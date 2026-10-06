@@ -1,0 +1,28 @@
+name: visio-studio
+services:
+  backend:
+    build: ./backend
+    env_file: .env
+    volumes: [data:/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+  frontend:
+    build: ./frontend
+    ports: ["127.0.0.1:${APP_PORT:-5480}:80"]
+    volumes: [data:/data:ro]
+    depends_on:
+      backend: {condition: service_healthy}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  data:

@@ -1,0 +1,30 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Data volume mirror (never committed; real data lives in the Docker volume)
+data/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+*.egg-info/
+
+# SQLite (in case a local file ever appears outside the volume)
+*.db
+*.db-wal
+*.db-shm
+
+# Node / frontend
+node_modules/
+dist/
+
+# Spike scripts: throwaway inputs and outputs only (scripts themselves are tracked)
+spikes/**/input/
+spikes/**/output/
+
+# OS cruft
+.DS_Store
