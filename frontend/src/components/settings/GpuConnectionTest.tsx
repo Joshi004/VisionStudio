@@ -1,7 +1,12 @@
 import { Button, Group, Paper, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
-import { useGpuConnection, useTestGpuConnection, type ConnectionTest } from "../../api/gpu";
+import {
+  useGpuConnection,
+  useTestGpuConnection,
+  type ConnectionTest,
+  type ConnectionTestResult,
+} from "../../api/gpu";
 
 function Outcome({ result }: { result: ConnectionTest }) {
   return (
@@ -21,6 +26,50 @@ function Outcome({ result }: { result: ConnectionTest }) {
       </Text>
     </Stack>
   );
+}
+
+/** One line about the API check that ran together with the test. */
+function ContractLine({ contract }: { contract: ConnectionTestResult["contract"] }) {
+  if (contract === null) {
+    return (
+      <Text size="sm" c="dimmed">
+        API check skipped: the server is unreachable.
+      </Text>
+    );
+  }
+
+  switch (contract.status) {
+    case "ok":
+      return (
+        <Text size="sm" c="green">
+          API unchanged: it matches the approved version.
+        </Text>
+      );
+    case "changed": {
+      const names = contract.sources
+        .filter((item) => item.status === "changed" || item.status === "unreadable")
+        .map((item) => item.name);
+      return (
+        <Text size="sm" c="orange">
+          API changed ({names.join(", ")}). Review it under GPU API below.
+        </Text>
+      );
+    }
+    case "not_approved":
+      return (
+        <Text size="sm" c="blue">
+          API not approved yet. Approve it under GPU API below.
+        </Text>
+      );
+    case "unreachable": {
+      const reason = contract.sources.find((item) => item.status === "unreachable")?.message;
+      return (
+        <Text size="sm" c="red">
+          The API could not be fetched{reason ? `: ${reason}` : "."}
+        </Text>
+      );
+    }
+  }
 }
 
 export function GpuConnectionTest() {
@@ -57,8 +106,9 @@ export function GpuConnectionTest() {
           <Stack gap={2}>
             <Text fw={600}>GPU server connection</Text>
             <Text size="sm" c="dimmed">
-              Tests the saved GPU server URL by calling its health endpoint. Nothing else in the
-              app calls the server while a page loads.
+              Tests the saved GPU server URL by calling its health endpoint, then checks its API
+              against the approved version. Nothing else in the app calls the server while a page
+              loads.
             </Text>
           </Stack>
           <Button onClick={() => test.mutate()} loading={test.isPending}>
@@ -67,6 +117,8 @@ export function GpuConnectionTest() {
         </Group>
 
         {status}
+
+        {test.data && <ContractLine contract={test.data.contract} />}
 
         {test.isError && (
           <Text c="red" size="sm">

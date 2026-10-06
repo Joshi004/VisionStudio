@@ -27,3 +27,13 @@ export function audioFormatLabel(mime: string): string {
 export function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+/** A time from the API (ISO 8601) in the browser's local time. */
+export function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString();
+}
+
+/** "sha256:00197efee9fe…": enough to tell two versions apart. Show the full value in a title. */
+export function shortFingerprint(fingerprint: string): string {
+  return fingerprint.length > 20 ? `${fingerprint.slice(0, 19)}…` : fingerprint;
+}

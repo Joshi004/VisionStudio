@@ -903,3 +903,86 @@ Known issues and leftovers:
   The JS bundle is still over 500 kB, so Vite still warns. Harmless.
 - Phases 1 and 2 are committed (b94d86c). Phase 3 is not committed; you review and commit.
 ```
+
+```text
+### Phase 4: GPU API contract guard (done 2026-10-06)
+Plan: plans/phase-04-contract-guard.md
+Built: The contract guard. `providers/contract_guard.py` has check, approve, last_check,
+missing_baselines and overview. `services/api_contract.py` holds the pure parts: fingerprint,
+canonical JSON, operations by tag, and the diff (changed JSON paths, plus an OpenAPI summary of
+operations and schemas added, removed and changed). `api_contract_sources` has its own read,
+save and reset in `core/settings.py`. `gpu_status.system_status()` is what the banner reads.
+Endpoints: GET /api/gpu/status, GET /api/gpu/contract, POST /api/gpu/contract/approve, PUT and
+DELETE /api/gpu/contract/sources. POST /api/gpu/connection/test now answers {health, contract}
+and runs the contract check only when health is reachable. Frontend: a banner on every page
+(server unreachable, API changed with the waiting-job count, API not approved yet), and a "GPU
+API" section on Settings (per-source status, approved operations by tag, the diff of a pending
+change, Capture and approve or Approve this change, and a sources editor). No migration, no new
+dependency, no new table.
+Approved decisions (with the plan): each source has a `base`, "gpu" or "transcription"; the "not
+approved" banner shows on every page; sources are [{name, base, path}], 1 to 5; approve is all or
+nothing; a connection error, timeout or HTTP 5xx is "unreachable", while HTTP 4xx, a redirect, an
+oversized answer or a non-JSON-object answer is "unreadable" (counts as changed once the source
+has an approved version).
+Deviations from ANALYSIS.md or DATABASE_STRUCTURE.md: the `api_contract_sources` value is
+[{name, base, path}] instead of the example ["guide", "openapi"] in DB Section 6, because the old
+form cannot say which server a source lives on (the Gap in this phase's decisions). DB Sections
+4.7 and 6 are updated: `api_snapshot.url` is the path relative to the source's base, the baseline
+is matched on source and url, and the new internal row `gpu_contract_last_check` is listed.
+No schema change.
+Decisions later phases must follow:
+- Before any submission, call `await contract_guard.check(session)` and submit only when
+  `result.is_ok`. "changed", "not_approved" and "unreachable" all block. Phase 5 calls it from
+  the dispatcher on each tick that has something to submit, with the phase "paused: GPU API
+  changed" for a waiting job. Do not call it per page load.
+- Phase 5 fills in `SystemStatus.waiting_jobs` in `gpu_status.system_status()` (a constant 0 now).
+  The banner already prints it. Phase 5's job actions must invalidate the frontend query key
+  `["gpu"]` (`GPU_KEY` in api/gpu.ts), which covers connection, status and contract.
+- Snapshots are insert-only. A source's baseline is its latest approved row with the same
+  `source` and `url`, ordered by `fetched_at`, then `id`. A pending row is stored once per
+  version. Never update or delete a snapshot.
+- A source's address is `docker_mapped(join_url(<base's URL>, path))`, and `contract_guard.
+  called_urls(session)` returns it. The "transcription" base reads `transcription_url`, which
+  falls back to the GPU server URL when blank.
+- `check()` and `approve()` share one lock and end their own read transaction before fetching.
+  `settings.write_internal(..., commit=False)` lets a caller store an internal row in its own
+  transaction. A new internal row still goes in `INTERNAL_KEYS`.
+- The banner state "not approved" is computed from `api_snapshot` on every read. The other states
+  come from the stored last check, which counts only while its source names and called URLs equal
+  the ones that would be used now.
+- To simulate an API change without touching the server, INSERT an approved snapshot of the
+  openapi source with a different fingerprint and a body without one path (SQLite json_remove,
+  see acceptance check 3 in the plan). Never edit an existing row.
+[VERIFY] results:
+- content_hash stability through the app's own approve() and check(): pass. The guide fingerprint
+  equals its top-level content_hash (sha256:00197efee9fe...), and the openapi fingerprint
+  (sha256:5bb87b1fc180...) equals an independent computation (canonical JSON without `servers`).
+  The two fetches inside approve() 3 s apart agreed, a second approve gave "unchanged" with no new
+  rows, and repeated checks never changed the fingerprints. Approve takes about 5 s.
+- A live endpoint that changes by itself is refused: /v1/jobs (it carries server_time) came back
+  "unstable" with `server_time` in the diff. A manual check had shown /v1/health, /v1/partitions
+  and /v1/rvc/voices to be stable, so /v1/health would be accepted as a source today (the phase's
+  example was conditional: "if its body changes between fetches").
+- The guide's content_hash does not change with the Host header, while facts.base_url and the
+  markdown inside the guide do. So a new tunnel address does not look like an API change.
+Known issues and leftovers:
+- `api_snapshot` holds 6 rows from the checks: the two real approvals, the simulated approved row
+  (fingerprint sha256:simulated-phase4), the pending row it produced, the approval that followed,
+  and an approved `openapi-tx` row from the base check. Snapshots are insert-only, so they stay.
+  The current baselines are rows 1 (guide) and 5 (openapi). Sources and URLs are back to defaults.
+- Only a simulated change was exercised. A real server update, an HTTP 5xx answer and a redirect
+  were not seen. HTTP 404 (unreadable), a dead port (unreachable) and "changes by itself" were.
+- After an approve is refused as "changed again", nothing refreshes the last check, so the new
+  version only shows as a pending change after the next Test connection. The refusal message says so.
+- A changed source whose address returns an error has no pending row to show (there is no document
+  to compare). Settings shows the source's last-check message instead, and no Approve button.
+- The UI was checked with a throwaway headless Chrome script (DevTools protocol, kept in /tmp,
+  not in the repo): the three banners on Projects, Activity and Settings, the diff and Approve
+  button, Approve through the button, the sources editor's validation message, the Test
+  connection result line, and no API requests during 60 s idle (Refresh sent 5 requests, none
+  of which called the GPU server). Add source (up to its limit of 5) was clicked. Remove, Reset
+  to defaults and a successful Save in the editor were not; the same operations were run against
+  the API with curl.
+- The JS bundle is 652 kB, so Vite still warns. Harmless.
+- Phase 3 is committed (ed6c48a). Phase 4 is not committed; you review and commit.
+```

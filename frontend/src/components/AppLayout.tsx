@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from "react-router";
 
 import { useRefreshAll } from "../hooks/useRefreshAll";
 import { BackendStatus } from "./BackendStatus";
+import { GpuBanner } from "./GpuBanner";
 
 const NAV_ITEMS = [
   { label: "Projects", to: "/projects" },
@@ -39,6 +40,7 @@ export function AppLayout() {
         ))}
       </AppShell.Navbar>
       <AppShell.Main>
+        <GpuBanner />
         <Outlet />
       </AppShell.Main>
     </AppShell>

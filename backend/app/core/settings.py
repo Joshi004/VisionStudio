@@ -5,8 +5,10 @@ environment variable (a first-run default), then the built-in default. Values
 are read at the moment they are used, so a change needs no restart. Later
 phases read a setting with `get_str` or `get_int`.
 
-`api_contract_sources` (DATABASE_STRUCTURE.md Section 6) is not here: Phase 4
-adds it together with its own editor.
+`api_contract_sources` (DATABASE_STRUCTURE.md Section 6) is a list, not a text
+or number setting, so it is not in `REGISTRY`: it has its own read, save and
+reset functions at the end of this module, and its own endpoints (Phase 4).
+The generic settings API keeps answering 404 for that key.
 """
 
 from __future__ import annotations
@@ -34,7 +36,8 @@ SettingSource = Literal["saved", "environment", "built_in"]
 # Rows in the `setting` table that the app writes for itself. They are not
 # settings: the API never lists, saves or resets them. Add new ones here.
 GPU_CONNECTION_LAST_TEST = "gpu_connection_last_test"
-INTERNAL_KEYS = frozenset({GPU_CONNECTION_LAST_TEST})
+GPU_CONTRACT_LAST_CHECK = "gpu_contract_last_check"
+INTERNAL_KEYS = frozenset({GPU_CONNECTION_LAST_TEST, GPU_CONTRACT_LAST_CHECK})
 
 
 class UnknownSettingError(LookupError):
@@ -416,8 +419,162 @@ async def read_internal(session: AsyncSession, key: str) -> Any | None:
     return None if row is None else row.value
 
 
-async def write_internal(session: AsyncSession, key: str, value: Any) -> None:
-    """Stores a JSON value in an internal row and commits."""
+async def write_internal(
+    session: AsyncSession, key: str, value: Any, *, commit: bool = True
+) -> None:
+    """Stores a JSON value in an internal row, and commits unless the caller will."""
     _check_internal(key)
     await _upsert(session, key, value)
+    if commit:
+        await session.commit()
+
+
+# --- API contract sources (Phase 4) -------------------------------------------------
+#
+# Each source is a GET address whose JSON answer is recorded and checked
+# (ANALYSIS.md Section 6.5). It is a path on one of two servers: `base` says
+# which. Paths are relative, so a new tunnel address never invalidates them.
+
+CONTRACT_SOURCES_KEY = "api_contract_sources"
+MAX_CONTRACT_SOURCES = 5
+MAX_CONTRACT_PATH_CHARS = 500
+
+ContractBase = Literal["gpu", "transcription"]
+
+# The URL setting each base reads. A blank transcription URL falls back to the GPU server URL.
+BASE_SETTING: dict[ContractBase, str] = {
+    "gpu": "gpu_api_base_url",
+    "transcription": "transcription_url",
+}
+
+_BASE_BY_TEXT: dict[str, ContractBase] = {"gpu": "gpu", "transcription": "transcription"}
+_SOURCE_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+
+
+@dataclass(frozen=True)
+class ContractSource:
+    name: str
+    base: ContractBase
+    path: str
+
+
+DEFAULT_CONTRACT_SOURCES: tuple[ContractSource, ...] = (
+    ContractSource(name="guide", base="gpu", path="/v1/guide?format=json"),
+    ContractSource(name="openapi", base="gpu", path="/openapi.json"),
+)
+
+
+@dataclass(frozen=True)
+class EffectiveContractSources:
+    sources: tuple[ContractSource, ...]
+    source: Literal["saved", "built_in"]
+    updated_at: datetime | None
+    # Why a saved value was skipped, if it was.
+    note: str | None
+
+
+def contract_sources_to_json(sources: Iterable[ContractSource]) -> list[dict[str, str]]:
+    return [{"name": item.name, "base": item.base, "path": item.path} for item in sources]
+
+
+def validate_contract_sources(raw: object) -> tuple[ContractSource, ...]:
+    """Checks a list of sources and returns it in the form that is stored.
+
+    Raises `SettingValueError` with a message meant for the user.
+    """
+    limit_message = f"Add from 1 to {MAX_CONTRACT_SOURCES} sources."
+    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_CONTRACT_SOURCES:
+        raise SettingValueError(limit_message)
+
+    sources: list[ContractSource] = []
+    for number, item in enumerate(raw, start=1):
+        sources.append(_validate_contract_source(number, item))
+
+    names = [item.name for item in sources]
+    for name in names:
+        if names.count(name) > 1:
+            raise SettingValueError(f'Two sources are called "{name}". Give each its own name.')
+
+    targets = [(item.base, item.path) for item in sources]
+    for target in targets:
+        if targets.count(target) > 1:
+            raise SettingValueError("Two sources point at the same address. Remove one of them.")
+    return tuple(sources)
+
+
+def _validate_contract_source(number: int, item: object) -> ContractSource:
+    label = f"Source {number}"
+    if (
+        not isinstance(item, dict)
+        or set(item) != {"name", "base", "path"}
+        or not all(isinstance(value, str) for value in item.values())
+    ):
+        raise SettingValueError(f"{label} needs a name, a base and a path, all as text.")
+
+    name = item["name"].strip()
+    if not _SOURCE_NAME.fullmatch(name):
+        raise SettingValueError(
+            f"{label}: the name may use lower case letters, numbers, dashes and underscores, "
+            "must start with a letter or number, and can be up to 40 characters."
+        )
+
+    base = _BASE_BY_TEXT.get(item["base"].strip())
+    if base is None:
+        raise SettingValueError(
+            f'Source "{name}": choose the GPU server URL or the Transcription URL.'
+        )
+
+    path = item["path"].strip()
+    problem = _contract_path_problem(path)
+    if problem is not None:
+        raise SettingValueError(f'Source "{name}": {problem}')
+    return ContractSource(name=name, base=base, path=path)
+
+
+def _contract_path_problem(path: str) -> str | None:
+    if not path.startswith("/") or path.startswith("//"):
+        return "the path must start with a single slash, for example /openapi.json."
+    if len(path) > MAX_CONTRACT_PATH_CHARS:
+        return f"the path is longer than {MAX_CONTRACT_PATH_CHARS} characters."
+    if any(char.isspace() or not char.isprintable() for char in path):
+        return "the path must not contain spaces or control characters."
+    if "#" in path:
+        return "the path must not contain #."
+    return None
+
+
+async def read_contract_sources(session: AsyncSession) -> EffectiveContractSources:
+    """The sources that apply now. A saved list that fails validation is skipped, with a note."""
+    rows = await _load_rows(session, [CONTRACT_SOURCES_KEY])
+    row = rows.get(CONTRACT_SOURCES_KEY)
+    note: str | None = None
+    if row is not None:
+        try:
+            return EffectiveContractSources(
+                sources=validate_contract_sources(row.value),
+                source="saved",
+                updated_at=row.updated_at,
+                note=None,
+            )
+        except SettingValueError as exc:
+            note = f"The saved list of sources is not valid ({exc}) and is being ignored."
+    return EffectiveContractSources(
+        sources=DEFAULT_CONTRACT_SOURCES, source="built_in", updated_at=None, note=note
+    )
+
+
+async def save_contract_sources(session: AsyncSession, raw: object) -> EffectiveContractSources:
+    """Validates and saves the list of sources, then returns what now applies."""
+    sources = validate_contract_sources(raw)
+    await _upsert(session, CONTRACT_SOURCES_KEY, contract_sources_to_json(sources))
     await session.commit()
+    _logger.info("setting saved: %s", CONTRACT_SOURCES_KEY)
+    return await read_contract_sources(session)
+
+
+async def reset_contract_sources(session: AsyncSession) -> EffectiveContractSources:
+    """Removes the saved list, so the built-in sources apply again."""
+    await session.execute(delete(Setting).where(Setting.key == CONTRACT_SOURCES_KEY))
+    await session.commit()
+    _logger.info("setting reset: %s", CONTRACT_SOURCES_KEY)
+    return await read_contract_sources(session)

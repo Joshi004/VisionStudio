@@ -151,9 +151,100 @@ export interface paths {
         put?: never;
         /**
          * Test Connection
-         * @description Tests the saved GPU server URL now. An unreachable server is a normal 200 answer.
+         * @description Tests the saved GPU server URL now, then checks its API if it answered.
+         *
+         *     An unreachable server is a normal 200 answer.
          */
         post: operations["test_connection_api_gpu_connection_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gpu/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Status
+         * @description The stored state the banner reads. Reads the database only, never calls the server.
+         */
+        get: operations["get_status_api_gpu_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gpu/contract/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Contract Sources
+         * @description Saves the list of sources whose answers are recorded and checked.
+         */
+        put: operations["save_contract_sources_api_gpu_contract_sources_put"];
+        post?: never;
+        /**
+         * Reset Contract Sources
+         * @description Removes the saved list, so the built-in sources apply again.
+         */
+        delete: operations["reset_contract_sources_api_gpu_contract_sources_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gpu/contract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Contract
+         * @description The approved API, any change waiting for approval, and the last check.
+         *
+         *     Reads the database only, never calls the server, and never returns whole documents.
+         */
+        get: operations["get_contract_api_gpu_contract_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gpu/contract/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Contract
+         * @description Records the API as it is now, if every source answers the same twice.
+         *
+         *     Takes a few seconds: each source is fetched twice, a few seconds apart. A refused
+         *     approval is a normal 200 answer with `approved: false` and a reason per source.
+         */
+        post: operations["approve_contract_api_gpu_contract_approve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -164,6 +255,42 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ApproveRequest */
+        ApproveRequest: {
+            /** Expected */
+            expected?: {
+                [key: string]: string;
+            };
+        };
+        /** ApproveResponse */
+        ApproveResponse: {
+            /** Approved */
+            approved: boolean;
+            /** Sources */
+            sources: components["schemas"]["SourceApprovalOut"][];
+        };
+        /** ApprovedSummaryOut */
+        ApprovedSummaryOut: {
+            /** Snapshot Id */
+            snapshot_id: number;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Server Content Hash */
+            server_content_hash: string | null;
+            /** Api Version */
+            api_version: string | null;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Approved At */
+            approved_at: string | null;
+            /** Operation Count */
+            operation_count: number | null;
+            /** Tags */
+            tags: components["schemas"]["TagGroupOut"][];
+        };
         /** ConnectionState */
         ConnectionState: {
             last_test: components["schemas"]["ConnectionTest"] | null;
@@ -188,6 +315,97 @@ export interface components {
              */
             checked_at: string;
         };
+        /** ConnectionTestResult */
+        ConnectionTestResult: {
+            health: components["schemas"]["ConnectionTest"];
+            contract: components["schemas"]["ContractCheckOut"] | null;
+        };
+        /** ContractCheckOut */
+        ContractCheckOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "changed" | "not_approved" | "unreachable";
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Sources */
+            sources: components["schemas"]["SourceCheckOut"][];
+        };
+        /** ContractDiffOut */
+        ContractDiffOut: {
+            /** Entries */
+            entries: components["schemas"]["DiffEntryOut"][];
+            /** Truncated */
+            truncated: boolean;
+            openapi: components["schemas"]["OpenApiChangesOut"] | null;
+        };
+        /** ContractOverviewOut */
+        ContractOverviewOut: {
+            sources_setting: components["schemas"]["ContractSourcesOut"];
+            last_check: components["schemas"]["ContractCheckOut"] | null;
+            /** Sources */
+            sources: components["schemas"]["SourceOverviewOut"][];
+        };
+        /** ContractSourceIn */
+        ContractSourceIn: {
+            /** Name */
+            name: string;
+            /** Base */
+            base: string;
+            /** Path */
+            path: string;
+        };
+        /** ContractSourceOut */
+        ContractSourceOut: {
+            /** Name */
+            name: string;
+            /**
+             * Base
+             * @enum {string}
+             */
+            base: "gpu" | "transcription";
+            /** Path */
+            path: string;
+            /** Called Url */
+            called_url: string;
+        };
+        /** ContractSourcesOut */
+        ContractSourcesOut: {
+            /** Sources */
+            sources: components["schemas"]["ContractSourceOut"][];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "saved" | "built_in";
+            /** Updated At */
+            updated_at: string | null;
+            /** Note */
+            note: string | null;
+        };
+        /** ContractSourcesUpdate */
+        ContractSourcesUpdate: {
+            /** Sources */
+            sources: components["schemas"]["ContractSourceIn"][];
+        };
+        /** ContractStatusOut */
+        ContractStatusOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ok" | "changed" | "not_approved" | "unreachable" | "unknown";
+            /** Checked At */
+            checked_at: string | null;
+            /** Sources */
+            sources: components["schemas"]["SourceCheckOut"][];
+            /** Message */
+            message: string | null;
+        };
         /** DatabaseStatus */
         DatabaseStatus: {
             /** Ok */
@@ -199,10 +417,33 @@ export interface components {
             /** Revision */
             revision?: string | null;
         };
+        /** DiffEntryOut */
+        DiffEntryOut: {
+            /** Path */
+            path: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "added" | "removed" | "changed";
+            /** Before */
+            before: string | null;
+            /** After */
+            after: string | null;
+            /** Text Diff */
+            text_diff: string[] | null;
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /** Detail */
             detail: string;
+        };
+        /** GpuStatus */
+        GpuStatus: {
+            server: components["schemas"]["ServerStatusOut"];
+            contract: components["schemas"]["ContractStatusOut"];
+            /** Waiting Jobs */
+            waiting_jobs: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -219,6 +460,45 @@ export interface components {
             database: components["schemas"]["DatabaseStatus"];
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
+        };
+        /** OpenApiChangesOut */
+        OpenApiChangesOut: {
+            /** Operations Added */
+            operations_added: string[];
+            /** Operations Removed */
+            operations_removed: string[];
+            /** Operations Changed */
+            operations_changed: string[];
+            /** Schemas Added */
+            schemas_added: string[];
+            /** Schemas Removed */
+            schemas_removed: string[];
+            /** Schemas Changed */
+            schemas_changed: string[];
+        };
+        /** OperationOut */
+        OperationOut: {
+            /** Method */
+            method: string;
+            /** Path */
+            path: string;
+            /** Summary */
+            summary: string | null;
+        };
+        /** PendingChangeOut */
+        PendingChangeOut: {
+            /** Snapshot Id */
+            snapshot_id: number;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Api Version */
+            api_version: string | null;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            diff: components["schemas"]["ContractDiffOut"];
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -338,6 +618,20 @@ export interface components {
             /** Is Set */
             is_set: boolean;
         };
+        /** ServerStatusOut */
+        ServerStatusOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "reachable" | "unreachable" | "unknown";
+            /** Checked At */
+            checked_at: string | null;
+            /** Called Url */
+            called_url: string | null;
+            /** Error */
+            error: string | null;
+        };
         /** SettingItem */
         SettingItem: {
             /** Key */
@@ -388,6 +682,65 @@ export interface components {
             settings: components["schemas"]["SettingItem"][];
             /** Secrets */
             secrets: components["schemas"]["SecretStatus"][];
+        };
+        /** SourceApprovalOut */
+        SourceApprovalOut: {
+            /** Name */
+            name: string;
+            /** Called Url */
+            called_url: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "approved" | "unchanged" | "unstable" | "changed_again" | "unreachable" | "unreadable";
+            /** Message */
+            message: string | null;
+            /** Fingerprint */
+            fingerprint: string | null;
+            diff: components["schemas"]["ContractDiffOut"] | null;
+        };
+        /** SourceCheckOut */
+        SourceCheckOut: {
+            /** Name */
+            name: string;
+            /** Called Url */
+            called_url: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "changed" | "not_approved" | "unreachable" | "unreadable";
+            /** Message */
+            message: string | null;
+            /** Approved Fingerprint */
+            approved_fingerprint: string | null;
+            /** Current Fingerprint */
+            current_fingerprint: string | null;
+        };
+        /** SourceOverviewOut */
+        SourceOverviewOut: {
+            /** Name */
+            name: string;
+            /**
+             * Base
+             * @enum {string}
+             */
+            base: "gpu" | "transcription";
+            /** Path */
+            path: string;
+            /** Called Url */
+            called_url: string;
+            approved: components["schemas"]["ApprovedSummaryOut"] | null;
+            pending: components["schemas"]["PendingChangeOut"] | null;
+            last_check: components["schemas"]["SourceCheckOut"] | null;
+        };
+        /** TagGroupOut */
+        TagGroupOut: {
+            /** Tag */
+            tag: string;
+            /** Operations */
+            operations: components["schemas"]["OperationOut"][];
         };
         /** ToolStatus */
         ToolStatus: {
@@ -805,7 +1158,133 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConnectionTest"];
+                    "application/json": components["schemas"]["ConnectionTestResult"];
+                };
+            };
+        };
+    };
+    get_status_api_gpu_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GpuStatus"];
+                };
+            };
+        };
+    };
+    save_contract_sources_api_gpu_contract_sources_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContractSourcesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractSourcesOut"];
+                };
+            };
+            /** @description The value is not valid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reset_contract_sources_api_gpu_contract_sources_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractSourcesOut"];
+                };
+            };
+        };
+    };
+    get_contract_api_gpu_contract_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractOverviewOut"];
+                };
+            };
+        };
+    };
+    approve_contract_api_gpu_contract_approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApproveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

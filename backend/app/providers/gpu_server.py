@@ -1,7 +1,7 @@
-"""Talking to the GPU server. Phase 2 only has the health check.
+"""Talking to the GPU server: the health check (Phase 2).
 
-Phase 4 adds the contract guard, and Phases 5 and 9 add the transcription and
-video adapters, next to this one.
+The contract guard (Phase 4) is `contract_guard.py` next to this module, and
+Phases 5 and 9 add the transcription and video adapters here too.
 """
 
 from __future__ import annotations

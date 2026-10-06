@@ -2,6 +2,7 @@ import { Alert, Badge, Group, Loader, Paper, Stack, Text, Title } from "@mantine
 
 import { describeError } from "../api/errors";
 import { useSettings, type SettingItem } from "../api/settings";
+import { ContractSection } from "../components/settings/ContractSection";
 import { GpuConnectionTest } from "../components/settings/GpuConnectionTest";
 import { SettingRow } from "../components/settings/SettingRow";
 
@@ -34,6 +35,7 @@ export function SettingsPage() {
       {data && (
         <>
           <GpuConnectionTest />
+          <ContractSection />
 
           {groupSettings(data.settings).map(([group, settings]) => (
             <Stack key={group} gap="md">

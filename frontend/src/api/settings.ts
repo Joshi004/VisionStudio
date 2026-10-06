@@ -2,12 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
+import { GPU_KEY } from "./gpu";
 import type { components } from "./schema";
 
 export type SettingItem = components["schemas"]["SettingItem"];
 
 const SETTINGS_KEY = ["settings"] as const;
-const GPU_CONNECTION_KEY = ["gpu", "connection"] as const;
 
 async function fetchSettings() {
   const { data, response } = await api.GET("/api/settings");
@@ -21,13 +21,13 @@ export function useSettings() {
   return useQuery({ queryKey: SETTINGS_KEY, queryFn: fetchSettings });
 }
 
-/** A changed URL also changes whether the stored connection test still applies. */
+/** A changed URL also changes which stored GPU results (connection, API, banner) still apply. */
 function useRefreshAfterChange() {
   const queryClient = useQueryClient();
   return () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: SETTINGS_KEY }),
-      queryClient.invalidateQueries({ queryKey: GPU_CONNECTION_KEY }),
+      queryClient.invalidateQueries({ queryKey: GPU_KEY }),
     ]);
 }
 
