@@ -1,0 +1,306 @@
+"""Scene proposal (ANALYSIS.md Section 5.2).
+
+`POST /api/projects/{id}/propose-scenes` creates the `plan_scenes` job and returns at once
+with HTTP 202. It is a paid call (Section 6.2), so it only ever runs from this click, and
+two gates ask first: the recording differs from the script, and scenes that already hold a
+description, frames or a clip would be replaced. The dispatcher does the work.
+
+`GET /api/projects/{id}/scenes` reads the database only: the scenes, the proposal they came
+from, whether they are out of date, and the model the next proposal will call.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal, cast
+
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, ConfigDict, StrictBool
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.errors import ErrorResponse
+from app.api.jobs import JobDetail, JobSummary, job_detail, job_summary
+from app.api.projects import load_project
+from app.core import settings as settings_service
+from app.db.models import Job, Scene
+from app.db.session import SessionDep
+from app.jobs import dispatcher, store
+from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
+from app.jobs.store import JobRow
+from app.services import scene_cuts, scene_planner, transcript_matching
+from app.services import scenes as scenes_service
+from app.services import transcripts as transcripts_service
+
+router = APIRouter()
+
+_NOT_FOUND = {404: {"model": ErrorResponse, "description": "No project has this id."}}
+_NOT_READY = {
+    422: {
+        "model": ErrorResponse,
+        "description": "There is no voiceover, script or current transcript yet, or the "
+        "script is too long.",
+    }
+}
+_NEEDS_CONFIRMATION = {
+    409: {
+        "model": ErrorResponse,
+        "description": "The recording differs from the script, or scenes with inputs would "
+        "be replaced, and the request did not confirm it.",
+    }
+}
+
+CutSource = Literal["ai", "rule", "manual"]
+StaleReasonOut = Literal["script_changed", "voiceover_changed"]
+
+
+class ProposeScenesRequest(BaseModel):
+    """What the user has confirmed. Every flag is off unless sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Ask the model again even though the same request was answered before (paid).
+    run_again: StrictBool = False
+    # Go on although the recording differs from the script.
+    accept_mismatch: StrictBool = False
+    # Replace scenes that have a description, frames or a clip. Their files stay on disk.
+    discard_scenes_with_inputs: StrictBool = False
+
+
+class SceneOut(BaseModel):
+    id: int
+    index: int
+    start_s: float
+    end_s: float
+    text: str
+    cut_source: CutSource
+    # Why this scene's cut needs a look, if it does.
+    cut_note: str | None
+    has_inputs: bool
+
+
+class UsageOut(BaseModel):
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    # Hidden reasoning tokens. They are part of `completion_tokens` and billed as output.
+    reasoning_tokens: int | None
+
+
+class ChecksOut(BaseModel):
+    entries: int
+    exact: int
+    moved: int
+    flagged: int
+    dropped: int
+
+
+class SplitterOut(BaseModel):
+    cuts_added: int
+    cuts_removed: int
+
+
+class ProposalOut(BaseModel):
+    """The proposal the scenes came from (the newest `plan_scenes` job that succeeded)."""
+
+    job_id: int
+    finished_at: datetime | None
+    # "rule": the model could not be used, and the rule-based splitter proposed the scenes.
+    source: Literal["ai", "rule"]
+    fallback_reason: str | None
+    # Set when no call was made because the same request had been answered by this job.
+    cache_hit_of_job_id: int | None
+    model: str | None
+    usage: UsageOut | None
+    checks: ChecksOut | None
+    splitter: SplitterOut | None
+
+
+class LlmInfoOut(BaseModel):
+    model: str
+    # The address the app will really call, after Docker mapping.
+    will_call: str | None
+
+
+class ScenesOut(BaseModel):
+    job: JobSummary | None
+    proposal: ProposalOut | None
+    scenes: list[SceneOut]
+    stale_reasons: list[StaleReasonOut]
+    llm: LlmInfoOut
+
+
+def _int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _int_or_zero(value: object) -> int:
+    return _int(value) or 0
+
+
+def _proposal_out(job: Job) -> ProposalOut:
+    output: Any = job.output if isinstance(job.output, dict) else {}
+    recorded: Any = job.input if isinstance(job.input, dict) else {}
+
+    request = recorded.get("request")
+    model = request.get("model") if isinstance(request, dict) else None
+
+    usage = output.get("usage")
+    checks = output.get("checks")
+    splitter = output.get("splitter")
+    fallback = output.get("fallback_reason")
+    return ProposalOut(
+        job_id=job.id,
+        finished_at=job.finished_at,
+        source="rule" if output.get("source") == "rule" else "ai",
+        fallback_reason=fallback if isinstance(fallback, str) else None,
+        cache_hit_of_job_id=_int(output.get("cache_hit_of_job_id")),
+        model=model if isinstance(model, str) else None,
+        usage=(
+            UsageOut(
+                prompt_tokens=_int(usage.get("prompt_tokens")),
+                completion_tokens=_int(usage.get("completion_tokens")),
+                reasoning_tokens=_int(usage.get("reasoning_tokens")),
+            )
+            if isinstance(usage, dict)
+            else None
+        ),
+        checks=(
+            ChecksOut(
+                entries=_int_or_zero(checks.get("entries")),
+                exact=_int_or_zero(checks.get("exact")),
+                moved=_int_or_zero(checks.get("moved")),
+                flagged=_int_or_zero(checks.get("flagged")),
+                dropped=_int_or_zero(checks.get("dropped")),
+            )
+            if isinstance(checks, dict)
+            else None
+        ),
+        splitter=(
+            SplitterOut(
+                cuts_added=_int_or_zero(splitter.get("cuts_added")),
+                cuts_removed=_int_or_zero(splitter.get("cuts_removed")),
+            )
+            if isinstance(splitter, dict)
+            else None
+        ),
+    )
+
+
+def _scene_out(scene: Scene) -> SceneOut:
+    return SceneOut(
+        id=scene.id,
+        index=scene.index,
+        start_s=scene.start_s,
+        end_s=scene.end_s,
+        text=scene.text,
+        # The database CHECK constraint keeps this to the allowed values.
+        cut_source=cast(CutSource, scene.cut_source),
+        cut_note=scene.cut_note,
+        has_inputs=scene_cuts.has_inputs(scene),
+    )
+
+
+async def _llm_info(session: AsyncSession) -> LlmInfoOut:
+    url = await settings_service.read_setting(session, LLM_URL_KEY)
+    model = await settings_service.get_str(session, LLM_MODEL_KEY)
+    return LlmInfoOut(model=model, will_call=url.will_call)
+
+
+@router.post(
+    "/projects/{project_id}/propose-scenes",
+    response_model=JobDetail,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_NOT_READY, **_NEEDS_CONFIRMATION},
+)
+async def propose_scenes(
+    project_id: int,
+    session: SessionDep,
+    body: ProposeScenesRequest | None = None,
+) -> JobDetail:
+    """Starts proposing scenes (a paid call to the language model), or returns the proposal
+    that is already active. The same request as an earlier one reuses its stored answer
+    unless `run_again` is sent.
+    """
+    flags = body or ProposeScenesRequest()
+    project = await load_project(session, project_id)
+
+    if project.voiceover_asset_id is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Upload a voiceover first.")
+    if project.script_text is None or not project.script_text.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Paste the script first.")
+
+    state = await transcripts_service.transcription_state(session, project)
+    transcript = state.transcript
+    if transcript is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Transcribe the voiceover first."
+        )
+    if state.stale_reasons:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The transcript is out of date. Transcribe again first.",
+        )
+    word_count = len(transcript.script_words) if isinstance(transcript.script_words, list) else 0
+    if word_count > scene_planner.MAX_SCRIPT_WORDS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"This script has {word_count:,} words; scene proposal handles up to "
+            f"{scene_planner.MAX_SCRIPT_WORDS:,}.",
+        )
+
+    if state.warnings and not flags.accept_mismatch:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "The recording differs from the script. "
+            + " ".join(state.warnings)
+            + " Confirm to propose scenes anyway.",
+        )
+
+    with_inputs = await scenes_service.scenes_with_inputs(session, project.id)
+    if with_inputs and not flags.discard_scenes_with_inputs:
+        noun = "scene has" if with_inputs == 1 else "scenes have"
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{with_inputs} {noun} a description, frames or a clip. Proposing scenes replaces "
+            "all the scenes and discards those inputs (their files stay on disk). "
+            "Confirm to continue.",
+        )
+
+    job, _created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=scenes_service.PLAN_JOB,
+        provider="llm",
+        input={
+            "transcript_id": transcript.id,
+            "voiceover_asset_id": project.voiceover_asset_id,
+            "script_sha256": transcript_matching.script_sha256(project.script_text),
+            "run_again": flags.run_again,
+            "accept_mismatch": flags.accept_mismatch,
+            "discard_scenes_with_inputs": flags.discard_scenes_with_inputs,
+        },
+    )
+    dispatcher.nudge()
+    return job_detail(JobRow(job=job, project_name=project.name, scene_index=None))
+
+
+@router.get(
+    "/projects/{project_id}/scenes",
+    response_model=ScenesOut,
+    responses=_NOT_FOUND,
+)
+async def get_scenes(project_id: int, session: SessionDep) -> ScenesOut:
+    """The project's scenes and the proposal they came from. Reads the database only."""
+    project = await load_project(session, project_id)
+    state = await scenes_service.scenes_state(session, project)
+    llm_info = await _llm_info(session)
+
+    job_out = None
+    if state.job is not None:
+        job_out = job_summary(JobRow(job=state.job, project_name=project.name, scene_index=None))
+    return ScenesOut(
+        job=job_out,
+        proposal=_proposal_out(state.proposal) if state.proposal is not None else None,
+        scenes=[_scene_out(scene) for scene in state.scenes],
+        stale_reasons=state.stale_reasons,
+        llm=llm_info,
+    )

@@ -251,6 +251,165 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description Jobs, newest first: all of them, or those of one project.
+         */
+        get: operations["list_jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job */
+        get: operations["get_job_api_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Job
+         * @description Cancels a job that has not started, or one the GPU server no longer knows.
+         */
+        post: operations["cancel_job_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/resubmit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resubmit Job
+         * @description Queues a job the GPU server does not know again, as a new attempt.
+         */
+        post: operations["resubmit_job_api_jobs__job_id__resubmit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/transcribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Transcription
+         * @description Starts transcribing the voiceover, or returns the job that is already active.
+         */
+        post: operations["start_transcription_api_projects__project_id__transcribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/transcription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Transcription
+         * @description The newest transcribe job and transcript of the project. Reads the database only.
+         */
+        get: operations["get_transcription_api_projects__project_id__transcription_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/propose-scenes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Scenes
+         * @description Starts proposing scenes (a paid call to the language model), or returns the proposal
+         *     that is already active. The same request as an earlier one reuses its stored answer
+         *     unless `run_again` is sent.
+         */
+        post: operations["propose_scenes_api_projects__project_id__propose_scenes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scenes
+         * @description The project's scenes and the proposal they came from. Reads the database only.
+         */
+        get: operations["get_scenes_api_projects__project_id__scenes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -290,6 +449,19 @@ export interface components {
             operation_count: number | null;
             /** Tags */
             tags: components["schemas"]["TagGroupOut"][];
+        };
+        /** ChecksOut */
+        ChecksOut: {
+            /** Entries */
+            entries: number;
+            /** Exact */
+            exact: number;
+            /** Moved */
+            moved: number;
+            /** Flagged */
+            flagged: number;
+            /** Dropped */
+            dropped: number;
         };
         /** ConnectionState */
         ConnectionState: {
@@ -461,6 +633,119 @@ export interface components {
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
         };
+        /** JobDetail */
+        JobDetail: {
+            /** Id */
+            id: number;
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Scene Id */
+            scene_id: number | null;
+            /** Scene Index */
+            scene_index: number | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "transcribe" | "plan_scenes" | "generate_clip" | "render_final";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "gpu" | "llm" | "local";
+            /** Attempt */
+            attempt: number;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Last Checked At */
+            last_checked_at: string | null;
+            /** Can Cancel */
+            can_cancel: boolean;
+            /** Can Resubmit */
+            can_resubmit: boolean;
+            /** Provider Job Id */
+            provider_job_id: string | null;
+            /** Input */
+            input: unknown;
+            /** Output */
+            output: unknown;
+            /** Result Asset Id */
+            result_asset_id: number | null;
+        };
+        /** JobSummary */
+        JobSummary: {
+            /** Id */
+            id: number;
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Scene Id */
+            scene_id: number | null;
+            /** Scene Index */
+            scene_index: number | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "transcribe" | "plan_scenes" | "generate_clip" | "render_final";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "gpu" | "llm" | "local";
+            /** Attempt */
+            attempt: number;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Last Checked At */
+            last_checked_at: string | null;
+            /** Can Cancel */
+            can_cancel: boolean;
+            /** Can Resubmit */
+            can_resubmit: boolean;
+        };
+        /** LlmInfoOut */
+        LlmInfoOut: {
+            /** Model */
+            model: string;
+            /** Will Call */
+            will_call: string | null;
+        };
         /** OpenApiChangesOut */
         OpenApiChangesOut: {
             /** Operations Added */
@@ -609,6 +894,98 @@ export interface components {
             /** Script Text */
             script_text?: string | null;
         };
+        /**
+         * ProposalOut
+         * @description The proposal the scenes came from (the newest `plan_scenes` job that succeeded).
+         */
+        ProposalOut: {
+            /** Job Id */
+            job_id: number;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "rule";
+            /** Fallback Reason */
+            fallback_reason: string | null;
+            /** Cache Hit Of Job Id */
+            cache_hit_of_job_id: number | null;
+            /** Model */
+            model: string | null;
+            usage: components["schemas"]["UsageOut"] | null;
+            checks: components["schemas"]["ChecksOut"] | null;
+            splitter: components["schemas"]["SplitterOut"] | null;
+        };
+        /**
+         * ProposeScenesRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        ProposeScenesRequest: {
+            /**
+             * Run Again
+             * @default false
+             */
+            run_again: boolean;
+            /**
+             * Accept Mismatch
+             * @default false
+             */
+            accept_mismatch: boolean;
+            /**
+             * Discard Scenes With Inputs
+             * @default false
+             */
+            discard_scenes_with_inputs: boolean;
+        };
+        /** SceneOut */
+        SceneOut: {
+            /** Id */
+            id: number;
+            /** Index */
+            index: number;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Text */
+            text: string;
+            /**
+             * Cut Source
+             * @enum {string}
+             */
+            cut_source: "ai" | "rule" | "manual";
+            /** Cut Note */
+            cut_note: string | null;
+            /** Has Inputs */
+            has_inputs: boolean;
+        };
+        /** ScenesOut */
+        ScenesOut: {
+            job: components["schemas"]["JobSummary"] | null;
+            proposal: components["schemas"]["ProposalOut"] | null;
+            /** Scenes */
+            scenes: components["schemas"]["SceneOut"][];
+            /** Stale Reasons */
+            stale_reasons: ("script_changed" | "voiceover_changed")[];
+            llm: components["schemas"]["LlmInfoOut"];
+        };
+        /** ScriptWordOut */
+        ScriptWordOut: {
+            /** Index */
+            index: number;
+            /** Word */
+            word: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Matched */
+            matched: boolean;
+            /** Paragraph */
+            paragraph: number;
+        };
         /** SecretStatus */
         SecretStatus: {
             /** Name */
@@ -735,6 +1112,13 @@ export interface components {
             pending: components["schemas"]["PendingChangeOut"] | null;
             last_check: components["schemas"]["SourceCheckOut"] | null;
         };
+        /** SplitterOut */
+        SplitterOut: {
+            /** Cuts Added */
+            cuts_added: number;
+            /** Cuts Removed */
+            cuts_removed: number;
+        };
         /** TagGroupOut */
         TagGroupOut: {
             /** Tag */
@@ -748,6 +1132,56 @@ export interface components {
             ok: boolean;
             /** Version */
             version?: string | null;
+        };
+        /** TranscriptCountsOut */
+        TranscriptCountsOut: {
+            /** Script Words */
+            script_words: number;
+            /** Matched */
+            matched: number;
+            /** Interpolated */
+            interpolated: number;
+            /** Spoken Words */
+            spoken_words: number;
+            /** Extra Spoken */
+            extra_spoken: number;
+        };
+        /** TranscriptOut */
+        TranscriptOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Provider */
+            provider: string;
+            /** Voiceover Asset Id */
+            voiceover_asset_id: number | null;
+            /** Script Words */
+            script_words: components["schemas"]["ScriptWordOut"][];
+            counts: components["schemas"]["TranscriptCountsOut"];
+            /** Warnings */
+            warnings: string[];
+            /** Stale Reasons */
+            stale_reasons: ("script_changed" | "voiceover_changed")[];
+            /** Processing Time */
+            processing_time: number | null;
+        };
+        /** TranscriptionOut */
+        TranscriptionOut: {
+            job: components["schemas"]["JobSummary"] | null;
+            transcript: components["schemas"]["TranscriptOut"] | null;
+        };
+        /** UsageOut */
+        UsageOut: {
+            /** Prompt Tokens */
+            prompt_tokens: number | null;
+            /** Completion Tokens */
+            completion_tokens: number | null;
+            /** Reasoning Tokens */
+            reasoning_tokens: number | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -1276,6 +1710,349 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApproveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_api_jobs_get: {
+        parameters: {
+            query?: {
+                project_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_api_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No job has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_job_api_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No job has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The job is not in a state that allows it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resubmit_job_api_jobs__job_id__resubmit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No job has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The job is not in a state that allows it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_transcription_api_projects__project_id__transcribe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no voiceover or no script yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_transcription_api_projects__project_id__transcription_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptionOut"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    propose_scenes_api_projects__project_id__propose_scenes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProposeScenesRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The recording differs from the script, or scenes with inputs would be replaced, and the request did not confirm it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no voiceover, script or current transcript yet, or the script is too long. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_scenes_api_projects__project_id__scenes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */

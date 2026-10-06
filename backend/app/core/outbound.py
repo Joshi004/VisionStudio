@@ -1,8 +1,8 @@
 """The one place the backend makes outbound HTTP calls.
 
-Every later phase calls out through `request()`: the GPU server, the
-transcription API and the LLM. Phases 5 and 9 extend this module (uploads and
-`download_to_file`) and reuse the checks below. Do not create another httpx
+Every later phase calls out through `request()` (or `upload()`, added in
+Phase 5): the GPU server, the transcription API and the LLM. Phase 9 adds
+`download_to_file` and reuses the checks below. Do not create another httpx
 client anywhere else.
 
 What `request()` enforces (ANALYSIS.md Section 3.6 and 3.7):
@@ -154,6 +154,48 @@ async def request(
     A non-2xx answer is returned, not raised: the caller decides what it means.
     Raises `OutboundError` when there is no usable answer at all.
     """
+    return await _send(
+        method, url, json=json, params=params, files=None, timeout_s=timeout_s, max_bytes=max_bytes
+    )
+
+
+async def upload(
+    url: str,
+    *,
+    filename: str,
+    content: bytes,
+    mime: str,
+    timeout_s: float,
+    max_bytes: int = JSON_MAX_BYTES,
+) -> OutboundResponse:
+    """POSTs one file as multipart/form-data in the field `file`, as the GPU API's
+    `POST /v1/uploads` expects (Phase 5). Every check of `request()` applies.
+
+    The file is held in memory, which is fine for the 1-minute voiceovers of
+    iteration 1. `filename` matters: the GPU server decides the file type from
+    its extension.
+    """
+    return await _send(
+        "POST",
+        url,
+        json=None,
+        params=None,
+        files={"file": (filename, content, mime)},
+        timeout_s=timeout_s,
+        max_bytes=max_bytes,
+    )
+
+
+async def _send(
+    method: str,
+    url: str,
+    *,
+    json: Any,
+    params: Mapping[str, str] | None,
+    files: Mapping[str, tuple[str, bytes, str]] | None,
+    timeout_s: float,
+    max_bytes: int,
+) -> OutboundResponse:
     final_url = docker_mapped(url)
     try:
         check_request_url(final_url)
@@ -171,6 +213,7 @@ async def request(
                 final_url,
                 json=json,
                 params=params,
+                files=files,
                 headers=auth_headers_for(final_url),
                 timeout=timeout_s,
             ) as response:

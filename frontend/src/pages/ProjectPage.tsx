@@ -3,7 +3,9 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
+import { ScenesSection } from "../components/projects/ScenesSection";
 import { ScriptSection } from "../components/projects/ScriptSection";
+import { TranscriptSection } from "../components/projects/TranscriptSection";
 import { VoiceoverSection } from "../components/projects/VoiceoverSection";
 import { capitalise } from "../format";
 
@@ -62,6 +64,8 @@ export function ProjectPage() {
 
           <VoiceoverSection project={project} />
           <ScriptSection project={project} />
+          <TranscriptSection project={project} />
+          <ScenesSection project={project} />
         </>
       )}
     </Stack>

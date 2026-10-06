@@ -107,6 +107,12 @@ class Transcript(Base):
     words: Mapped[Any] = mapped_column(JSON)
     script_words: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    # Added in Phase 5: which voiceover and which script this transcript was made from, so
+    # the app can tell when either has changed since (the transcript is then out of date).
+    voiceover_asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("asset.id", ondelete="SET NULL"), default=None
+    )
+    script_sha256: Mapped[str]
 
 
 class Scene(Base):

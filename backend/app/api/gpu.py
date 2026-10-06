@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from app.api.errors import ErrorResponse
 from app.core import settings as settings_service
 from app.db.session import SessionDep
+from app.jobs import dispatcher
 from app.providers import contract_guard
 from app.services import gpu_status
 
@@ -87,6 +88,8 @@ async def test_connection(session: SessionDep) -> ConnectionTestResult:
     An unreachable server is a normal 200 answer.
     """
     outcome = await gpu_status.run_connection_test(session)
+    # A server that answers again can let waiting jobs proceed.
+    dispatcher.nudge()
     return ConnectionTestResult(
         health=ConnectionTest.model_validate(outcome.health),
         contract=None
@@ -333,6 +336,8 @@ async def approve_contract(body: ApproveRequest, session: SessionDep) -> Approve
     approval is a normal 200 answer with `approved: false` and a reason per source.
     """
     result = await contract_guard.approve(session, body.expected)
+    # An approved API releases the jobs that were paused because it had changed.
+    dispatcher.nudge()
     return ApproveResponse(
         approved=result.approved,
         sources=[SourceApprovalOut.model_validate(item) for item in result.sources],

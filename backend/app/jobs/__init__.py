@@ -1,3 +1,28 @@
-"""Background job handlers. Empty in Phase 1; the dispatcher loop and the
-first handler (transcription) arrive in Phase 5 (ITERATION_1_PHASES.md).
+"""Background jobs (ANALYSIS.md Section 3.3).
+
+- `store.py`: every change to a `job` row.
+- `handlers.py`: the interface a job type implements, and the registry.
+- `dispatcher.py`: the one loop that moves jobs forward.
+- `phases.py`: the phase labels the UI shows.
+- one module per job type (`transcribe.py`, `plan_scenes.py`).
+
+A new job type is a new handler module plus one line in `register_handlers` below. The
+dispatcher loop is not touched.
 """
+
+from __future__ import annotations
+
+
+def register_handlers() -> None:
+    """Registers every job type's handler. Called once, by `dispatcher.start()`.
+
+    Imports are inside the function so that importing `app.jobs` stays cheap and the
+    handler modules can import the rest of the package without a cycle.
+    """
+    from app.jobs import handlers
+    from app.jobs.plan_scenes import PlanScenesHandler
+    from app.jobs.transcribe import TranscribeHandler
+
+    handlers.register(TranscribeHandler())
+    handlers.register(PlanScenesHandler())
+    # Phase 9 adds generate_clip and Phase 10 render_final here.

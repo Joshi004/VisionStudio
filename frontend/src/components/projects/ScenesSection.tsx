@@ -1,0 +1,373 @@
+import { useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Loader,
+  Modal,
+  Paper,
+  ScrollArea,
+  Stack,
+  Table,
+  Text,
+  Title,
+  Tooltip,
+} from "@mantine/core";
+
+import { describeError } from "../../api/errors";
+import type { ProjectDetail } from "../../api/projects";
+import { useProposeScenes, useScenes, type Scene } from "../../api/scenes";
+import { useTranscription } from "../../api/transcription";
+import { formatDateTime } from "../../format";
+import { JobActions } from "../jobs/JobActions";
+import { elapsedText } from "../jobs/jobFormat";
+import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { useScenePlayer } from "./scenePlayer";
+import {
+  checksLine,
+  isOutsideLimits,
+  llmHost,
+  seconds,
+  staleSceneMessage,
+  usageLine,
+} from "./sceneView";
+
+const CUT_SOURCE_LABELS: Record<Scene["cut_source"], { label: string; color: string }> = {
+  ai: { label: "AI", color: "blue" },
+  rule: { label: "Rule", color: "grape" },
+  manual: { label: "Manual", color: "gray" },
+};
+
+type PendingConfirmation = { runAgain: boolean };
+
+export function ScenesSection({ project }: { project: ProjectDetail }) {
+  const scenesQuery = useScenes(project.id);
+  // The transcript query is shared with the transcript section: one request, one cache entry.
+  const transcription = useTranscription(project.id);
+  const propose = useProposeScenes(project.id);
+  const { audioRef, playingId, play, stop, onTimeUpdate, onPause, onEnded } = useScenePlayer();
+  const [pending, setPending] = useState<PendingConfirmation | null>(null);
+
+  const { data, isLoading, isError, error, dataUpdatedAt } = scenesQuery;
+  // Elapsed times are worked out from the stored times as of the last time the data was
+  // loaded (on page load, Refresh or returning to the tab). There is no timer.
+  const now = dataUpdatedAt;
+
+  const job = data?.job ?? null;
+  const proposal = data?.proposal ?? null;
+  const scenes = data?.scenes ?? [];
+  const transcript = transcription.data?.transcript ?? null;
+  const isActive = job !== null && (job.status === "queued" || job.status === "running");
+  const hasScript = project.script_text !== null && project.script_text.trim() !== "";
+
+  const mismatchWarnings = transcript?.warnings ?? [];
+  const scenesWithInputs = scenes.filter((scene) => scene.has_inputs).length;
+
+  let blockedReason: string | null = null;
+  if (!project.voiceover) {
+    blockedReason = "Upload a voiceover first.";
+  } else if (!hasScript) {
+    blockedReason = "Paste the script first.";
+  } else if (!transcript) {
+    blockedReason = "Transcribe the voiceover first.";
+  } else if (transcript.stale_reasons.length > 0) {
+    blockedReason = "The transcript is out of date. Transcribe again first.";
+  } else if (isActive) {
+    blockedReason = "A proposal is already in progress.";
+  }
+
+  function click(runAgain: boolean) {
+    // The two questions the page asks before a paid call that replaces something.
+    if (mismatchWarnings.length > 0 || scenesWithInputs > 0) {
+      setPending({ runAgain });
+      return;
+    }
+    propose.mutate({
+      run_again: runAgain,
+      accept_mismatch: false,
+      discard_scenes_with_inputs: false,
+    });
+  }
+
+  function confirm() {
+    if (pending === null) {
+      return;
+    }
+    propose.mutate({
+      run_again: pending.runAgain,
+      accept_mismatch: mismatchWarnings.length > 0,
+      discard_scenes_with_inputs: scenesWithInputs > 0,
+    });
+    setPending(null);
+  }
+
+  const usage = proposal ? usageLine(proposal) : null;
+  const checks = proposal ? checksLine(proposal) : null;
+
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Stack gap="sm">
+        <Group justify="space-between" align="center">
+          <Title order={4}>Scenes</Title>
+          <Group gap="sm">
+            {blockedReason && (
+              <Text size="xs" c="dimmed">
+                {blockedReason}
+              </Text>
+            )}
+            {proposal && (
+              <Button
+                variant="default"
+                onClick={() => click(true)}
+                disabled={blockedReason !== null}
+                loading={propose.isPending}
+              >
+                Run again
+              </Button>
+            )}
+            <Button
+              onClick={() => click(false)}
+              disabled={blockedReason !== null}
+              loading={propose.isPending}
+            >
+              Propose scenes
+            </Button>
+          </Group>
+        </Group>
+
+        {data && (
+          <Text size="xs" c="dimmed">
+            Calls the language model ({data.llm.model} at {llmHost(data.llm.will_call)}): a paid
+            call that sends your script and its word times. Propose scenes reuses the stored
+            answer when nothing has changed. Run again always asks the model again.
+          </Text>
+        )}
+
+        {isLoading && <Loader size="sm" />}
+
+        {isError && (
+          <Alert color="red" title="Could not load the scenes">
+            {describeError(error)} Press Refresh to try again.
+          </Alert>
+        )}
+
+        {propose.isError && (
+          <Alert color="red" title="The proposal was not started">
+            {describeError(propose.error)}
+          </Alert>
+        )}
+
+        {job && (
+          <Stack gap={4}>
+            <Group gap="sm">
+              <JobStatusBadge job={job} />
+              <Text size="sm" c="dimmed">
+                {elapsedText(job, now)}
+              </Text>
+              <JobActions job={job} />
+            </Group>
+            {isActive && (
+              <Text size="xs" c="dimmed">
+                A proposal takes about 20 seconds. Press Refresh to see its progress.
+              </Text>
+            )}
+          </Stack>
+        )}
+
+        {job?.status === "failed" && job.error && (
+          <Alert color="red" title="The proposal failed">
+            <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {job.error}
+            </Text>
+          </Alert>
+        )}
+
+        {data && !job && scenes.length === 0 && (
+          <Text c="dimmed">
+            No scenes yet. Proposing splits the script into scenes of {project.min_scene_seconds}{" "}
+            to {project.max_scene_seconds} seconds.
+          </Text>
+        )}
+
+        {data && data.stale_reasons.length > 0 && (
+          <Alert color="yellow" title="These scenes are out of date">
+            {data.stale_reasons.map((reason) => (
+              <Text key={reason} size="sm">
+                {staleSceneMessage(reason)}
+              </Text>
+            ))}
+            <Text size="sm">
+              Transcribe again if needed, then propose scenes to replace them.
+            </Text>
+          </Alert>
+        )}
+
+        {proposal?.source === "rule" && (
+          <Alert color="orange" title="The rule-based splitter proposed these scenes">
+            <Text size="sm">
+              The language model could not be used, so the cuts come from the script's paragraph
+              breaks and punctuation alone.
+            </Text>
+            {proposal.fallback_reason && (
+              <Text size="sm" style={{ wordBreak: "break-word" }}>
+                Reason: {proposal.fallback_reason}
+              </Text>
+            )}
+          </Alert>
+        )}
+
+        {proposal && scenes.length > 0 && (
+          <Stack gap={2}>
+            <Text size="sm" c="dimmed">
+              {scenes.length} scenes · proposed {proposal.finished_at ? formatDateTime(proposal.finished_at) : ""}
+              {proposal.source === "ai" ? " by the language model" : " by the rule-based splitter"}
+            </Text>
+            {proposal.cache_hit_of_job_id !== null && (
+              <Text size="xs" c="dimmed">
+                Reused the stored answer from job {proposal.cache_hit_of_job_id}: no call was made.
+              </Text>
+            )}
+            {usage && (
+              <Text size="xs" c="dimmed">
+                {usage}
+              </Text>
+            )}
+            {checks && (
+              <Text size="xs" c="dimmed">
+                {checks}
+              </Text>
+            )}
+          </Stack>
+        )}
+
+        {scenes.length > 0 && (
+          <>
+            {project.voiceover && (
+              // Keyed by the asset, so a replacement voiceover loads fresh. It has no controls:
+              // the Play buttons below drive it.
+              <audio
+                key={project.voiceover.asset_id}
+                ref={audioRef}
+                src={project.voiceover.url}
+                preload="metadata"
+                onTimeUpdate={onTimeUpdate}
+                onPause={onPause}
+                onEnded={onEnded}
+              />
+            )}
+            <ScrollArea.Autosize mah={560} type="auto">
+              <Table verticalSpacing="xs" stickyHeader>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>#</Table.Th>
+                    <Table.Th>Time</Table.Th>
+                    <Table.Th>Length</Table.Th>
+                    <Table.Th>Text</Table.Th>
+                    <Table.Th>Cut</Table.Th>
+                    <Table.Th />
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {scenes.map((scene) => {
+                    const length = scene.end_s - scene.start_s;
+                    const outside = isOutsideLimits(
+                      length,
+                      project.min_scene_seconds,
+                      project.max_scene_seconds,
+                    );
+                    const source = CUT_SOURCE_LABELS[scene.cut_source];
+                    const isPlaying = playingId === scene.id;
+                    return (
+                      <Table.Tr key={scene.id}>
+                        <Table.Td>{scene.index + 1}</Table.Td>
+                        <Table.Td style={{ whiteSpace: "nowrap" }}>
+                          {seconds(scene.start_s)} – {seconds(scene.end_s)} s
+                        </Table.Td>
+                        <Table.Td style={{ whiteSpace: "nowrap" }}>
+                          {outside ? (
+                            <Tooltip
+                              label={`Outside the project's limits (${project.min_scene_seconds} to ${project.max_scene_seconds} s)`}
+                            >
+                              <Text size="sm" c="red" fw={600} component="span">
+                                {seconds(length)} s
+                              </Text>
+                            </Tooltip>
+                          ) : (
+                            <Text size="sm" component="span">
+                              {seconds(length)} s
+                            </Text>
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{scene.text}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Stack gap={2} align="flex-start">
+                            <Badge color={source.color} variant="light">
+                              {source.label}
+                            </Badge>
+                            {scene.cut_note && (
+                              <Text size="xs" c="orange.8">
+                                {scene.cut_note}
+                              </Text>
+                            )}
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
+                          <Button
+                            size="compact-xs"
+                            variant={isPlaying ? "filled" : "light"}
+                            onClick={() => (isPlaying ? stop() : play(scene))}
+                          >
+                            {isPlaying ? "Stop" : "Play"}
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea.Autosize>
+          </>
+        )}
+      </Stack>
+
+      <Modal
+        opened={pending !== null}
+        onClose={() => setPending(null)}
+        title="Before the language model is called"
+        centered
+      >
+        <Stack gap="sm">
+          {mismatchWarnings.length > 0 && (
+            <Alert color="orange" title="The recording differs from the script">
+              {mismatchWarnings.map((warning) => (
+                <Text key={warning} size="sm">
+                  {warning}
+                </Text>
+              ))}
+              <Text size="sm">You can fix the script and transcribe again, or go on anyway.</Text>
+            </Alert>
+          )}
+          {scenesWithInputs > 0 && (
+            <Alert color="yellow" title="Scenes with inputs will be replaced">
+              <Text size="sm">
+                {scenesWithInputs} of the {scenes.length} scenes{" "}
+                {scenesWithInputs === 1 ? "has" : "have"} a description, frames or a clip.
+                Proposing replaces all the scenes and discards those inputs. Their files stay on
+                disk.
+              </Text>
+            </Alert>
+          )}
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+            <Button onClick={confirm}>Continue</Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Paper>
+  );
+}

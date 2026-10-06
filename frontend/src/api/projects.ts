@@ -14,7 +14,8 @@ export const VOICEOVER_MAX_MB = 400;
 /** What nginx accepts on /api/, before the backend sees the request. */
 const NGINX_MAX_MB = 512;
 
-const PROJECTS_KEY = ["projects"] as const;
+/** Every project query starts with this key, including a project's transcription. */
+export const PROJECTS_KEY = ["projects"] as const;
 
 async function fetchProjects() {
   const { data, response } = await api.GET("/api/projects");

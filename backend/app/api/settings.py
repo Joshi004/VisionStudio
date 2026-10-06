@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from app.api.errors import ErrorResponse
 from app.core import settings as settings_service
 from app.db.session import SessionDep
+from app.jobs import dispatcher
 
 router = APIRouter()
 
@@ -106,6 +107,8 @@ async def save_setting(key: str, body: SettingUpdate, session: SessionDep) -> Se
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except settings_service.SettingValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    # A new URL or limit can let a waiting job proceed, so the dispatcher looks again now.
+    dispatcher.nudge()
     return _to_item(effective)
 
 
@@ -118,4 +121,5 @@ async def reset_setting(key: str, session: SessionDep) -> SettingItem:
         effective = await settings_service.reset_setting(session, key)
     except settings_service.UnknownSettingError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    dispatcher.nudge()
     return _to_item(effective)

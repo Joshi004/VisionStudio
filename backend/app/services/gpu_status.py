@@ -6,8 +6,8 @@ Test connection button and, from Phase 5, by the dispatcher) and the last
 contract check (written by `contract_guard`). Callers read and write them only
 through this module and `contract_guard`.
 
-`system_status` is what the banner on every page reads. Phase 5 fills in
-`waiting_jobs`.
+`system_status` is what the banner on every page reads, including the number of jobs
+paused because the GPU API changed (Phase 5).
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
+from app.jobs import store as job_store
 from app.providers import contract_guard
 from app.providers.contract_guard import CheckResult, SourceCheck
 from app.providers.gpu_server import HealthResult, check_health, health_url
@@ -33,8 +34,12 @@ class ConnectionTestOutcome:
     contract: CheckResult | None
 
 
-async def run_connection_test(session: AsyncSession) -> ConnectionTestOutcome:
-    """Tests the saved GPU server URL now, then checks its API, and stores both results."""
+async def record_health(session: AsyncSession) -> HealthResult:
+    """Checks the saved GPU server URL now and stores the result for the banner.
+
+    The Test connection button and, from Phase 5, the dispatcher both call this, so the
+    banner stays current while nobody is looking (ANALYSIS.md Section 3.3).
+    """
     base_url = await settings_service.get_str(session, GPU_URL_KEY)
     # End the read transaction before the network call: never hold one across it.
     await session.commit()
@@ -43,6 +48,12 @@ async def run_connection_test(session: AsyncSession) -> ConnectionTestOutcome:
     await settings_service.write_internal(
         session, settings_service.GPU_CONNECTION_LAST_TEST, health.to_json()
     )
+    return health
+
+
+async def run_connection_test(session: AsyncSession) -> ConnectionTestOutcome:
+    """Tests the saved GPU server URL now, then checks its API, and stores both results."""
+    health = await record_health(session)
     contract = await contract_guard.check(session) if health.reachable else None
     return ConnectionTestOutcome(health=health, contract=contract)
 
@@ -132,5 +143,5 @@ async def system_status(session: AsyncSession) -> SystemStatus:
     contract = _contract_status(
         await contract_guard.last_check(session), await contract_guard.missing_baselines(session)
     )
-    # Phase 5 counts the jobs paused by a changed API here.
-    return SystemStatus(server=server, contract=contract, waiting_jobs=0)
+    waiting_jobs = await job_store.waiting_job_count(session)
+    return SystemStatus(server=server, contract=contract, waiting_jobs=waiting_jobs)
