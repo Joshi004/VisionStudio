@@ -299,7 +299,8 @@ export interface paths {
         put?: never;
         /**
          * Cancel Job
-         * @description Cancels a job that has not started, or one the GPU server no longer knows.
+         * @description Cancels a job that has not started, one the GPU server no longer knows, or a running
+         *     clip job (which is cancelled on the GPU server first).
          */
         post: operations["cancel_job_api_jobs__job_id__cancel_post"];
         delete?: never;
@@ -501,6 +502,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/scenes/{scene_id}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Clip
+         * @description Starts generating a clip for the scene (Generate, and Regenerate when it has one).
+         *
+         *     A scene that already has a clip being generated returns that job: two quick clicks make
+         *     one job. Each new job gets its own random seed, so it makes a new take.
+         */
+        post: operations["generate_clip_api_projects__project_id__scenes__scene_id__generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/generate-ready-scenes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Ready Scenes
+         * @description Starts a clip for every scene that is ready, has no clip yet and has no job running.
+         *
+         *     All the jobs are created in one transaction. The page asks before calling this, and it
+         *     shows how many it will start (`ScenesOut.generate_ready_count`).
+         */
+        post: operations["generate_ready_scenes_api_projects__project_id__generate_ready_scenes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/select-take": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select Take
+         * @description Makes one of the scene's finished clips the one the final video uses.
+         */
+        post: operations["select_take_api_projects__project_id__scenes__scene_id__select_take_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/clip-sound": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Clip Sound
+         * @description Switches the scene's own clip sound on or off for the final video (Phase 10 reads it).
+         */
+        put: operations["set_clip_sound_api_projects__project_id__scenes__scene_id__clip_sound_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -553,6 +640,11 @@ export interface components {
             flagged: number;
             /** Dropped */
             dropped: number;
+        };
+        /** ClipSoundRequest */
+        ClipSoundRequest: {
+            /** Use Clip Sound */
+            use_clip_sound: boolean;
         };
         /** ConnectionState */
         ConnectionState: {
@@ -748,6 +840,13 @@ export interface components {
             preview_url: string;
             /** Warnings */
             warnings: string[];
+        };
+        /** GenerateReadyOut */
+        GenerateReadyOut: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
+            /** Created */
+            created: number;
         };
         /** GpuStatus */
         GpuStatus: {
@@ -1113,6 +1212,19 @@ export interface components {
             missing: ("description" | "first_frame" | "last_frame")[];
             /** Ready */
             ready: boolean;
+            /** Use Clip Sound */
+            use_clip_sound: boolean;
+            /** Selected Clip Asset Id */
+            selected_clip_asset_id: number | null;
+            /** Target Frames */
+            target_frames: number;
+            clip_job: components["schemas"]["JobSummary"] | null;
+            /** Clip Typical Run Seconds */
+            clip_typical_run_seconds: number | null;
+            /** Generate Blocked Reason */
+            generate_blocked_reason: string | null;
+            /** Takes */
+            takes: components["schemas"]["TakeOut"][];
         };
         /**
          * SceneUpdate
@@ -1149,6 +1261,10 @@ export interface components {
             edit_blocked_reason: string | null;
             /** Ready Count */
             ready_count: number;
+            /** Generate Ready Count */
+            generate_ready_count: number;
+            /** Max Parallel Generations */
+            max_parallel_generations: number;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -1173,6 +1289,11 @@ export interface components {
             label: string;
             /** Is Set */
             is_set: boolean;
+        };
+        /** SelectTakeRequest */
+        SelectTakeRequest: {
+            /** Asset Id */
+            asset_id: number;
         };
         /** ServerStatusOut */
         ServerStatusOut: {
@@ -1304,6 +1425,39 @@ export interface components {
             tag: string;
             /** Operations */
             operations: components["schemas"]["OperationOut"][];
+        };
+        /**
+         * TakeOut
+         * @description One finished clip of a scene (a succeeded `generate_clip` job and its asset).
+         */
+        TakeOut: {
+            /** Asset Id */
+            asset_id: number;
+            /** Job Id */
+            job_id: number;
+            /** Url */
+            url: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Seed */
+            seed: number | null;
+            /** Frame Count */
+            frame_count: number | null;
+            /** Target Frames */
+            target_frames: number | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Audio Codec */
+            audio_codec: string | null;
+            /** Selected */
+            selected: boolean;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Too Short */
+            too_short: boolean;
         };
         /** ToolStatus */
         ToolStatus: {
@@ -2021,6 +2175,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description The GPU server did not answer the cancel, so nothing changed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     resubmit_job_api_jobs__job_id__resubmit_post: {
@@ -2481,6 +2644,177 @@ export interface operations {
                 content?: never;
             };
             /** @description No project, scene or frame has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_clip_api_projects__project_id__scenes__scene_id__generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A clip cannot be generated now: the scene is not ready, is longer than the project's maximum, or the scenes are out of date or being replaced. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_ready_scenes_api_projects__project_id__generate_ready_scenes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateReadyOut"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A clip cannot be generated now: the scene is not ready, is longer than the project's maximum, or the scenes are out of date or being replaced. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    select_take_api_projects__project_id__scenes__scene_id__select_take_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectTakeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project or scene has this id, or the asset is not a finished clip of this scene. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_clip_sound_api_projects__project_id__scenes__scene_id__clip_sound_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClipSoundRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project or scene has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;

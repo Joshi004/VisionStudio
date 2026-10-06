@@ -15,10 +15,15 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
+from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobActionError, JobRow
+from app.providers import video_generator
+from app.providers.gpu_server import GpuCallError
+
+GPU_URL_KEY = "gpu_api_base_url"
 
 router = APIRouter()
 
@@ -123,18 +128,75 @@ async def get_job(job_id: int, session: SessionDep) -> JobDetail:
     return job_detail(await _load_row(session, job_id))
 
 
+async def _cancel_on_server(base_url: str, provider_job_id: str) -> dict[str, Any]:
+    """Asks the GPU server to stop a job. What it answers, whatever it says, is recorded.
+
+    "Whatever it says" means an answer: the job is unknown (404), or the request was refused.
+    No answer at all (no connection, a server error, a busy server) raises 503 and the job is
+    left as it is, because cancelling here while the job keeps running there would waste a GPU.
+    """
+    try:
+        return (await video_generator.cancel(base_url, provider_job_id)).to_json()
+    except GpuCallError as exc:
+        if exc.kind in ("not_found", "rejected", "bad_answer"):
+            return {"cancelled": False, "error": str(exc)}
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The GPU server did not answer, so the job was not cancelled. Try again.",
+        ) from exc
+
+
 @router.post(
     "/jobs/{job_id}/cancel",
     response_model=JobDetail,
-    responses={**_NOT_FOUND, **_NOT_ALLOWED},
+    responses={
+        **_NOT_FOUND,
+        **_NOT_ALLOWED,
+        503: {
+            "model": ErrorResponse,
+            "description": "The GPU server did not answer the cancel, so nothing changed.",
+        },
+    },
 )
 async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
-    """Cancels a job that has not started, or one the GPU server no longer knows."""
-    await _load_row(session, job_id)
+    """Cancels a job that has not started, one the GPU server no longer knows, or a running
+    clip job (which is cancelled on the GPU server first).
+    """
+    job = (await _load_row(session, job_id)).job
+    was_not_found = store.is_not_found(job)
+
+    remote_answer: dict[str, Any] | None = None
+    if store.can_cancel(job) and store.needs_remote_cancel(job):
+        base_url = await settings_service.get_str(session, GPU_URL_KEY)
+        provider_job_id = job.provider_job_id
+        await session.commit()  # end the read before the call
+        if provider_job_id is not None:
+            remote_answer = await _cancel_on_server(base_url, provider_job_id)
+
     try:
         await store.cancel_job(session, job_id)
     except JobActionError as exc:
         raise HTTPException(exc.status_code, exc.message) from exc
+
+    # A job that was still uploading may have been submitted while it was being cancelled.
+    # Its start notices (`mark_submitted` fails) and cancels it too; this covers the other order.
+    after = (await _load_row(session, job_id)).job
+    if (
+        remote_answer is None
+        and not was_not_found
+        and after.provider_job_id is not None
+        and after.type in store.REMOTE_CANCEL_TYPES
+    ):
+        base_url = await settings_service.get_str(session, GPU_URL_KEY)
+        provider_job_id = after.provider_job_id
+        await session.commit()
+        try:
+            remote_answer = (await video_generator.cancel(base_url, provider_job_id)).to_json()
+        except GpuCallError as exc:
+            remote_answer = {"cancelled": False, "error": str(exc)}
+
+    if remote_answer is not None:
+        await store.merge_output(session, job_id, {"cancel": remote_answer})
     dispatcher.nudge()
     return job_detail(await _load_row(session, job_id))
 

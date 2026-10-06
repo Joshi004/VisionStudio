@@ -1,9 +1,9 @@
 """The one place the backend makes outbound HTTP calls.
 
-Every later phase calls out through `request()` (or `upload()`, added in
-Phase 5): the GPU server, the transcription API and the LLM. Phase 9 adds
-`download_to_file` and reuses the checks below. Do not create another httpx
-client anywhere else.
+Every later phase calls out through `request()` (or `upload()`, added in Phase 5, and
+`download_to_file()`, added in Phase 9): the GPU server, the transcription API and the
+LLM. All three share one call path (`_call`) and so the checks below. Do not create
+another httpx client anywhere else.
 
 What `request()` enforces (ANALYSIS.md Section 3.6 and 3.7):
 
@@ -22,14 +22,17 @@ What `request()` enforces (ANALYSIS.md Section 3.6 and 3.7):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from json import loads
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+import anyio
 import httpx
 
 from app.core.config import env_value
@@ -39,12 +42,15 @@ USER_AGENT = "VisioStudio/0.1"
 BITDEER_HOST = "api-inference.bitdeer.ai"
 BITDEER_KEY_ENV = "BITDEEP_API_KEY"
 
-# Small, for JSON answers. The larger limit for media downloads arrives with the
-# download method in the phase that needs it.
+# Small, for JSON answers. Media downloads (`download_to_file`, Phase 9) have their own,
+# larger limits.
 JSON_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_TIMEOUT_S = 10.0
+MEDIA_MAX_BYTES = 1024 * 1024 * 1024
+DOWNLOAD_TIMEOUT_S = 600.0
 
 _READ_CHUNK_BYTES = 64 * 1024
+_DOWNLOAD_CHUNK_BYTES = 256 * 1024
 _MAX_LOCATION_CHARS = 200
 
 _logger = logging.getLogger(__name__)
@@ -196,6 +202,43 @@ async def _send(
     timeout_s: float,
     max_bytes: int,
 ) -> OutboundResponse:
+    async def read_body(response: httpx.Response, final_url: str) -> OutboundResponse:
+        body = await _read_limited(response, max_bytes)
+        return OutboundResponse(
+            url=final_url,
+            status_code=response.status_code,
+            headers=response.headers,
+            body=body,
+        )
+
+    result, _status = await _call(
+        method,
+        url,
+        json=json,
+        params=params,
+        files=files,
+        timeout_s=timeout_s,
+        handle=read_body,
+    )
+    return result
+
+
+async def _call[T](
+    method: str,
+    url: str,
+    *,
+    json: Any,
+    params: Mapping[str, str] | None,
+    files: Mapping[str, tuple[str, bytes, str]] | None,
+    timeout_s: float,
+    handle: Callable[[httpx.Response, str], Awaitable[T]],
+) -> tuple[T, int]:
+    """Makes one call with every check of this module, and lets `handle` read the answer.
+
+    Everything that applies to a call lives here once: the URL rules, the Docker mapping,
+    the time limit, no redirects, the key only for Bitdeer, and the mapping of transport
+    problems to `OutboundError`. Returns what `handle` returned and the HTTP status.
+    """
     final_url = docker_mapped(url)
     try:
         check_request_url(final_url)
@@ -224,13 +267,8 @@ async def _send(
                         f"The server answered with a redirect to {location}. "
                         "Redirects are not followed.",
                     )
-                body = await _read_limited(response, max_bytes)
-                result = OutboundResponse(
-                    url=final_url,
-                    status_code=response.status_code,
-                    headers=response.headers,
-                    body=body,
-                )
+                result = await handle(response, final_url)
+                status_code = response.status_code
     except OutboundError as exc:
         _log_call(method, final_url, started, f"refused ({exc.reason})")
         raise
@@ -242,7 +280,89 @@ async def _send(
         detail = str(exc) or type(exc).__name__
         raise OutboundError("connection", f"Could not reach {netloc} ({detail}).") from exc
 
-    _log_call(method, final_url, started, str(result.status_code))
+    _log_call(method, final_url, started, str(status_code))
+    return result, status_code
+
+
+@dataclass(frozen=True)
+class DownloadResult:
+    """A finished download: the file at `dest`, or the server's error answer."""
+
+    url: str  # the address actually called, after Docker mapping
+    status_code: int
+    # Set only for a 200: the size and SHA-256 of the file that was written.
+    size_bytes: int
+    sha256: str
+    # Set only for any other status: the answer, up to `JSON_MAX_BYTES`. No file is written.
+    error_body: bytes
+
+
+async def download_to_file(
+    url: str,
+    dest: Path,
+    *,
+    timeout_s: float = DOWNLOAD_TIMEOUT_S,
+    max_bytes: int = MEDIA_MAX_BYTES,
+) -> DownloadResult:
+    """GETs `url` and streams a 200 answer into the new file `dest`, counting bytes and
+    hashing as it goes. Every check of `request()` applies (Phase 2).
+
+    `dest` must not exist: it is created with "xb", and removed again on any failure, so a
+    half-written file never stays behind. Any status other than 200 is returned with its
+    body in `error_body` and nothing is written. Raises `OutboundError` when there is no
+    usable answer, or the file is larger than `max_bytes`.
+    """
+    created = False
+
+    async def write_file(response: httpx.Response, final_url: str) -> DownloadResult:
+        nonlocal created
+        if response.status_code != 200:
+            error_body = await _read_limited(response, JSON_MAX_BYTES)
+            return DownloadResult(
+                url=final_url,
+                status_code=response.status_code,
+                size_bytes=0,
+                sha256="",
+                error_body=error_body,
+            )
+
+        too_large = OutboundError("too_large", f"The file is larger than {max_bytes:,} bytes.")
+        declared = response.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > max_bytes:
+            raise too_large
+
+        digest = hashlib.sha256()
+        size = 0
+        async with await anyio.open_file(dest, "xb") as file:
+            created = True
+            async for chunk in response.aiter_bytes(_DOWNLOAD_CHUNK_BYTES):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise too_large
+                digest.update(chunk)
+                await file.write(chunk)
+        return DownloadResult(
+            url=final_url,
+            status_code=200,
+            size_bytes=size,
+            sha256=digest.hexdigest(),
+            error_body=b"",
+        )
+
+    try:
+        result, _status = await _call(
+            "GET",
+            url,
+            json=None,
+            params=None,
+            files=None,
+            timeout_s=timeout_s,
+            handle=write_file,
+        )
+    except BaseException:
+        if created:
+            dest.unlink(missing_ok=True)
+        raise
     return result
 
 

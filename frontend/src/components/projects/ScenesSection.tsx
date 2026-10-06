@@ -16,14 +16,16 @@ import {
   Tooltip,
 } from "@mantine/core";
 
+import { useGenerateClip, useGenerateReadyScenes } from "../../api/clips";
 import { describeError } from "../../api/errors";
 import type { ProjectDetail } from "../../api/projects";
 import { useProposeScenes, useScenes, type Scene } from "../../api/scenes";
 import { useTranscription } from "../../api/transcription";
 import { formatDateTime } from "../../format";
 import { JobActions } from "../jobs/JobActions";
-import { elapsedText } from "../jobs/jobFormat";
+import { elapsedText, statusColor, typicalText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { clipCell, generateLabel, hasActiveClipJob } from "./clipView";
 import { CutEditor } from "./CutEditor";
 import { missingText } from "./promptHints";
 import { SceneInputsDrawer } from "./SceneInputsDrawer";
@@ -50,8 +52,11 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
   // The transcript query is shared with the transcript section: one request, one cache entry.
   const transcription = useTranscription(project.id);
   const propose = useProposeScenes(project.id);
+  const generateClip = useGenerateClip(project.id);
+  const generateAll = useGenerateReadyScenes(project.id);
   const { audioRef, playingId, play, stop, onTimeUpdate, onPause, onEnded } = useScenePlayer();
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
+  const [confirmingAll, setConfirmingAll] = useState(false);
   const [editing, setEditing] = useState(false);
   // The scene whose inputs are open in the drawer, and whether the list of what is missing shows.
   const [inputsSceneId, setInputsSceneId] = useState<number | null>(null);
@@ -271,6 +276,33 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                   </Button>
                 )}
               </Group>
+              <Group gap="sm" align="center">
+                <Button
+                  size="xs"
+                  disabled={data.generate_ready_count === 0}
+                  loading={generateAll.isPending}
+                  onClick={() => setConfirmingAll(true)}
+                >
+                  Generate all ready scenes ({data.generate_ready_count})
+                </Button>
+                <Text size="xs" c="dimmed">
+                  Starts a clip for each ready scene that has none yet. Each takes 5 to 10 minutes
+                  on the GPU server, and at most {data.max_parallel_generations} run at once. Press
+                  Refresh to see progress.
+                </Text>
+              </Group>
+              {generateAll.isError && (
+                <Alert color="red" title="The clips were not started">
+                  {describeError(generateAll.error)}
+                </Alert>
+              )}
+              {generateAll.isSuccess && (
+                <Text size="xs" c="dimmed">
+                  {generateAll.data.created === 0
+                    ? "No clip needed to start."
+                    : `Started ${generateAll.data.created} ${generateAll.data.created === 1 ? "clip" : "clips"}.`}
+                </Text>
+              )}
               {showMissing && data.ready_count < scenes.length && (
                 <ScrollArea.Autosize mah={160} type="auto">
                   <Stack gap={2}>
@@ -334,6 +366,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                     <Table.Th>Text</Table.Th>
                     <Table.Th>Cut</Table.Th>
                     <Table.Th>Inputs</Table.Th>
+                    <Table.Th style={{ minWidth: 170 }}>Clip</Table.Th>
                     <Table.Th />
                   </Table.Tr>
                 </Table.Thead>
@@ -404,6 +437,65 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                           </Stack>
                         </Table.Td>
                         <Table.Td>
+                          <Stack gap={2} align="flex-start">
+                            {scene.clip_job !== null && hasActiveClipJob(scene) ? (
+                              <>
+                                <Badge color={statusColor(scene.clip_job.status)} variant="light">
+                                  {scene.clip_job.status}
+                                </Badge>
+                                {scene.clip_job.phase && (
+                                  <Text size="xs" c="dimmed">
+                                    {scene.clip_job.phase}
+                                  </Text>
+                                )}
+                                <Text size="xs" c="dimmed">
+                                  {elapsedText(scene.clip_job, now)}
+                                  {typicalText(scene.clip_typical_run_seconds) !== ""
+                                    ? ` · ${typicalText(scene.clip_typical_run_seconds)}`
+                                    : ""}
+                                </Text>
+                              </>
+                            ) : (
+                              <>
+                                {scene.clip_job?.status === "failed" && (
+                                  <Tooltip label={scene.clip_job.error ?? "The clip failed."}>
+                                    <Badge color="red" variant="light">
+                                      failed
+                                    </Badge>
+                                  </Tooltip>
+                                )}
+                                <Text size="xs" c="dimmed">
+                                  {clipCell(scene)}
+                                </Text>
+                              </>
+                            )}
+                            <Group gap={4}>
+                              <Tooltip
+                                label={scene.generate_blocked_reason}
+                                disabled={scene.generate_blocked_reason === null}
+                                multiline
+                                w={260}
+                              >
+                                <span>
+                                  <Button
+                                    size="compact-xs"
+                                    variant="default"
+                                    disabled={scene.generate_blocked_reason !== null}
+                                    loading={
+                                      generateClip.isPending &&
+                                      generateClip.variables?.sceneId === scene.id
+                                    }
+                                    onClick={() => generateClip.mutate({ sceneId: scene.id })}
+                                  >
+                                    {generateLabel(scene)}
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                              {scene.clip_job !== null && <JobActions job={scene.clip_job} />}
+                            </Group>
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
                           <Button
                             size="compact-xs"
                             variant={isPlaying ? "filled" : "light"}
@@ -426,9 +518,40 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
         project={project}
         scenes={scenes}
         sceneId={inputsSceneId}
+        now={now}
         onSelect={setInputsSceneId}
         onClose={() => setInputsSceneId(null)}
       />
+
+      <Modal
+        opened={confirmingAll}
+        onClose={() => setConfirmingAll(false)}
+        title="Generate all ready scenes"
+        centered
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            Start {data?.generate_ready_count ?? 0}{" "}
+            {data?.generate_ready_count === 1 ? "clip generation" : "clip generations"}? Each one
+            uses a GPU on your server for about 5 to 10 minutes, and at most{" "}
+            {data?.max_parallel_generations ?? 0} run at once. Scenes that already have a clip are
+            skipped.
+          </Text>
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={() => setConfirmingAll(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmingAll(false);
+                generateAll.mutate();
+              }}
+            >
+              Start
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal
         opened={pending !== null}

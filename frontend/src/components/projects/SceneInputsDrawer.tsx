@@ -4,6 +4,7 @@ import {
   Anchor,
   Badge,
   Button,
+  Divider,
   Drawer,
   Group,
   Paper,
@@ -21,6 +22,7 @@ import { DESCRIPTION_MAX_CHARS, useSaveDescription } from "../../api/sceneInputs
 import type { Scene } from "../../api/scenes";
 import { FrameSlot } from "./FrameSlot";
 import { countWords, missingText, promptHints } from "./promptHints";
+import { SceneClipSection } from "./SceneClipSection";
 import { seconds } from "./sceneView";
 
 type SceneInputsDrawerProps = {
@@ -28,19 +30,23 @@ type SceneInputsDrawerProps = {
   scenes: Scene[];
   /** The scene being edited. The drawer is closed when this is null or the scene is gone. */
   sceneId: number | null;
+  /** Milliseconds since 1970 as of the last load, for the clip job's elapsed time. */
+  now: number;
   onSelect: (sceneId: number) => void;
   onClose: () => void;
 };
 
 /**
- * Everything a scene needs before a clip can be made: its description, the prompt that will
- * be sent, and its first and last frame. It reads the scene from the scenes query, so it
- * shows the new state after every save without another request.
+ * Everything a scene needs before a clip can be made (its description, the prompt that will
+ * be sent, and its first and last frame), and then the clip itself: Generate, the status of
+ * the job and the takes. It reads the scene from the scenes query, so it shows the new state
+ * after every save without another request.
  */
 export function SceneInputsDrawer({
   project,
   scenes,
   sceneId,
+  now,
   onSelect,
   onClose,
 }: SceneInputsDrawerProps) {
@@ -247,6 +253,9 @@ export function SceneInputsDrawer({
               />
             </SimpleGrid>
           </Stack>
+
+          <Divider />
+          <SceneClipSection project={project} scene={scene} now={now} />
         </Stack>
       )}
     </Drawer>

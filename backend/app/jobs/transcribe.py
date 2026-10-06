@@ -155,7 +155,7 @@ class TranscribeHandler(JobHandler):
         try:
             remote = await gpu_server.job_status(base_url, job.provider_job_id)
         except GpuCallError as exc:
-            await self._record_poll(job_id, _phase_for_poll_error(exc))
+            await self._record_poll(job_id, phase_for_poll_error(exc))
             return False
 
         if remote.status == "queued":
@@ -219,7 +219,7 @@ class TranscribeHandler(JobHandler):
             elif exc.kind == "bad_answer":
                 await store.fail_job(session, job.id, f"The transcript could not be used: {exc}")
             else:
-                await store.record_poll(session, job.id, _phase_for_poll_error(exc))
+                await store.record_poll(session, job.id, phase_for_poll_error(exc))
 
     async def _match_and_store(
         self, job: Job, body: dict[str, Any], spoken: list[transcriber.SpokenWord]
@@ -312,7 +312,7 @@ class TranscribeHandler(JobHandler):
             await store.fail_job(session, job_id, message)
 
 
-def _phase_for_poll_error(exc: GpuCallError) -> str:
+def phase_for_poll_error(exc: GpuCallError) -> str:
     """What to show while the server cannot be asked. None of these fails the job."""
     if exc.kind == "unreachable":
         return phases.SERVER_UNREACHABLE_CHECKING

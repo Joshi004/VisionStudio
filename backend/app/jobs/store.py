@@ -30,6 +30,10 @@ _logger = logging.getLogger(__name__)
 ACTIVE_STATUSES = ("queued", "running")
 ERROR_MAX_CHARS = 4000
 
+# Job types that can be cancelled while they run, because the server has a cancel for them
+# (Phase 9). A transcription cannot yet: its cancel is not built.
+REMOTE_CANCEL_TYPES = frozenset({"generate_clip"})
+
 # One backend process, so a module lock is enough to make "create, unless one is active" atomic.
 _create_lock = asyncio.Lock()
 
@@ -53,8 +57,23 @@ class JobRow:
 
 
 def can_cancel(job: Job) -> bool:
-    """A job that has not started, or one the server no longer knows."""
-    return job.status == "queued" or is_not_found(job)
+    """A job that has not started, one the server no longer knows, or (for the types that
+    have a cancel on the server) a running one that is not yet fetching its result.
+    """
+    if job.status == "queued" or is_not_found(job):
+        return True
+    return (
+        job.status == "running"
+        and job.type in REMOTE_CANCEL_TYPES
+        and job.phase not in phases.FINISHING_PHASES
+    )
+
+
+def needs_remote_cancel(job: Job) -> bool:
+    """Is there a job on the server to cancel? Only a running job that has been submitted,
+    and that the server still knows.
+    """
+    return job.status == "running" and job.provider_job_id is not None and not is_not_found(job)
 
 
 def can_resubmit(job: Job) -> bool:
@@ -87,11 +106,17 @@ async def create_job(
     provider: str,
     input: dict[str, Any],
     scene_id: int | None = None,
+    commit: bool = True,
 ) -> tuple[Job, bool]:
     """Creates a queued job, unless one of this type is already active for the project
     (or for the scene). Returns `(job, created)`: the existing job when it was not created.
 
     This is what makes two quick clicks on one button create one job (Section 3.3).
+
+    With `commit=False` the job is only flushed, so a caller can create several jobs in one
+    transaction (Generate all) and commit them together. It must hold the database's write
+    lock already (see `scenes_service.lock_scenes`), so nobody else can create a job
+    between the check and the commit.
     """
     async with _create_lock:
         statement = (
@@ -108,7 +133,8 @@ async def create_job(
         )
         existing = (await session.execute(statement)).scalars().first()
         if existing is not None:
-            await session.commit()
+            if commit:
+                await session.commit()
             return existing, False
 
         job = Job(
@@ -122,7 +148,10 @@ async def create_job(
             attempt=1,
         )
         session.add(job)
-        await session.commit()
+        if commit:
+            await session.commit()
+        else:
+            await session.flush()
     _logger.info("job %d created: type=%s project=%d", job.id, type, project_id)
     return job, True
 
@@ -192,9 +221,32 @@ async def record_output(session: AsyncSession, job_id: int, output: dict[str, An
     return saved
 
 
-async def record_poll(session: AsyncSession, job_id: int, phase: str) -> None:
-    """Notes that the server was asked about a running job, and what it said."""
-    await _update(session, job_id, ("running",), phase=phase, last_checked_at=utcnow())
+async def record_poll(
+    session: AsyncSession,
+    job_id: int,
+    phase: str,
+    output: dict[str, Any] | None = None,
+) -> None:
+    """Notes that the server was asked about a running job, and what it said. `output`, when
+    given, replaces the job's output (a clip job keeps the server's progress there).
+    """
+    values: dict[str, Any] = {"phase": phase, "last_checked_at": utcnow()}
+    if output is not None:
+        values["output"] = output
+    await _update(session, job_id, ("running",), **values)
+    await session.commit()
+
+
+async def merge_output(session: AsyncSession, job_id: int, values: dict[str, Any]) -> None:
+    """Adds keys to the output of a job that has finished (succeeded, failed or cancelled):
+    what the cleanup or the cancel on the server answered. A new object is assigned.
+    """
+    job = await _load(session, job_id)
+    if job is None or job.status in ACTIVE_STATUSES:
+        await session.commit()
+        return
+    merged = {**(job.output if isinstance(job.output, dict) else {}), **values}
+    await _update(session, job_id, ("succeeded", "failed", "cancelled"), output=merged)
     await session.commit()
 
 
@@ -259,16 +311,22 @@ async def _load(session: AsyncSession, job_id: int) -> Job | None:
 
 
 async def cancel_job(session: AsyncSession, job_id: int) -> Job:
-    """Cancels a job that has not started, or one the server no longer knows.
+    """Cancels a job that has not started, one the server no longer knows, or a running clip
+    job (the caller cancels it on the server first, see `needs_remote_cancel`).
 
-    A job that is running cannot be cancelled yet: not on the GPU server (Phase 5), and not
-    a call to the language model.
+    Any other running job cannot be cancelled: a transcription is already on the GPU server
+    (its cancel is not built), and a call to the language model cannot be taken back.
     """
     job = await _load(session, job_id)
     if job is None:
         raise JobActionError(404, f"Job {job_id} does not exist.")
     if not can_cancel(job):
-        if job.status == "running" and job.provider == "gpu":
+        if job.status == "running" and job.phase in phases.FINISHING_PHASES:
+            message = (
+                "The clip has been made and is being downloaded and checked, so it can no "
+                "longer be cancelled. Wait a moment and refresh."
+            )
+        elif job.status == "running" and job.provider == "gpu":
             message = "This job is already running on the GPU server and cannot be cancelled."
         elif job.status == "running":
             message = "This job is already running and cannot be cancelled."

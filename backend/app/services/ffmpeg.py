@@ -189,6 +189,108 @@ def _parse_probe(data: Any) -> ProbeResult | None:
     )
 
 
+@dataclass(frozen=True)
+class VideoProbe:
+    """What a generated clip contains (Phase 9 checks it before storing it)."""
+
+    width: int | None
+    height: int | None
+    fps: float | None
+    # The number of frames, counted from the file's packets. None when ffprobe cannot tell.
+    frame_count: int | None
+    duration_s: float | None
+    # The first audio stream, or None when the clip has no sound.
+    audio: AudioStream | None
+
+
+async def probe_video(path: Path, *, timeout_s: float = 120.0) -> VideoProbe | None:
+    """Reads a video file, counting its frames. Returns None when ffprobe cannot read the
+    file, cannot run, or the file has no video stream. Never raises.
+
+    `-count_packets` reads the whole file once, so this is slower than `probe` (a few
+    seconds for a clip), and it is how the number of frames is known for certain.
+    """
+    args = [
+        "-v",
+        "error",
+        "-count_packets",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+        file_input(path),
+    ]
+    try:
+        result = await run_tool("ffprobe", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffprobe could not run: %s", exc)
+        return None
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")[:_STDERR_LOG_CHARS]
+        _logger.info("ffprobe exit code %s: %s", result.returncode, stderr.strip())
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        _logger.warning("ffprobe printed output that is not JSON")
+        return None
+    return _parse_video_probe(data)
+
+
+def _frame_rate(value: object) -> float | None:
+    """ffprobe prints a rate as a fraction such as "24/1"."""
+    if not isinstance(value, str) or "/" not in value:
+        return _number(value)
+    numerator, _, denominator = value.partition("/")
+    top, bottom = _number(numerator), _number(denominator)
+    if top is None or bottom is None or bottom == 0:
+        return None
+    return top / bottom
+
+
+def _parse_video_probe(data: Any) -> VideoProbe | None:
+    if not isinstance(data, dict):
+        return None
+    streams = data.get("streams")
+    video: dict[str, Any] | None = None
+    audio: AudioStream | None = None
+    for stream in streams if isinstance(streams, list) else []:
+        if not isinstance(stream, dict):
+            continue
+        kind = stream.get("codec_type")
+        if kind == "video" and video is None:
+            disposition = stream.get("disposition")
+            if not (isinstance(disposition, dict) and disposition.get("attached_pic") == 1):
+                video = stream
+        elif kind == "audio" and audio is None:
+            audio = AudioStream(
+                codec_name=stream.get("codec_name"),
+                sample_rate=_whole_number(stream.get("sample_rate")),
+                channels=_whole_number(stream.get("channels")),
+                duration_s=_number(stream.get("duration")),
+            )
+    if video is None:
+        return None
+
+    media_format = data.get("format")
+    format_duration = (
+        _number(media_format.get("duration")) if isinstance(media_format, dict) else None
+    )
+    # The packet count is exact. The container's own frame count is only a fallback.
+    frame_count = _whole_number(video.get("nb_read_packets"))
+    if frame_count is None:
+        frame_count = _whole_number(video.get("nb_frames"))
+    return VideoProbe(
+        width=_whole_number(video.get("width")),
+        height=_whole_number(video.get("height")),
+        fps=_frame_rate(video.get("avg_frame_rate")) or _frame_rate(video.get("r_frame_rate")),
+        frame_count=frame_count,
+        duration_s=_number(video.get("duration")) or format_duration,
+        audio=audio,
+    )
+
+
 async def tool_version(tool: Tool) -> str | None:
     """Returns the tool's version string (e.g. "7.1.5-0+deb13u1").
 

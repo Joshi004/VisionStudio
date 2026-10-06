@@ -94,6 +94,15 @@ class Storage:
             raise
         return TempFile(path=path, size_bytes=size_bytes, sha256=digest.hexdigest())
 
+    def new_temp_path(self, suffix: str) -> Path:
+        """A path for a new file in the temp folder, for a caller that writes the file itself
+        (a download). The file must be created with "xb", never with mkstemp (see the module
+        note), and then described to `save` as a `TempFile`.
+        """
+        if not _EXTENSION.fullmatch(suffix):
+            raise StorageError(f"Not a valid file extension: {suffix!r}")
+        return self._tmp_dir / f"{uuid.uuid4().hex}.{suffix}"
+
     async def save(self, temp: TempFile, project_id: int, ext: str) -> StoredFile:
         """Moves a received file into the media folder under a generated name."""
         if not _EXTENSION.fullmatch(ext):

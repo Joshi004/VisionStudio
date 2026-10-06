@@ -2,11 +2,12 @@
 (Phase 5).
 
 The contract guard (Phase 4) is `contract_guard.py` next to this module. The
-transcription adapter is `transcriber.py`, and Phase 9 adds the video adapter.
+transcription adapter is `transcriber.py`, and the video adapter is `video_generator.py`.
 
-Upload, submit, status and result work the same for every backend on the server
-(ANALYSIS.md Section 6.1), so they live here once: `upload_file`, `submit_job`,
-`job_status` and `job_result_json`. Each takes the base URL to call, which for
+Upload, submit, status, result, cancel and purge work the same for every backend on the
+server (ANALYSIS.md Section 6.1), so they live here once: `upload_file`, `submit_job`,
+`job_status`, `job_result_json`, `download_result` (a binary result), `cancel_job` and
+`purge_job`. Each takes the base URL to call, which for
 transcription is the transcription URL setting. They raise `GpuCallError` for
 anything that is not a usable answer, with a `kind` the caller can act on.
 """
@@ -21,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
+
 from app.core import outbound
 from app.core.urls import docker_mapped, join_url
 from app.db.types import utcnow
@@ -34,6 +37,9 @@ UPLOAD_TIMEOUT_S = 600.0
 SUBMIT_TIMEOUT_S = 30.0
 STATUS_TIMEOUT_S = 10.0
 RESULT_TIMEOUT_S = 30.0
+CANCEL_TIMEOUT_S = 15.0
+PURGE_TIMEOUT_S = 30.0
+DOWNLOAD_TIMEOUT_S = 600.0
 MESSAGE_MAX_CHARS = 2000
 
 # The server's own ids are 32 hex characters. Anything else never goes into a URL path.
@@ -194,6 +200,50 @@ class RemoteStatus:
     status: RemoteState
     error: str | None
     result_ready: bool
+    # Context the server adds (Phase 9 shows it next to the elapsed time). All optional.
+    pipeline: str | None = None
+    partition: str | None = None
+    typical_run_seconds: float | None = None
+    typical_basis: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        """What a job stores as `output.remote` while it runs."""
+        return {
+            "status": self.status,
+            "pipeline": self.pipeline,
+            "partition": self.partition,
+            "typical_run_seconds": self.typical_run_seconds,
+            "typical_basis": self.typical_basis,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+
+@dataclass(frozen=True)
+class CancelAnswer:
+    """The server's answer to a cancel. `cancelled` is False for a job that had finished."""
+
+    cancelled: bool
+    reason: str | None
+
+    def to_json(self) -> dict[str, Any]:
+        return {"cancelled": self.cancelled, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class PurgeAnswer:
+    removed_asset_ids: list[str]
+    kept_asset_ids: list[str]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "removed_asset_ids": self.removed_asset_ids,
+            "kept_asset_ids": self.kept_asset_ids,
+        }
 
 
 def server_message(response: outbound.OutboundResponse) -> str:
@@ -321,7 +371,24 @@ async def job_status(base_url: str, job_id: str) -> RemoteStatus:
         status=status,
         error=error if isinstance(error, str) and error else None,
         result_ready=body.get("result_ready") is True,
+        pipeline=_text(body.get("pipeline")),
+        partition=_text(body.get("partition")),
+        typical_run_seconds=_seconds(body.get("typical_run_seconds")),
+        typical_basis=_text(body.get("typical_basis")),
+        created_at=_text(body.get("created_at")),
+        started_at=_text(body.get("started_at")),
+        finished_at=_text(body.get("finished_at")),
     )
+
+
+def _text(value: object) -> str | None:
+    return value[:MESSAGE_MAX_CHARS] if isinstance(value, str) and value else None
+
+
+def _seconds(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value) if value >= 0 else None
 
 
 async def job_result_json(base_url: str, job_id: str) -> dict[str, Any]:
@@ -336,3 +403,66 @@ async def job_result_json(base_url: str, job_id: str) -> dict[str, Any]:
     except outbound.OutboundError as exc:
         raise _transport_error(exc) from exc
     return _json_object(response, "result")
+
+
+async def download_result(base_url: str, job_id: str, dest: Path) -> outbound.DownloadResult:
+    """Downloads a finished job's result file (a video) into the new file `dest`.
+
+    Same errors as `job_result_json`: 409 (not finished yet) and 410 (expired) arrive as
+    GpuCallError("rejected") with that `status_code`, and 404 as "not_found". Nothing is
+    left at `dest` when this raises.
+    """
+    url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/result")
+    try:
+        result = await outbound.download_to_file(url, dest, timeout_s=DOWNLOAD_TIMEOUT_S)
+    except outbound.OutboundError as exc:
+        raise _transport_error(exc) from exc
+    if result.status_code != 200:
+        dest.unlink(missing_ok=True)
+        raise _error_for(
+            outbound.OutboundResponse(
+                url=result.url,
+                status_code=result.status_code,
+                headers=httpx.Headers(),
+                body=result.error_body,
+            )
+        )
+    return result
+
+
+async def cancel_job(base_url: str, job_id: str) -> CancelAnswer:
+    """Cancels a job that has not finished (`DELETE /v1/jobs/{job_id}`).
+
+    Best effort on the server's side: a job that already finished answers
+    `cancelled: false`, which is not an error. A cancelled job later reports `failed`.
+    """
+    url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}")
+    try:
+        response = await outbound.request("DELETE", url, timeout_s=CANCEL_TIMEOUT_S)
+    except outbound.OutboundError as exc:
+        raise _transport_error(exc) from exc
+    body = _json_object(response, "cancel answer")
+    return CancelAnswer(cancelled=body.get("cancelled") is True, reason=_text(body.get("reason")))
+
+
+async def purge_job(base_url: str, job_id: str) -> PurgeAnswer:
+    """Deletes a finished job from the server, with its output and the uploads no other job
+    uses (`DELETE /v1/jobs/{job_id}/purge`). This cannot be undone. The server answers 409
+    for a job that is still queued or running.
+    """
+    url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/purge")
+    try:
+        response = await outbound.request("DELETE", url, timeout_s=PURGE_TIMEOUT_S)
+    except outbound.OutboundError as exc:
+        raise _transport_error(exc) from exc
+    body = _json_object(response, "purge answer")
+    return PurgeAnswer(
+        removed_asset_ids=_id_list(body.get("removed_asset_ids")),
+        kept_asset_ids=_id_list(body.get("kept_asset_ids")),
+    )
+
+
+def _id_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item[:200] for item in value if isinstance(item, str)][:50]

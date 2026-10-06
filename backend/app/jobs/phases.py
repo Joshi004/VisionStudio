@@ -37,6 +37,17 @@ MATCHING: Final = "matching to the script"
 SERVER_UNREACHABLE_CHECKING: Final = "GPU server unreachable, checking again"
 NOT_FOUND: Final = "not found on this server"
 
+# --- Running: clip generation (Phase 9) ------------------------------------------------
+PREPARING_FRAMES: Final = "preparing the frames"
+UPLOADING_FRAMES: Final = "uploading the frames"
+DOWNLOADING_CLIP: Final = "downloading the clip"
+CHECKING_CLIP: Final = "checking the clip"
+RESULT_NOT_READY: Final = "the server has not released the clip yet, checking again"
+
+# While a job is in one of these, its result is being fetched and stored: it can no longer
+# be cancelled (the server has already finished it).
+FINISHING_PHASES: Final = frozenset({DOWNLOADING_CLIP, CHECKING_CLIP})
+
 # --- Running: scene proposal (Phase 6) ------------------------------------------------
 PREPARING_PROMPT: Final = "preparing the prompt"
 REUSING_ANSWER: Final = "reusing the stored answer"

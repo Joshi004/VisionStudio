@@ -196,6 +196,18 @@ def frame_warnings(width: int, height: int, gen_width: int, gen_height: int) -> 
     return warnings
 
 
+def render_frame_png(path: Path, width: int, height: int) -> bytes:
+    """The normalised frame as a lossless PNG: exactly the file that is sent to the GPU server
+    (Phase 9). Blocking: run it through `run_pillow`.
+    """
+    with Image.open(path, formats=_FORMATS) as image:
+        image.load()
+        normalised = normalise_frame(image, width, height)
+    buffer = io.BytesIO()
+    normalised.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
 def render_preview_jpeg(path: Path, width: int, height: int) -> bytes:
     """The normalised frame as a JPEG, for the page. Blocking: run it through `run_pillow`.
 

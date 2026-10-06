@@ -4,7 +4,7 @@
 - `handlers.py`: the interface a job type implements, and the registry.
 - `dispatcher.py`: the one loop that moves jobs forward.
 - `phases.py`: the phase labels the UI shows.
-- one module per job type (`transcribe.py`, `plan_scenes.py`).
+- one module per job type (`transcribe.py`, `plan_scenes.py`, `generate_clip.py`).
 
 A new job type is a new handler module plus one line in `register_handlers` below. The
 dispatcher loop is not touched.
@@ -20,9 +20,11 @@ def register_handlers() -> None:
     handler modules can import the rest of the package without a cycle.
     """
     from app.jobs import handlers
+    from app.jobs.generate_clip import GenerateClipHandler
     from app.jobs.plan_scenes import PlanScenesHandler
     from app.jobs.transcribe import TranscribeHandler
 
     handlers.register(TranscribeHandler())
     handlers.register(PlanScenesHandler())
-    # Phase 9 adds generate_clip and Phase 10 render_final here.
+    handlers.register(GenerateClipHandler())
+    # Phase 10 adds render_final here.

@@ -589,6 +589,20 @@ async def _approved_row(session: AsyncSession, source: ContractSource) -> ApiSna
     return (await session.execute(statement)).scalars().first()
 
 
+async def approved_bodies(session: AsyncSession) -> list[dict[str, Any]]:
+    """The approved documents of the current sources (the guide, the OpenAPI spec...).
+
+    Phase 9 reads the limits it checks a request against (`num_frames`) from the approved
+    OpenAPI document, so a request is only built against what you approved.
+    """
+    bodies: list[dict[str, Any]] = []
+    for source, _url in await called_urls(session):
+        row = await _approved_row(session, source)
+        if row is not None and isinstance(row.body, dict):
+            bodies.append(row.body)
+    return bodies
+
+
 def _summarise(row: ApiSnapshot) -> ApprovedSummary:
     body = row.body if isinstance(row.body, dict) else {}
     is_spec = api_contract.is_openapi(body)

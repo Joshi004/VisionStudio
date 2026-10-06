@@ -39,6 +39,16 @@ export function formatElapsed(totalSeconds: number): string {
   return minutesRest === 0 ? `${hours} h` : `${hours} h ${minutesRest} min`;
 }
 
+/** "typically about 12 min", from the server's usual run time. Empty when it is not known. */
+export function typicalText(typicalSeconds: number | null): string {
+  if (typicalSeconds === null || typicalSeconds <= 0) {
+    return "";
+  }
+  // A few minutes is a rough figure: round it to the minute so it does not look exact.
+  const rounded = typicalSeconds < 120 ? typicalSeconds : Math.round(typicalSeconds / 60) * 60;
+  return `typically about ${formatElapsed(rounded)}`;
+}
+
 type Timed = Pick<JobSummary, "status" | "created_at" | "started_at" | "finished_at">;
 
 /**

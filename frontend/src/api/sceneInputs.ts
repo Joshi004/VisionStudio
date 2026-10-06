@@ -22,7 +22,7 @@ export const DESCRIPTION_MAX_CHARS = 4000;
  * edit, or the generation size changed) the page may be showing old data, so it is loaded
  * again.
  */
-function useSceneInputsMutation<TVariables>(
+export function useSceneInputsMutation<TVariables>(
   projectId: number,
   mutationFn: (variables: TVariables) => Promise<ScenesState>,
 ) {

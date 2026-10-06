@@ -31,8 +31,10 @@ from app.core import settings as settings_service
 from app.db.models import Asset, Job, Project, Scene
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
+from app.jobs.generate_clip import MAX_PARALLEL_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
+from app.services import clips as clips_service
 from app.services import (
     cut_edits,
     frame_images,
@@ -125,6 +127,29 @@ class FrameOut(BaseModel):
     warnings: list[str]
 
 
+class TakeOut(BaseModel):
+    """One finished clip of a scene (a succeeded `generate_clip` job and its asset)."""
+
+    asset_id: int
+    job_id: int
+    # The clip's file, served from /media (with Range requests, so it seeks).
+    url: str
+    created_at: datetime
+    seed: int | None
+    # The frames in the file (counted by ffprobe) and the frames the scene needed.
+    frame_count: int | None
+    target_frames: int | None
+    duration_s: float | None
+    # The codec of the clip's own sound, None when it has none.
+    audio_codec: str | None
+    # This is the take the final video uses.
+    selected: bool
+    # The scene's cuts have changed since this take was made.
+    out_of_date: bool
+    # The take has fewer frames than the scene needs now.
+    too_short: bool
+
+
 class SceneOut(BaseModel):
     id: int
     index: int
@@ -149,6 +174,20 @@ class SceneOut(BaseModel):
     # What is still needed (description, first_frame, last_frame). Ready when nothing is.
     missing: list[MissingInput]
     ready: bool
+    # Whether the final video uses this scene's own clip sound.
+    use_clip_sound: bool
+    # The take the final video uses, if any.
+    selected_clip_asset_id: int | None
+    # How many frames the scene lasts at the project's frame rate (Phase 10 uses it too).
+    target_frames: int
+    # The newest clip job of this scene, whatever its status.
+    clip_job: JobSummary | None
+    # The server's usual time for such a job, as of its last check.
+    clip_typical_run_seconds: float | None
+    # Why a clip cannot be generated for this scene now, or None when it can.
+    generate_blocked_reason: str | None
+    # The finished clips, newest first.
+    takes: list[TakeOut]
 
 
 class SceneWordOut(BaseModel):
@@ -213,6 +252,11 @@ class ScenesOut(BaseModel):
     edit_blocked_reason: str | None
     # How many scenes have a description and both frames.
     ready_count: int
+    # How many scenes "Generate all ready scenes" would start: ready, no clip yet, nothing
+    # running, and not blocked.
+    generate_ready_count: int
+    # The setting, so the page can say how many run at once.
+    max_parallel_generations: int
 
 
 def _int(value: object) -> int | None:
@@ -296,12 +340,49 @@ def _frame_out(project: Project, asset: Asset | None) -> FrameOut | None:
     )
 
 
+def _clip_typical_seconds(job: Job | None) -> float | None:
+    """The server's usual run time, from the last status check stored on the job."""
+    output = job.output if job is not None else None
+    remote = output.get("remote") if isinstance(output, dict) else None
+    value = remote.get("typical_run_seconds") if isinstance(remote, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _take_out(take: clips_service.Take, scene: Scene, project: Project) -> TakeOut:
+    recorded = take.provenance
+    audio = recorded.get("audio")
+    codec = audio.get("codec") if isinstance(audio, dict) else None
+    seed = recorded.get("seed")
+    target = recorded.get("target_frames")
+    return TakeOut(
+        asset_id=take.asset.id,
+        job_id=take.job.id,
+        url=media_url(take.asset.path),
+        created_at=take.asset.created_at,
+        seed=_int(seed),
+        frame_count=_int(recorded.get("frame_count")),
+        target_frames=_int(target),
+        duration_s=take.asset.duration_s,
+        audio_codec=codec if isinstance(codec, str) else None,
+        selected=scene.selected_clip_asset_id == take.asset.id,
+        out_of_date=clips_service.take_is_out_of_date(recorded, scene),
+        too_short=clips_service.take_is_too_short(recorded, scene, project),
+    )
+
+
 def _scene_out(
     scene: Scene,
     project: Project,
     frames: dict[int, Asset],
     first_word: int | None,
     last_word: int | None,
+    *,
+    scenes_blocked: str | None,
+    active_clip: Job | None,
+    clip_job: Job | None,
+    takes: list[clips_service.Take],
 ) -> SceneOut:
     missing = scene_inputs.missing_inputs(scene)
     return SceneOut(
@@ -324,6 +405,19 @@ def _scene_out(
         last_frame=_frame_out(project, frames.get(scene.last_frame_asset_id or 0)),
         missing=missing,
         ready=not missing,
+        use_clip_sound=scene.use_clip_sound,
+        selected_clip_asset_id=scene.selected_clip_asset_id,
+        target_frames=clips_service.target_frames_for(scene, project),
+        clip_job=(
+            job_summary(JobRow(job=clip_job, project_name=project.name, scene_index=scene.index))
+            if clip_job is not None
+            else None
+        ),
+        clip_typical_run_seconds=_clip_typical_seconds(clip_job),
+        generate_blocked_reason=clips_service.generation_block(
+            scene, project, scenes_blocked=scenes_blocked, active=active_clip
+        ),
+        takes=[_take_out(take, scene, project) for take in takes],
     )
 
 
@@ -350,6 +444,16 @@ async def propose_scenes(
     """
     flags = body or ProposeScenesRequest()
     project = await load_project(session, project_id)
+
+    # A proposal replaces every scene, and deleting a scene deletes its clip jobs.
+    generating = len(await clips_service.active_clip_jobs(session, project.id))
+    if generating:
+        noun = "scene" if generating == 1 else "scenes"
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Clips are being generated for {generating} {noun}. Wait for them, or cancel "
+            "them, before proposing scenes.",
+        )
 
     if project.voiceover_asset_id is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Upload a voiceover first.")
@@ -443,10 +547,38 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             ranges.append((previous_last + 1, cut.last_word))
             previous_last = cut.last_word
 
+    # Clips (Phase 9): the newest job and the finished takes of each scene, and whether the
+    # scenes as a whole can be generated at all.
+    scenes_blocked = clips_service.scenes_block_reason(state.job, state.stale_reasons)
+    active_clips = await clips_service.active_clip_jobs(session, project.id)
+    clip_jobs = await store.latest_jobs_by_scene(session, project.id, clips_service.GENERATE_JOB)
+    takes = await clips_service.takes_by_scene(session, project.id)
+    max_parallel = await settings_service.get_int(session, MAX_PARALLEL_KEY)
+
     scene_outs = [
-        _scene_out(scene, project, frames, first_word, last_word)
+        _scene_out(
+            scene,
+            project,
+            frames,
+            first_word,
+            last_word,
+            scenes_blocked=scenes_blocked,
+            active_clip=active_clips.get(scene.id),
+            clip_job=clip_jobs.get(scene.id),
+            takes=takes.get(scene.id, []),
+        )
         for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
     ]
+    generate_ready_count = sum(
+        1
+        for scene in state.scenes
+        if clips_service.is_generate_all_candidate(
+            scene,
+            project,
+            scenes_blocked=scenes_blocked,
+            active=active_clips.get(scene.id),
+        )
+    )
     return ScenesOut(
         job=job_out,
         proposal=_proposal_out(state.proposal) if state.proposal is not None else None,
@@ -456,6 +588,8 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
         words=words,
         edit_blocked_reason=blocked_reason,
         ready_count=sum(1 for scene in scene_outs if scene.ready),
+        generate_ready_count=generate_ready_count,
+        max_parallel_generations=max_parallel,
     )
 
 
@@ -536,6 +670,17 @@ async def edit_cut(project_id: int, body: CutEditRequest, session: SessionDep) -
         raise _unprocessable(str(exc)) from None
 
     affected = state.scenes[edit.first : edit.first + edit.old_count]
+    # A clip being generated belongs to the scene as it is. Only the scenes this edit changes
+    # are protected, so the rest of the cuts stay editable during a long batch.
+    active_clips = await clips_service.active_clip_jobs(session, project.id)
+    generating = [scene for scene in affected if scene.id in active_clips]
+    if generating:
+        verb = "has" if len(generating) == 1 else "have"
+        pronoun = "it" if len(generating) == 1 else "them"
+        raise _unprocessable(
+            f"{_scene_numbers(generating)} {verb} a clip being generated. Wait for {pronoun} "
+            "to finish, or cancel the job, before changing this cut."
+        )
     with_inputs = [scene for scene in affected if scene_cuts.has_inputs(scene)]
     if with_inputs and not body.discard_inputs:
         verb = "has" if len(with_inputs) == 1 else "have"

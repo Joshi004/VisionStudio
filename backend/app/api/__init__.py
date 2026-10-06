@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api import gpu, health, jobs, projects, scene_inputs, scenes, settings, transcription
+from app.api import (
+    clips,
+    gpu,
+    health,
+    jobs,
+    projects,
+    scene_inputs,
+    scenes,
+    settings,
+    transcription,
+)
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router, tags=["health"])
@@ -15,3 +25,4 @@ api_router.include_router(jobs.router, tags=["jobs"])
 api_router.include_router(transcription.router, tags=["transcription"])
 api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(scene_inputs.router, tags=["scenes"])
+api_router.include_router(clips.router, tags=["scenes"])
