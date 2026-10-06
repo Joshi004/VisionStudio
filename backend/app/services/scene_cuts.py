@@ -24,6 +24,21 @@ CutSource = Literal["ai", "rule", "manual"]
 
 _TIME_DECIMALS: Final = 3
 
+# How far a stored scene time may differ from the time `build_scene_specs` works out again
+# (times are stored with 3 decimals).
+_TIME_TOLERANCE_S: Final = 0.0005
+
+# The values that clear a scene's inputs (Phase 7: "discard inputs"): exactly the columns
+# `has_inputs` reads. `use_clip_sound` is a preference, not an input, so it stays. Phase 8
+# and 9 add their input columns here and to `has_inputs` together.
+NO_INPUTS: Final[dict[str, None]] = {
+    "scene_description": None,
+    "scene_description_source": None,
+    "first_frame_asset_id": None,
+    "last_frame_asset_id": None,
+    "selected_clip_asset_id": None,
+}
+
 
 @dataclass(frozen=True)
 class Word:
@@ -152,9 +167,52 @@ def build_scene_specs(
     return specs
 
 
+def cuts_from_scenes(
+    words: Sequence[Word], scenes: Sequence[Scene | Any], audio_end_s: float
+) -> list[Cut]:
+    """The cuts that made these scenes: the inverse of `build_scene_specs`.
+
+    The `scene` table stores no word numbers, but a scene's text is its words joined by
+    single spaces, so each scene is matched to the words that follow the previous scene.
+    `scenes` are in order. Every scene must match, and the times `build_scene_specs` works
+    out from the cuts must equal the stored ones, so that an edit rebuilds only what it
+    changes and leaves every other scene exactly as it is. Raises ValueError when they
+    do not (the scenes came from other words, or were made another way).
+    """
+    cuts: list[Cut] = []
+    next_word = 0
+    for position, scene in enumerate(scenes):
+        if scene.index != position:
+            raise ValueError("The scene numbers are not 0 to n-1 in order.")
+        joined = ""
+        last_word: int | None = None
+        for k in range(next_word, len(words)):
+            joined = words[k].text if k == next_word else f"{joined} {words[k].text}"
+            if joined == scene.text:
+                last_word = k
+                break
+            if len(joined) > len(scene.text):
+                break
+        if last_word is None:
+            raise ValueError(f"The text of scene {position + 1} is not in the script's words.")
+        cuts.append(Cut(last_word=last_word, source=scene.cut_source, note=scene.cut_note))
+        next_word = last_word + 1
+    if not cuts or next_word != len(words):
+        raise ValueError("The scenes do not cover the whole script.")
+
+    for spec, scene in zip(build_scene_specs(words, cuts, audio_end_s), scenes, strict=True):
+        if (
+            abs(spec.start_s - scene.start_s) > _TIME_TOLERANCE_S
+            or abs(spec.end_s - scene.end_s) > _TIME_TOLERANCE_S
+        ):
+            raise ValueError(f"The times of scene {spec.index + 1} do not fit the script's words.")
+    return cuts
+
+
 def has_inputs(scene: Scene | Any) -> bool:
     """True when the scene holds something the user (or a later phase) put there: a
-    description, either frame or a chosen clip. Replacing such a scene asks first.
+    description, either frame or a chosen clip. Replacing such a scene asks first. Keep the
+    columns in step with `NO_INPUTS`.
     """
     description = scene.scene_description
     return bool(

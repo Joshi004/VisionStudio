@@ -6,30 +6,38 @@ two gates ask first: the recording differs from the script, and scenes that alre
 description, frames or a clip would be replaced. The dispatcher does the work.
 
 `GET /api/projects/{id}/scenes` reads the database only: the scenes, the proposal they came
-from, whether they are out of date, and the model the next proposal will call.
+from, whether they are out of date, and the model the next proposal will call. It also
+carries the script's words, which the page needs to edit the cuts.
+
+`POST /api/projects/{id}/edit-cut` (Phase 7) adds, moves or removes one cut and answers with
+the scenes as they are afterwards. It is not a job: it is a quick change to the database,
+and it makes no call to the language model.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, ConfigDict, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobDetail, JobSummary, job_detail, job_summary
 from app.api.projects import load_project
 from app.core import settings as settings_service
-from app.db.models import Job, Scene
+from app.db.models import Job, Project, Scene
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
-from app.services import scene_cuts, scene_planner, transcript_matching
+from app.services import cut_edits, scene_cuts, scene_planner, transcript_matching
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -66,6 +74,27 @@ class ProposeScenesRequest(BaseModel):
     discard_scenes_with_inputs: StrictBool = False
 
 
+# A word number: a whole number, zero or more. Not a float, a string or a boolean.
+WordNumber = Annotated[int, Field(strict=True, ge=0)]
+
+
+class CutEditRequest(BaseModel):
+    """One edit of one cut. A cut is named by the number of the last word of the scene it
+    ends, so "after word 12" is the gap between word 12 and word 13.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["add", "remove", "move"]
+    # Add: the gap to cut at. Remove and move: the cut to remove or move.
+    after_word: WordNumber
+    # Move only: the gap to move the cut to.
+    to_after_word: WordNumber | None = None
+    # Clear the description, frames and clip of the scenes the edit changes, if they have any.
+    # Their files stay on disk.
+    discard_inputs: StrictBool = False
+
+
 class SceneOut(BaseModel):
     id: int
     index: int
@@ -76,6 +105,18 @@ class SceneOut(BaseModel):
     # Why this scene's cut needs a look, if it does.
     cut_note: str | None
     has_inputs: bool
+    # The scene's first and last word (numbers in `ScenesOut.words`). None while the cuts
+    # cannot be edited (see `edit_blocked_reason`).
+    first_word: int | None
+    last_word: int | None
+
+
+class SceneWordOut(BaseModel):
+    """One word of the script, as the scenes were cut from it."""
+
+    index: int
+    word: str
+    paragraph: int
 
 
 class UsageOut(BaseModel):
@@ -126,6 +167,10 @@ class ScenesOut(BaseModel):
     scenes: list[SceneOut]
     stale_reasons: list[StaleReasonOut]
     llm: LlmInfoOut
+    # The script's words, for editing the cuts. Empty when editing is not possible.
+    words: list[SceneWordOut]
+    # Why the cuts cannot be edited now (no scenes, a proposal running, out of date...).
+    edit_blocked_reason: str | None
 
 
 def _int(value: object) -> int | None:
@@ -185,7 +230,7 @@ def _proposal_out(job: Job) -> ProposalOut:
     )
 
 
-def _scene_out(scene: Scene) -> SceneOut:
+def _scene_out(scene: Scene, first_word: int | None, last_word: int | None) -> SceneOut:
     return SceneOut(
         id=scene.id,
         index=scene.index,
@@ -196,6 +241,8 @@ def _scene_out(scene: Scene) -> SceneOut:
         cut_source=cast(CutSource, scene.cut_source),
         cut_note=scene.cut_note,
         has_inputs=scene_cuts.has_inputs(scene),
+        first_word=first_word,
+        last_word=last_word,
     )
 
 
@@ -283,6 +330,47 @@ async def propose_scenes(
     return job_detail(JobRow(job=job, project_name=project.name, scene_index=None))
 
 
+async def _scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
+    """What the page shows about a project's scenes. Reads the database only."""
+    state = await scenes_service.scenes_state(session, project)
+    llm_info = await _llm_info(session)
+    view = await scenes_service.cuts_view(session, project, state)
+
+    job_out = None
+    if state.job is not None:
+        job_out = job_summary(JobRow(job=state.job, project_name=project.name, scene_index=None))
+
+    words: list[SceneWordOut] = []
+    blocked_reason: str | None = None
+    # Each scene's first and last word, from the cuts: a scene starts after the cut before it.
+    ranges: list[tuple[int | None, int | None]] = [(None, None)] * len(state.scenes)
+    if isinstance(view, str):
+        blocked_reason = view
+    else:
+        words = [
+            SceneWordOut(index=word.index, word=word.text, paragraph=word.paragraph)
+            for word in view.words
+        ]
+        previous_last = -1
+        ranges = []
+        for cut in view.cuts:
+            ranges.append((previous_last + 1, cut.last_word))
+            previous_last = cut.last_word
+
+    return ScenesOut(
+        job=job_out,
+        proposal=_proposal_out(state.proposal) if state.proposal is not None else None,
+        scenes=[
+            _scene_out(scene, first_word, last_word)
+            for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
+        ],
+        stale_reasons=state.stale_reasons,
+        llm=llm_info,
+        words=words,
+        edit_blocked_reason=blocked_reason,
+    )
+
+
 @router.get(
     "/projects/{project_id}/scenes",
     response_model=ScenesOut,
@@ -291,16 +379,100 @@ async def propose_scenes(
 async def get_scenes(project_id: int, session: SessionDep) -> ScenesOut:
     """The project's scenes and the proposal they came from. Reads the database only."""
     project = await load_project(session, project_id)
-    state = await scenes_service.scenes_state(session, project)
-    llm_info = await _llm_info(session)
+    return await _scenes_out(session, project)
 
-    job_out = None
-    if state.job is not None:
-        job_out = job_summary(JobRow(job=state.job, project_name=project.name, scene_index=None))
-    return ScenesOut(
-        job=job_out,
-        proposal=_proposal_out(state.proposal) if state.proposal is not None else None,
-        scenes=[_scene_out(scene) for scene in state.scenes],
-        stale_reasons=state.stale_reasons,
-        llm=llm_info,
+
+def _unprocessable(message: str) -> HTTPException:
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, message)
+
+
+def _scene_numbers(scenes: list[Scene]) -> str:
+    """Reads 'Scene 4' or 'Scenes 3 and 4', with the numbers shown to the user (from 1)."""
+    numbers = [str(scene.index + 1) for scene in scenes]
+    if len(numbers) == 1:
+        return f"Scene {numbers[0]}"
+    return f"Scenes {' and '.join(numbers)}"
+
+
+@router.post(
+    "/projects/{project_id}/edit-cut",
+    response_model=ScenesOut,
+    responses={
+        **_NOT_FOUND,
+        409: {
+            "model": ErrorResponse,
+            "description": "A scene the edit changes has a description, frames or a clip, "
+            "and the request did not confirm clearing them.",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "The cuts cannot be edited now (no scenes, a proposal running, "
+            "out of date), or this edit is not possible.",
+        },
+    },
+)
+async def edit_cut(project_id: int, body: CutEditRequest, session: SessionDep) -> ScenesOut:
+    """Adds, removes or moves one cut, and returns the scenes as they are afterwards.
+
+    Only the scenes next to the cut are rebuilt. An added or moved cut is a manual cut,
+    timed in the middle of the gap. When a scene the edit changes has a description, frames
+    or a clip, nothing happens until the request sets `discard_inputs`: then those inputs
+    are cleared (their files stay on disk).
+    """
+    if body.action == "move" and body.to_after_word is None:
+        raise _unprocessable("Moving a cut needs to_after_word.")
+    if body.action != "move" and body.to_after_word is not None:
+        raise _unprocessable("Only a move takes to_after_word.")
+
+    project = await load_project(session, project_id)
+    # Take the write lock, then read: what is read below cannot change before the commit.
+    await scenes_service.lock_scenes(session, project.id)
+    await session.refresh(project)
+
+    state = await scenes_service.scenes_state(session, project)
+    view = await scenes_service.cuts_view(session, project, state)
+    if isinstance(view, str):
+        raise _unprocessable(view)
+
+    try:
+        if body.action == "add":
+            edit = cut_edits.add_cut(view.words, view.cuts, body.after_word)
+        elif body.action == "remove":
+            edit = cut_edits.remove_cut(view.words, view.cuts, body.after_word)
+        else:
+            # to_after_word is set for a move: checked at the top.
+            move_to = cast(int, body.to_after_word)
+            edit = cut_edits.move_cut(view.words, view.cuts, body.after_word, move_to)
+        specs = scene_cuts.build_scene_specs(view.words, edit.cuts, view.audio_end_s)
+    except ValueError as exc:  # CutEditError is one
+        raise _unprocessable(str(exc)) from None
+
+    affected = state.scenes[edit.first : edit.first + edit.old_count]
+    with_inputs = [scene for scene in affected if scene_cuts.has_inputs(scene)]
+    if with_inputs and not body.discard_inputs:
+        verb = "has" if len(with_inputs) == 1 else "have"
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{_scene_numbers(with_inputs)} {verb} a description, frames or a clip. This edit "
+            "clears them (their files stay on disk). Confirm to continue.",
+        )
+
+    await scenes_service.apply_cut_edit(
+        session,
+        state.scenes,
+        edit,
+        specs[edit.first : edit.first + edit.new_count],
+        clear_inputs=bool(with_inputs),
     )
+    await session.commit()
+    _logger.info(
+        "project %d: cut edit %s after word %d%s: scenes %d to %d rebuilt, inputs cleared: %s",
+        project.id,
+        body.action,
+        body.after_word,
+        f" to after word {body.to_after_word}" if body.to_after_word is not None else "",
+        edit.first + 1,
+        edit.first + edit.new_count,
+        "yes" if with_inputs else "no",
+    )
+    return await _scenes_out(session, project)

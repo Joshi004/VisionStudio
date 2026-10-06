@@ -410,6 +410,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/edit-cut": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Cut
+         * @description Adds, removes or moves one cut, and returns the scenes as they are afterwards.
+         *
+         *     Only the scenes next to the cut are rebuilt. An added or moved cut is a manual cut,
+         *     timed in the middle of the gap. When a scene the edit changes has a description, frames
+         *     or a clip, nothing happens until the request sets `discard_inputs`: then those inputs
+         *     are cleared (their files stay on disk).
+         */
+        post: operations["edit_cut_api_projects__project_id__edit_cut_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -577,6 +602,27 @@ export interface components {
             sources: components["schemas"]["SourceCheckOut"][];
             /** Message */
             message: string | null;
+        };
+        /**
+         * CutEditRequest
+         * @description One edit of one cut. A cut is named by the number of the last word of the scene it
+         *     ends, so "after word 12" is the gap between word 12 and word 13.
+         */
+        CutEditRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "add" | "remove" | "move";
+            /** After Word */
+            after_word: number;
+            /** To After Word */
+            to_after_word?: number | null;
+            /**
+             * Discard Inputs
+             * @default false
+             */
+            discard_inputs: boolean;
         };
         /** DatabaseStatus */
         DatabaseStatus: {
@@ -960,6 +1006,22 @@ export interface components {
             cut_note: string | null;
             /** Has Inputs */
             has_inputs: boolean;
+            /** First Word */
+            first_word: number | null;
+            /** Last Word */
+            last_word: number | null;
+        };
+        /**
+         * SceneWordOut
+         * @description One word of the script, as the scenes were cut from it.
+         */
+        SceneWordOut: {
+            /** Index */
+            index: number;
+            /** Word */
+            word: string;
+            /** Paragraph */
+            paragraph: number;
         };
         /** ScenesOut */
         ScenesOut: {
@@ -970,6 +1032,10 @@ export interface components {
             /** Stale Reasons */
             stale_reasons: ("script_changed" | "voiceover_changed")[];
             llm: components["schemas"]["LlmInfoOut"];
+            /** Words */
+            words: components["schemas"]["SceneWordOut"][];
+            /** Edit Blocked Reason */
+            edit_blocked_reason: string | null;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -2062,6 +2128,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_cut_api_projects__project_id__edit_cut_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CutEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A scene the edit changes has a description, frames or a clip, and the request did not confirm clearing them. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The cuts cannot be edited now (no scenes, a proposal running, out of date), or this edit is not possible. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

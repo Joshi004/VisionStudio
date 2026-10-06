@@ -11,6 +11,15 @@ export type Scene = components["schemas"]["SceneOut"];
 export type Proposal = components["schemas"]["ProposalOut"];
 /** What the user has confirmed when proposing scenes. Every flag is false unless set. */
 export type ProposeFlags = components["schemas"]["ProposeScenesRequest"];
+/** One word of the script, as the scenes were cut from it. */
+export type SceneWord = components["schemas"]["SceneWordOut"];
+/** One edit of one cut: add, remove or move. */
+export type CutEditBody = components["schemas"]["CutEditRequest"];
+
+/** The scenes query lives under the project's key, so saving the script refreshes it. */
+function scenesKey(projectId: number) {
+  return [...PROJECTS_KEY, projectId, "scenes"] as const;
+}
 
 async function fetchScenes(projectId: number) {
   const { data, error, response } = await api.GET("/api/projects/{project_id}/scenes", {
@@ -31,7 +40,7 @@ async function fetchScenes(projectId: number) {
  */
 export function useScenes(projectId: number) {
   return useQuery({
-    queryKey: [...PROJECTS_KEY, projectId, "scenes"],
+    queryKey: scenesKey(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: isValidProjectId(projectId),
   });
@@ -58,5 +67,36 @@ export function useProposeScenes(projectId: number) {
       return data;
     },
     onSuccess: () => invalidateAfterJobAction(queryClient),
+  });
+}
+
+/**
+ * Adds, moves or removes one cut. The answer holds the scenes as they are afterwards, so
+ * the page shows the change at once, with no Refresh. A 409 (a scene beside the cut has
+ * inputs) is left to the caller, which asks the user and sends the edit again. After a 422
+ * the page may be showing old scenes, so they are loaded again.
+ */
+export function useEditCut(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (edit: CutEditBody) => {
+      const { data, error, response } = await api.POST("/api/projects/{project_id}/edit-cut", {
+        params: { path: { project_id: projectId } },
+        body: edit,
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not change the cut (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: (data) => queryClient.setQueryData(scenesKey(projectId), data),
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 422) {
+        void queryClient.invalidateQueries({ queryKey: scenesKey(projectId) });
+      }
+    },
   });
 }

@@ -23,6 +23,7 @@ import { formatDateTime } from "../../format";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { CutEditor } from "./CutEditor";
 import { useScenePlayer } from "./scenePlayer";
 import {
   checksLine,
@@ -48,6 +49,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
   const propose = useProposeScenes(project.id);
   const { audioRef, playingId, play, stop, onTimeUpdate, onPause, onEnded } = useScenePlayer();
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const { data, isLoading, isError, error, dataUpdatedAt } = scenesQuery;
   // Elapsed times are worked out from the stored times as of the last time the data was
@@ -63,6 +65,11 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
 
   const mismatchWarnings = transcript?.warnings ?? [];
   const scenesWithInputs = scenes.filter((scene) => scene.has_inputs).length;
+
+  // Cuts can be edited while the scenes are current and no proposal is running. The server
+  // says why not (data.edit_blocked_reason), and the answer to every edit carries it again.
+  const editBlockedReason = data?.edit_blocked_reason ?? null;
+  const showEditor = editing && data !== undefined && editBlockedReason === null;
 
   let blockedReason: string | null = null;
   if (!project.voiceover) {
@@ -243,6 +250,24 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
 
         {scenes.length > 0 && (
           <>
+            <Group gap="sm" align="center">
+              <Button
+                size="xs"
+                variant={showEditor ? "filled" : "default"}
+                disabled={editBlockedReason !== null}
+                onClick={() => setEditing(!editing)}
+              >
+                {showEditor ? "Done" : "Edit cuts"}
+              </Button>
+              {editBlockedReason !== null && (
+                <Text size="xs" c="dimmed">
+                  {editBlockedReason}
+                </Text>
+              )}
+            </Group>
+            {showEditor && data && (
+              <CutEditor project={project} scenes={scenes} words={data.words} onEdited={stop} />
+            )}
             {project.voiceover && (
               // Keyed by the asset, so a replacement voiceover loads fresh. It has no controls:
               // the Play buttons below drive it.

@@ -1,8 +1,8 @@
 import type { ScriptWord, Transcript } from "../../api/transcription";
 
 /** The script's words in paragraphs, in order. */
-export function groupByParagraph(words: ScriptWord[]): ScriptWord[][] {
-  const groups: ScriptWord[][] = [];
+export function groupByParagraph<T extends { paragraph: number }>(words: T[]): T[][] {
+  const groups: T[][] = [];
   for (const word of words) {
     const last = groups[groups.length - 1];
     if (last && last[0].paragraph === word.paragraph) {

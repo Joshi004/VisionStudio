@@ -1,0 +1,85 @@
+/* A word of the script. Neighbouring scenes alternate between two tints. */
+.word {
+  border-radius: 3px;
+  padding: 2px 0;
+}
+
+.tintA {
+  background: var(--mantine-color-blue-light);
+}
+
+.tintB {
+  background: var(--mantine-color-gray-light);
+}
+
+/* The gap between two words: a button, so it can be clicked and reached with the keyboard.
+   Inside a scene it looks like a tinted space. */
+.gap {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.5em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.gap:focus-visible {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: 1px;
+}
+
+.gap:disabled {
+  cursor: default;
+}
+
+/* Adding a cut: the gap lights up under the pointer. */
+.gap:not(.cut):hover:not(:disabled) {
+  background: var(--mantine-color-blue-filled);
+}
+
+/* A cut: a bar in the colour of whoever placed it. */
+.cut {
+  width: 0.5em;
+}
+
+.cut:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+
+.cutAi {
+  background: var(--mantine-color-blue-6);
+}
+
+.cutRule {
+  background: var(--mantine-color-grape-6);
+}
+
+.cutManual {
+  background: var(--mantine-color-teal-6);
+}
+
+/* The cut that is picked up, and the gaps it can move to. */
+.selected {
+  outline: 3px solid var(--mantine-color-orange-6);
+  outline-offset: 1px;
+}
+
+.target {
+  outline: 2px dashed var(--mantine-color-orange-6);
+  outline-offset: -1px;
+}
+
+.target:hover:not(:disabled) {
+  background: var(--mantine-color-orange-5);
+}
+
+.swatch {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-right: 0.3em;
+  border-radius: 2px;
+}
