@@ -7,6 +7,7 @@ outermost, so every request meets the Host check before the Origin check
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -22,6 +23,7 @@ from app.core.logging import configure_logging
 from app.core.security import OriginCheckMiddleware
 from app.db.session import engine
 from app.services.ffmpeg import tool_version
+from app.services.storage import get_storage
 
 _logger = logging.getLogger(__name__)
 
@@ -30,6 +32,8 @@ _logger = logging.getLogger(__name__)
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     config = get_config()
     config.media_dir.mkdir(parents=True, exist_ok=True)
+    # Temp files of an upload that was cut short by a restart (Phase 3). Stored media stays.
+    await asyncio.to_thread(get_storage().clear_tmp)
 
     # Read once at startup (Phase 1 decision): GET /api/health just reports these,
     # it never shells out on every request.

@@ -49,6 +49,13 @@ class AppConfig:
         return self.data_dir / "media"
 
     @property
+    def tmp_dir(self) -> Path:
+        """Working files for uploads in progress. Same volume as `media_dir`, so a
+        finished file is moved into place with an atomic rename. Not served by nginx.
+        """
+        return self.data_dir / "tmp"
+
+    @property
     def async_database_url(self) -> str:
         """Used by the app itself: async SQLAlchemy with the aiosqlite driver."""
         return f"sqlite+aiosqlite:///{self.db_path}"

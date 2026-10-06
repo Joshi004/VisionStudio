@@ -21,6 +21,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Projects */
+        get: operations["list_projects_api_projects_get"];
+        put?: never;
+        /** Create Project */
+        post: operations["create_project_api_projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Project */
+        get: operations["get_project_api_projects__project_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Project
+         * @description Changes the fields that are sent: settings, guidelines and the script.
+         */
+        patch: operations["update_project_api_projects__project_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/voiceover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Voiceover
+         * @description Stores the voiceover (WAV, MP3, M4A or FLAC) sent as the raw request body.
+         *
+         *     A new upload becomes the project's voiceover. The previous file is kept.
+         */
+        post: operations["upload_voiceover_api_projects__project_id__voiceover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -159,6 +220,115 @@ export interface components {
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
         };
+        /** ProjectCreate */
+        ProjectCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+        };
+        /** ProjectDetail */
+        ProjectDetail: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Gen Width */
+            gen_width: number;
+            /** Gen Height */
+            gen_height: number;
+            /** Out Width */
+            out_width: number;
+            /** Out Height */
+            out_height: number;
+            /** Fps */
+            fps: number;
+            /** Min Scene Seconds */
+            min_scene_seconds: number;
+            /** Max Scene Seconds */
+            max_scene_seconds: number;
+            /** Clip Sound Volume */
+            clip_sound_volume: number;
+            /** Style Prefix */
+            style_prefix: string | null;
+            /** Prompt Suffix */
+            prompt_suffix: string | null;
+            /** Negative Prompt */
+            negative_prompt: string | null;
+            /** Cut Instructions */
+            cut_instructions: string | null;
+            /** Script Text */
+            script_text: string | null;
+            voiceover: components["schemas"]["VoiceoverOut"] | null;
+        };
+        /** ProjectSummary */
+        ProjectSummary: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Voiceover Duration S */
+            voiceover_duration_s: number | null;
+            /** Has Script */
+            has_script: boolean;
+        };
+        /**
+         * ProjectUpdate
+         * @description Only the fields that are sent are changed. The orientation cannot be changed.
+         */
+        ProjectUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Gen Width */
+            gen_width?: number | null;
+            /** Gen Height */
+            gen_height?: number | null;
+            /** Out Width */
+            out_width?: number | null;
+            /** Out Height */
+            out_height?: number | null;
+            /** Fps */
+            fps?: number | null;
+            /** Min Scene Seconds */
+            min_scene_seconds?: number | null;
+            /** Max Scene Seconds */
+            max_scene_seconds?: number | null;
+            /** Clip Sound Volume */
+            clip_sound_volume?: number | null;
+            /** Style Prefix */
+            style_prefix?: string | null;
+            /** Prompt Suffix */
+            prompt_suffix?: string | null;
+            /** Negative Prompt */
+            negative_prompt?: string | null;
+            /** Cut Instructions */
+            cut_instructions?: string | null;
+            /** Script Text */
+            script_text?: string | null;
+        };
         /** SecretStatus */
         SecretStatus: {
             /** Name */
@@ -239,6 +409,26 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** VoiceoverOut */
+        VoiceoverOut: {
+            /** Asset Id */
+            asset_id: number;
+            /** Url */
+            url: string;
+            /** Mime */
+            mime: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Duration S */
+            duration_s: number | null;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -273,6 +463,205 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    list_projects_api_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"][];
+                };
+            };
+        };
+    };
+    create_project_api_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetail"];
+                };
+            };
+            /** @description A value breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_project_api_projects__project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_project_api_projects__project_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A value breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_voiceover_api_projects__project_id__voiceover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is not an acceptable voiceover. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

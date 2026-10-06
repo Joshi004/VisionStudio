@@ -4,6 +4,8 @@ import { AppLayout } from "./components/AppLayout";
 import { RouteError } from "./components/RouteError";
 import { ActivityPage } from "./pages/ActivityPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { ProjectPage } from "./pages/ProjectPage";
+import { ProjectSettingsPage } from "./pages/ProjectSettingsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -15,6 +17,8 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/projects" replace /> },
       { path: "projects", element: <ProjectsPage /> },
+      { path: "projects/:projectId", element: <ProjectPage /> },
+      { path: "projects/:projectId/settings", element: <ProjectSettingsPage /> },
       { path: "activity", element: <ActivityPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },
