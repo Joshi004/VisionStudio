@@ -435,6 +435,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/scenes/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Scene
+         * @description Saves the scene's description (`scene_description_source = manual`).
+         */
+        patch: operations["update_scene_api_projects__project_id__scenes__scene_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/frames/{slot}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Frame
+         * @description Stores a PNG, JPEG or WebP image sent as the raw request body as the scene's first or
+         *     last frame. A frame already there is replaced; its file stays on disk.
+         */
+        post: operations["upload_frame_api_projects__project_id__scenes__scene_id__frames__slot__post"];
+        /**
+         * Remove Frame
+         * @description Clears the scene's first or last frame. The asset row and the file stay.
+         */
+        delete: operations["remove_frame_api_projects__project_id__scenes__scene_id__frames__slot__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/frames/{asset_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Frame Preview
+         * @description The stored frame normalised to `width` x `height`, which must be the project's
+         *     current generation size.
+         */
+        get: operations["frame_preview_api_projects__project_id__frames__asset_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -655,6 +721,33 @@ export interface components {
         ErrorResponse: {
             /** Detail */
             detail: string;
+        };
+        /**
+         * FrameOut
+         * @description A scene's first or last frame: the original upload, and how it will be framed.
+         */
+        FrameOut: {
+            /** Asset Id */
+            asset_id: number;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Mime */
+            mime: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Original Url */
+            original_url: string;
+            /** Preview Url */
+            preview_url: string;
+            /** Warnings */
+            warnings: string[];
         };
         /** GpuStatus */
         GpuStatus: {
@@ -1010,6 +1103,24 @@ export interface components {
             first_word: number | null;
             /** Last Word */
             last_word: number | null;
+            /** Scene Description */
+            scene_description: string | null;
+            /** Prompt */
+            prompt: string | null;
+            first_frame: components["schemas"]["FrameOut"] | null;
+            last_frame: components["schemas"]["FrameOut"] | null;
+            /** Missing */
+            missing: ("description" | "first_frame" | "last_frame")[];
+            /** Ready */
+            ready: boolean;
+        };
+        /**
+         * SceneUpdate
+         * @description A scene's description. Null or blank clears it.
+         */
+        SceneUpdate: {
+            /** Scene Description */
+            scene_description: string | null;
         };
         /**
          * SceneWordOut
@@ -1036,6 +1147,8 @@ export interface components {
             words: components["schemas"]["SceneWordOut"][];
             /** Edit Blocked Reason */
             edit_blocked_reason: string | null;
+            /** Ready Count */
+            ready_count: number;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -2181,6 +2294,208 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_scene_api_projects__project_id__scenes__scene_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project, scene or frame has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The description is too long. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_frame_api_projects__project_id__scenes__scene_id__frames__slot__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+                slot: "first" | "last";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project, scene or frame has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is not an acceptable frame. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_frame_api_projects__project_id__scenes__scene_id__frames__slot__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+                slot: "first" | "last";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project, scene or frame has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    frame_preview_api_projects__project_id__frames__asset_id__preview_get: {
+        parameters: {
+            query: {
+                width: number;
+                height: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+                asset_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The frame as it will be sent, as a JPEG. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            /** @description The browser's copy is current. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No project, scene or frame has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

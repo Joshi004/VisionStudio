@@ -95,7 +95,8 @@ export function useUpdateProject(projectId: number) {
   });
 }
 
-async function uploadError(response: Response): Promise<ApiError> {
+/** The error for a failed upload, from the backend's `detail` or nginx's own answer. */
+export async function uploadError(response: Response): Promise<ApiError> {
   let body: unknown = null;
   try {
     body = await response.json();

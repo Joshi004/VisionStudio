@@ -28,14 +28,24 @@ from app.api.errors import ErrorResponse
 from app.api.jobs import JobDetail, JobSummary, job_detail, job_summary
 from app.api.projects import load_project
 from app.core import settings as settings_service
-from app.db.models import Job, Project, Scene
+from app.db.models import Asset, Job, Project, Scene
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
-from app.services import cut_edits, scene_cuts, scene_planner, transcript_matching
+from app.services import (
+    cut_edits,
+    frame_images,
+    scene_cuts,
+    scene_inputs,
+    scene_planner,
+    scene_prompt,
+    transcript_matching,
+)
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
+from app.services.scene_inputs import MissingInput
+from app.services.storage import media_url
 
 _logger = logging.getLogger(__name__)
 
@@ -95,6 +105,26 @@ class CutEditRequest(BaseModel):
     discard_inputs: StrictBool = False
 
 
+class FrameOut(BaseModel):
+    """A scene's first or last frame: the original upload, and how it will be framed."""
+
+    asset_id: int
+    # The original's size as displayed (after the EXIF orientation).
+    width: int | None
+    height: int | None
+    mime: str
+    size_bytes: int
+    created_at: datetime
+    # The file exactly as uploaded.
+    original_url: str
+    # The frame as it will be sent: RGB, centre-cropped and resized to the project's current
+    # generation size. The size is in the address, so a page that is out of date gets a 404
+    # instead of a wrong framing.
+    preview_url: str
+    # About cropping or enlarging, for the project's current generation size.
+    warnings: list[str]
+
+
 class SceneOut(BaseModel):
     id: int
     index: int
@@ -109,6 +139,16 @@ class SceneOut(BaseModel):
     # cannot be edited (see `edit_blocked_reason`).
     first_word: int | None
     last_word: int | None
+    # The saved description (what the user typed).
+    scene_description: str | None
+    # What will be sent to the video model: the project's style prefix, the saved description
+    # and the prompt suffix. None while there is no description.
+    prompt: str | None
+    first_frame: FrameOut | None
+    last_frame: FrameOut | None
+    # What is still needed (description, first_frame, last_frame). Ready when nothing is.
+    missing: list[MissingInput]
+    ready: bool
 
 
 class SceneWordOut(BaseModel):
@@ -171,6 +211,8 @@ class ScenesOut(BaseModel):
     words: list[SceneWordOut]
     # Why the cuts cannot be edited now (no scenes, a proposal running, out of date...).
     edit_blocked_reason: str | None
+    # How many scenes have a description and both frames.
+    ready_count: int
 
 
 def _int(value: object) -> int | None:
@@ -230,7 +272,38 @@ def _proposal_out(job: Job) -> ProposalOut:
     )
 
 
-def _scene_out(scene: Scene, first_word: int | None, last_word: int | None) -> SceneOut:
+def _frame_out(project: Project, asset: Asset | None) -> FrameOut | None:
+    if asset is None:
+        return None
+    warnings: list[str] = []
+    if asset.width is not None and asset.height is not None:
+        warnings = frame_images.frame_warnings(
+            asset.width, asset.height, project.gen_width, project.gen_height
+        )
+    return FrameOut(
+        asset_id=asset.id,
+        width=asset.width,
+        height=asset.height,
+        mime=asset.mime,
+        size_bytes=asset.size_bytes,
+        created_at=asset.created_at,
+        original_url=media_url(asset.path),
+        preview_url=(
+            f"/api/projects/{project.id}/frames/{asset.id}/preview"
+            f"?width={project.gen_width}&height={project.gen_height}"
+        ),
+        warnings=warnings,
+    )
+
+
+def _scene_out(
+    scene: Scene,
+    project: Project,
+    frames: dict[int, Asset],
+    first_word: int | None,
+    last_word: int | None,
+) -> SceneOut:
+    missing = scene_inputs.missing_inputs(scene)
     return SceneOut(
         id=scene.id,
         index=scene.index,
@@ -243,6 +316,14 @@ def _scene_out(scene: Scene, first_word: int | None, last_word: int | None) -> S
         has_inputs=scene_cuts.has_inputs(scene),
         first_word=first_word,
         last_word=last_word,
+        scene_description=scene.scene_description,
+        prompt=scene_prompt.assemble_prompt(
+            project.style_prefix, scene.scene_description, project.prompt_suffix
+        ),
+        first_frame=_frame_out(project, frames.get(scene.first_frame_asset_id or 0)),
+        last_frame=_frame_out(project, frames.get(scene.last_frame_asset_id or 0)),
+        missing=missing,
+        ready=not missing,
     )
 
 
@@ -330,11 +411,16 @@ async def propose_scenes(
     return job_detail(JobRow(job=job, project_name=project.name, scene_index=None))
 
 
-async def _scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
-    """What the page shows about a project's scenes. Reads the database only."""
+async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
+    """What the page shows about a project's scenes. Reads the database only.
+
+    Every endpoint that changes a scene answers with this, so the page shows the change
+    without another request.
+    """
     state = await scenes_service.scenes_state(session, project)
     llm_info = await _llm_info(session)
     view = await scenes_service.cuts_view(session, project, state)
+    frames = await scene_inputs.load_frames(session, state.scenes)
 
     job_out = None
     if state.job is not None:
@@ -357,17 +443,19 @@ async def _scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             ranges.append((previous_last + 1, cut.last_word))
             previous_last = cut.last_word
 
+    scene_outs = [
+        _scene_out(scene, project, frames, first_word, last_word)
+        for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
+    ]
     return ScenesOut(
         job=job_out,
         proposal=_proposal_out(state.proposal) if state.proposal is not None else None,
-        scenes=[
-            _scene_out(scene, first_word, last_word)
-            for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
-        ],
+        scenes=scene_outs,
         stale_reasons=state.stale_reasons,
         llm=llm_info,
         words=words,
         edit_blocked_reason=blocked_reason,
+        ready_count=sum(1 for scene in scene_outs if scene.ready),
     )
 
 
@@ -379,7 +467,7 @@ async def _scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
 async def get_scenes(project_id: int, session: SessionDep) -> ScenesOut:
     """The project's scenes and the proposal they came from. Reads the database only."""
     project = await load_project(session, project_id)
-    return await _scenes_out(session, project)
+    return await scenes_out(session, project)
 
 
 def _unprocessable(message: str) -> HTTPException:
@@ -475,4 +563,4 @@ async def edit_cut(project_id: int, body: CutEditRequest, session: SessionDep) -
         edit.first + edit.new_count,
         "yes" if with_inputs else "no",
     )
-    return await _scenes_out(session, project)
+    return await scenes_out(session, project)

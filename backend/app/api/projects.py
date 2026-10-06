@@ -228,9 +228,22 @@ _VOICEOVER_UPLOAD_BODY = {
 }
 
 
-def _content_length(request: Request) -> int | None:
+def content_length(request: Request) -> int | None:
     value = request.headers.get("content-length", "")
     return int(value) if value.isascii() and value.isdigit() else None
+
+
+def require_octet_stream(request: Request) -> None:
+    """415 unless the file is sent as the raw body with the content type
+    application/octet-stream. A web page on another site cannot send this type without a
+    CORS preflight, which this API never answers. Shared by every upload endpoint.
+    """
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/octet-stream":
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "Send the file as the request body with the content type application/octet-stream.",
+        )
 
 
 @router.post(
@@ -247,21 +260,14 @@ async def upload_voiceover(project_id: int, request: Request, session: SessionDe
     """
     project = await load_project(session, project_id)
 
-    # Only a fixed content type is accepted. A web page on another site cannot send
-    # this type without a CORS preflight, which this API never answers.
-    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
-    if content_type != "application/octet-stream":
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            "Send the file as the request body with the content type application/octet-stream.",
-        )
+    require_octet_stream(request)
 
     # End the read transaction: none may stay open while the file is received.
     await session.commit()
 
     try:
         asset = await voiceover_service.upload_voiceover(
-            session, project.id, request.stream(), _content_length(request)
+            session, project.id, request.stream(), content_length(request)
         )
     except voiceover_service.VoiceoverRejected as exc:
         raise HTTPException(exc.status_code, exc.message) from exc

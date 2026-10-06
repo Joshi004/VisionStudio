@@ -17,7 +17,7 @@ export type SceneWord = components["schemas"]["SceneWordOut"];
 export type CutEditBody = components["schemas"]["CutEditRequest"];
 
 /** The scenes query lives under the project's key, so saving the script refreshes it. */
-function scenesKey(projectId: number) {
+export function scenesKey(projectId: number) {
   return [...PROJECTS_KEY, projectId, "scenes"] as const;
 }
 

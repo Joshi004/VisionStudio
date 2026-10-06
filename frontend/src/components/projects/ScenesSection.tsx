@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -24,6 +25,8 @@ import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { CutEditor } from "./CutEditor";
+import { missingText } from "./promptHints";
+import { SceneInputsDrawer } from "./SceneInputsDrawer";
 import { useScenePlayer } from "./scenePlayer";
 import {
   checksLine,
@@ -50,6 +53,9 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
   const { audioRef, playingId, play, stop, onTimeUpdate, onPause, onEnded } = useScenePlayer();
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const [editing, setEditing] = useState(false);
+  // The scene whose inputs are open in the drawer, and whether the list of what is missing shows.
+  const [inputsSceneId, setInputsSceneId] = useState<number | null>(null);
+  const [showMissing, setShowMissing] = useState(false);
 
   const { data, isLoading, isError, error, dataUpdatedAt } = scenesQuery;
   // Elapsed times are worked out from the stored times as of the last time the data was
@@ -248,8 +254,45 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
           </Stack>
         )}
 
-        {scenes.length > 0 && (
+        {scenes.length > 0 && data && (
           <>
+            <Stack gap={4}>
+              <Group gap="sm" align="center">
+                <Text size="sm" fw={600}>
+                  {data.ready_count} of {scenes.length} scenes ready
+                </Text>
+                {data.ready_count < scenes.length && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() => setShowMissing(!showMissing)}
+                  >
+                    {showMissing ? "Hide what is missing" : "Show what is missing"}
+                  </Button>
+                )}
+              </Group>
+              {showMissing && data.ready_count < scenes.length && (
+                <ScrollArea.Autosize mah={160} type="auto">
+                  <Stack gap={2}>
+                    {scenes
+                      .filter((scene) => !scene.ready)
+                      .map((scene) => (
+                        <Text key={scene.id} size="xs">
+                          <Anchor
+                            component="button"
+                            type="button"
+                            size="xs"
+                            onClick={() => setInputsSceneId(scene.id)}
+                          >
+                            Scene {scene.index + 1}
+                          </Anchor>
+                          : {missingText(scene.missing)}
+                        </Text>
+                      ))}
+                  </Stack>
+                </ScrollArea.Autosize>
+              )}
+            </Stack>
             <Group gap="sm" align="center">
               <Button
                 size="xs"
@@ -290,6 +333,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                     <Table.Th>Length</Table.Th>
                     <Table.Th>Text</Table.Th>
                     <Table.Th>Cut</Table.Th>
+                    <Table.Th>Inputs</Table.Th>
                     <Table.Th />
                   </Table.Tr>
                 </Table.Thead>
@@ -340,6 +384,26 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                           </Stack>
                         </Table.Td>
                         <Table.Td>
+                          <Stack gap={2} align="flex-start">
+                            {scene.ready ? (
+                              <Badge color="green" variant="light">
+                                Ready
+                              </Badge>
+                            ) : (
+                              <Text size="xs" c="dimmed">
+                                Needs {missingText(scene.missing)}
+                              </Text>
+                            )}
+                            <Button
+                              size="compact-xs"
+                              variant="default"
+                              onClick={() => setInputsSceneId(scene.id)}
+                            >
+                              Inputs
+                            </Button>
+                          </Stack>
+                        </Table.Td>
+                        <Table.Td>
                           <Button
                             size="compact-xs"
                             variant={isPlaying ? "filled" : "light"}
@@ -357,6 +421,14 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
           </>
         )}
       </Stack>
+
+      <SceneInputsDrawer
+        project={project}
+        scenes={scenes}
+        sceneId={inputsSceneId}
+        onSelect={setInputsSceneId}
+        onClose={() => setInputsSceneId(null)}
+      />
 
       <Modal
         opened={pending !== null}
