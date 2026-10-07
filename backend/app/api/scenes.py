@@ -44,6 +44,7 @@ from app.services import (
     scene_prompt,
     transcript_matching,
 )
+from app.services import renders as renders_service
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
 from app.services.scene_inputs import MissingInput
@@ -257,6 +258,10 @@ class ScenesOut(BaseModel):
     generate_ready_count: int
     # The setting, so the page can say how many run at once.
     max_parallel_generations: int
+    # Why the final video cannot be rendered now (a scene has no clip, a clip is too short,
+    # the scenes are out of date...), or None when it can. Changes with every take or cut edit,
+    # which answer with this object, so the Render button follows without another request.
+    render_blocked_reason: str | None
 
 
 def _int(value: object) -> int | None:
@@ -590,6 +595,13 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
         ready_count=sum(1 for scene in scene_outs if scene.ready),
         generate_ready_count=generate_ready_count,
         max_parallel_generations=max_parallel,
+        render_blocked_reason=renders_service.render_block(
+            project,
+            state.scenes,
+            renders_service.selected_takes(state.scenes, takes),
+            plan_job=state.job,
+            stale_reasons=state.stale_reasons,
+        ),
     )
 
 

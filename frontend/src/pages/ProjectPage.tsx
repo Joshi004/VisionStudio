@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
+import { RenderSection } from "../components/projects/RenderSection";
 import { ScenesSection } from "../components/projects/ScenesSection";
 import { ScriptSection } from "../components/projects/ScriptSection";
 import { TranscriptSection } from "../components/projects/TranscriptSection";
@@ -66,6 +67,7 @@ export function ProjectPage() {
           <ScriptSection project={project} />
           <TranscriptSection project={project} />
           <ScenesSection project={project} />
+          <RenderSection project={project} />
         </>
       )}
     </Stack>

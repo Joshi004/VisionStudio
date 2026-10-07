@@ -20,7 +20,7 @@ PAUSED_API_NOT_APPROVED: Final = "paused: GPU API not approved"
 WAITING_API_UNCHECKED: Final = "waiting: GPU API could not be checked"
 WAITING_SERVER_UNREACHABLE: Final = "waiting: GPU server unreachable"
 WAITING_SERVER_BUSY: Final = "waiting: server busy (HTTP 429)"
-RESTARTED: Final = "restarted: submitting again"
+RESTARTED: Final = "restarted: starting again"
 EXPIRED: Final = "expired on the server: submitting again"
 
 # Every label that starts with this counts as "waiting because of the GPU API" in the banner.
@@ -48,6 +48,12 @@ RESULT_NOT_READY: Final = "the server has not released the clip yet, checking ag
 # be cancelled (the server has already finished it).
 FINISHING_PHASES: Final = frozenset({DOWNLOADING_CLIP, CHECKING_CLIP})
 
+# --- Running: final render (Phase 10) --------------------------------------------------
+CHECKING_CLIPS: Final = "checking the clips"
+JOINING: Final = "joining the clips and mixing the sound"
+CHECKING_VIDEO: Final = "checking the video"
+SAVING_VIDEO: Final = "saving the video"
+
 # --- Running: scene proposal (Phase 6) ------------------------------------------------
 PREPARING_PROMPT: Final = "preparing the prompt"
 REUSING_ANSWER: Final = "reusing the stored answer"
@@ -63,6 +69,10 @@ CANCELLED: Final = "cancelled"
 
 def preempted(next_attempt: int) -> str:
     return f"pre-empted: submitting again (attempt {next_attempt} of {MAX_ATTEMPTS})"
+
+
+def trimming(number: int, total: int) -> str:
+    return f"trimming clip {number} of {total}"
 
 
 def asking_model(attempt: int, attempts: int) -> str:

@@ -4,6 +4,10 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (2026-10-05):** `ANALYSIS.md` Revision 4 confirmed the transcription endpoint's real response shape against the live GPU server. Section 4.3 (`transcript` table) and the JSON shapes in Section 5 below are updated accordingly — `transcript.words` now holds the whole verified response object, not a guessed-at array.
 
+**Update (Phase 6, 2026-10-06):** no schema change. Section 5 now documents the `plan_scenes` job's `input` (it carries the cache key `input_hash` and what the scenes were made from) and `output` (the model's answer is kept verbatim in `output.answer`, next to the attempts, the token usage and the check counts), and Section 7 says how scenes are replaced. The cache key lives in `job.input`, not in a new column.
+
+**Update (Phase 9, 2026-10-06):** no schema change. Section 5 now documents the real `generate_clip` `input` and `output` (the request is built once and stored, and every later attempt sends it again) and the `asset.provenance` of a clip and of a derived frame, and Section 7 says how a clip, its take and its selection are written. A *take* is a succeeded `generate_clip` job together with its clip asset: there is still no clip table.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -64,6 +68,7 @@ erDiagram
     TRANSCRIPT {
         integer id PK
         integer project_id FK
+        integer voiceover_asset_id FK
     }
     SCENE {
         integer id PK
@@ -90,6 +95,7 @@ erDiagram
     PROJECT ||--o{ TRANSCRIPT    : "owns"
     PROJECT ||--o{ JOB           : "owns"
     PROJECT |o--o| ASSET         : "voiceover_asset_id"
+    TRANSCRIPT }o--o| ASSET      : "voiceover_asset_id"
     SCENE   }o--o| ASSET         : "first_frame_asset_id"
     SCENE   }o--o| ASSET         : "last_frame_asset_id"
     SCENE   }o--o| ASSET         : "selected_clip_asset_id"
@@ -106,6 +112,7 @@ erDiagram
 | `asset` | `project_id` | `project.id` | No |
 | `project` | `voiceover_asset_id` | `asset.id` | Yes (until the voiceover is uploaded) |
 | `transcript` | `project_id` | `project.id` | No |
+| `transcript` | `voiceover_asset_id` | `asset.id` | Yes (the voiceover the transcript was made from; `SET NULL` if that asset row is ever removed). Added in Phase 5. |
 | `scene` | `project_id` | `project.id` | No |
 | `scene` | `first_frame_asset_id` | `asset.id` | Yes (until uploaded) |
 | `scene` | `last_frame_asset_id` | `asset.id` | Yes (until uploaded) |
@@ -185,11 +192,11 @@ Any file on disk — uploaded or generated. Covers the voiceover, every frame, e
 | `mime` | TEXT | NOT NULL | — | MIME type |
 | `size_bytes` | INTEGER | NOT NULL | — | File size |
 | `duration_s` | REAL | NULL | — | Audio/video kinds only |
-| `width` | INTEGER | NULL | — | Image/video kinds only |
-| `height` | INTEGER | NULL | — | Image/video kinds only |
+| `width` | INTEGER | NULL | — | Image/video kinds only. For an uploaded frame: the size as displayed, after the EXIF orientation is applied (Phase 8) |
+| `height` | INTEGER | NULL | — | Image/video kinds only. Same rule as `width` |
 | `sha256` | TEXT | NOT NULL | — | Content hash |
 | `source` | TEXT | NOT NULL | — | `upload` \| `ai` \| `derived` |
-| `provenance` | JSON | NULL | empty | provider/model/prompt/seed — empty for uploads |
+| `provenance` | JSON | NULL | empty | provider/model/prompt/seed — empty (NULL) for uploads, including the frames uploaded in Phase 8 |
 | `created_at` | DATETIME | NOT NULL | now | |
 
 ```sql
@@ -223,20 +230,26 @@ Word times from the transcription endpoint, plus those same times matched onto y
 | `provider` | TEXT | NOT NULL | — | Which transcription endpoint produced this, e.g. `"parakeet"` |
 | `language` | TEXT | NOT NULL | — | The language you expect the voiceover to be in (e.g. `"en"`), used only for your own records and any future matching logic. **Not sent to the endpoint** — Parakeet auto-detects among 25 languages and has no `language` request field. |
 | `words` | JSON | NOT NULL | — | The endpoint's raw response, exactly as returned: `{transcription, processing_time, word_timestamps, segment_timestamps, metadata}` — see Section 5 |
-| `script_words` | JSON | NOT NULL | — | Script words with matched times, built from `words.word_timestamps`: `[{index, word, start, end, matched}]` |
+| `script_words` | JSON | NOT NULL | — | Script words with matched times, built from `words.word_timestamps`: `[{index, word, start, end, matched, paragraph}]` — see Section 5 |
 | `created_at` | DATETIME | NOT NULL | now | |
+| `voiceover_asset_id` | INTEGER, FK → `asset.id` | NULL | — | The voiceover asset this transcript was made from. (Phase 5, migration `0002`) |
+| `script_sha256` | TEXT | NOT NULL | — | SHA-256 (hex) of the project's `script_text` exactly as stored at the moment of matching. (Phase 5, migration `0002`) |
 
 ```sql
 CREATE TABLE transcript (
-    id           INTEGER PRIMARY KEY,
-    project_id   INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-    provider     TEXT NOT NULL,
-    language     TEXT NOT NULL,
-    words        JSON NOT NULL,
-    script_words JSON NOT NULL,
-    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id                 INTEGER PRIMARY KEY,
+    project_id         INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    provider           TEXT NOT NULL,
+    language           TEXT NOT NULL,
+    words              JSON NOT NULL,
+    script_words       JSON NOT NULL,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    voiceover_asset_id INTEGER REFERENCES asset(id) ON DELETE SET NULL,
+    script_sha256      TEXT NOT NULL
 );
 ```
+
+**Out of date (Phase 5).** The ANALYSIS.md model does not say how to tell that a transcript no longer fits its inputs, so Phase 5 added the two columns above. A transcript is out of date when `voiceover_asset_id` differs from the project's current `voiceover_asset_id` (reason `voiceover_changed`), or when `script_sha256` differs from the SHA-256 of the project's current `script_text` (reason `script_changed`). An all-blank script is stored as `NULL` and hashes as the empty string. Uploading the same file again creates a new asset, so it counts as a changed voiceover. The newest transcript of a project (by `id`) is the one that counts.
 
 ### 4.4 `scene`
 
@@ -249,7 +262,7 @@ One cut = one clip (called "Segment" in Revision 1 of `ANALYSIS.md`). The centra
 | `index` | INTEGER | NOT NULL | — | Order within the project |
 | `start_s` | REAL | NOT NULL | — | Start time in the voiceover |
 | `end_s` | REAL | NOT NULL | — | End time in the voiceover |
-| `text` | TEXT | NOT NULL | — | This scene's slice of the script |
+| `text` | TEXT | NOT NULL | — | This scene's slice of the script: its words joined by single spaces. Phase 7 finds a scene's words again by matching this text against the transcript's `script_words` |
 | `cut_source` | TEXT | NOT NULL | — | `ai` \| `rule` \| `manual` — who placed the cut that ends this scene |
 | `cut_note` | TEXT | NULL | — | Why it needs a look, if it does |
 | `scene_description` | TEXT | NULL | — | What happens in the scene |
@@ -426,51 +439,254 @@ This is the whole object the endpoint returns, stored as-is. `word_timestamps` i
 
 ```json
 [
-  { "index": 0, "word": "Welcome", "start": 0.00, "end": 0.48, "matched": true },
-  { "index": 1, "word": "to",      "start": 0.48, "end": 0.62, "matched": true }
+  { "index": 0, "word": "Welcome", "start": 0.00, "end": 0.48, "matched": true,  "paragraph": 0 },
+  { "index": 1, "word": "to",      "start": 0.48, "end": 0.62, "matched": true,  "paragraph": 0 }
 ]
 ```
 
-### `job.output` for a `plan_scenes` job — the LLM's raw answer (Section 5.2, verbatim)
+`word` is the script's own token, with its punctuation, exactly as written. `matched` is `false` when the recogniser did not hear the word: its `start` and `end` are then interpolated between the neighbouring matched words. `paragraph` (0-based, added in Phase 5) is the number of the blank-line-separated paragraph the word is in, so later phases get the paragraph breaks (scene-break hints, `ANALYSIS.md` Section 5.2) without parsing the script again. Times are not guaranteed to be strictly increasing: the recogniser itself sometimes returns a zero-length word or a word that starts before the previous one ended.
+
+### `job.input` and `job.output` for a `transcribe` job (Phase 5)
+
+At creation, `input` is `{"voiceover_asset_id": 14}`. The handler replaces it as it learns more, so after the submission it holds the exact request:
 
 ```json
 {
-  "scenes": [
-    { "last_word": 57, "words_before_cut": "the lazy dog", "words_after_cut": "Then the fox" }
-  ]
-}
-```
-
-### `asset.provenance` — for AI-derived assets only; empty for uploads (Section 4.3)
-
-```json
-{
-  "provider": "bitdeer",
-  "model": "seedream-5.0-lite",
-  "prompt": "a lighthouse at sunset, cinematic-realistic style",
-  "seed": 12345
-}
-```
-
-### `job.input` for a `generate_clip` job — illustrative only
-
-`ANALYSIS.md` Section 5.3–5.4 describes the contents in prose ("the exact request sent, including final prompt, seed and server URL") but doesn't give a literal JSON shape. A reasonable shape:
-
-```json
-{
+  "voiceover_asset_id": 14,
   "server_url": "http://host.docker.internal:8012",
-  "endpoint": "/v1/ltx/videos/keyframe-interpolation",
-  "first_frame_asset_id": 41,
-  "last_frame_asset_id": 42,
-  "prompt": "Style: cinematic-realistic. A lighthouse beam sweeps slowly across a calm night sea, static camera, soft warm light, muted palette",
-  "negative_prompt": "blurry, low quality, extra fingers, text, watermark, speech, talking, voices, singing",
-  "num_frames": 129,
-  "fps": 24,
-  "width": 1920,
-  "height": 1088,
-  "seed": 987654
+  "upload": { "filename": "voiceover-14.m4a", "size_bytes": 496020, "remote_asset_id": "3f2a9c1e4b7d4a6c9e8f1a2b3c4d5e6f" },
+  "endpoint": "/v1/parakeet/transcribe",
+  "body": { "audio_asset_id": "3f2a9c1e4b7d4a6c9e8f1a2b3c4d5e6f", "partition": "main" }
 }
 ```
+
+`partition` is in `body` only when the GPU partition setting is not blank. `provider_job_id` holds the server's job id. When the job succeeds, `output` is a summary, and the full transcript lives in the `transcript` row it points to:
+
+```json
+{
+  "transcript_id": 1,
+  "processing_time": 59.53,
+  "script_words": 137,
+  "matched": 130,
+  "interpolated": 7,
+  "spoken_words": 134,
+  "extra_spoken": 4,
+  "warnings": []
+}
+```
+
+### `job.input` and `job.output` for a `plan_scenes` job (Phase 6)
+
+A `plan_scenes` job is a paid call to the language model (`ANALYSIS.md` Section 5.2 and 6.2). It has no `provider_job_id` (there is no remote job to check), and a restart never re-runs it.
+
+At creation, `input` records what the user confirmed and what the proposal is made from:
+
+```json
+{
+  "transcript_id": 1,
+  "voiceover_asset_id": 14,
+  "script_sha256": "9b7e...",
+  "run_again": false,
+  "accept_mismatch": false,
+  "discard_scenes_with_inputs": false
+}
+```
+
+`voiceover_asset_id` and `script_sha256` are what the scenes are made from: the scenes of the newest succeeded `plan_scenes` job are **out of date** when either differs from the project's current value (reasons `voiceover_changed` and `script_changed`, the same rule as the transcript in Section 4.3). The handler then adds the exact request, before the call is made:
+
+```json
+{
+  "server_url": "https://api-inference.bitdeer.ai/v1",
+  "endpoint": "/chat/completions",
+  "request": { "model": "zai-org/GLM-5.3-Flash", "messages": ["..."], "max_tokens": 16000,
+               "stream": false, "response_format": { "type": "json_object" },
+               "reasoning_effort": "high" },
+  "input_hash": "sha256:430e4650..."
+}
+```
+
+`input_hash` is the cache key (`ANALYSIS.md` Section 6.2, rule 3): the SHA-256 of the canonical JSON of the address that is called and the request body. The same hash means the same inputs, so the earlier answer is reused without a call, unless the user chose Run again. It lives in `job.input` rather than in a column (Phase 6 decision), and the lookup reads the project's newest 100 `plan_scenes` jobs.
+
+`output` is written after every attempt (so a paid answer is never lost) and replaced by the final value when the job succeeds:
+
+```json
+{
+  "source": "ai",
+  "cache_hit_of_job_id": null,
+  "fallback_reason": null,
+  "answer": { "scenes": [
+    { "last_word": 57, "words_before_cut": "the lazy dog", "words_after_cut": "Then the fox" }
+  ] },
+  "answer_usable": true,
+  "content": null,
+  "attempts": [
+    { "outcome": "answered", "http_status": 200, "message": null, "finish_reason": "stop",
+      "response_id": "726d3d94...", "elapsed_s": 12.8,
+      "usage": { "prompt_tokens": 1492, "completion_tokens": 2242, "reasoning_tokens": 1792 } }
+  ],
+  "usage": { "prompt_tokens": 1492, "completion_tokens": 2242, "reasoning_tokens": 1792 },
+  "checks": { "entries": 16, "exact": 16, "moved": 0, "flagged": 0, "dropped": 0 },
+  "splitter": { "cuts_added": 0, "cuts_removed": 0 },
+  "scene_count": 16,
+  "flagged_scenes": 0
+}
+```
+
+- `source` is `ai`, or `rule` when the model could not be used (two failed attempts, or a refusal such as HTTP 400) and the rule-based splitter proposed the cuts alone. Then `fallback_reason` says why, and `answer` is `null`.
+- `answer` is the model's list of scenes exactly as it answered (verbatim, from `ANALYSIS.md` Section 5.2). It is set only on the job that paid for it. A job that reused an earlier answer holds `answer: null` and `cache_hit_of_job_id`, which names the job that did pay, and `usage` is `null`. `answer_usable` is true when `answer` can be used again.
+- `content` is the model's raw text, kept only when it could not be used (at most 20,000 characters). The model's reasoning text is not stored.
+- `attempts[].outcome` is `answered`, `unusable` (an answer that could not be read, or that was cut off), or the kind of failure: `unreachable`, `rate_limited`, `server_error`, `refused`, `bad_answer`.
+- `usage.reasoning_tokens` are hidden thinking tokens. They are part of `completion_tokens` and billed as output. Bitdeer reports them at the top level of `usage`.
+- `checks` counts the model's entries: `exact` (number and checksum words agree), `moved` (a nearby word fit the checksum words), `flagged` (they fit nowhere nearby), `dropped` (unusable). `splitter` counts the cuts the rule-based splitter added and removed to keep scenes within the project's limits.
+
+### `asset.provenance` — empty for uploads (Section 4.3)
+
+An uploaded asset (the voiceover, a frame) has no provenance. Two shapes are built and checked against the real server (Phase 9), and a third, for the final video, is under the `render_final` job below (Phase 10). For an image from Bitdeer in a later phase, the sketch is `{"provider": "bitdeer", "model": "seedream-5.0-lite", "prompt": "...", "seed": 12345}`.
+
+**A clip** (`kind='clip'`, `source='ai'`, `mime='video/mp4'`; `duration_s`, `width` and `height` are the clip's own, read by ffprobe):
+
+```json
+{
+  "provider": "gpu",
+  "pipeline": "ltx:keyframe-interpolation",
+  "endpoint": "/v1/ltx/videos/keyframe-interpolation",
+  "server_url": "http://host.docker.internal:8012",
+  "provider_job_id": "e3b5bc1ba0044303a976b6c4b6fd0885",
+  "job_id": 25,
+  "scene_id": 33,
+  "scene_start_s": 18.96,
+  "scene_end_s": 22.28,
+  "prompt": "The sun rises slowly above a calm sea ...",
+  "negative_prompt": null,
+  "seed": 1527961933,
+  "fps": 24.0,
+  "num_frames": 81,
+  "target_frames": 80,
+  "frame_count": 81,
+  "first_frame_asset_id": 60,
+  "last_frame_asset_id": 61,
+  "audio": { "codec": "aac", "sample_rate": 48000, "channels": 2 }
+}
+```
+
+`scene_start_s` and `scene_end_s` are the range the clip was made for: a *take* is out of date when the scene's range differs from them by more than 0.0005 s (a cut was edited). `frame_count` is counted from the file's packets by ffprobe, and a clip is only stored when it has at least `target_frames`. `target_frames` is what the scene lasts on the project's fps grid, `num_frames` what LTX was asked for (the smallest 8k + 1 at or above it). `first_frame_asset_id` and `last_frame_asset_id` are the derived PNGs that were sent. `audio` is null for a clip without sound.
+
+**A derived frame** (`kind='frame'`, `source='derived'`, `mime='image/png'`, `width` and `height` the generation size): the uploaded frame as it is sent to the video model, made by `frame_images.normalise_frame` at the project's generation size at submission.
+
+```json
+{ "derived_from_asset_id": 56, "width": 1088, "height": 1920, "normalise_version": 1 }
+```
+
+An existing derived asset with identical provenance, whose file is still there, is reused instead of making another one. The original upload is never changed.
+
+### `job.input` and `job.output` for a `generate_clip` job (Phase 9)
+
+A `generate_clip` job belongs to a scene (`scene_id`). It is a remote job: `provider='gpu'`, and `provider_job_id` is the server's job id once the submit has answered. A resubmission (pre-emption, an expired result, Resubmit after "not found on this server") reuses the row with `attempt + 1`.
+
+**The request is built once**, the first time the job starts, and is stored before anything is uploaded. Every later attempt sends that stored request again (same seed, same files, uploaded again), because the server's guide says to resubmit a pre-empted job unchanged. A new seed comes only with a new job (Generate or Regenerate).
+
+At creation, `input` is `{"requested": "generate"}` (or `"generate_all"`). The first start adds what the request is made from and the request itself, and each submission adds the server address, the uploads and the exact body sent:
+
+```json
+{
+  "requested": "generate",
+  "scene": { "index": 4, "start_s": 18.96, "end_s": 22.28 },
+  "fps": 24,
+  "target_frames": 80,
+  "first_frame": { "original_asset_id": 56, "sent_asset_id": 60 },
+  "last_frame":  { "original_asset_id": 57, "sent_asset_id": 61 },
+  "endpoint": "/v1/ltx/videos/keyframe-interpolation",
+  "request": {
+    "prompt": "Style: cinematic-realistic. A lighthouse beam sweeps ... static camera, soft warm light",
+    "width": 1088, "height": 1920, "num_frames": 81, "frame_rate": 24.0, "seed": 1527961933
+  },
+  "server_url": "http://host.docker.internal:8012",
+  "uploads": [
+    { "asset_id": 60, "filename": "frame-60.png", "size_bytes": 62331, "remote_asset_id": "b8454c2be9594d408c8e4cb9c3157f76" },
+    { "asset_id": 61, "filename": "frame-61.png", "size_bytes": 149663, "remote_asset_id": "06a782eb169040b7829df707f225f5df" }
+  ],
+  "body": {
+    "prompt": "...", "width": 1088, "height": 1920, "num_frames": 81, "frame_rate": 24.0, "seed": 1527961933,
+    "keyframes": [
+      { "asset_id": "b8454c2be9594d408c8e4cb9c3157f76", "frame_idx": 0,  "strength": 1.0 },
+      { "asset_id": "06a782eb169040b7829df707f225f5df", "frame_idx": 80, "strength": 1.0 }
+    ]
+  }
+}
+```
+
+`request` is the body without its keyframes, which need the server's asset ids. `negative_prompt` is in it only when the project has one (it replaces the server's built-in default, so leaving it out keeps that), and `partition` only when the setting is not blank. There is no `enhance_prompt` on this endpoint, and `crf` is not sent. `sent_asset_id` is the derived PNG (see `asset.provenance`), `original_asset_id` the uploaded frame it came from.
+
+While the job runs, `output` holds the server's last answer: `{"remote": {"status", "pipeline", "partition", "typical_run_seconds", "typical_basis", "created_at", "started_at", "finished_at"}}`. When the clip is stored the job succeeds in the same transaction as the asset and the scene's selected take, and `output` becomes:
+
+```json
+{
+  "clip": {
+    "frame_count": 81, "target_frames": 80, "num_frames": 81,
+    "width": 1088, "height": 1920, "fps": 24.0, "duration_s": 3.375, "size_bytes": 1119521,
+    "audio": { "codec": "aac", "sample_rate": 48000, "channels": 2 }
+  },
+  "remote": { "status": "succeeded", "pipeline": "ltx:keyframe-interpolation", "typical_run_seconds": 577.4, "...": "..." },
+  "purge": { "removed_asset_ids": ["06a7...", "b845..."], "kept_asset_ids": [] }
+}
+```
+
+`purge` is what the server answered when the finished job was deleted there (best effort: `{"error": "..."}` when it could not be, which never fails the clip). A job that fails on the server, or whose clip cannot be used, is purged too and keeps `output.purge`. A cancelled job holds `output.cancel`, the server's answer to the cancel (`{"cancelled": true, "reason": null}`, or `{"cancelled": false, "error": "..."}` when the server did not know the job), and is not purged.
+
+### `job.input`, `job.output` and the `final` asset for a `render_final` job (Phase 10)
+
+A `render_final` job belongs to the project (`scene_id` is NULL). It is a local job: `provider='local'`, no `provider_job_id`, and everything happens in FFmpeg child processes on this machine. Only one is active per project at a time (a second click returns the active job). A restart queues a running render again with the same attempt number, and it renders the same stored timeline from the start.
+
+**The timeline** is the description of Section 8 of `ANALYSIS.md` ("Render from a timeline description"). It is built by the click, under the write lock, from the scenes as they are at that moment, and stored in `job.input`; the handler reads nothing else. What changes afterwards (a take, a cut, the volume, a clip sound switch) does not affect that render.
+
+```json
+{
+  "requested": "render",
+  "timeline": {
+    "version": 1,
+    "fps": 24,
+    "width": 1080,
+    "height": 1920,
+    "clip_sound_volume": 0.2,
+    "voiceover": { "asset_id": 75, "duration_s": 15.04 },
+    "total_frames": 361,
+    "clips": [
+      { "scene_id": 44, "scene_index": 0, "start_s": 0.0,  "end_s": 5.76, "start_frame": 0,   "frames": 138, "asset_id": 87, "clip_sound": true },
+      { "scene_id": 45, "scene_index": 1, "start_s": 5.76, "end_s": 9.48, "start_frame": 138, "frames": 90,  "asset_id": 86, "clip_sound": false }
+    ]
+  }
+}
+```
+
+`frames` is `frame_counts.target_frames(start_s, end_s, fps)` of the scene (Phase 9's function), so the frames add up to `total_frames`, the frame index of the last boundary, and the video is as long as the voiceover to within one frame. `start_frame` is the scene's first frame in the video. `asset_id` is the scene's selected clip. `clip_sound` is the scene's `use_clip_sound`. A scene shorter than one frame at the project's fps takes no time and is left out. `width` and `height` are the project's output size.
+
+On success, in one transaction: `INSERT asset` (`kind='final'`, `source='derived'`, `mime='video/mp4'`, `duration_s`, `width`, `height` of the file, and the provenance below) and `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`). Earlier renders stay.
+
+```json
+{
+  "final": {
+    "frame_count": 361, "fps": 24.0, "width": 1080, "height": 1920, "duration_s": 15.041667, "size_bytes": 6504578,
+    "audio": { "codec": "aac", "sample_rate": 48000, "channels": 2, "duration_s": 15.04 }
+  },
+  "clips": [ { "scene_index": 0, "sound": "clip" }, { "scene_index": 1, "sound": "muted" } ],
+  "seconds": { "trim": 1.2, "join": 2.6 }
+}
+```
+
+`clips[].sound` says where a scene's sound came from: `"clip"` (the clip's own sound), `"muted"` (the scene's switch is off: silence of the same length) or `"none in the clip"` (the clip has no sound: silence). `seconds` is the time of the two stages.
+
+```json
+{
+  "job_id": 40, "timeline_version": 1, "voiceover_asset_id": 75, "clip_asset_ids": [87, 86, 90],
+  "clip_sound_volume": 0.2, "muted_scene_indexes": [], "fps": 24, "frame_count": 361,
+  "ffmpeg_version": "7.1.5-0+deb13u1",
+  "video": "libx264 crf 18 preset medium yuv420p", "audio": "aac 192k 48000 Hz stereo"
+}
+```
+
+That is the provenance of the `final` asset. `muted_scene_indexes` lists the scenes (0-based) whose switch was off.
+
+**How the file is made.** Stage 1, per clip: the picture is cut to exactly `frames` frames at the project's fps, scaled to cover the output size and centre-cropped to it (a 1088 wide clip for a 1080 wide video only loses 4 pixels on each side); the sound is converted to 48 kHz stereo, cut to the same length, faded for 20 ms at both ends (the fade-out sits where the clip's own sound ends, since LTX sound is 17 to 45 ms shorter than its video), and padded with silence to exactly `round(frames * 48000 / fps)` samples; a muted scene or a clip without sound gets that much silence. The result is a MOV with `libx264 -crf 12 -preset veryfast -bf 0` and PCM 16-bit sound. Stage 2: the MOVs are joined with the concat demuxer, the clips' sound goes through `volume=<clip_sound_volume>`, and it is mixed under the voiceover with `amix=inputs=2:duration=first:dropout_transition=0:normalize=0` (the voiceover first; `normalize=0` keeps it at its own level, where the default would lower it by 6 dB); a mono voiceover is made stereo with `pan`, because the automatic conversion lowers it by 3 dB. The result is encoded with `libx264 -crf 18 -preset medium -profile:v high -pix_fmt yuv420p -r <fps> -fps_mode cfr`, AAC 192 kb/s and `-movflags +faststart`.
 
 ---
 
@@ -511,13 +727,13 @@ Mapping the flow in `ANALYSIS.md` Section 1 onto table writes, so the structure'
 |---|---|
 | Create project, pick orientation | `INSERT project` (orientation + size/fps/scene-length/volume defaults filled in per Section 4.4) |
 | Upload voiceover, paste script | `INSERT asset` (`kind='voiceover'`) → `UPDATE project.voiceover_asset_id`, `UPDATE project.script_text` |
-| Transcribe audio, match to script | `INSERT job` (`type='transcribe'`) → on success, `INSERT transcript` (`words`, `script_words`) |
-| AI picks cut words, code times them | `INSERT job` (`type='plan_scenes'`, raw LLM answer saved to `job.output`) → on success, `INSERT scene` rows, one per cut (`cut_source`/`cut_note` set) |
-| Review and adjust cuts (human checkpoint) | Direct `UPDATE` / `INSERT` / `DELETE` on `scene` rows; an edit you make sets `cut_source='manual'` |
-| Per scene: description, first/last frame | `UPDATE scene.scene_description` (+ `scene_description_source`); `INSERT asset` (`kind='frame'`) then `UPDATE scene.first_frame_asset_id` / `last_frame_asset_id` |
-| Generate one clip per scene | `INSERT job` (`type='generate_clip'`, `scene_id=<scene>`) → dispatcher updates `status`/`phase`/`provider_job_id` over time → on success, `INSERT asset` (`kind='clip'`), `UPDATE job.result_asset_id`, `UPDATE scene.selected_clip_asset_id` |
-| Preview clips, regenerate or mute (human checkpoint) | Regenerate: another `job` + `asset` row, `scene.selected_clip_asset_id` repointed. Mute: `UPDATE scene.use_clip_sound = false` |
-| Trim, join, mix, render final video | `INSERT job` (`type='render_final'`) → on success, `INSERT asset` (`kind='final'`) |
+| Transcribe audio, match to script | `INSERT job` (`type='transcribe'`) → on success, `INSERT transcript` (`words`, `script_words`, `voiceover_asset_id`, `script_sha256`) and `UPDATE job` (`status='succeeded'`, `output`) in one transaction |
+| AI picks cut words, code times them | `INSERT job` (`type='plan_scenes'`, `provider='llm'`; the exact request and its `input_hash` are saved to `job.input`, and the LLM's answer to `job.output` the moment it arrives) → on success, in **one transaction**: `UPDATE job` (`status='succeeded'`, `output`), `DELETE` all of the project's `scene` rows and `INSERT` the new ones, one per cut (`index` 0 to n-1, `cut_source`/`cut_note` set). Deleting a scene also deletes the `job` rows that point at it (`scene_id` is `ON DELETE CASCADE`: there are none before `generate_clip` exists), and `asset` files are never touched. When scenes with inputs exist, the replacement only happens if the click confirmed it. |
+| Review and adjust cuts (human checkpoint) | One edit, one transaction, and no `job` row (Phase 7). The transaction takes the write lock first (a no-op `UPDATE` of the project's scenes), then reads the scenes and rebuilds only the scenes next to the cut. A scene that continues keeps its `id`: `UPDATE` of `start_s`, `end_s`, `text`, `cut_source`, `cut_note`. **Add** a cut: the left part keeps the id, the right part is a new `INSERT`. **Remove** a cut: the earlier scene keeps its id, and the later one is `DELETE`d (its `job` rows go with it, `ON DELETE CASCADE`). **Move** a cut: both scenes keep their ids. A cut you add or move sets `cut_source='manual'`; the cut at the other end of a rebuilt scene keeps its source. A rebuilt scene's `cut_note` is cleared. The scenes after the edit are renumbered through temporary negative `index` values, because `UNIQUE (project_id, index)` is checked row by row (`index` stays 0 to n-1 with no gaps). When a rebuilt scene has inputs, the edit is refused (HTTP 409) until it is confirmed. Confirming sets `scene_description`, `scene_description_source`, `first_frame_asset_id`, `last_frame_asset_id` and `selected_clip_asset_id` to NULL on the rebuilt scenes only (`use_clip_sound` stays). Files and `asset` rows are never touched. |
+| Per scene: description, first/last frame | **Description** (Phase 8): `UPDATE scene` sets `scene_description` (trimmed, at most 4,000 characters) and `scene_description_source='manual'`; a blank description sets both to NULL. **Frame**: `INSERT asset` (`kind='frame'`, `source='upload'`, the original file exactly as uploaded, `width` and `height` as displayed), then `UPDATE scene.first_frame_asset_id` or `last_frame_asset_id`, in one transaction. Remove sets the column to NULL, and the `asset` row and the file stay. Replacing a frame inserts a new asset and repoints the column. **Normalised frames are not stored in this phase**: the preview is rendered on request at the project's current generation size, because that size can change after an upload. Phase 9 normalises again at submission with the same function (`services/frame_images.normalise_frame`) and stores the exact file it sends as a `derived` frame asset. Readiness is computed (`services/scene_inputs.missing_inputs`) and never stored. |
+| Generate one clip per scene | **Generate** (Phase 9): `INSERT job` (`type='generate_clip'`, `provider='gpu'`, `scene_id=<scene>`), only for a ready scene that is not longer than the project's maximum and has no active clip job; "Generate all ready scenes" inserts one per scene that is ready and has no selected take, all in one transaction. The dispatcher starts the job while fewer than `max_parallel_generations` clip jobs are `running` (read every tick). **Start**: the first time, `INSERT asset` for each frame as sent (`kind='frame'`, `source='derived'`, a PNG at the generation size, unless an identical one exists) and `UPDATE job.input` with the request, before anything is uploaded; then the frames are uploaded, the job is submitted, and `UPDATE job` sets `provider_job_id` and the exact body (nothing in between). **Each tick** `UPDATE job` sets `phase`, `last_checked_at` and `output.remote`. **On success**, in one transaction: `INSERT asset` (`kind='clip'`, `source='ai'`, `provenance` as in Section 5), `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`) and `UPDATE scene.selected_clip_asset_id` (the new take is the selected one); then the server's job is purged and `job.output.purge` is merged in. A pre-emption is `UPDATE job SET status='queued', attempt=attempt+1, provider_job_id=NULL` (up to 3 attempts). A proposal replaces the scenes, which deletes their jobs (`ON DELETE CASCADE`), so it is refused while a clip job is active; a cut edit is refused for the scenes it would change while they have one. |
+| Preview clips, regenerate or mute (human checkpoint) | **Regenerate**: another `job` (new random seed) and `asset` row, which becomes the selected take. **Select take**: `UPDATE scene.selected_clip_asset_id`, only to the clip of a succeeded `generate_clip` job of that scene. **Clip sound**: `UPDATE scene.use_clip_sound`. **Cancel**: for a queued job, `status='cancelled'`; for a running one the server is asked first (`DELETE /v1/jobs/{id}`), and when it does not answer nothing changes; the server's answer is merged into `output.cancel`. Takes are never deleted. A take whose `provenance.scene_start_s` and `scene_end_s` no longer equal the scene's is shown as out of date. |
+| Trim, join, mix, render final video | **Render** (Phase 10): in one transaction that holds the write lock (`lock_scenes`, so a cut edit cannot change a scene halfway), the endpoint reads the scenes and the selected takes, refuses with 422 when `renders.render_block` gives a reason (no voiceover or scenes, a proposal active, the scenes out of date, a scene with no selected clip, or a selected clip with fewer frames than the scene now needs), builds the timeline and `INSERT job` (`type='render_final'`, `provider='local'`, `input={"requested": "render", "timeline": ...}`). A render that is already queued or running is returned instead. The dispatcher starts it while fewer than `max_parallel_ffmpeg` renders are `running`. **Each step** `UPDATE job.phase` (checking the clips, trimming clip i of n, joining the clips and mixing the sound, checking the video, saving the video). The temporary files live in `/data/tmp` and are removed afterwards. **On success**, in one transaction: `INSERT asset` (`kind='final'`, `source='derived'`, provenance as in Section 5) and `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`). A render never changes a `scene` row and never deletes anything; every earlier render stays as a succeeded job with its `final` asset. Only a queued render can be cancelled. A restart queues a running render again, and it renders the same timeline from the start. |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 
@@ -531,7 +747,7 @@ Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snaps
 2. **Table names:** lowercase `snake_case`, singular (`project`, `asset`, `scene`, `job`, `transcript`, `setting`, `api_snapshot`), mapped from the PascalCase model names in `ANALYSIS.md`.
 3. **Cascade rules:** `ON DELETE CASCADE` from `project` to its owned rows (`asset`, `transcript`, `scene`, `job`), and `ON DELETE SET NULL` for the optional asset references on `scene` and `job` (so deleting one asset doesn't delete a whole scene). `ANALYSIS.md` doesn't state delete behaviour anywhere; this is a reasonable default, not a documented rule.
 4. **Indexes** beyond the primary/foreign keys (Section 4, "Recommended indexes") are my suggestions based on the dispatcher's described access patterns (Section 3.3), not a list given in `ANALYSIS.md`.
-5. **`job.input` / `job.output` JSON shapes** for job types other than `plan_scenes` are illustrative sketches (Section 5 above). Only the `plan_scenes` output shape and, as of 2026-10-05, the `transcript.words` shape are verbatim-verified against a real server response (`ANALYSIS.md` Section 5.2 and 5.1 respectively); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
+5. **`job.input` / `job.output` JSON shapes.** The `transcribe`, `plan_scenes`, `generate_clip` and `render_final` shapes were built and checked against the real servers (and, for the render, the image's FFmpeg) in Phases 5, 6, 9 and 10, and the `transcript.words` shape (as of 2026-10-05) and the model's `answer` inside `plan_scenes` output are verbatim from a real response (`ANALYSIS.md` Section 5.1 and 5.2); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
 6. **`scene.index`** is assumed zero-based and contiguous per project; `ANALYSIS.md` doesn't state the numbering convention explicitly.
 7. **`project.language` default `'en'`** reflects the English-only decision (Revision 3 decisions table) but isn't given as a literal column default in `ANALYSIS.md`.
 8. **Timestamp population** (`DEFAULT CURRENT_TIMESTAMP`) is a SQLite/SQLAlchemy convention I chose; `ANALYSIS.md` doesn't describe how timestamp columns get their values.

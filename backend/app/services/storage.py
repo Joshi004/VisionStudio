@@ -103,6 +103,26 @@ class Storage:
             raise StorageError(f"Not a valid file extension: {suffix!r}")
         return self._tmp_dir / f"{uuid.uuid4().hex}.{suffix}"
 
+    async def describe_temp(self, path: Path) -> TempFile:
+        """Counts the bytes and hashes a temp file that a caller wrote itself (a render), so
+        it can be handed to `save`. Reads the file in a thread. Refuses a path outside the
+        temp folder.
+        """
+        if path.resolve().parent != self._tmp_dir.resolve():
+            raise StorageError(f"Not a temp file: {path}")
+        size_bytes, sha256 = await anyio.to_thread.run_sync(self._hash_file, path)
+        return TempFile(path=path, size_bytes=size_bytes, sha256=sha256)
+
+    @staticmethod
+    def _hash_file(path: Path) -> tuple[int, str]:
+        digest = hashlib.sha256()
+        size_bytes = 0
+        with path.open("rb") as file:
+            while chunk := file.read(1024 * 1024):
+                size_bytes += len(chunk)
+                digest.update(chunk)
+        return size_bytes, digest.hexdigest()
+
     async def save(self, temp: TempFile, project_id: int, ext: str) -> StoredFile:
         """Moves a received file into the media folder under a generated name."""
         if not _EXTENSION.fullmatch(ext):

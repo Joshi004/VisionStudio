@@ -588,6 +588,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Render
+         * @description Starts rendering the final video from the selected take of every scene, or returns
+         *     the render that is already queued or running (two quick clicks make one job).
+         */
+        post: operations["start_render_api_projects__project_id__render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/renders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Renders
+         * @description The project's newest render job and its finished renders. Reads the database only.
+         */
+        get: operations["get_renders_api_projects__project_id__renders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1177,6 +1218,43 @@ export interface components {
              */
             discard_scenes_with_inputs: boolean;
         };
+        /**
+         * RenderOut
+         * @description One finished render (a succeeded `render_final` job and its `final` asset).
+         */
+        RenderOut: {
+            /** Asset Id */
+            asset_id: number;
+            /** Job Id */
+            job_id: number;
+            /** Url */
+            url: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration S */
+            duration_s: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Clip Sound Volume */
+            clip_sound_volume: number | null;
+            /** Scene Count */
+            scene_count: number;
+            /** Muted Scene Count */
+            muted_scene_count: number;
+        };
+        /** RendersOut */
+        RendersOut: {
+            job: components["schemas"]["JobSummary"] | null;
+            /** Renders */
+            renders: components["schemas"]["RenderOut"][];
+        };
         /** SceneOut */
         SceneOut: {
             /** Id */
@@ -1265,6 +1343,8 @@ export interface components {
             generate_ready_count: number;
             /** Max Parallel Generations */
             max_parallel_generations: number;
+            /** Render Blocked Reason */
+            render_blocked_reason: string | null;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -2815,6 +2895,86 @@ export interface operations {
                 };
             };
             /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_render_api_projects__project_id__render_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project cannot be rendered now: there is no voiceover or no scene, a scene has no clip or its clip is too short, or the scenes are out of date or being replaced. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_renders_api_projects__project_id__renders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RendersOut"];
+                };
+            };
+            /** @description No project has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -22,9 +22,10 @@ def register_handlers() -> None:
     from app.jobs import handlers
     from app.jobs.generate_clip import GenerateClipHandler
     from app.jobs.plan_scenes import PlanScenesHandler
+    from app.jobs.render_final import RenderFinalHandler
     from app.jobs.transcribe import TranscribeHandler
 
     handlers.register(TranscribeHandler())
     handlers.register(PlanScenesHandler())
     handlers.register(GenerateClipHandler())
-    # Phase 10 adds render_final here.
+    handlers.register(RenderFinalHandler())

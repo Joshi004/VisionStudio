@@ -10,6 +10,7 @@ from app.api import (
     health,
     jobs,
     projects,
+    renders,
     scene_inputs,
     scenes,
     settings,
@@ -26,3 +27,4 @@ api_router.include_router(transcription.router, tags=["transcription"])
 api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(scene_inputs.router, tags=["scenes"])
 api_router.include_router(clips.router, tags=["scenes"])
+api_router.include_router(renders.router, tags=["renders"])
