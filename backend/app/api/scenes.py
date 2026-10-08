@@ -33,6 +33,8 @@ from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.generate_clip import MAX_PARALLEL_KEY
+from app.jobs.generate_frame import IMAGE_MODEL_KEY
+from app.jobs.generate_frame import MAX_PARALLEL_KEY as MAX_PARALLEL_IMAGES_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
 from app.jobs.write_image_prompt import IMAGE_PROMPT_MODEL_KEY
@@ -42,6 +44,7 @@ from app.services import (
     cut_edits,
     description_writer,
     frame_images,
+    image_lab,
     scene_cuts,
     scene_inputs,
     scene_planner,
@@ -49,6 +52,7 @@ from app.services import (
     transcript_matching,
 )
 from app.services import descriptions as descriptions_service
+from app.services import first_frames as first_frames_service
 from app.services import image_prompts as image_prompts_service
 from app.services import renders as renders_service
 from app.services import scenes as scenes_service
@@ -134,6 +138,14 @@ class FrameOut(BaseModel):
     preview_url: str
     # About cropping or enlarging, for the project's current generation size.
     warnings: list[str]
+    # Who made the file: the user (an upload), or the image model (`ai`). `derived` frames are
+    # the copies sent to the video model and are never a scene's frame.
+    source: Literal["upload", "ai", "derived"]
+    # The `generate_frame` job that made an AI frame. None for an upload.
+    job_id: int | None
+    # An AI frame made from an image prompt that differs from the scene's now (computed, never
+    # stored). False for an upload.
+    out_of_date: bool
 
 
 class TakeOut(BaseModel):
@@ -206,6 +218,19 @@ class SceneOut(BaseModel):
     prompt: str | None
     first_frame: FrameOut | None
     last_frame: FrameOut | None
+    # The first frame is an AI frame made from an image prompt that differs from the scene's now.
+    first_frame_out_of_date: bool
+    # The newest job that makes this scene's first frame, whatever its status (Phase 17).
+    frame_job: JobSummary | None
+    # Why that job's frame was not attached to the scene (it was kept among the earlier frames),
+    # or None.
+    frame_job_note: str | None
+    # Why a first frame cannot be made for this scene now, or None when it can. Replacing an
+    # upload is not a reason: the page asks first.
+    frame_blocked_reason: str | None
+    # The frames the scene can go back to, newest first: the frames its jobs made, and what
+    # they replaced. The frame in use now is among them when an AI job made it.
+    first_frame_choices: list[FrameOut]
     # What is still needed (description, first_frame). Ready when nothing is: the last frame
     # is optional.
     missing: list[MissingInput]
@@ -315,6 +340,18 @@ class ScenesOut(BaseModel):
     # How many jobs "Write image prompts" would start: scenes with text to work from and no
     # prompt or an out-of-date AI prompt, and nothing running.
     image_prompt_candidate_count: int
+    # The model the next first frame will be made by (the Bitdeer image model), and the address
+    # after Docker mapping.
+    image_llm: LlmInfoOut
+    # Why "Generate first frames" cannot start any job now, or None when it can.
+    frames_blocked_reason: str | None
+    # How many jobs "Generate first frames" would start: scenes with a current image prompt and
+    # no first frame or an out-of-date AI one, and nothing running. Uploads are skipped.
+    frame_candidate_count: int
+    # The setting, so the page can say how many images are made at once.
+    max_parallel_image_generations: int
+    # Bitdeer's price for one image, in US dollars. An estimate: the page marks it so.
+    price_per_image_usd: float
 
 
 def _int(value: object) -> int | None:
@@ -374,9 +411,13 @@ def _proposal_out(job: Job) -> ProposalOut:
     )
 
 
-def _frame_out(project: Project, asset: Asset | None) -> FrameOut | None:
+def _frame_out(
+    project: Project, asset: Asset | None, *, out_of_date: bool = False
+) -> FrameOut | None:
     if asset is None:
         return None
+    provenance: Any = asset.provenance
+    recorded_job = provenance.get("job_id") if isinstance(provenance, dict) else None
     warnings: list[str] = []
     if asset.width is not None and asset.height is not None:
         warnings = frame_images.frame_warnings(
@@ -395,6 +436,10 @@ def _frame_out(project: Project, asset: Asset | None) -> FrameOut | None:
             f"?width={project.gen_width}&height={project.gen_height}"
         ),
         warnings=warnings,
+        # The database CHECK constraint keeps this to the allowed values.
+        source=cast(Literal["upload", "ai", "derived"], asset.source),
+        job_id=_int(recorded_job) if asset.source == "ai" else None,
+        out_of_date=out_of_date,
     )
 
 
@@ -445,8 +490,13 @@ def _scene_out(
     prompt_out_of_date: bool,
     prompt_job: Job | None,
     prompt_blocked: str | None,
+    frame_job: Job | None,
+    frame_blocked: str | None,
+    frame_choices: list[Asset],
 ) -> SceneOut:
     missing = scene_inputs.missing_inputs(scene)
+    first_asset = frames.get(scene.first_frame_asset_id or 0)
+    first_out_of_date = first_frames_service.frame_out_of_date(scene, first_asset)
     return SceneOut(
         id=scene.id,
         index=scene.index,
@@ -482,8 +532,28 @@ def _scene_out(
         prompt=scene_prompt.assemble_prompt(
             project.style_prefix, scene.scene_description, project.prompt_suffix
         ),
-        first_frame=_frame_out(project, frames.get(scene.first_frame_asset_id or 0)),
+        first_frame=_frame_out(project, first_asset, out_of_date=first_out_of_date),
         last_frame=_frame_out(project, frames.get(scene.last_frame_asset_id or 0)),
+        first_frame_out_of_date=first_out_of_date,
+        frame_job=(
+            job_summary(JobRow(job=frame_job, project_name=project.name, scene_index=scene.index))
+            if frame_job is not None
+            else None
+        ),
+        frame_job_note=first_frames_service.not_attached_note(frame_job),
+        frame_blocked_reason=frame_blocked,
+        first_frame_choices=[
+            out
+            for asset in frame_choices
+            if (
+                out := _frame_out(
+                    project,
+                    asset,
+                    out_of_date=first_frames_service.frame_out_of_date(scene, asset),
+                )
+            )
+            is not None
+        ],
         missing=missing,
         ready=not missing,
         clip_mode=scene_inputs.clip_mode(scene),
@@ -544,6 +614,15 @@ async def propose_scenes(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"Image prompts are being written for {writing} {noun}. Wait for them to finish "
+            "before proposing scenes.",
+        )
+    # And for first frames (Phase 17): the paid image would be lost with its scene's job.
+    making = len(await first_frames_service.active_frame_jobs(session, project.id))
+    if making:
+        noun = "scene" if making == 1 else "scenes"
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"First frames are being made for {making} {noun}. Wait for them to finish "
             "before proposing scenes.",
         )
 
@@ -719,6 +798,23 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     def prompt_out_of_date(scene: Scene) -> bool:
         return scene.id in prompt_states and prompt_states[scene.id].out_of_date
 
+    # First frames (Phase 17): the newest job of each scene, the frames each scene can go back
+    # to, and why a frame cannot be made.
+    image_llm = await _llm_info(session, IMAGE_MODEL_KEY)
+    max_parallel_images = await settings_service.get_int(session, MAX_PARALLEL_IMAGES_KEY)
+    frame_jobs = await store.latest_jobs_by_scene(
+        session, project.id, first_frames_service.FRAME_JOB
+    )
+    active_frames = await first_frames_service.active_frame_jobs(session, project.id)
+    choices = await first_frames_service.frame_choices(session, project.id)
+
+    def frame_blocked(scene: Scene) -> str | None:
+        return prompts_project_block or first_frames_service.scene_block(
+            scene,
+            prompt_out_of_date=prompt_out_of_date(scene),
+            prompt_job_active=scene.id in active_prompts,
+        )
+
     scene_outs = [
         _scene_out(
             scene,
@@ -733,9 +829,23 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             prompt_out_of_date=prompt_out_of_date(scene),
             prompt_job=prompt_jobs.get(scene.id),
             prompt_blocked=prompts_project_block or image_prompts_service.scene_block(scene),
+            frame_job=frame_jobs.get(scene.id),
+            frame_blocked=frame_blocked(scene),
+            frame_choices=choices.get(scene.id, []),
         )
         for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
     ]
+    frame_candidates = sum(
+        1
+        for scene in state.scenes
+        if first_frames_service.is_candidate(
+            scene,
+            frames.get(scene.first_frame_asset_id or 0),
+            prompt_out_of_date=prompt_out_of_date(scene),
+            prompt_job_active=scene.id in active_prompts,
+            frame_job_active=scene.id in active_frames,
+        )
+    )
     prompt_candidates = sum(
         1
         for scene in state.scenes
@@ -787,6 +897,12 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
         image_prompts_blocked_reason=prompts_project_block
         or image_prompts_service.all_block(prompt_candidates, len(active_prompts)),
         image_prompt_candidate_count=prompt_candidates,
+        image_llm=image_llm,
+        frames_blocked_reason=prompts_project_block
+        or first_frames_service.all_block(frame_candidates, len(active_frames)),
+        frame_candidate_count=frame_candidates,
+        max_parallel_image_generations=max_parallel_images,
+        price_per_image_usd=image_lab.PRICE_PER_IMAGE_USD,
     )
 
 
@@ -887,6 +1003,16 @@ async def edit_cut(project_id: int, body: CutEditRequest, session: SessionDep) -
         raise _unprocessable(
             f"{_scene_numbers(writing)} {verb} an image prompt being written. Wait for "
             f"{pronoun} to finish before changing this cut."
+        )
+    # A first frame being made is lost the same way (Phase 17).
+    active_frames = await first_frames_service.active_frame_jobs(session, project.id)
+    making = [scene for scene in affected if scene.id in active_frames]
+    if making:
+        verb = "has" if len(making) == 1 else "have"
+        pronoun = "it" if len(making) == 1 else "them"
+        raise _unprocessable(
+            f"{_scene_numbers(making)} {verb} a first frame being made. Wait for {pronoun} "
+            "to finish before changing this cut."
         )
     with_inputs = [scene for scene in affected if scene_cuts.has_inputs(scene)]
     if with_inputs and not body.discard_inputs:

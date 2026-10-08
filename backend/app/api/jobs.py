@@ -32,11 +32,12 @@ JobType = Literal[
     "plan_scenes",
     "draft_descriptions",
     "write_image_prompt",
+    "generate_frame",
     "generate_clip",
     "render_final",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
-JobProvider = Literal["gpu", "llm", "local"]
+JobProvider = Literal["gpu", "llm", "image", "local"]
 
 # SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
 _MAX_JOB_ID = 2**63 - 1

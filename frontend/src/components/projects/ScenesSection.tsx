@@ -28,6 +28,8 @@ import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { clipCell, clipModeText, generateLabel, hasActiveClipJob } from "./clipView";
 import { CutEditor } from "./CutEditor";
 import { DraftDescriptionsPanel } from "./DraftDescriptionsPanel";
+import { FirstFramesPanel } from "./FirstFramesPanel";
+import { firstFrameText, frameFailed, hasActiveFrameJob } from "./firstFrameView";
 import { ImagePromptsPanel } from "./ImagePromptsPanel";
 import {
   hasActiveImagePromptJob,
@@ -270,6 +272,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
           <>
             <DraftDescriptionsPanel project={project} data={data} now={now} />
             <ImagePromptsPanel project={project} data={data} />
+            <FirstFramesPanel project={project} data={data} />
             <Stack gap={4}>
               <Group gap="sm" align="center">
                 <Text size="sm" fw={600}>
@@ -460,6 +463,25 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                                 </Badge>
                               </Tooltip>
                             )}
+                            <Text size="xs" c="dimmed">
+                              {firstFrameText(scene)}
+                            </Text>
+                            {scene.frame_job !== null && hasActiveFrameJob(scene) && (
+                              <Text size="xs" c="dimmed">
+                                {scene.frame_job.phase}
+                              </Text>
+                            )}
+                            {frameFailed(scene) && (
+                              <Tooltip
+                                label={scene.frame_job?.error ?? "The first frame failed."}
+                                multiline
+                                w={260}
+                              >
+                                <Badge color="red" variant="light">
+                                  first frame failed
+                                </Badge>
+                              </Tooltip>
+                            )}
                             <Button
                               size="compact-xs"
                               variant="default"
@@ -552,6 +574,8 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
         scenes={scenes}
         sceneId={inputsSceneId}
         imagePromptModel={data?.image_prompt_llm.model ?? ""}
+        imageModel={data?.image_llm.model ?? ""}
+        pricePerImage={data?.price_per_image_usd ?? 0}
         now={now}
         onSelect={setInputsSceneId}
         onClose={() => setInputsSceneId(null)}

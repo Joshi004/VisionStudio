@@ -83,6 +83,7 @@ class SettingSpec:
 
 GROUP_GPU = "GPU server"
 GROUP_LLM = "Language model"
+GROUP_IMAGE = "Image model"
 GROUP_LIMITS = "Limits"
 
 # The order here is the order on the Settings page. Defaults come from
@@ -184,6 +185,21 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="image_model",
+        group=GROUP_IMAGE,
+        label="Image model",
+        help=(
+            "Model that makes each scene's first frame, one paid image per scene. It uses the "
+            "LLM URL above (Bitdeer). The Image lab has its own model box."
+        ),
+        value_type="string",
+        default="seedream-5.0-lite",
+        pattern=TextPattern(
+            regex=r"[A-Za-z0-9._/:-]{1,200}",
+            message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
+        ),
+    ),
+    SettingSpec(
         key="max_parallel_generations",
         group=GROUP_LIMITS,
         label="Maximum parallel clip generations",
@@ -195,6 +211,20 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=4,
         min_value=1,
         max_value=16,
+    ),
+    SettingSpec(
+        key="max_parallel_image_generations",
+        group=GROUP_LIMITS,
+        label="Maximum parallel image generations",
+        help=(
+            "How many first frames may be made by the image model at the same time. Each image "
+            "takes 20 to 50 seconds. It applies the next time the app looks for work, and "
+            "running jobs are not stopped."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=1,
+        max_value=4,
     ),
     SettingSpec(
         key="poll_interval_seconds",

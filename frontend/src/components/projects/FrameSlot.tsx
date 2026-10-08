@@ -1,4 +1,11 @@
-import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import {
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Alert, Anchor, Button, Group, LoadingOverlay, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
@@ -31,6 +38,8 @@ type FrameSlotProps = {
   label: string;
   /** One line of help shown under the label. */
   description?: string;
+  /** Badges shown next to the label (who made the frame, whether it is out of date). */
+  badge?: ReactNode;
 };
 
 /**
@@ -39,7 +48,15 @@ type FrameSlotProps = {
  * sent (RGB, centre-cropped, at the generation size), and takes a dropped or pasted image
  * to replace it. Every change goes to the server, which answers with the scenes.
  */
-export function FrameSlot({ project, sceneId, slot, frame, label, description }: FrameSlotProps) {
+export function FrameSlot({
+  project,
+  sceneId,
+  slot,
+  frame,
+  label,
+  description,
+  badge,
+}: FrameSlotProps) {
   const upload = useUploadFrame(project.id);
   const remove = useRemoveFrame(project.id);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -110,9 +127,12 @@ export function FrameSlot({ project, sceneId, slot, frame, label, description }:
 
   return (
     <Stack gap={6}>
-      <Text size="sm" fw={600}>
-        {label}
-      </Text>
+      <Group gap="xs">
+        <Text size="sm" fw={600}>
+          {label}
+        </Text>
+        {badge}
+      </Group>
       {description && (
         <Text size="xs" c="dimmed">
           {description}

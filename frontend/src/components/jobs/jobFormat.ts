@@ -5,6 +5,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   plan_scenes: "Scene proposal",
   draft_descriptions: "Scene descriptions",
   write_image_prompt: "Image prompt",
+  generate_frame: "First frame",
   generate_clip: "Clip generation",
   render_final: "Final render",
 };

@@ -39,6 +39,7 @@ from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.providers.llm import LlmCallError
 from app.services import clips as clips_service
+from app.services import first_frames as first_frames_service
 from app.services import image_prompts as image_prompts_service
 from app.services import scene_cuts, scene_planner, scene_splitter
 from app.services import scenes as scenes_service
@@ -425,6 +426,7 @@ class PlanScenesHandler(JobHandler):
         with_inputs = 0
         clip_scenes = 0
         prompt_scenes = 0
+        frame_scenes = 0
         async with SessionLocal() as session:
             # Finishing the job first takes the database's write lock, so the checks below
             # and the replacement cannot be interleaved with another writer.
@@ -437,9 +439,12 @@ class PlanScenesHandler(JobHandler):
             clip_scenes = len(await clips_service.active_clip_jobs(session, project_id))
             # The same for an image prompt being written (Phase 16).
             prompt_scenes = len(await image_prompts_service.active_prompt_jobs(session, project_id))
-            if not clip_scenes and not prompt_scenes and not discard_with_inputs:
+            # And for a first frame being made (Phase 17).
+            frame_scenes = len(await first_frames_service.active_frame_jobs(session, project_id))
+            blocked = clip_scenes or prompt_scenes or frame_scenes
+            if not blocked and not discard_with_inputs:
                 with_inputs = await scenes_service.scenes_with_inputs(session, project_id)
-            if clip_scenes or prompt_scenes or with_inputs:
+            if blocked or with_inputs:
                 await session.rollback()
             else:
                 await scenes_service.replace_scenes(session, project_id, specs)
@@ -461,6 +466,15 @@ class PlanScenesHandler(JobHandler):
                 f"{prompt_scenes} {noun} an image prompt being written that was started while "
                 "this ran, so the scenes were not replaced. Wait for the prompts, then "
                 "propose scenes again.",
+            )
+            return
+        if frame_scenes:
+            noun = "scene has" if frame_scenes == 1 else "scenes have"
+            await self._fail(
+                job_id,
+                f"{frame_scenes} {noun} a first frame being made that was started while this "
+                "ran, so the scenes were not replaced. Wait for the frames, then propose "
+                "scenes again.",
             )
             return
         if with_inputs:

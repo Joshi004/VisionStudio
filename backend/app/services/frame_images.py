@@ -228,6 +228,32 @@ REFERENCE_MAX_PIXELS: Final = 36_000_000
 REFERENCE_JPEG_QUALITY: Final = 90
 
 
+def crop_bottom_and_fit(path: Path, crop_bottom: int, width: int, height: int) -> bytes:
+    """An image from the image model as the first frame (Phase 17): upright, RGB, with
+    `crop_bottom` pixels cut off the bottom (where the model stamps its label) and the rest
+    resized to exactly `width` x `height`, as a lossless PNG. Blocking: run it through
+    `run_pillow`.
+
+    The cut image must already have the shape of `width` x `height` (`services/frame_geometry`
+    makes sure of it), so the resize only scales. Raises ValueError when it does not, and
+    never stretches an image.
+    """
+    with Image.open(path, formats=_FORMATS) as image:
+        image.load()
+        rgb = _to_rgb(ImageOps.exif_transpose(image))
+    cut_height = rgb.height - crop_bottom
+    if crop_bottom <= 0 or cut_height <= 0 or rgb.width * height != cut_height * width:
+        raise ValueError(
+            f"A {rgb.width} x {rgb.height} image cut by {crop_bottom} px does not have the "
+            f"shape of {width} x {height}."
+        )
+    cut = rgb.crop((0, 0, rgb.width, cut_height))
+    fitted = cut.resize((width, height), Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    fitted.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
 def render_reference_jpeg(path: Path) -> bytes:
     """A stored image as an upright RGB JPEG, to send to the image API as a reference
     (Phase 13). No crop: the whole image is kept, scaled down only when it has more pixels

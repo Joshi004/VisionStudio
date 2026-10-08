@@ -71,6 +71,13 @@ SAVING_DESCRIPTIONS: Final = "saving the descriptions"
 CHECKING_IMAGE_PROMPT: Final = "checking the image prompt"
 SAVING_IMAGE_PROMPT: Final = "saving the image prompt"
 
+# --- Running: first frames (Phase 17) ---------------------------------------------------
+PREPARING_IMAGE_REQUEST: Final = "preparing the image request"
+GENERATING_IMAGE: Final = "generating the image"
+SAVING_IMAGE: Final = "saving the image"
+CROPPING_FRAME: Final = "cropping the frame"
+SAVING_FRAME: Final = "saving the frame"
+
 # --- Finished ---------------------------------------------------------------------
 DONE: Final = "done"
 FAILED: Final = "failed"

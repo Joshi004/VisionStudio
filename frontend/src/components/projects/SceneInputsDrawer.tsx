@@ -24,6 +24,7 @@ import {
   type SceneTexts,
 } from "../../api/sceneInputs";
 import type { Scene } from "../../api/scenes";
+import { FirstFrameActions, FirstFrameBadges } from "./FirstFrameActions";
 import { FrameSlot } from "./FrameSlot";
 import { clipModeText } from "./clipView";
 import { ImagePromptActions } from "./ImagePromptActions";
@@ -72,6 +73,9 @@ type SceneInputsDrawerProps = {
   sceneId: number | null;
   /** The model that writes image prompts, for the confirmation of Write image prompt. */
   imagePromptModel: string;
+  /** The image model that makes first frames, and its price per image, for the confirmation. */
+  imageModel: string;
+  pricePerImage: number;
   /** Milliseconds since 1970 as of the last load, for the clip job's elapsed time. */
   now: number;
   onSelect: (sceneId: number) => void;
@@ -89,6 +93,8 @@ export function SceneInputsDrawer({
   scenes,
   sceneId,
   imagePromptModel,
+  imageModel,
+  pricePerImage,
   now,
   onSelect,
   onClose,
@@ -409,6 +415,9 @@ export function SceneInputsDrawer({
                 slot="first"
                 frame={scene.first_frame}
                 label="First frame"
+                badge={
+                  scene.first_frame !== null ? <FirstFrameBadges frame={scene.first_frame} /> : undefined
+                }
               />
               <FrameSlot
                 key={`${scene.id}-last`}
@@ -420,6 +429,14 @@ export function SceneInputsDrawer({
                 description="When set, the clip is made to end on this frame."
               />
             </SimpleGrid>
+            <FirstFrameActions
+              project={project}
+              scene={scene}
+              model={imageModel}
+              pricePerImage={pricePerImage}
+              edited={dirty}
+              now={now}
+            />
           </Stack>
 
           <Divider />

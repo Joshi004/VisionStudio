@@ -35,7 +35,7 @@ from typing import ClassVar, Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 RestartRule = Literal["resume", "start_again", "never_rerun"]
-Provider = Literal["gpu", "llm", "local"]
+Provider = Literal["gpu", "llm", "image", "local"]
 
 
 class JobHandler(ABC):

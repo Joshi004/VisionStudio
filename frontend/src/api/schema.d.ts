@@ -571,6 +571,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/generate-first-frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate First Frames
+         * @description Starts one first frame job (a paid image from the image model) for every scene that has
+         *     a current image prompt, nothing running, and no first frame or an AI first frame that is
+         *     out of date. Frames the user uploaded are skipped. All the jobs are created in one
+         *     transaction. The page asks before calling this, and it shows how many it will start
+         *     (`ScenesOut.frame_candidate_count`) and the estimated cost.
+         */
+        post: operations["generate_first_frames_api_projects__project_id__generate_first_frames_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/generate-first-frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate First Frame
+         * @description Starts the first frame of one scene (a paid image from the image model), or returns the
+         *     job already active for it. A frame the user uploaded is replaced only when the request
+         *     sets `replace_upload`: it stays among the scene's earlier frames.
+         */
+        post: operations["generate_first_frame_api_projects__project_id__scenes__scene_id__generate_first_frame_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/select-first-frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select First Frame
+         * @description Makes one of the scene's earlier frames its first frame again.
+         */
+        post: operations["select_first_frame_api_projects__project_id__scenes__scene_id__select_first_frame_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/scenes/{scene_id}/generate": {
         parameters: {
             query?: never;
@@ -1069,6 +1135,33 @@ export interface components {
             preview_url: string;
             /** Warnings */
             warnings: string[];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "upload" | "ai" | "derived";
+            /** Job Id */
+            job_id: number | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+        };
+        /**
+         * GenerateFirstFrameRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        GenerateFirstFrameRequest: {
+            /**
+             * Replace Upload
+             * @default false
+             */
+            replace_upload: boolean;
+        };
+        /** GenerateFirstFramesOut */
+        GenerateFirstFramesOut: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
+            /** Created */
+            created: number;
         };
         /** GenerateReadyOut */
         GenerateReadyOut: {
@@ -1116,7 +1209,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final";
             /**
              * Status
              * @enum {string}
@@ -1128,7 +1221,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "gpu" | "llm" | "local";
+            provider: "gpu" | "llm" | "image" | "local";
             /** Attempt */
             attempt: number;
             /** Error */
@@ -1173,7 +1266,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final";
             /**
              * Status
              * @enum {string}
@@ -1185,7 +1278,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "gpu" | "llm" | "local";
+            provider: "gpu" | "llm" | "image" | "local";
             /** Attempt */
             attempt: number;
             /** Error */
@@ -1703,6 +1796,15 @@ export interface components {
             prompt: string | null;
             first_frame: components["schemas"]["FrameOut"] | null;
             last_frame: components["schemas"]["FrameOut"] | null;
+            /** First Frame Out Of Date */
+            first_frame_out_of_date: boolean;
+            frame_job: components["schemas"]["JobSummary"] | null;
+            /** Frame Job Note */
+            frame_job_note: string | null;
+            /** Frame Blocked Reason */
+            frame_blocked_reason: string | null;
+            /** First Frame Choices */
+            first_frame_choices: components["schemas"]["FrameOut"][];
             /** Missing */
             missing: ("description" | "first_frame")[];
             /** Ready */
@@ -1786,6 +1888,15 @@ export interface components {
             image_prompts_blocked_reason: string | null;
             /** Image Prompt Candidate Count */
             image_prompt_candidate_count: number;
+            image_llm: components["schemas"]["LlmInfoOut"];
+            /** Frames Blocked Reason */
+            frames_blocked_reason: string | null;
+            /** Frame Candidate Count */
+            frame_candidate_count: number;
+            /** Max Parallel Image Generations */
+            max_parallel_image_generations: number;
+            /** Price Per Image Usd */
+            price_per_image_usd: number;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -1810,6 +1921,11 @@ export interface components {
             label: string;
             /** Is Set */
             is_set: boolean;
+        };
+        /** SelectFirstFrameRequest */
+        SelectFirstFrameRequest: {
+            /** Asset Id */
+            asset_id: number;
         };
         /** SelectTakeRequest */
         SelectTakeRequest: {
@@ -3329,6 +3445,145 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_first_frames_api_projects__project_id__generate_first_frames_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateFirstFramesOut"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A first frame cannot be made now: there are no scenes, a proposal or a draft is running, the scenes are out of date, or the scene has no current image prompt (none, out of date, or being written). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_first_frame_api_projects__project_id__scenes__scene_id__generate_first_frame_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GenerateFirstFrameRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene's first frame is one the user uploaded, and the request did not confirm replacing it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A first frame cannot be made now: there are no scenes, a proposal or a draft is running, the scenes are out of date, or the scene has no current image prompt (none, out of date, or being written). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    select_first_frame_api_projects__project_id__scenes__scene_id__select_first_frame_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectFirstFrameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project or scene has this id, or the asset is not one of the scene's earlier frames. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

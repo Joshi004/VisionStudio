@@ -195,14 +195,14 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
-            "'write_image_prompt', 'generate_clip', 'render_final')",
+            "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final')",
             name="type_valid",
         ),
         CheckConstraint(
             "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
             name="status_valid",
         ),
-        CheckConstraint("provider IN ('gpu', 'llm', 'local')", name="provider_valid"),
+        CheckConstraint("provider IN ('gpu', 'llm', 'image', 'local')", name="provider_valid"),
         Index("idx_job_project", "project_id"),
         Index("idx_job_scene", "scene_id"),
         Index("idx_job_status", "status"),
