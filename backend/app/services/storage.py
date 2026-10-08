@@ -3,8 +3,8 @@
 Every stored file goes through `Storage`, so a later move to S3 or MinIO
 changes one class. The rules:
 
-- names are generated here (`<project_id>/<32 hex>.<ext>`), never taken from
-  the client;
+- names are generated here (`<project_id>/<32 hex>.<ext>`, or `lab/<32 hex>.<ext>` for the
+  Image lab), never taken from the client;
 - every path is checked to stay inside the media folder;
 - the database keeps only the relative path, and the URL is `/media/` plus
   that path (nginx serves it read-only from the same volume);
@@ -38,7 +38,9 @@ _logger = logging.getLogger(__name__)
 
 MEDIA_URL_PREFIX = "/media/"
 _EXTENSION = re.compile(r"[a-z0-9]{1,5}")
-_RELATIVE_PATH = re.compile(r"[0-9]+/[0-9a-f]{32}\.[a-z0-9]{1,5}")
+# The folder is a project id, or `lab` for the Image lab, which belongs to no project (Phase 13).
+LAB_FOLDER = "lab"
+_RELATIVE_PATH = re.compile(rf"(?:[0-9]+|{LAB_FOLDER})/[0-9a-f]{{32}}\.[a-z0-9]{{1,5}}")
 
 
 class StorageError(Exception):
@@ -125,9 +127,18 @@ class Storage:
 
     async def save(self, temp: TempFile, project_id: int, ext: str) -> StoredFile:
         """Moves a received file into the media folder under a generated name."""
+        return await self._save_in(str(project_id), temp, ext)
+
+    async def save_lab(self, temp: TempFile, ext: str) -> StoredFile:
+        """Like `save`, for a file of the Image lab: it goes in `media/lab/`, not in a project's
+        folder.
+        """
+        return await self._save_in(LAB_FOLDER, temp, ext)
+
+    async def _save_in(self, folder: str, temp: TempFile, ext: str) -> StoredFile:
         if not _EXTENSION.fullmatch(ext):
             raise StorageError(f"Not a valid file extension: {ext!r}")
-        relative_path = f"{project_id}/{uuid.uuid4().hex}.{ext}"
+        relative_path = f"{folder}/{uuid.uuid4().hex}.{ext}"
         destination = self.get_path(relative_path)
         await anyio.to_thread.run_sync(self._move, temp.path, destination)
         return StoredFile(

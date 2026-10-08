@@ -220,3 +220,29 @@ def render_preview_jpeg(path: Path, width: int, height: int) -> bytes:
     buffer = io.BytesIO()
     normalised.save(buffer, "JPEG", quality=PREVIEW_JPEG_QUALITY)
     return buffer.getvalue()
+
+
+# What the image API accepts as a reference: at most 6000 x 6000 pixels in total (the limit
+# BytePlus documents for Seedream). A larger image is scaled down to fit.
+REFERENCE_MAX_PIXELS: Final = 36_000_000
+REFERENCE_JPEG_QUALITY: Final = 90
+
+
+def render_reference_jpeg(path: Path) -> bytes:
+    """A stored image as an upright RGB JPEG, to send to the image API as a reference
+    (Phase 13). No crop: the whole image is kept, scaled down only when it has more pixels
+    than the API accepts. Blocking: run it through `run_pillow`.
+    """
+    with Image.open(path, formats=_FORMATS) as image:
+        image.load()
+        rgb = _to_rgb(ImageOps.exif_transpose(image))
+    pixels = rgb.width * rgb.height
+    if pixels > REFERENCE_MAX_PIXELS:
+        scale = (REFERENCE_MAX_PIXELS / pixels) ** 0.5
+        rgb = rgb.resize(
+            (max(1, int(rgb.width * scale)), max(1, int(rgb.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    buffer = io.BytesIO()
+    rgb.save(buffer, "JPEG", quality=REFERENCE_JPEG_QUALITY)
+    return buffer.getvalue()

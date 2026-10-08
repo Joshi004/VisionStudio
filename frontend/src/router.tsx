@@ -3,6 +3,7 @@ import { createBrowserRouter, Navigate } from "react-router";
 import { AppLayout } from "./components/AppLayout";
 import { RouteError } from "./components/RouteError";
 import { ActivityPage } from "./pages/ActivityPage";
+import { ImageLabPage } from "./pages/ImageLabPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectPage } from "./pages/ProjectPage";
 import { ProjectSettingsPage } from "./pages/ProjectSettingsPage";
@@ -20,6 +21,7 @@ export const router = createBrowserRouter([
       { path: "projects/:projectId", element: <ProjectPage /> },
       { path: "projects/:projectId/settings", element: <ProjectSettingsPage /> },
       { path: "activity", element: <ActivityPage /> },
+      { path: "image-lab", element: <ImageLabPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

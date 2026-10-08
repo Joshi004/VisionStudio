@@ -1,9 +1,9 @@
 """The one place the backend makes outbound HTTP calls.
 
-Every later phase calls out through `request()` (or `upload()`, added in Phase 5, and
-`download_to_file()`, added in Phase 9): the GPU server, the transcription API and the
-LLM. All three share one call path (`_call`) and so the checks below. Do not create
-another httpx client anywhere else.
+Every later phase calls out through `request()` (or `upload()`, added in Phase 5,
+`download_to_file()`, added in Phase 9, and `post_form()`, added in Phase 13): the GPU
+server, the transcription API, the LLM and the image API. All of them share one call path
+(`_call`) and so the checks below. Do not create another httpx client anywhere else.
 
 What `request()` enforces (ANALYSIS.md Section 3.6 and 3.7):
 
@@ -25,7 +25,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from json import loads
 from pathlib import Path
@@ -55,6 +55,10 @@ _MAX_LOCATION_CHARS = 200
 
 _logger = logging.getLogger(__name__)
 _client: httpx.AsyncClient | None = None
+
+# Files of a multipart form: `{field: (filename, content, mime)}`, or a list of
+# `(field, (filename, content, mime))` when a field repeats (Phase 13).
+FileParts = Mapping[str, tuple[str, bytes, str]] | Sequence[tuple[str, tuple[str, bytes, str]]]
 
 
 class OutboundError(Exception):
@@ -192,15 +196,41 @@ async def upload(
     )
 
 
+async def post_form(
+    url: str,
+    *,
+    data: Mapping[str, str],
+    files: Sequence[tuple[str, tuple[str, bytes, str]]],
+    timeout_s: float,
+    max_bytes: int = JSON_MAX_BYTES,
+) -> OutboundResponse:
+    """POSTs a multipart/form-data body: text fields, and files that may share a field name
+    (Phase 13, the image edit call). Every check of `request()` applies.
+
+    Everything is held in memory, which is fine for the few images of a lab run.
+    """
+    return await _send(
+        "POST",
+        url,
+        json=None,
+        params=None,
+        data=data,
+        files=files,
+        timeout_s=timeout_s,
+        max_bytes=max_bytes,
+    )
+
+
 async def _send(
     method: str,
     url: str,
     *,
     json: Any,
     params: Mapping[str, str] | None,
-    files: Mapping[str, tuple[str, bytes, str]] | None,
+    files: FileParts | None,
     timeout_s: float,
     max_bytes: int,
+    data: Mapping[str, str] | None = None,
 ) -> OutboundResponse:
     async def read_body(response: httpx.Response, final_url: str) -> OutboundResponse:
         body = await _read_limited(response, max_bytes)
@@ -216,6 +246,7 @@ async def _send(
         url,
         json=json,
         params=params,
+        data=data,
         files=files,
         timeout_s=timeout_s,
         handle=read_body,
@@ -229,9 +260,10 @@ async def _call[T](
     *,
     json: Any,
     params: Mapping[str, str] | None,
-    files: Mapping[str, tuple[str, bytes, str]] | None,
+    files: FileParts | None,
     timeout_s: float,
     handle: Callable[[httpx.Response, str], Awaitable[T]],
+    data: Mapping[str, str] | None = None,
 ) -> tuple[T, int]:
     """Makes one call with every check of this module, and lets `handle` read the answer.
 
@@ -256,6 +288,7 @@ async def _call[T](
                 final_url,
                 json=json,
                 params=params,
+                data=data,
                 files=files,
                 headers=auth_headers_for(final_url),
                 timeout=timeout_s,

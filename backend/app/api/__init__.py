@@ -8,6 +8,7 @@ from app.api import (
     clips,
     gpu,
     health,
+    image_lab,
     jobs,
     projects,
     renders,
@@ -28,3 +29,4 @@ api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(scene_inputs.router, tags=["scenes"])
 api_router.include_router(clips.router, tags=["scenes"])
 api_router.include_router(renders.router, tags=["renders"])
+api_router.include_router(image_lab.router, tags=["image-lab"])

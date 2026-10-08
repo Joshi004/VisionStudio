@@ -652,6 +652,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/images/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description The history, newest first. Reads the database only.
+         */
+        get: operations["list_runs_api_lab_images_runs_get"];
+        put?: never;
+        /**
+         * Create Run
+         * @description Makes one call to the image API (a paid call, about 25 to 40 s) and answers with the
+         *     saved run. A call that failed or was refused is a saved run too, with its `error`. The
+         *     request is answered when the call is done; if the browser goes away first, the call still
+         *     finishes and the run is kept.
+         */
+        post: operations["create_run_api_lab_images_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/images/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description One run, with the request and the answer.
+         */
+        get: operations["get_run_api_lab_images_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/images/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Image
+         * @description Stores a PNG, JPEG or WebP image sent as the raw request body, so it can be used as a
+         *     reference. The rules are those of a scene's frame.
+         */
+        post: operations["upload_image_api_lab_images_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/images/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Library
+         * @description The newest 60 lab images, uploads and results together.
+         */
+        get: operations["get_library_api_lab_images_library_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/images/project-frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Project Frames
+         * @description A project's frames, newest first, so one can be picked as a reference.
+         */
+        get: operations["get_project_frames_api_lab_images_project_frames_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1052,6 +1160,177 @@ export interface components {
             /** Can Resubmit */
             can_resubmit: boolean;
         };
+        /** LabImageOut */
+        LabImageOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "upload" | "result";
+            /** Run Id */
+            run_id: number | null;
+            /** Output Index */
+            output_index: number | null;
+            /** Url */
+            url: string;
+            /** Mime */
+            mime: string;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** LabLibraryOut */
+        LabLibraryOut: {
+            /** Images */
+            images: components["schemas"]["LabImageOut"][];
+        };
+        /**
+         * LabReferenceIn
+         * @description An image to send as a reference: one the lab holds, or a project's frame asset.
+         */
+        LabReferenceIn: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "lab" | "asset";
+            /** Id */
+            id: number;
+        };
+        /** LabReferenceOut */
+        LabReferenceOut: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "lab" | "asset";
+            /** Id */
+            id: number;
+            /** Url */
+            url: string | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+        };
+        /** LabRunOut */
+        LabRunOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "text_to_image" | "image_to_image" | "edit";
+            /** Endpoint */
+            endpoint: string;
+            /** Model */
+            model: string;
+            /** Prompt */
+            prompt: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "succeeded" | "failed";
+            /** Http Status */
+            http_status: number | null;
+            /** Error */
+            error: string | null;
+            /** Seconds */
+            seconds: number | null;
+            /** Request Bytes */
+            request_bytes: number | null;
+            /** Usage */
+            usage: {
+                [key: string]: unknown;
+            } | null;
+            /** Estimated Cost Usd */
+            estimated_cost_usd: number | null;
+            /** Images */
+            images: components["schemas"]["LabImageOut"][];
+            /** References */
+            references: components["schemas"]["LabReferenceOut"][];
+            /** Request */
+            request: unknown | null;
+            /** Response */
+            response: unknown | null;
+        };
+        /**
+         * LabRunRequest
+         * @description The form of the Image lab. Each field is sent as it is, so the page can show what the
+         *     API does with it: the API may ignore any of them.
+         */
+        LabRunRequest: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "text_to_image" | "image_to_image" | "edit";
+            /**
+             * Model
+             * @default seedream-5.0-lite
+             */
+            model: string;
+            /** Prompt */
+            prompt: string;
+            /**
+             * Size
+             * @default 1632x2880
+             */
+            size: string;
+            /**
+             * Watermark
+             * @default false
+             */
+            watermark: boolean | null;
+            /** Seed */
+            seed?: number | null;
+            /** Sequential Max Images */
+            sequential_max_images?: number | null;
+            /**
+             * Image Field As
+             * @default list
+             * @enum {string}
+             */
+            image_field_as: "list" | "string";
+            /**
+             * Edit Field Name
+             * @default image
+             * @enum {string}
+             */
+            edit_field_name: "image" | "image[]";
+            /** Extra */
+            extra?: unknown;
+            /** References */
+            references?: components["schemas"]["LabReferenceIn"][];
+        };
+        /** LabRunsOut */
+        LabRunsOut: {
+            /** Runs */
+            runs: components["schemas"]["LabRunOut"][];
+            /** Next Before Id */
+            next_before_id: number | null;
+        };
         /** LlmInfoOut */
         LlmInfoOut: {
             /** Model */
@@ -1153,6 +1432,37 @@ export interface components {
             /** Script Text */
             script_text: string | null;
             voiceover: components["schemas"]["VoiceoverOut"] | null;
+        };
+        /** ProjectFrameOut */
+        ProjectFrameOut: {
+            /** Asset Id */
+            asset_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Source */
+            source: string;
+            /** Url */
+            url: string;
+            /** Mime */
+            mime: string;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Scene Number */
+            scene_number: number | null;
+            /** Slot */
+            slot: ("first" | "last") | null;
+        };
+        /** ProjectFramesOut */
+        ProjectFramesOut: {
+            /** Frames */
+            frames: components["schemas"]["ProjectFrameOut"][];
         };
         /** ProjectSummary */
         ProjectSummary: {
@@ -3076,6 +3386,222 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RendersOut"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_lab_images_runs_get: {
+        parameters: {
+            query?: {
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabRunsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_lab_images_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabRunOut"];
+                };
+            };
+            /** @description The form is not acceptable: an empty prompt, too many or missing references, a reference that does not exist, or a bad extra JSON. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_api_lab_images_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabRunOut"];
+                };
+            };
+            /** @description No run has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_image_api_lab_images_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabImageOut"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is not an acceptable image. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_library_api_lab_images_library_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabLibraryOut"];
+                };
+            };
+        };
+    };
+    get_project_frames_api_lab_images_project_frames_get: {
+        parameters: {
+            query: {
+                project_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectFramesOut"];
                 };
             };
             /** @description No project has this id. */

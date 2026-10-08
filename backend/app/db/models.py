@@ -1,4 +1,4 @@
-"""ORM models for all seven tables, exactly as DATABASE_STRUCTURE.md Section 4
+"""ORM models for every table, exactly as DATABASE_STRUCTURE.md Section 4
 describes: same columns, nullability, defaults, CHECK constraints, foreign
 keys (with their ON DELETE rules) and indexes. Table names are the
 lowercase snake_case identifiers from that document (Section 8, item 2);
@@ -242,3 +242,68 @@ class ApiSnapshot(Base):
     body: Mapped[Any] = mapped_column(JSON)
     state: Mapped[str] = mapped_column(default="pending", server_default=text("'pending'"))
     approved_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class LabRun(Base):
+    """One manual test of the image API from the Image lab page (Phase 13).
+
+    A run is one synchronous call, not a `job`: the lab is not tied to a project. It keeps
+    the exact request and the raw response (image data replaced by sizes), so results can be
+    compared later. Never deleted in iteration 1.
+    """
+
+    __tablename__ = "lab_run"
+    __table_args__ = (
+        CheckConstraint("mode IN ('text_to_image', 'image_to_image', 'edit')", name="mode_valid"),
+        CheckConstraint("status IN ('succeeded', 'failed')", name="status_valid"),
+        Index("idx_lab_run_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    mode: Mapped[str]
+    endpoint: Mapped[str]
+    model: Mapped[str]
+    prompt: Mapped[str]
+    # What the form held: size, watermark, seed, image set, the two toggles, the extra JSON.
+    params: Mapped[Any] = mapped_column(JSON)
+    # [{source: "lab" | "asset", id}] in the order they were sent. (Not named `references`:
+    # that is an SQL keyword.)
+    reference_images: Mapped[Any] = mapped_column(JSON)
+    status: Mapped[str]
+    http_status: Mapped[int | None] = mapped_column(default=None)
+    error: Mapped[str | None] = mapped_column(default=None)
+    seconds: Mapped[float | None] = mapped_column(default=None)
+    request_bytes: Mapped[int | None] = mapped_column(default=None)
+    usage: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    request: Mapped[Any] = mapped_column(JSON)
+    response: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+
+
+class LabImage(Base):
+    """An image the Image lab holds: one the user uploaded, or one a run produced. Files live
+    under `media/lab/` (Phase 13). A project's frames are not copied here: a run refers to
+    them by their `asset` id.
+    """
+
+    __tablename__ = "lab_image"
+    __table_args__ = (
+        CheckConstraint("origin IN ('upload', 'result')", name="origin_valid"),
+        Index("idx_lab_image_run", "run_id"),
+        Index("idx_lab_image_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    origin: Mapped[str]
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    # The position among the run's results, from 0. None for an upload.
+    output_index: Mapped[int | None] = mapped_column(default=None)
+    path: Mapped[str]
+    mime: Mapped[str]
+    width: Mapped[int]
+    height: Mapped[int]
+    size_bytes: Mapped[int]
+    sha256: Mapped[str]
