@@ -1,6 +1,7 @@
 """The `draft_descriptions` job: a language model writes, for every scene of a project in one
-request, the video prompt and the first and last frame descriptions (ANALYSIS.md Section 4.2
-and 6.2; Phase 12).
+request, the video prompt and the first frame description (ANALYSIS.md Section 4.2 and 6.2;
+Phase 12, reworked for first-frame clips in Phase 15). It never writes a last frame
+description.
 
 It is a paid job (Section 6.2), so the rules of the scene proposal hold here too:
 
@@ -362,6 +363,7 @@ class DraftDescriptionsHandler(JobHandler):
 
         drafts = {draft.scene_id: draft for draft in checked.drafts}
         written_by_scene: dict[int, list[str]] = {}
+        cleared_by_scene: dict[int, list[str]] = {}
         skipped = {"all_fixed": 0, "changed_while_drafting": 0, "missing_in_answer": 0}
 
         async with SessionLocal() as session:
@@ -385,6 +387,7 @@ class DraftDescriptionsHandler(JobHandler):
                     for column, value in plan.values.items():
                         setattr(scene, column, value)
                     written_by_scene[scene.id] = plan.written
+                    cleared_by_scene[scene.id] = plan.cleared
 
             output: dict[str, Any] = {
                 "answer": outcome.answer,
@@ -400,9 +403,9 @@ class DraftDescriptionsHandler(JobHandler):
                         "continuity": draft.continuity,
                         writer.VIDEO_PROMPT: draft.video_prompt,
                         writer.FIRST_FRAME: draft.first_frame,
-                        writer.LAST_FRAME: draft.last_frame,
                         "warnings": list(draft.warnings),
                         "written": written_by_scene.get(draft.scene_id, []),
+                        "cleared": cleared_by_scene.get(draft.scene_id, []),
                     }
                     for draft in checked.drafts
                 ],

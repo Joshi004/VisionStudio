@@ -16,7 +16,7 @@ const VIDEO_STARTS_WITH = /\bthe video (starts|begins) with\b/i;
 
 /**
  * Small warnings about a description, from ANALYSIS.md Section 5.4. They never block saving:
- * they only point at wording that tends to pull the result away from the two frames.
+ * they only point at wording that tends to pull the result away from the first frame.
  */
 export function promptHints(description: string): string[] {
   const hints: string[] = [];
@@ -33,7 +33,7 @@ export function promptHints(description: string): string[] {
   }
   if (CUT_TO.test(description)) {
     hints.push(
-      "\u201ccut to\u201d found. Describe one continuous motion between the two frames instead.",
+      "\u201ccut to\u201d found. Describe one continuous shot instead.",
     );
   }
   if (TIMESTAMP.test(description)) {
@@ -52,10 +52,9 @@ export function promptHints(description: string): string[] {
 const MISSING_LABELS: Record<MissingInput, string> = {
   description: "description",
   first_frame: "first frame",
-  last_frame: "last frame",
 };
 
-/** "description", "description and last frame", "description, first frame and last frame". */
+/** "description", "first frame", "description and first frame". */
 export function missingText(missing: MissingInput[]): string {
   const labels = missing.map((item) => MISSING_LABELS[item]);
   if (labels.length <= 1) {

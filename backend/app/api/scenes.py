@@ -35,6 +35,7 @@ from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.generate_clip import MAX_PARALLEL_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
+from app.providers import video_generator
 from app.services import clips as clips_service
 from app.services import (
     cut_edits,
@@ -50,7 +51,7 @@ from app.services import descriptions as descriptions_service
 from app.services import renders as renders_service
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
-from app.services.scene_inputs import MissingInput
+from app.services.scene_inputs import ClipMode, MissingInput
 from app.services.storage import media_url
 
 _logger = logging.getLogger(__name__)
@@ -148,6 +149,9 @@ class TakeOut(BaseModel):
     duration_s: float | None
     # The codec of the clip's own sound, None when it has none.
     audio_codec: str | None
+    # How the clip was made: from the first frame alone, or from both frames. None for a clip
+    # that did not record its endpoint.
+    clip_mode: ClipMode | None
     # This is the take the final video uses.
     selected: bool
     # The scene's cuts have changed since this take was made.
@@ -175,10 +179,12 @@ class SceneOut(BaseModel):
     # Who wrote it. None while there is no description.
     scene_description_source: TextSource | None
     # What the first and last frame should show: a guide for making the frames, typed or
-    # drafted. They share one source: the pair is the user's once the user edits either.
+    # drafted. Each has its own source. The AI writes only the first one: the last-frame
+    # description is for a last frame the user adds by hand.
     first_frame_description: str | None
     last_frame_description: str | None
-    frame_descriptions_source: TextSource | None
+    first_frame_description_source: TextSource | None
+    last_frame_description_source: TextSource | None
     # The job that last wrote AI text into this scene. Kept after the user edits the text.
     description_job_id: int | None
     # What will be sent to the video model: the project's style prefix, the saved description
@@ -186,9 +192,13 @@ class SceneOut(BaseModel):
     prompt: str | None
     first_frame: FrameOut | None
     last_frame: FrameOut | None
-    # What is still needed (description, first_frame, last_frame). Ready when nothing is.
+    # What is still needed (description, first_frame). Ready when nothing is: the last frame
+    # is optional.
     missing: list[MissingInput]
     ready: bool
+    # How the clip will be made: from the first frame alone, or, when a last frame is
+    # attached, from both frames (the clip is made to end on it).
+    clip_mode: ClipMode
     # Whether the final video uses this scene's own clip sound.
     use_clip_sound: bool
     # The take the final video uses, if any.
@@ -265,7 +275,7 @@ class ScenesOut(BaseModel):
     words: list[SceneWordOut]
     # Why the cuts cannot be edited now (no scenes, a proposal running, out of date...).
     edit_blocked_reason: str | None
-    # How many scenes have a description and both frames.
+    # How many scenes have a description and a first frame.
     ready_count: int
     # How many scenes "Generate all ready scenes" would start: ready, no clip yet, nothing
     # running, and not blocked.
@@ -393,6 +403,7 @@ def _take_out(take: clips_service.Take, scene: Scene, project: Project) -> TakeO
         target_frames=_int(target),
         duration_s=take.asset.duration_s,
         audio_codec=codec if isinstance(codec, str) else None,
+        clip_mode=video_generator.clip_mode_for(recorded.get("endpoint")),
         selected=scene.selected_clip_asset_id == take.asset.id,
         out_of_date=clips_service.take_is_out_of_date(recorded, scene),
         too_short=clips_service.take_is_too_short(recorded, scene, project),
@@ -429,7 +440,10 @@ def _scene_out(
         scene_description_source=cast(TextSource | None, scene.scene_description_source),
         first_frame_description=scene.first_frame_description,
         last_frame_description=scene.last_frame_description,
-        frame_descriptions_source=cast(TextSource | None, scene.frame_descriptions_source),
+        first_frame_description_source=cast(
+            TextSource | None, scene.first_frame_description_source
+        ),
+        last_frame_description_source=cast(TextSource | None, scene.last_frame_description_source),
         description_job_id=scene.description_job_id,
         prompt=scene_prompt.assemble_prompt(
             project.style_prefix, scene.scene_description, project.prompt_suffix
@@ -438,6 +452,7 @@ def _scene_out(
         last_frame=_frame_out(project, frames.get(scene.last_frame_asset_id or 0)),
         missing=missing,
         ready=not missing,
+        clip_mode=scene_inputs.clip_mode(scene),
         use_clip_sound=scene.use_clip_sound,
         selected_clip_asset_id=scene.selected_clip_asset_id,
         target_frames=clips_service.target_frames_for(scene, project),

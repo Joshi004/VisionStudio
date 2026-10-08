@@ -227,7 +227,7 @@ export function ProjectSettingsForm({
             <Title order={4}>AI description instructions</Title>
             <Textarea
               aria-label="AI description instructions"
-              description="Optional extra instructions for the AI that drafts the scene descriptions and frame descriptions: characters and places to use, the look, or sound wishes (it adds no music by default). They come before the AI's own rules wherever they differ."
+              description="Optional extra instructions for the AI that drafts the video prompts and first frame descriptions: places and recurring subjects to use (animals, objects, people where needed), the look, or sound wishes (it adds no music by default). They come before the AI's own rules wherever they differ."
               value={draft.description_instructions}
               onChange={(event) => edit("description_instructions", event.currentTarget.value)}
               autosize

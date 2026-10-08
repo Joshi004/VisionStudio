@@ -25,7 +25,7 @@ import { formatDateTime } from "../../format";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText, statusColor, typicalText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
-import { clipCell, generateLabel, hasActiveClipJob } from "./clipView";
+import { clipCell, clipModeText, generateLabel, hasActiveClipJob } from "./clipView";
 import { CutEditor } from "./CutEditor";
 import { DraftDescriptionsPanel } from "./DraftDescriptionsPanel";
 import { missingText } from "./promptHints";
@@ -429,6 +429,9 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                                 Needs {missingText(scene.missing)}
                               </Text>
                             )}
+                            <Text size="xs" c="dimmed">
+                              {clipModeText(scene.clip_mode)}
+                            </Text>
                             <Button
                               size="compact-xs"
                               variant="default"

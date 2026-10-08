@@ -128,8 +128,12 @@ class Scene(Base):
             "scene_description_source IN ('manual', 'ai')", name="scene_description_source_valid"
         ),
         CheckConstraint(
-            "frame_descriptions_source IN ('manual', 'ai')",
-            name="frame_descriptions_source_valid",
+            "first_frame_description_source IN ('manual', 'ai')",
+            name="first_frame_description_source_valid",
+        ),
+        CheckConstraint(
+            "last_frame_description_source IN ('manual', 'ai')",
+            name="last_frame_description_source_valid",
         ),
         UniqueConstraint("project_id", "index"),
         Index("idx_scene_project", "project_id"),
@@ -146,12 +150,15 @@ class Scene(Base):
     scene_description: Mapped[str | None] = mapped_column(default=None)
     scene_description_source: Mapped[str | None] = mapped_column(default=None)
     # Added in Phase 12. What the first and last frame should show: written by the AI that
-    # drafts descriptions, or by hand. One source for the pair, since they are drafted and
-    # edited together. `description_job_id` is the `draft_descriptions` job that wrote the
-    # AI text, so a scene can be traced back to the exact prompt that produced it.
+    # drafts descriptions, or by hand. Since Phase 15 each text has its own source (they
+    # shared one before), and the AI writes only the first: the last-frame description is
+    # for a last frame the author adds by hand. `description_job_id` is the
+    # `draft_descriptions` job that wrote the AI text, so a scene can be traced back to the
+    # exact prompt that produced it.
     first_frame_description: Mapped[str | None] = mapped_column(default=None)
     last_frame_description: Mapped[str | None] = mapped_column(default=None)
-    frame_descriptions_source: Mapped[str | None] = mapped_column(default=None)
+    first_frame_description_source: Mapped[str | None] = mapped_column(default=None)
+    last_frame_description_source: Mapped[str | None] = mapped_column(default=None)
     # `use_alter`: `job.scene_id` points back at this table, the same intended cycle as
     # project and asset (see `Project.voiceover_asset_id`).
     description_job_id: Mapped[int | None] = mapped_column(

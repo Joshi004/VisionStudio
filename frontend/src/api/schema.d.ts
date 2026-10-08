@@ -1636,8 +1636,10 @@ export interface components {
             first_frame_description: string | null;
             /** Last Frame Description */
             last_frame_description: string | null;
-            /** Frame Descriptions Source */
-            frame_descriptions_source: ("manual" | "ai") | null;
+            /** First Frame Description Source */
+            first_frame_description_source: ("manual" | "ai") | null;
+            /** Last Frame Description Source */
+            last_frame_description_source: ("manual" | "ai") | null;
             /** Description Job Id */
             description_job_id: number | null;
             /** Prompt */
@@ -1645,9 +1647,14 @@ export interface components {
             first_frame: components["schemas"]["FrameOut"] | null;
             last_frame: components["schemas"]["FrameOut"] | null;
             /** Missing */
-            missing: ("description" | "first_frame" | "last_frame")[];
+            missing: ("description" | "first_frame")[];
             /** Ready */
             ready: boolean;
+            /**
+             * Clip Mode
+             * @enum {string}
+             */
+            clip_mode: "first_frame" | "first_and_last";
             /** Use Clip Sound */
             use_clip_sound: boolean;
             /** Selected Clip Asset Id */
@@ -1902,6 +1909,8 @@ export interface components {
             duration_s: number | null;
             /** Audio Codec */
             audio_codec: string | null;
+            /** Clip Mode */
+            clip_mode: ("first_frame" | "first_and_last") | null;
             /** Selected */
             selected: boolean;
             /** Out Of Date */

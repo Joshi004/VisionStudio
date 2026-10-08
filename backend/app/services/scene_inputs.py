@@ -1,4 +1,5 @@
-"""A scene's inputs: its description and its first and last frame (ANALYSIS.md Section 4.2).
+"""A scene's inputs: its description, its first frame and an optional last frame
+(ANALYSIS.md Section 4.2).
 
 Manual-first: whoever made an input, it is the same column or asset row, and only
 `scene_description_source` and `asset.source` say where it came from. Readiness is computed
@@ -29,7 +30,9 @@ from app.services.storage import TooLargeError, get_storage
 
 _logger = logging.getLogger(__name__)
 
-MissingInput = Literal["description", "first_frame", "last_frame"]
+MissingInput = Literal["description", "first_frame"]
+# How a scene's clip is made: from its first frame alone, or from both frames.
+ClipMode = Literal["first_frame", "first_and_last"]
 FrameSlot = Literal["first", "last"]
 
 DESCRIPTION_MAX_CHARS: Final = 4000
@@ -51,8 +54,8 @@ class DescriptionTooLong(ValueError):
 
 
 def missing_inputs(scene: Scene | Any) -> list[MissingInput]:
-    """What a scene still needs before a clip can be generated: a description and both
-    frames. Pure, and the only definition of "ready".
+    """What a scene still needs before a clip can be generated: a description and a first
+    frame. The last frame is optional. Pure, and the only definition of "ready".
     """
     description = scene.scene_description
     missing: list[MissingInput] = []
@@ -60,13 +63,19 @@ def missing_inputs(scene: Scene | Any) -> list[MissingInput]:
         missing.append("description")
     if scene.first_frame_asset_id is None:
         missing.append("first_frame")
-    if scene.last_frame_asset_id is None:
-        missing.append("last_frame")
     return missing
 
 
 def is_ready(scene: Scene | Any) -> bool:
     return not missing_inputs(scene)
+
+
+def clip_mode(scene: Scene | Any) -> ClipMode:
+    """How the scene's clip is made: with a last frame attached, the clip is made to end on
+    it (keyframe interpolation); without one, from the first frame alone (image-to-video).
+    Pure. The page, and the clip job when it prepares its request, both use this.
+    """
+    return "first_and_last" if scene.last_frame_asset_id is not None else "first_frame"
 
 
 async def get_scene(session: AsyncSession, project_id: int, scene_id: int) -> Scene | None:
@@ -104,6 +113,13 @@ _TEXT_LABELS: Final[dict[str, str]] = {
 }
 
 
+# Each frame description and the column that says who wrote it (Phase 15).
+_FRAME_TEXT_SOURCES: Final[dict[str, str]] = {
+    "first_frame_description": "first_frame_description_source",
+    "last_frame_description": "last_frame_description_source",
+}
+
+
 def _text_or_none(value: str | None) -> str | None:
     return (value or "").strip() or None
 
@@ -115,11 +131,11 @@ async def set_texts(
 
     Each text is trimmed, and a blank one is cleared. A text that equals what is stored is
     left alone, so saving an AI draft without editing it keeps it the AI's. A text that
-    changed becomes the author's: the description's `scene_description_source`, or the pair's
-    `frame_descriptions_source` for the two frame descriptions (the pair is the author's as
-    soon as the author edits either, and has no source when both are blank). A later draft
-    never overwrites the author's text. The job that wrote an AI text stays on the scene, so
-    the draft can still be compared with what the author made of it. Commits.
+    changed becomes the author's, in its own source column (`scene_description_source`,
+    `first_frame_description_source` or `last_frame_description_source`), and a text that
+    was cleared has no source. Editing one text never changes another's source. A later
+    draft never overwrites the author's text. The job that wrote an AI text stays on the
+    scene, so the draft can still be compared with what the author made of it. Commits.
 
     Raises DescriptionTooLong or SceneGone.
     """
@@ -141,14 +157,10 @@ async def set_texts(
             scene.scene_description = text
             scene.scene_description_source = "manual" if text else None
 
-    frames_changed = False
-    for field in ("first_frame_description", "last_frame_description"):
+    for field, source_column in _FRAME_TEXT_SOURCES.items():
         if field in new_texts and new_texts[field] != _text_or_none(getattr(scene, field)):
             setattr(scene, field, new_texts[field])
-            frames_changed = True
-    if frames_changed:
-        has_text = scene.first_frame_description or scene.last_frame_description
-        scene.frame_descriptions_source = "manual" if has_text else None
+            setattr(scene, source_column, "manual" if new_texts[field] else None)
 
     await session.commit()
 

@@ -29,9 +29,17 @@ export function clipCell(scene: Pick<Scene, "takes">): string {
   return `Take ${takes.length - selectedIndex} of ${takes.length}`;
 }
 
-/** "seed 1527961933 · 81 frames · 3.38 s · sound: aac". */
+/** How a scene's clip is made: from its first frame alone, or from both frames. */
+export function clipModeText(mode: Scene["clip_mode"]): string {
+  return mode === "first_and_last" ? "First and last frame" : "First frame only";
+}
+
+/** "first frame only · seed 1527961933 · 81 frames · 3.38 s · sound: aac". */
 export function takeLine(take: Take): string {
   const parts: string[] = [];
+  if (take.clip_mode !== null) {
+    parts.push(clipModeText(take.clip_mode).toLowerCase());
+  }
   if (take.seed !== null) {
     parts.push(`seed ${take.seed}`);
   }

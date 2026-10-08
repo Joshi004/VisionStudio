@@ -1,11 +1,17 @@
-"""Writing scene descriptions with a language model (Phase 12). Pure functions, no I/O.
+"""Writing scene descriptions with a language model (Phase 12, reworked in Phase 15). Pure
+functions, no I/O.
 
 One request carries the whole script and every scene, and the model answers with the
-characters and places of the video (`world`) and, for each scene, three texts:
+subjects and places of the video (`world`) and, for each scene, two texts:
 
 - `video_prompt`: the motion prompt for the video model (it becomes `scene_description`);
-- `first_frame` and `last_frame`: what the two anchor frames should show, to guide making
-  them by hand now and with an image model later.
+- `first_frame`: what the frame the clip starts on should show, to guide making it by hand
+  now and with an image model later.
+
+A clip is made from its first frame alone, so the model never writes a last frame. A last
+frame is optional and added by the author. If the author wrote a description of one, it is
+sent as context (`SceneToDraft.fixed_last_frame`), so the video prompt can end on it, and it
+is never written.
 
 The steps are the same as for the scene proposal (`scene_planner.py`):
 
@@ -43,13 +49,14 @@ REASONING_EFFORT: Final = "high"
 # Longer than any description the page accepts (`scene_inputs.DESCRIPTION_MAX_CHARS`).
 FIELD_MAX_CHARS: Final = 4000
 
-CONTINUITY_VALUES: Final = ("new_place", "same_place_new_angle", "continues_shot")
+CONTINUITY_VALUES: Final = ("new_place", "same_place_new_angle", "continues_action")
 
-# The three texts the model writes for a scene.
+# The two texts the model writes for a scene.
 VIDEO_PROMPT: Final = "video_prompt"
 FIRST_FRAME: Final = "first_frame"
+FIELDS: Final = (VIDEO_PROMPT, FIRST_FRAME)
+# Never written by the model. The author's own text for it is sent as context only.
 LAST_FRAME: Final = "last_frame"
-FIELDS: Final = (VIDEO_PROMPT, FIRST_FRAME, LAST_FRAME)
 
 
 def _system_prompt(profile: PromptProfile) -> str:
@@ -61,21 +68,28 @@ def _system_prompt(profile: PromptProfile) -> str:
             "- A voiceover reads a script. The video shows pictures that illustrate the "
             "narration. Nobody on screen speaks, the narrator is never seen, and there is no "
             "on-screen text.",
-            "- The script is cut into scenes. Each scene becomes one short clip, made by "
-            f"{profile.video_model} from three things that you write: a first frame (a still "
-            "image), a last frame (a still image) and a motion prompt. The video model fills "
-            "in the movement between the two frames.",
+            "- The script is cut into scenes. Each scene becomes one short clip, made with "
+            f"{profile.video_model}. You write two things for each clip: a first frame (a "
+            "still image) and a motion prompt. The video model starts from the first frame "
+            "and invents the movement from the prompt.",
             "- Scenes are joined with hard cuts. Each scene must work on its own, and all "
             "scenes together must look like one film.",
             "",
             "What you write for every scene",
-            '- "first_frame": the still image the clip starts on.',
-            '- "last_frame": the still image the clip ends on: the same shot after one clear '
-            "change that fits the scene's length.",
+            '- "first_frame": the still image the clip starts on: the instant just before the '
+            "motion begins.",
             '- "video_prompt": the motion prompt.',
             '- "continuity": "new_place" (a new place or time), "same_place_new_angle" (the '
-            "previous scene's place and people, seen from a new angle or distance) or "
-            '"continues_shot" (the previous scene\'s last frame carries straight on).',
+            "previous scene's place and subjects, seen from a new angle or distance) or "
+            '"continues_action" (the same place, subject and framing as the previous scene, '
+            "with the first frame showing where the previous scene's motion ended).",
+            "",
+            "What the story shows",
+            "- Tell the story through places, objects, nature, animals, light and weather, "
+            "rather than through a human lead.",
+            "- People may appear when a scene needs them, but keep them incidental: hands at "
+            "work, a distant figure, someone seen from behind. Never make a person the subject "
+            "of the video, and never invent a named person that the script does not have.",
             "",
             "The pictures follow the narration",
             "- Show what the narrator says in this scene: literally when it is concrete, and "
@@ -84,36 +98,33 @@ def _system_prompt(profile: PromptProfile) -> str:
             "- Never show the narrator, and never put the narration's words on screen.",
             "",
             "Consistency across the whole video",
-            '- First fill in "world": every recurring character and every recurring place, '
-            'defined once. A character gets a short visual name (for example "the keeper") '
-            "and a fixed description: age, build, hair, clothing, distinguishing features. A "
-            "place gets a fixed description: what it is, its materials, its colours, its light.",
-            "- In every scene, call a character or a place by exactly that name, and repeat "
-            "its identifying details in the frames, word for word where you can. Never invent a "
-            "new look for something that has already appeared.",
+            '- First fill in "world": every recurring subject (an animal, an object, or a '
+            "person where the script needs one) and every recurring place, defined once. A "
+            'subject gets a short visual name (for example "the paper boat") and a fixed '
+            "description: what it is, its size, its materials or species, its colours and "
+            "markings, and for a person the age, build, hair and clothing. A place gets a "
+            "fixed description: what it is, its materials, its colours, its light.",
+            "- In every scene, call a subject or a place by exactly that name, and repeat "
+            "its identifying details in the first frame, word for word where you can. Never "
+            "invent a new look for something that has already appeared.",
             "- One lighting logic per place: the same time of day and the same light sources "
             "whenever the video returns to it.",
             "- One visual style for the whole video: the style the author gives.",
             "",
-            'Rules for "first_frame" and "last_frame" (a frame is one still photograph)',
+            'Rules for "first_frame" (a frame is one still photograph)',
             "- Say what the frame shows at this instant: the subject and what it is doing, the "
             "setting, the shot size and angle (wide, medium or close-up; eye level, low or "
             'high), the lens look (for example "35 mm look, shallow depth of field"), the '
             "light, the colour palette, and where things sit in the frame. 40 to 90 words.",
+            "- It is the instant just before the motion begins: the subject in place and "
+            "ready to move, never the action already done. That gives the video prompt "
+            "something to animate.",
             '- No motion words ("starts to", "begins to") and no sound. Plain photographic '
             "language.",
             "- Fit the frame shape the author gives (portrait or landscape).",
             "- No text, captions, logos or watermarks in the picture.",
-            "- Apply the author's style to the frames in words, because an image model does "
+            "- Apply the author's style to the frame in words, because an image model does "
             "not get it any other way.",
-            "- The last frame is complete on its own (write out the setting and the people "
-            "again), but it keeps everything from the first frame the same except the "
-            "change: the same place, light, people and shot size. The one exception is a "
-            "camera move that changes the framing: then the last frame is framed where the "
-            "move ends.",
-            "- The change must fit the scene's length. A 2 to 3 second scene allows one small "
-            "action. A 5 to 6 second scene allows one action and a reaction. Never a journey, "
-            "never a different place.",
             "",
             profile.video_prompt_rules,
             "",
@@ -122,17 +133,18 @@ def _system_prompt(profile: PromptProfile) -> str:
             "",
             "Fixed fields",
             "- In the scene list, a field marked FIXED was written by the author. Do not "
-            "change it and do not write it again: answer null for that field. Write the other "
-            "fields so that they fit with it.",
+            "change it and do not write it again: answer null for that field.",
+            "- Answer null only for the fields marked FIXED. Every other field of that scene "
+            "must still be written, and must fit the fixed ones.",
             "",
             "Answer with one JSON object only, in exactly this form:",
-            '{"world": {"characters": [{"name": "...", "description": "..."}], '
+            '{"world": {"subjects": [{"name": "...", "description": "..."}], '
             '"places": [{"name": "...", "description": "..."}]}, '
             '"scenes": [{"scene": 1, "continuity": "new_place", "first_frame": "...", '
-            '"last_frame": "...", "video_prompt": "..."}]}',
+            '"video_prompt": "..."}]}',
             '- "scenes" has exactly one entry for each scene in the scene list, in order, '
             "numbered as in the list.",
-            '- "world" lists only the characters and places that appear in more than one '
+            '- "world" lists only the subjects and places that appear in more than one '
             "scene or that need a fixed look. It can be empty.",
         ]
     )
@@ -150,7 +162,9 @@ class SceneToDraft:
     """A scene as the request was built from it, and which of its texts the author wrote.
 
     A text the author wrote is carried here (`fixed_*`), sent to the model as context, and
-    never overwritten. Text the AI wrote earlier, or none, may be written again.
+    never overwritten. Text the AI wrote earlier, or none, may be written again. The model
+    never writes a last frame, so `fixed_last_frame` is context only: the author's own
+    description of a last frame the author adds by hand.
     """
 
     scene_id: int
@@ -172,11 +186,8 @@ class SceneToDraft:
 
     @property
     def all_fixed(self) -> bool:
-        return (
-            self.fixed_video_prompt is not None
-            and self.fixed_first_frame is not None
-            and self.fixed_last_frame is not None
-        )
+        """Whether the author wrote every text the model could write (not the last frame)."""
+        return self.fixed_video_prompt is not None and self.fixed_first_frame is not None
 
     def fixed_text(self, field: str) -> str | None:
         return {
@@ -190,17 +201,18 @@ def to_draft(scene: Scene) -> SceneToDraft:
     """The scene as a drafting request sees it. Pure: it reads the scene's columns only.
 
     A text is the author's unless it was written by the AI (`source = 'ai'`). A text of an
-    unknown source counts as the author's: nothing is overwritten by guessing.
+    unknown source counts as the author's: nothing is overwritten by guessing. A last-frame
+    description written by the AI (an old draft) is not sent: a draft that writes into the
+    scene clears it (`descriptions.plan_write`).
     """
     video = None
     if not _blank(scene.scene_description) and scene.scene_description_source != "ai":
         video = (scene.scene_description or "").strip()
-    frames_are_ai = scene.frame_descriptions_source == "ai"
     first = None
-    if not _blank(scene.first_frame_description) and not frames_are_ai:
+    if not _blank(scene.first_frame_description) and scene.first_frame_description_source != "ai":
         first = (scene.first_frame_description or "").strip()
     last = None
-    if not _blank(scene.last_frame_description) and not frames_are_ai:
+    if not _blank(scene.last_frame_description) and scene.last_frame_description_source != "ai":
         last = (scene.last_frame_description or "").strip()
     return SceneToDraft(
         scene_id=scene.id,
@@ -246,8 +258,8 @@ def _user_message(
     if style:
         lines.append(
             f'Style of the whole video: {style}. The app writes "Style: {style}." in front '
-            "of every video prompt, so do not repeat the style there. Use it in the frame "
-            "descriptions."
+            "of every video prompt, so do not repeat the style there. Use it in the first "
+            "frame descriptions."
         )
     else:
         lines.append(
@@ -280,6 +292,13 @@ def _user_message(
             fixed = scene.fixed_text(field)
             if fixed is not None:
                 lines.append(f"FIXED {field}: {fixed}")
+        if scene.fixed_last_frame is not None:
+            # Context for the video prompt only. The model is never asked for a last frame.
+            lines.append(
+                f"FIXED {LAST_FRAME} (the author added a last frame: the clip ends on it, so "
+                f"the video prompt must end exactly here; do not write one): "
+                f"{scene.fixed_last_frame}"
+            )
         lines.append("")
     lines.append(f"Write all {len(scenes)} scenes now.")
     return "\n".join(lines)
@@ -344,14 +363,12 @@ class SceneDraft:
     continuity: str | None
     video_prompt: str | None
     first_frame: str | None
-    last_frame: str | None
     warnings: tuple[str, ...]
 
     def text(self, field: str) -> str | None:
         return {
             VIDEO_PROMPT: self.video_prompt,
             FIRST_FRAME: self.first_frame,
-            LAST_FRAME: self.last_frame,
         }[field]
 
     @property
@@ -406,7 +423,8 @@ def check_drafts(
     - An entry must name a scene of the request, by its number from 1, and only the first
       entry for a scene counts.
     - A text that is empty, not text, or over the limit is dropped. A text for a field that
-      is fixed is dropped too: the author's own text is never replaced.
+      is fixed is dropped too: the author's own text is never replaced. Only the fields in
+      `FIELDS` are read, so a last frame the model writes anyway is ignored.
     - The video prompt is checked against the profile's wording rules and word limit. That
       gives warnings, which never stop a draft from being saved.
     """
@@ -449,7 +467,6 @@ def check_drafts(
             continuity=continuity if continuity in CONTINUITY_VALUES else None,
             video_prompt=video_prompt,
             first_frame=texts[FIRST_FRAME],
-            last_frame=texts[LAST_FRAME],
             warnings=tuple(warnings),
         )
 

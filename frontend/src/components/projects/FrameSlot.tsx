@@ -29,6 +29,8 @@ type FrameSlotProps = {
   frame: Frame | null;
   /** "First frame" or "Last frame". */
   label: string;
+  /** One line of help shown under the label. */
+  description?: string;
 };
 
 /**
@@ -37,7 +39,7 @@ type FrameSlotProps = {
  * sent (RGB, centre-cropped, at the generation size), and takes a dropped or pasted image
  * to replace it. Every change goes to the server, which answers with the scenes.
  */
-export function FrameSlot({ project, sceneId, slot, frame, label }: FrameSlotProps) {
+export function FrameSlot({ project, sceneId, slot, frame, label, description }: FrameSlotProps) {
   const upload = useUploadFrame(project.id);
   const remove = useRemoveFrame(project.id);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -111,6 +113,11 @@ export function FrameSlot({ project, sceneId, slot, frame, label }: FrameSlotPro
       <Text size="sm" fw={600}>
         {label}
       </Text>
+      {description && (
+        <Text size="xs" c="dimmed">
+          {description}
+        </Text>
+      )}
 
       <div
         className={slotClasses.join(" ")}

@@ -38,7 +38,6 @@ _TIME_TOLERANCE_S: Final = 0.0005
 _PART_NAMES: Final[dict[str, str]] = {
     "description": "a description",
     "first_frame": "a first frame",
-    "last_frame": "a last frame",
 }
 
 

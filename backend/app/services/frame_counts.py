@@ -18,8 +18,8 @@ from __future__ import annotations
 import math
 from typing import Final
 
-# The smallest frame count the keyframe endpoint accepts (the approved OpenAPI spec says
-# `minimum: 9`). `video_generator.frame_limits` reads the real minimum from the spec.
+# The smallest frame count both clip endpoints accept (the approved OpenAPI spec says
+# `minimum: 9` for each). `video_generator.frame_limits` reads the real minimum from the spec.
 MIN_NUM_FRAMES: Final = 9
 
 _FRAMES_PER_STEP: Final = 8

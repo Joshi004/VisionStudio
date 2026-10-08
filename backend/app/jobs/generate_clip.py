@@ -3,18 +3,22 @@ and 6.4).
 
 It is a remote job, so the three steps follow `JobHandler`:
 
-- `start`: build the request once (the first time only), upload the two frames, submit,
+- `start`: build the request once (the first time only), upload the frame or frames, submit,
   and save the server's job id at once.
 - `poll`: ask the server about the job once per tick.
 - `finish`: download the clip, check it with ffprobe, store it as a take and make it the
   scene's selected take, then purge the job on the server.
 
-**The request is built once.** The first `start` works out the prompt, the size, the frame
-count, the seed and the two normalised frames from the scene and the project as they are
-then, and stores that in `job.input`. Every later attempt (after pre-emption, an expired
-result or a Resubmit) sends the same stored request with the same seed and re-uploads the
-same files, because "the correct response to a pre-emption failure is to resubmit the
-exact same request unchanged" (the server's guide). A new seed comes only with a new job.
+**The request is built once.** The first `start` works out the clip mode (a scene with a last
+frame is made by keyframe interpolation, one without by image-to-video from its first frame:
+`scene_inputs.clip_mode`), the endpoint, the prompt, the size, the frame count, the seed and
+the normalised frame or frames from the scene and the project as they are then, and stores
+that in `job.input`. Every later attempt (after pre-emption, an expired result or a
+Resubmit) sends the same stored request to the same stored endpoint with the same seed and
+re-uploads the same files, because "the correct response to a pre-emption failure is to
+resubmit the exact same request unchanged" (the server's guide). A frame added or removed
+after the click changes nothing for a job already prepared. A new seed comes only with a
+new job.
 
 Failure handling follows ANALYSIS.md Section 5.8, row by row (see the notes in each
 method). A dropped connection never fails the job.
@@ -42,7 +46,15 @@ from app.jobs.handlers import JobHandler
 from app.jobs.transcribe import is_preemption, phase_for_poll_error
 from app.providers import contract_guard, video_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import api_contract, clips, derived_frames, ffmpeg, frame_counts, scene_prompt
+from app.services import (
+    api_contract,
+    clips,
+    derived_frames,
+    ffmpeg,
+    frame_counts,
+    scene_inputs,
+    scene_prompt,
+)
 from app.services.assets import add_asset
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -63,11 +75,14 @@ _SEED_LIMIT: Final = 2**31
 
 @dataclass(frozen=True)
 class _Plan:
-    """What a start submits: the request without its keyframes, and the two files to upload."""
+    """What a start submits: the endpoint, the request without its frames, and the file or
+    two files to upload (`last` is None for a clip made from the first frame alone).
+    """
 
+    endpoint: str
     request: dict[str, Any]
     first: Asset
-    last: Asset
+    last: Asset | None
     # The job's input as stored, which a submission extends.
     recorded: dict[str, Any]
 
@@ -104,20 +119,36 @@ class GenerateClipHandler(JobHandler):
         """The plan of an earlier attempt, read back from the job's input. None the first time."""
         recorded = job.input if isinstance(job.input, dict) else {}
         request = recorded.get("request")
+        endpoint = recorded.get("endpoint")
         first_id = _sent_asset_id(recorded.get("first_frame"))
-        last_id = _sent_asset_id(recorded.get("last_frame"))
-        if not isinstance(request, dict) or first_id is None or last_id is None:
+        if (
+            not isinstance(request, dict)
+            or not isinstance(endpoint, str)
+            or video_generator.clip_mode_for(endpoint) is None
+            or first_id is None
+        ):
             return None
+        # Only a keyframe clip has a last frame. A first-frame job stores none.
+        last_id: int | None = None
+        if endpoint == video_generator.KEYFRAME_PATH:
+            last_id = _sent_asset_id(recorded.get("last_frame"))
+            if last_id is None:
+                return None
         async with SessionLocal() as session:
             first = await session.get(Asset, first_id)
-            last = await session.get(Asset, last_id)
+            last = await session.get(Asset, last_id) if last_id is not None else None
             await session.commit()
-        if first is None or last is None:
+        if first is None or (last_id is not None and last is None):
             return None
-        return _Plan(request=request, first=first, last=last, recorded=recorded)
+        return _Plan(endpoint=endpoint, request=request, first=first, last=last, recorded=recorded)
 
     async def _prepare(self, job: Job, partition: str) -> _Plan | None:
-        """Works out the request and the frames to send. Runs on the first attempt only.
+        """Works out the clip mode, the request and the frames to send. Runs on the first
+        attempt only.
+
+        The mode comes from the scene's frames as they are now (a last frame attached means
+        keyframe interpolation, none means image-to-video from the first frame), and is
+        stored with the endpoint, so a frame added or removed later changes nothing.
 
         Fails the job (returns None) when the scene is no longer ready, or the request would
         break a limit of the approved API (ANALYSIS.md Section 5.3 and 5.8: a wrong request
@@ -129,10 +160,11 @@ class GenerateClipHandler(JobHandler):
             project = await session.get(Project, job.project_id)
             first = await _frame(session, scene.first_frame_asset_id) if scene else None
             last = await _frame(session, scene.last_frame_asset_id) if scene else None
+            mode = scene_inputs.clip_mode(scene) if scene else None
             bodies = await contract_guard.approved_bodies(session)
             await session.commit()
 
-        if scene is None or project is None:
+        if scene is None or project is None or mode is None:
             await self._fail(job.id, "The scene for this clip no longer exists.")
             return None
         # The inputs may have changed since the click (the description, a frame, the cuts).
@@ -140,9 +172,11 @@ class GenerateClipHandler(JobHandler):
         prompt = scene_prompt.assemble_prompt(
             project.style_prefix, scene.scene_description, project.prompt_suffix
         )
-        if block is not None or prompt is None or first is None or last is None:
+        needs_last = mode == "first_and_last"
+        if block is not None or prompt is None or first is None or (needs_last and last is None):
             await self._fail(job.id, block or "The scene is not ready any more.")
             return None
+        endpoint = video_generator.ENDPOINTS[mode]
 
         fps = project.fps
         target = frame_counts.target_frames(scene.start_s, scene.end_s, fps)
@@ -150,26 +184,30 @@ class GenerateClipHandler(JobHandler):
         spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
         try:
             if spec is None:
-                raise ValueError(video_generator.NO_ENDPOINT)
-            video_generator.check_frames(num_frames, video_generator.frame_limits(spec))
+                raise ValueError(video_generator.no_endpoint_message(endpoint))
+            video_generator.check_frames(num_frames, video_generator.frame_limits(spec, endpoint))
             video_generator.check_size(project.gen_width, project.gen_height)
         except ValueError as exc:
             await self._fail(job.id, str(exc))
             return None
 
+        first_sent: Asset
+        last_sent: Asset | None = None
         async with SessionLocal() as session:
             try:
                 first_sent = await derived_frames.frame_to_send(
                     session, first, project.gen_width, project.gen_height
                 )
-                last_sent = await derived_frames.frame_to_send(
-                    session, last, project.gen_width, project.gen_height
-                )
+                if needs_last and last is not None:
+                    last_sent = await derived_frames.frame_to_send(
+                        session, last, project.gen_width, project.gen_height
+                    )
             except derived_frames.FrameNotUsable as exc:
                 await self._fail(job.id, str(exc))
                 return None
 
         request = video_generator.build_request(
+            endpoint=endpoint,
             prompt=prompt,
             negative_prompt=project.negative_prompt,
             width=project.gen_width,
@@ -184,9 +222,14 @@ class GenerateClipHandler(JobHandler):
             "scene": {"index": scene.index, "start_s": scene.start_s, "end_s": scene.end_s},
             "fps": fps,
             "target_frames": target,
+            "clip_mode": mode,
             "first_frame": {"original_asset_id": first.id, "sent_asset_id": first_sent.id},
-            "last_frame": {"original_asset_id": last.id, "sent_asset_id": last_sent.id},
-            "endpoint": video_generator.KEYFRAME_PATH,
+            "last_frame": (
+                {"original_asset_id": last.id, "sent_asset_id": last_sent.id}
+                if last is not None and last_sent is not None
+                else None
+            ),
+            "endpoint": endpoint,
             "request": request,
         }
         # Saved before anything is uploaded: the exact request, so a restart or a resubmission
@@ -194,15 +237,17 @@ class GenerateClipHandler(JobHandler):
         async with SessionLocal() as session:
             if not await store.update_input(session, job.id, recorded):
                 return None  # cancelled while preparing
-        return _Plan(request=request, first=first_sent, last=last_sent, recorded=recorded)
+        return _Plan(
+            endpoint=endpoint, request=request, first=first_sent, last=last_sent, recorded=recorded
+        )
 
     async def _upload_and_submit(self, job: Job, base_url: str, plan: _Plan) -> None:
-        """Uploads both frames and submits. The server's job id is saved the moment the submit
-        answers, with nothing that can fail in between (ANALYSIS.md Section 3.3).
+        """Uploads the frame or frames and submits. The server's job id is saved the moment
+        the submit answers, with nothing that can fail in between (ANALYSIS.md Section 3.3).
 
         - 502 at submit: retried once after a pause.
         - 429: the job goes back to the queue and waits.
-        - 400 for an unknown asset id: the frames are uploaded again, once.
+        - 400 for an unknown asset id: the frame or frames are uploaded again, once.
         - 422 and any other refusal: the job fails with the server's message and is not
           retried, because the request we built is what is wrong.
         """
@@ -213,7 +258,8 @@ class GenerateClipHandler(JobHandler):
             try:
                 await self._phase(job.id, phases.UPLOADING_FRAMES)
                 uploads: list[dict[str, Any]] = []
-                for asset in (plan.first, plan.last):
+                frames = [plan.first] if plan.last is None else [plan.first, plan.last]
+                for asset in frames:
                     filename = f"frame-{asset.id}.png"
                     remote_id = await video_generator.upload_frame(
                         base_url, storage.get_path(asset.path), filename
@@ -229,10 +275,17 @@ class GenerateClipHandler(JobHandler):
                 if not await self._is_running(job.id):
                     return  # cancelled while uploading: nothing was submitted
                 await self._phase(job.id, phases.SUBMITTING)
-                body = video_generator.with_keyframes(
-                    plan.request, uploads[0]["remote_asset_id"], uploads[1]["remote_asset_id"]
-                )
-                provider_job_id = await video_generator.submit(base_url, body)
+                # A keyframe plan always has two frames and a first-frame plan one (`_prepare`
+                # and `_stored_plan` both guarantee it).
+                if plan.endpoint == video_generator.KEYFRAME_PATH:
+                    body = video_generator.with_keyframes(
+                        plan.request, uploads[0]["remote_asset_id"], uploads[1]["remote_asset_id"]
+                    )
+                else:
+                    body = video_generator.with_first_frame(
+                        plan.request, uploads[0]["remote_asset_id"]
+                    )
+                provider_job_id = await video_generator.submit(base_url, plan.endpoint, body)
                 break
             except StorageError:
                 await self._fail(job.id, "A frame's file could not be found on disk.")
@@ -445,6 +498,10 @@ class GenerateClipHandler(JobHandler):
             "provider": "gpu",
             "pipeline": remote.get("pipeline") if isinstance(remote, dict) else None,
             "endpoint": recorded.get("endpoint"),
+            # How the clip was made: the LTX mode the request named (None for keyframe
+            # interpolation, which has no such field) and from which frames.
+            "mode": request.get("mode"),
+            "clip_mode": video_generator.clip_mode_for(recorded.get("endpoint")),
             "server_url": recorded.get("server_url"),
             "provider_job_id": job.provider_job_id,
             "job_id": job.id,

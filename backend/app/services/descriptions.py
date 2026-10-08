@@ -41,7 +41,7 @@ _NO_SCENES = "There are no scenes yet. Propose scenes first."
 _PROPOSAL_RUNNING = "A scene proposal is in progress. Wait for it to finish."
 _SCENES_STALE = "The scenes are out of date. Propose scenes again first."
 _NOTHING_TO_DRAFT = (
-    "Nothing to draft: every scene's description and frame descriptions were written by you."
+    "Nothing to draft: every scene's description and first frame description were written by you."
 )
 
 
@@ -99,24 +99,30 @@ def _blank(value: str | None) -> bool:
 
 @dataclass(frozen=True)
 class SceneWrite:
-    """The columns a draft sets on a scene, and which of its three texts they carry."""
+    """The columns a draft sets on a scene, which of its texts they carry, and which old AI
+    text the draft cleared.
+    """
 
     values: dict[str, Any] = field(default_factory=dict)
     written: list[str] = field(default_factory=list)
+    cleared: list[str] = field(default_factory=list)
 
 
 def plan_write(scene: Scene, draft: SceneDraft, job_id: int) -> SceneWrite:
     """What this draft may write into the scene as it is now.
 
     A text is written only if the scene's own is blank or was written by the AI. So a
-    description typed after the request was built is not overwritten either.
+    description typed after the request was built is not overwritten either. Each text has
+    its own source (Phase 15), so the author's first-frame description does not lock the
+    video prompt, and the other way round.
 
-    The two frame descriptions share one source. If the author wrote one of them, the other
-    may still be drafted, but the pair stays the author's (`manual`), so a later draft leaves
-    both alone.
+    The AI never writes a last-frame description. One that an earlier AI draft wrote (the
+    old keyframe profile) is cleared, but only in a scene this draft writes into: it would
+    no longer fit the new texts. The author's last-frame description is never touched.
     """
     values: dict[str, Any] = {}
     written: list[str] = []
+    cleared: list[str] = []
 
     description_is_ai = scene.scene_description_source == "ai"
     if draft.video_prompt is not None and (_blank(scene.scene_description) or description_is_ai):
@@ -124,21 +130,19 @@ def plan_write(scene: Scene, draft: SceneDraft, job_id: int) -> SceneWrite:
         values["scene_description_source"] = "ai"
         written.append(VIDEO_PROMPT)
 
-    frames_are_ai = scene.frame_descriptions_source == "ai"
-    frame_columns = (
-        (FIRST_FRAME, "first_frame_description", draft.first_frame),
-        (LAST_FRAME, "last_frame_description", draft.last_frame),
-    )
-    for name, column, text in frame_columns:
-        if text is not None and (_blank(getattr(scene, column)) or frames_are_ai):
-            values[column] = text
-            written.append(name)
-    if FIRST_FRAME in written or LAST_FRAME in written:
-        author_text_remains = not frames_are_ai and any(
-            not _blank(getattr(scene, column)) for _name, column, _text in frame_columns
-        )
-        values["frame_descriptions_source"] = "manual" if author_text_remains else "ai"
+    first_is_ai = scene.first_frame_description_source == "ai"
+    if draft.first_frame is not None and (_blank(scene.first_frame_description) or first_is_ai):
+        values["first_frame_description"] = draft.first_frame
+        values["first_frame_description_source"] = "ai"
+        written.append(FIRST_FRAME)
 
     if written:
+        last_is_ai_text = (
+            not _blank(scene.last_frame_description) and scene.last_frame_description_source == "ai"
+        )
+        if last_is_ai_text:
+            values["last_frame_description"] = None
+            values["last_frame_description_source"] = None
+            cleared.append(LAST_FRAME)
         values["description_job_id"] = job_id
-    return SceneWrite(values=values, written=written)
+    return SceneWrite(values=values, written=written, cleared=cleared)

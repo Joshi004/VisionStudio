@@ -25,6 +25,7 @@ import {
 } from "../../api/sceneInputs";
 import type { Scene } from "../../api/scenes";
 import { FrameSlot } from "./FrameSlot";
+import { clipModeText } from "./clipView";
 import { countWords, missingText, promptHints } from "./promptHints";
 import { SceneClipSection } from "./SceneClipSection";
 import { seconds } from "./sceneView";
@@ -75,8 +76,8 @@ type SceneInputsDrawerProps = {
 
 /**
  * Everything a scene needs before a clip can be made (its description, the prompt that will
- * be sent, and its first and last frame), and then the clip itself: Generate, the status of
- * the job and the takes. It reads the scene from the scenes query, so it shows the new state
+ * be sent, its first frame and an optional last frame), and then the clip itself: Generate,
+ * the status of the job and the takes. It reads the scene from the scenes query, so it shows the new state
  * after every save without another request.
  */
 export function SceneInputsDrawer({
@@ -215,7 +216,7 @@ export function SceneInputsDrawer({
                   />
                 </Group>
               }
-              description="The motion that connects the two frames: one flowing paragraph, in the present tense. Style, camera and lighting come from the project's guidelines."
+              description="What changes from the first frame, and where the motion ends: one flowing paragraph, in the present tense. With a last frame attached, it ends on that frame. Style, camera and lighting come from the project's guidelines."
               placeholder="A lighthouse beam sweeps slowly across a calm night sea..."
               value={draft}
               onChange={(event) => type("scene_description", event.currentTarget.value)}
@@ -242,12 +243,12 @@ export function SceneInputsDrawer({
                 <Group gap="xs">
                   <span>First frame description</span>
                   <SourceBadge
-                    source={scene.frame_descriptions_source}
+                    source={scene.first_frame_description_source}
                     edited={changed.includes("first_frame_description")}
                   />
                 </Group>
               }
-              description="What the first frame shows: a guide for making or choosing the frame. An AI draft is written from the script only, so check that it matches your frame."
+              description="What the first frame shows, at the instant just before the motion begins: a guide for making or choosing the frame. An AI draft is written from the script only, so check that it matches your frame."
               value={draftOf("first_frame_description")}
               onChange={(event) => type("first_frame_description", event.currentTarget.value)}
               autosize
@@ -262,14 +263,14 @@ export function SceneInputsDrawer({
             <Textarea
               label={
                 <Group gap="xs">
-                  <span>Last frame description</span>
+                  <span>Last frame description (optional)</span>
                   <SourceBadge
-                    source={scene.frame_descriptions_source}
+                    source={scene.last_frame_description_source}
                     edited={changed.includes("last_frame_description")}
                   />
                 </Group>
               }
-              description="What the last frame shows: the same shot after the change that happens in this scene."
+              description="Only for a last frame you add yourself: what it shows. The AI never writes this."
               value={draftOf("last_frame_description")}
               onChange={(event) => type("last_frame_description", event.currentTarget.value)}
               autosize
@@ -343,6 +344,9 @@ export function SceneInputsDrawer({
           </Stack>
 
           <Stack gap={6}>
+            <Text size="sm">
+              Clip made from: {clipModeText(scene.clip_mode).toLowerCase()}
+            </Text>
             <Text size="sm" c="dimmed">
               Frames are cropped from the centre and resized to {project.gen_width} x{" "}
               {project.gen_height} for the video model. The previews show exactly that.
@@ -362,7 +366,8 @@ export function SceneInputsDrawer({
                 sceneId={scene.id}
                 slot="last"
                 frame={scene.last_frame}
-                label="Last frame"
+                label="Last frame (optional)"
+                description="When set, the clip is made to end on this frame."
               />
             </SimpleGrid>
           </Stack>
