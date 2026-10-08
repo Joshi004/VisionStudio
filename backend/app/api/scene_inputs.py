@@ -1,6 +1,7 @@
 """Scene inputs (Phase 8): the description, the first and last frame, and the frame preview.
 
-`PATCH .../scenes/{id}` saves the description. `POST` and `DELETE .../scenes/{id}/frames/{slot}`
+`PATCH .../scenes/{id}` saves the description and the two frame descriptions (Phase 12 added
+the frame descriptions). `POST` and `DELETE .../scenes/{id}/frames/{slot}`
 set and remove a frame. Each answers with the scenes as they are afterwards (`ScenesOut`),
 so the page shows the change without another request.
 
@@ -51,11 +52,16 @@ _PREVIEW_CACHE_CONTROL: Final = "private, no-cache"
 
 
 class SceneUpdate(BaseModel):
-    """A scene's description. Null or blank clears it."""
+    """The texts of a scene. Only the fields that are sent are changed, and null or blank
+    clears one. A text that is saved becomes the author's (`manual`): a later AI draft never
+    overwrites it.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    scene_description: StrictStr | None
+    scene_description: StrictStr | None = None
+    first_frame_description: StrictStr | None = None
+    last_frame_description: StrictStr | None = None
 
 
 def _scene_missing(scene_id: int) -> HTTPException:
@@ -77,17 +83,21 @@ async def _require_scene(session: AsyncSession, project_id: int, scene_id: int) 
     response_model=ScenesOut,
     responses={
         **_NOT_FOUND,
-        422: {"model": ErrorResponse, "description": "The description is too long."},
+        422: {"model": ErrorResponse, "description": "A text is too long."},
     },
 )
 async def update_scene(
     project_id: int, scene_id: int, body: SceneUpdate, session: SessionDep
 ) -> ScenesOut:
-    """Saves the scene's description (`scene_description_source = manual`)."""
+    """Saves the scene's description and frame descriptions that are sent. Each one that
+    changes is marked as written by the author (`manual`).
+    """
     project = await load_project(session, project_id)
     await _require_scene(session, project.id, scene_id)
     try:
-        await scene_inputs.set_description(session, project.id, scene_id, body.scene_description)
+        await scene_inputs.set_texts(
+            session, project.id, scene_id, body.model_dump(exclude_unset=True)
+        )
     except scene_inputs.DescriptionTooLong as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     except scene_inputs.SceneGone:

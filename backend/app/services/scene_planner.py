@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+from app.providers import llm
 from app.services.scene_cuts import Cut, Word
 from app.services.transcript_matching import normalise
 
@@ -129,31 +130,13 @@ def request_hash(called_url: str, body: dict[str, Any]) -> str:
 # --- Reading the answer ------------------------------------------------------------
 
 
-def _json_object(content: str) -> Any:
-    """Parses the model's text. Models sometimes wrap JSON in a code fence or add a
-    sentence around it, so a plain parse is followed by a search for the outer braces.
-    """
-    text = content.strip()
-    try:
-        return json.loads(text)
-    except ValueError:
-        pass
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            return json.loads(text[start : end + 1])
-        except ValueError:
-            pass
-    raise ValueError("The model's answer was not valid JSON.")
-
-
 def parse_answer(content: str) -> list[Any]:
     """The list of scenes in the model's answer. Raises ValueError, with a message fit for
     the user, when there is none.
     """
     if not content.strip():
         raise ValueError("The model's answer was empty.")
-    answer = _json_object(content)
+    answer = llm.parse_json_object(content)
     scenes = answer.get("scenes") if isinstance(answer, dict) else None
     if not isinstance(scenes, list):
         raise ValueError('The model\'s answer had no "scenes" list.')

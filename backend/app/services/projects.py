@@ -76,9 +76,16 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "prompt_suffix": "Prompt suffix",
     "negative_prompt": "Negative prompt",
     "cut_instructions": "Cut instructions",
+    "description_instructions": "Description instructions",
     "script_text": "Script",
 }
-_GUIDELINE_FIELDS: Final = ("style_prefix", "prompt_suffix", "negative_prompt", "cut_instructions")
+_GUIDELINE_FIELDS: Final = (
+    "style_prefix",
+    "prompt_suffix",
+    "negative_prompt",
+    "cut_instructions",
+    "description_instructions",
+)
 _NULLABLE_FIELDS: Final = frozenset((*_GUIDELINE_FIELDS, "script_text"))
 
 

@@ -53,6 +53,9 @@ class Project(Base):
     negative_prompt: Mapped[str | None] = mapped_column(default=None)
     clip_sound_volume: Mapped[float] = mapped_column(default=0.2, server_default=text("0.2"))
     cut_instructions: Mapped[str | None] = mapped_column(default=None)
+    # Added in Phase 12: wishes for the AI that writes scene descriptions (characters,
+    # places, look, sound), the counterpart of `cut_instructions`.
+    description_instructions: Mapped[str | None] = mapped_column(default=None)
     script_text: Mapped[str | None] = mapped_column(default=None)
     language: Mapped[str] = mapped_column(default="en", server_default=text("'en'"))
     # Circular reference with `asset` (DATABASE_STRUCTURE.md Section 3): `asset.project_id`
@@ -124,6 +127,10 @@ class Scene(Base):
         CheckConstraint(
             "scene_description_source IN ('manual', 'ai')", name="scene_description_source_valid"
         ),
+        CheckConstraint(
+            "frame_descriptions_source IN ('manual', 'ai')",
+            name="frame_descriptions_source_valid",
+        ),
         UniqueConstraint("project_id", "index"),
         Index("idx_scene_project", "project_id"),
     )
@@ -138,6 +145,18 @@ class Scene(Base):
     cut_note: Mapped[str | None] = mapped_column(default=None)
     scene_description: Mapped[str | None] = mapped_column(default=None)
     scene_description_source: Mapped[str | None] = mapped_column(default=None)
+    # Added in Phase 12. What the first and last frame should show: written by the AI that
+    # drafts descriptions, or by hand. One source for the pair, since they are drafted and
+    # edited together. `description_job_id` is the `draft_descriptions` job that wrote the
+    # AI text, so a scene can be traced back to the exact prompt that produced it.
+    first_frame_description: Mapped[str | None] = mapped_column(default=None)
+    last_frame_description: Mapped[str | None] = mapped_column(default=None)
+    frame_descriptions_source: Mapped[str | None] = mapped_column(default=None)
+    # `use_alter`: `job.scene_id` points back at this table, the same intended cycle as
+    # project and asset (see `Project.voiceover_asset_id`).
+    description_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
+    )
     first_frame_asset_id: Mapped[int | None] = mapped_column(
         ForeignKey("asset.id", ondelete="SET NULL"), default=None
     )
@@ -156,7 +175,8 @@ class Job(Base):
     __tablename__ = "job"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('transcribe', 'plan_scenes', 'generate_clip', 'render_final')",
+            "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
+            "'generate_clip', 'render_final')",
             name="type_valid",
         ),
         CheckConstraint(

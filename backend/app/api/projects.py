@@ -57,6 +57,7 @@ class ProjectUpdate(BaseModel):
     prompt_suffix: StrictStr | None = None
     negative_prompt: StrictStr | None = None
     cut_instructions: StrictStr | None = None
+    description_instructions: StrictStr | None = None
     script_text: StrictStr | None = None
 
 
@@ -96,6 +97,7 @@ class ProjectDetail(BaseModel):
     prompt_suffix: str | None
     negative_prompt: str | None
     cut_instructions: str | None
+    description_instructions: str | None
     script_text: str | None
     voiceover: VoiceoverOut | None
 
@@ -137,6 +139,7 @@ def _detail(project: Project, voiceover: Asset | None) -> ProjectDetail:
         prompt_suffix=project.prompt_suffix,
         negative_prompt=project.negative_prompt,
         cut_instructions=project.cut_instructions,
+        description_instructions=project.description_instructions,
         script_text=project.script_text,
         voiceover=_voiceover_out(voiceover),
     )

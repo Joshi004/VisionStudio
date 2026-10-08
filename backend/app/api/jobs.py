@@ -27,7 +27,9 @@ GPU_URL_KEY = "gpu_api_base_url"
 
 router = APIRouter()
 
-JobType = Literal["transcribe", "plan_scenes", "generate_clip", "render_final"]
+JobType = Literal[
+    "transcribe", "plan_scenes", "draft_descriptions", "generate_clip", "render_final"
+]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "local"]
 

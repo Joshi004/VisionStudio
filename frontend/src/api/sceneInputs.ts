@@ -38,21 +38,31 @@ export function useSceneInputsMutation<TVariables>(
   });
 }
 
-/** Saves a scene's description. Blank clears it. */
-export function useSaveDescription(projectId: number) {
+/** The texts of a scene: the description (the video prompt) and the two frame descriptions. */
+export type SceneTexts = {
+  scene_description?: string;
+  first_frame_description?: string;
+  last_frame_description?: string;
+};
+
+/**
+ * Saves the texts that are sent, and only those. Blank clears one. A text that is saved
+ * becomes the user's own: a later AI draft never overwrites it.
+ */
+export function useSaveSceneTexts(projectId: number) {
   return useSceneInputsMutation(
     projectId,
-    async ({ sceneId, description }: { sceneId: number; description: string }) => {
+    async ({ sceneId, texts }: { sceneId: number; texts: SceneTexts }) => {
       const { data, error, response } = await api.PATCH(
         "/api/projects/{project_id}/scenes/{scene_id}",
         {
           params: { path: { project_id: projectId, scene_id: sceneId } },
-          body: { scene_description: description },
+          body: texts,
         },
       );
       if (!data) {
         throw new ApiError(
-          detailMessage(error, `Could not save the description (HTTP ${response.status}).`),
+          detailMessage(error, `Could not save the text (HTTP ${response.status}).`),
           response.status,
         );
       }

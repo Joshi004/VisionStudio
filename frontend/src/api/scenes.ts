@@ -15,6 +15,8 @@ export type ProposeFlags = components["schemas"]["ProposeScenesRequest"];
 export type SceneWord = components["schemas"]["SceneWordOut"];
 /** One edit of one cut: add, remove or move. */
 export type CutEditBody = components["schemas"]["CutEditRequest"];
+/** What the user has confirmed when drafting the descriptions. */
+export type DraftFlags = components["schemas"]["DraftDescriptionsRequest"];
 
 /** The scenes query lives under the project's key, so saving the script refreshes it. */
 export function scenesKey(projectId: number) {
@@ -67,6 +69,36 @@ export function useProposeScenes(projectId: number) {
       return data;
     },
     onSuccess: () => invalidateAfterJobAction(queryClient),
+  });
+}
+
+/**
+ * Starts drafting the scene descriptions (a paid call to the language model) and returns at
+ * once. Progress shows after a Refresh. A 422 means the scenes changed since the page was
+ * loaded, so they are loaded again.
+ */
+export function useDraftDescriptions(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (flags: DraftFlags) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/draft-descriptions",
+        { params: { path: { project_id: projectId } }, body: flags },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not start drafting (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => invalidateAfterJobAction(queryClient),
+    onError: (error) => {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 422)) {
+        void queryClient.invalidateQueries({ queryKey: scenesKey(projectId) });
+      }
+    },
   });
 }
 

@@ -31,12 +31,14 @@ from app.core import settings as settings_service
 from app.db.models import Asset, Job, Project, Scene
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
+from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.generate_clip import MAX_PARALLEL_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
 from app.services import clips as clips_service
 from app.services import (
     cut_edits,
+    description_writer,
     frame_images,
     scene_cuts,
     scene_inputs,
@@ -44,6 +46,7 @@ from app.services import (
     scene_prompt,
     transcript_matching,
 )
+from app.services import descriptions as descriptions_service
 from app.services import renders as renders_service
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
@@ -71,6 +74,8 @@ _NEEDS_CONFIRMATION = {
 }
 
 CutSource = Literal["ai", "rule", "manual"]
+# Who wrote a text of a scene: the author (typed or edited), or the AI that drafts them.
+TextSource = Literal["manual", "ai"]
 StaleReasonOut = Literal["script_changed", "voiceover_changed"]
 
 
@@ -165,8 +170,17 @@ class SceneOut(BaseModel):
     # cannot be edited (see `edit_blocked_reason`).
     first_word: int | None
     last_word: int | None
-    # The saved description (what the user typed).
+    # The saved description: the motion prompt, typed by the user or drafted by the AI.
     scene_description: str | None
+    # Who wrote it. None while there is no description.
+    scene_description_source: TextSource | None
+    # What the first and last frame should show: a guide for making the frames, typed or
+    # drafted. They share one source: the pair is the user's once the user edits either.
+    first_frame_description: str | None
+    last_frame_description: str | None
+    frame_descriptions_source: TextSource | None
+    # The job that last wrote AI text into this scene. Kept after the user edits the text.
+    description_job_id: int | None
     # What will be sent to the video model: the project's style prefix, the saved description
     # and the prompt suffix. None while there is no description.
     prompt: str | None
@@ -262,6 +276,14 @@ class ScenesOut(BaseModel):
     # the scenes are out of date...), or None when it can. Changes with every take or cut edit,
     # which answer with this object, so the Render button follows without another request.
     render_blocked_reason: str | None
+    # The newest job that drafts the descriptions with AI, whatever its status (Phase 12).
+    description_job: JobSummary | None
+    # The model the next draft will call, and the address after Docker mapping.
+    description_llm: LlmInfoOut
+    # Why the descriptions cannot be drafted now, or None when they can.
+    draft_blocked_reason: str | None
+    # How many scenes have at least one text the AI may write (not the author's own).
+    draftable_count: int
 
 
 def _int(value: object) -> int | None:
@@ -403,6 +425,12 @@ def _scene_out(
         first_word=first_word,
         last_word=last_word,
         scene_description=scene.scene_description,
+        # The database CHECK constraints keep these to the allowed values.
+        scene_description_source=cast(TextSource | None, scene.scene_description_source),
+        first_frame_description=scene.first_frame_description,
+        last_frame_description=scene.last_frame_description,
+        frame_descriptions_source=cast(TextSource | None, scene.frame_descriptions_source),
+        description_job_id=scene.description_job_id,
         prompt=scene_prompt.assemble_prompt(
             project.style_prefix, scene.scene_description, project.prompt_suffix
         ),
@@ -426,9 +454,9 @@ def _scene_out(
     )
 
 
-async def _llm_info(session: AsyncSession) -> LlmInfoOut:
+async def _llm_info(session: AsyncSession, model_key: str = LLM_MODEL_KEY) -> LlmInfoOut:
     url = await settings_service.read_setting(session, LLM_URL_KEY)
-    model = await settings_service.get_str(session, LLM_MODEL_KEY)
+    model = await settings_service.get_str(session, model_key)
     return LlmInfoOut(model=model, will_call=url.will_call)
 
 
@@ -520,6 +548,58 @@ async def propose_scenes(
     return job_detail(JobRow(job=job, project_name=project.name, scene_index=None))
 
 
+class DraftDescriptionsRequest(BaseModel):
+    """What the user has confirmed. Every flag is off unless sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Ask the model again even though the same request was answered before (paid).
+    run_again: StrictBool = False
+
+
+@router.post(
+    "/projects/{project_id}/draft-descriptions",
+    response_model=JobDetail,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        **_NOT_FOUND,
+        422: {
+            "model": ErrorResponse,
+            "description": "There are no scenes yet, a proposal is running, the scenes are out "
+            "of date, there are too many, or every text was written by the user.",
+        },
+    },
+)
+async def draft_descriptions(
+    project_id: int,
+    session: SessionDep,
+    body: DraftDescriptionsRequest | None = None,
+) -> JobDetail:
+    """Starts drafting the scene descriptions (a paid call to the language model), or returns
+    the draft that is already active. The same request as an earlier one reuses its stored
+    answer unless `run_again` is sent. Text the user wrote is never overwritten.
+    """
+    flags = body or DraftDescriptionsRequest()
+    project = await load_project(session, project_id)
+
+    state = await scenes_service.scenes_state(session, project)
+    block = descriptions_service.draft_block(
+        state.scenes, plan_job=state.job, stale_reasons=state.stale_reasons
+    )
+    if block is not None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, block)
+
+    job, _created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=descriptions_service.DRAFT_JOB,
+        provider="llm",
+        input={"requested": "draft", "run_again": flags.run_again},
+    )
+    dispatcher.nudge()
+    return job_detail(JobRow(job=job, project_name=project.name, scene_index=None))
+
+
 async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     """What the page shows about a project's scenes. Reads the database only.
 
@@ -528,6 +608,8 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     """
     state = await scenes_service.scenes_state(session, project)
     llm_info = await _llm_info(session)
+    description_llm = await _llm_info(session, DESCRIPTION_MODEL_KEY)
+    description_job = await store.latest_job(session, project.id, descriptions_service.DRAFT_JOB)
     view = await scenes_service.cuts_view(session, project, state)
     frames = await scene_inputs.load_frames(session, state.scenes)
 
@@ -602,6 +684,16 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             plan_job=state.job,
             stale_reasons=state.stale_reasons,
         ),
+        description_job=(
+            job_summary(JobRow(job=description_job, project_name=project.name, scene_index=None))
+            if description_job is not None
+            else None
+        ),
+        description_llm=description_llm,
+        draft_blocked_reason=descriptions_service.draft_block(
+            state.scenes, plan_job=state.job, stale_reasons=state.stale_reasons
+        ),
+        draftable_count=description_writer.draftable_count(state.scenes),
     )
 
 

@@ -8,6 +8,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (Phase 9, 2026-10-06):** no schema change. Section 5 now documents the real `generate_clip` `input` and `output` (the request is built once and stored, and every later attempt sends it again) and the `asset.provenance` of a clip and of a derived frame, and Section 7 says how a clip, its take and its selection are written. A *take* is a succeeded `generate_clip` job together with its clip asset: there is still no clip table.
 
+**Update (Phase 12, 2026-10-08):** migration `0003`. A new job type, `draft_descriptions` (a paid call to the language model that writes every scene's video prompt and its first and last frame descriptions in one request). `project` gains `description_instructions`. `scene` gains `first_frame_description`, `last_frame_description`, `frame_descriptions_source` and `description_job_id` (the job that wrote the AI text). Section 5 documents the job's `input` and `output`, and Section 7 says how the drafts are written and which fields they may overwrite.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -76,6 +78,7 @@ erDiagram
         integer first_frame_asset_id FK
         integer last_frame_asset_id FK
         integer selected_clip_asset_id FK
+        integer description_job_id FK
     }
     JOB {
         integer id PK
@@ -100,6 +103,7 @@ erDiagram
     SCENE   }o--o| ASSET         : "last_frame_asset_id"
     SCENE   }o--o| ASSET         : "selected_clip_asset_id"
     SCENE   ||--o{ JOB           : "generation attempts"
+    SCENE   }o--o| JOB           : "description_job_id"
     JOB     }o--o| ASSET         : "result_asset_id"
 ```
 
@@ -117,11 +121,14 @@ erDiagram
 | `scene` | `first_frame_asset_id` | `asset.id` | Yes (until uploaded) |
 | `scene` | `last_frame_asset_id` | `asset.id` | Yes (until uploaded) |
 | `scene` | `selected_clip_asset_id` | `asset.id` | Yes (until a clip is generated) |
+| `scene` | `description_job_id` | `job.id` | Yes (until an AI draft writes into the scene; `SET NULL` if that job row is ever removed). Added in Phase 12. |
 | `job` | `project_id` | `project.id` | No |
 | `job` | `scene_id` | `scene.id` | Yes (only per-scene job types set this) |
 | `job` | `result_asset_id` | `asset.id` | Yes (until the job succeeds) |
 
 Note the one circular-looking reference: `asset.project_id` points at `project`, and `project.voiceover_asset_id` points back at `asset`. This isn't a problem in practice because of the order things happen in (Section 1 of `ANALYSIS.md`): the project row is created first with `voiceover_asset_id` left `NULL`, the voiceover file is uploaded afterwards as an `asset` row, and only then is `project.voiceover_asset_id` updated to point at it.
+
+Phase 12 adds a second pair: `scene.description_job_id` points at `job`, and `job.scene_id` points back at `scene`. Both are nullable, and a `draft_descriptions` job is project-level (`scene_id` is NULL), so it survives the replacement of the scenes. The ORM marks `description_job_id` with `use_alter` for the same reason as the voiceover link.
 
 ---
 
@@ -151,6 +158,7 @@ One row per video. Holds output settings (pre-filled from orientation — Sectio
 | `negative_prompt` | TEXT | NULL | blank | Guideline: what to avoid |
 | `clip_sound_volume` | REAL | NOT NULL | 0.2 | 0 = off; otherwise each clip's own sound, as a share of the voiceover's level (0.2 = 14 dB under the voice, 0.05 = 26 dB). The render measures the loudness of the voiceover and of each clip, so every clip lands at the same distance under the voice |
 | `cut_instructions` | TEXT | NULL | blank | Extra instructions for the AI that proposes cuts |
+| `description_instructions` | TEXT | NULL | blank | Extra instructions for the AI that drafts scene descriptions: characters, places, look, sound wishes (Phase 12) |
 | `script_text` | TEXT | NULL | — | Pasted in step B of the flow; `NULL` until then |
 | `language` | TEXT | NOT NULL | `'en'` | Voiceover language (English-only decision) |
 | `voiceover_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Set once the voiceover is uploaded |
@@ -173,6 +181,7 @@ CREATE TABLE project (
     negative_prompt    TEXT,
     clip_sound_volume  REAL NOT NULL DEFAULT 0.2,
     cut_instructions   TEXT,
+    description_instructions TEXT,
     script_text        TEXT,
     language           TEXT NOT NULL DEFAULT 'en',
     voiceover_asset_id INTEGER REFERENCES asset(id) ON DELETE SET NULL
@@ -265,8 +274,12 @@ One cut = one clip (called "Segment" in Revision 1 of `ANALYSIS.md`). The centra
 | `text` | TEXT | NOT NULL | — | This scene's slice of the script: its words joined by single spaces. Phase 7 finds a scene's words again by matching this text against the transcript's `script_words` |
 | `cut_source` | TEXT | NOT NULL | — | `ai` \| `rule` \| `manual` — who placed the cut that ends this scene |
 | `cut_note` | TEXT | NULL | — | Why it needs a look, if it does |
-| `scene_description` | TEXT | NULL | — | What happens in the scene |
+| `scene_description` | TEXT | NULL | — | The motion prompt sent to the video model (with the project's style prefix and suffix around it) |
 | `scene_description_source` | TEXT | NULL | — | `manual` \| `ai` |
+| `first_frame_description` | TEXT | NULL | — | What the first frame should show: a guide for making the frame, by hand now and by an image model later (Phase 12) |
+| `last_frame_description` | TEXT | NULL | — | What the last frame should show: the same shot after the scene's change (Phase 12) |
+| `frame_descriptions_source` | TEXT | NULL | — | `manual` \| `ai`. One source for the pair, because they are drafted and edited together (Phase 12) |
+| `description_job_id` | INTEGER, FK → `job.id` | NULL | — | The `draft_descriptions` job that last wrote AI text into this scene (any of the three texts). Kept after the user edits a text, so the draft in `job.output.drafts` can be compared with what the user made of it. `ON DELETE SET NULL`. Lets a scene be traced to the exact request and answer (Phase 12) |
 | `first_frame_asset_id` | INTEGER, FK → `asset.id` | NULL | — | |
 | `last_frame_asset_id` | INTEGER, FK → `asset.id` | NULL | — | |
 | `use_clip_sound` | BOOLEAN | NOT NULL | true | Per-scene switch; false mutes this scene's own sound |
@@ -284,6 +297,10 @@ CREATE TABLE scene (
     cut_note                  TEXT,
     scene_description         TEXT,
     scene_description_source  TEXT CHECK (scene_description_source IN ('manual', 'ai')),
+    first_frame_description   TEXT,
+    last_frame_description    TEXT,
+    frame_descriptions_source TEXT CHECK (frame_descriptions_source IN ('manual', 'ai')),
+    description_job_id        INTEGER REFERENCES job(id) ON DELETE SET NULL,
     first_frame_asset_id      INTEGER REFERENCES asset(id) ON DELETE SET NULL,
     last_frame_asset_id       INTEGER REFERENCES asset(id) ON DELETE SET NULL,
     use_clip_sound            BOOLEAN NOT NULL DEFAULT 1,
@@ -303,7 +320,7 @@ Every unit of background work: transcribe, plan scenes, generate a clip, render 
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | Owning project |
 | `scene_id` | INTEGER, FK → `scene.id` | NULL | — | Set only for per-scene jobs (`generate_clip`) |
-| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `generate_clip` \| `render_final` |
+| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `generate_clip` \| `render_final` |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `local` |
@@ -323,7 +340,7 @@ CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
     scene_id         INTEGER REFERENCES scene(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'generate_clip', 'render_final')),
+    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'generate_clip', 'render_final')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -539,6 +556,72 @@ At creation, `input` records what the user confirmed and what the proposal is ma
 - `usage.reasoning_tokens` are hidden thinking tokens. They are part of `completion_tokens` and billed as output. Bitdeer reports them at the top level of `usage`.
 - `checks` counts the model's entries: `exact` (number and checksum words agree), `moved` (a nearby word fit the checksum words), `flagged` (they fit nowhere nearby), `dropped` (unusable). `splitter` counts the cuts the rule-based splitter added and removed to keep scenes within the project's limits.
 
+### `job.input` and `job.output` for a `draft_descriptions` job (Phase 12)
+
+A `draft_descriptions` job is a paid call to the language model (`ANALYSIS.md` Section 6.2). It writes, for every scene of a project in **one request**, the video prompt (into `scene.scene_description`) and the first and last frame descriptions. Like `plan_scenes` it has no `provider_job_id`, and a restart never re-runs it. It is a project-level job: `scene_id` is NULL, so replacing the scenes does not delete it.
+
+At creation, `input` records only the click:
+
+```json
+{ "requested": "draft", "run_again": false }
+```
+
+The handler adds the exact request, before the call is made:
+
+```json
+{
+  "profile": { "id": "ltx-2.3-keyframe", "version": 1 },
+  "instructions_sha256": "sha256:9d1c...",
+  "scenes_sent": [
+    { "scene_id": 30, "index": 0, "start_s": 0.0, "end_s": 3.2, "text": "In the beginning...",
+      "fixed": { "video_prompt": false, "first_frame": false, "last_frame": false } }
+  ],
+  "server_url": "https://api-inference.bitdeer.ai/v1",
+  "endpoint": "/chat/completions",
+  "request": { "model": "zai-org/GLM-5.3", "messages": ["..."], "max_tokens": 32000,
+               "stream": false, "response_format": { "type": "json_object" },
+               "reasoning_effort": "high" },
+  "input_hash": "sha256:7ac2..."
+}
+```
+
+- `profile` names the **prompt profile** that wrote the instructions (`services/description_profiles.py`): everything that depends on the video model (its prompt rules, its worked example, its text checks). `version` is raised by hand whenever the profile's text changes, and `instructions_sha256` is the SHA-256 of the full system message, so runs can be grouped by instruction set even if a version bump is forgotten.
+- `scenes_sent` is the snapshot the request was built from. The save writes only scenes whose `scene_id`, times and `text` still equal it. `fixed` marks the fields the user wrote: they are sent to the model as context, and never overwritten.
+- `request` is the whole body (system and user messages included), so any draft can be read back exactly as it was asked for.
+- `input_hash` is the cache key, built like `plan_scenes`' (the address and the request body). The same hash reuses the stored answer unless the user chose Run again.
+
+`output` is written after every attempt, and replaced by the final value when the job succeeds:
+
+```json
+{
+  "answer": {
+    "world": { "characters": [ { "name": "the keeper", "description": "..." } ],
+               "places": [ { "name": "the lighthouse", "description": "..." } ] },
+    "scenes": [ { "scene": 1, "continuity": "new_place", "first_frame": "...", "last_frame": "...",
+                  "video_prompt": "..." } ]
+  },
+  "answer_usable": true,
+  "content": null,
+  "attempts": [ { "outcome": "answered", "http_status": 200, "message": null, "finish_reason": "stop",
+                  "response_id": "…", "elapsed_s": 41.2,
+                  "usage": { "prompt_tokens": 3100, "completion_tokens": 9800, "reasoning_tokens": 6100 } } ],
+  "usage": { "prompt_tokens": 3100, "completion_tokens": 9800, "reasoning_tokens": 6100 },
+  "cache_hit_of_job_id": null,
+  "drafts": [ { "scene_id": 30, "index": 0, "continuity": "new_place",
+                "video_prompt": "...", "first_frame": "...", "last_frame": "...",
+                "warnings": [], "written": ["video_prompt", "first_frame", "last_frame"] } ],
+  "skipped": { "all_fixed": 2, "changed_while_drafting": 0, "missing_in_answer": 0 },
+  "dropped_entries": 0,
+  "seconds": 41.9
+}
+```
+
+- `answer` is the model's JSON verbatim, set only on the job that paid for it. A job that reused an earlier answer holds `answer: null` and `cache_hit_of_job_id`. `world` (the characters and places the model fixed once and reused) and `continuity` (`new_place`, `same_place_new_angle` or `continues_shot`) are kept for analysis, and for the image step that will use them later. They are not shown in the UI.
+- `drafts` is what the checks made of each scene's draft (empty fields and fields over 4,000 characters are dropped). `warnings` are the profile's text rules and word limit that the text breaks. They never block saving. `written` lists the fields that really reached the scene.
+- `skipped.all_fixed` counts scenes with nothing the AI may write, `changed_while_drafting` the scenes whose id, times or text changed after the request was built, and `missing_in_answer` the scenes the model did not return. `dropped_entries` counts answer entries that named a scene that does not exist, or one already answered, or were not objects.
+- A text the author wrote (`source = 'manual'`) is sent to the model as `FIXED` and the model answers `null` for it; any text the model returns for a fixed field is ignored.
+- `scene.description_job_id` points at this job for every scene that received at least one AI field.
+
 ### `asset.provenance` — empty for uploads (Section 4.3)
 
 An uploaded asset (the voiceover, a frame) has no provenance. Two shapes are built and checked against the real server (Phase 9), and a third, for the final video, is under the `render_final` job below (Phase 10). For an image from Bitdeer in a later phase, the sketch is `{"provider": "bitdeer", "model": "seedream-5.0-lite", "prompt": "...", "seed": 12345}`.
@@ -705,7 +788,8 @@ That is the provenance of the `final` asset. `muted_scene_indexes` lists the sce
 | `transcription_url` | `""` | blank = same as `gpu_api_base_url` |
 | `gpu_partition` | `""` | blank = cluster default |
 | `llm_base_url` | `"https://api-inference.bitdeer.ai/v1"` | from `BITDEEP_BASE_URL` env var |
-| `llm_model` | `"zai-org/GLM-5.3-Flash"` | |
+| `llm_model` | `"zai-org/GLM-5.3-Flash"` | the model that proposes the scene cuts |
+| `description_llm_model` | `"zai-org/GLM-5.3"` | the model that drafts scene descriptions (Phase 12); uses `llm_base_url` |
 | `max_parallel_generations` | `4` | |
 | `poll_interval_seconds` | `15` | |
 | `max_parallel_ffmpeg` | `1` | |
@@ -734,7 +818,8 @@ Mapping the flow in `ANALYSIS.md` Section 1 onto table writes, so the structure'
 | Upload voiceover, paste script | `INSERT asset` (`kind='voiceover'`) → `UPDATE project.voiceover_asset_id`, `UPDATE project.script_text` |
 | Transcribe audio, match to script | `INSERT job` (`type='transcribe'`) → on success, `INSERT transcript` (`words`, `script_words`, `voiceover_asset_id`, `script_sha256`) and `UPDATE job` (`status='succeeded'`, `output`) in one transaction |
 | AI picks cut words, code times them | `INSERT job` (`type='plan_scenes'`, `provider='llm'`; the exact request and its `input_hash` are saved to `job.input`, and the LLM's answer to `job.output` the moment it arrives) → on success, in **one transaction**: `UPDATE job` (`status='succeeded'`, `output`), `DELETE` all of the project's `scene` rows and `INSERT` the new ones, one per cut (`index` 0 to n-1, `cut_source`/`cut_note` set). Deleting a scene also deletes the `job` rows that point at it (`scene_id` is `ON DELETE CASCADE`: there are none before `generate_clip` exists), and `asset` files are never touched. When scenes with inputs exist, the replacement only happens if the click confirmed it. |
-| Review and adjust cuts (human checkpoint) | One edit, one transaction, and no `job` row (Phase 7). The transaction takes the write lock first (a no-op `UPDATE` of the project's scenes), then reads the scenes and rebuilds only the scenes next to the cut. A scene that continues keeps its `id`: `UPDATE` of `start_s`, `end_s`, `text`, `cut_source`, `cut_note`. **Add** a cut: the left part keeps the id, the right part is a new `INSERT`. **Remove** a cut: the earlier scene keeps its id, and the later one is `DELETE`d (its `job` rows go with it, `ON DELETE CASCADE`). **Move** a cut: both scenes keep their ids. A cut you add or move sets `cut_source='manual'`; the cut at the other end of a rebuilt scene keeps its source. A rebuilt scene's `cut_note` is cleared. The scenes after the edit are renumbered through temporary negative `index` values, because `UNIQUE (project_id, index)` is checked row by row (`index` stays 0 to n-1 with no gaps). When a rebuilt scene has inputs, the edit is refused (HTTP 409) until it is confirmed. Confirming sets `scene_description`, `scene_description_source`, `first_frame_asset_id`, `last_frame_asset_id` and `selected_clip_asset_id` to NULL on the rebuilt scenes only (`use_clip_sound` stays). Files and `asset` rows are never touched. |
+| Review and adjust cuts (human checkpoint) | One edit, one transaction, and no `job` row (Phase 7). The transaction takes the write lock first (a no-op `UPDATE` of the project's scenes), then reads the scenes and rebuilds only the scenes next to the cut. A scene that continues keeps its `id`: `UPDATE` of `start_s`, `end_s`, `text`, `cut_source`, `cut_note`. **Add** a cut: the left part keeps the id, the right part is a new `INSERT`. **Remove** a cut: the earlier scene keeps its id, and the later one is `DELETE`d (its `job` rows go with it, `ON DELETE CASCADE`). **Move** a cut: both scenes keep their ids. A cut you add or move sets `cut_source='manual'`; the cut at the other end of a rebuilt scene keeps its source. A rebuilt scene's `cut_note` is cleared. The scenes after the edit are renumbered through temporary negative `index` values, because `UNIQUE (project_id, index)` is checked row by row (`index` stays 0 to n-1 with no gaps). When a rebuilt scene has inputs, the edit is refused (HTTP 409) until it is confirmed. Confirming sets `scene_description`, `scene_description_source`, `first_frame_description`, `last_frame_description`, `frame_descriptions_source`, `description_job_id`, `first_frame_asset_id`, `last_frame_asset_id` and `selected_clip_asset_id` to NULL on the rebuilt scenes only (`use_clip_sound` stays). Files and `asset` rows are never touched. |
+| AI drafts the scene descriptions | **Draft** (Phase 12): `INSERT job` (`type='draft_descriptions'`, `provider='llm'`, `input={"requested": "draft", "run_again": ...}`), only from a click and only when scenes exist, are not out of date, no proposal is running, and at most one job of this type is active. The handler builds the request from the active prompt profile, saves it to `job.input` before the call, saves the model's answer to `job.output` the moment it arrives, then writes the drafts in **one transaction**: it takes the write lock first (`lock_scenes`), and for each scene whose id, times and text still equal `input.scenes_sent` it `UPDATE`s `scene_description` + `scene_description_source='ai'` when the description is blank or was written by AI, and the two frame descriptions + `frame_descriptions_source='ai'` when the blank or AI-written ones are still so, and sets `description_job_id`; then `UPDATE job` (`status='succeeded'`, `output`). A text the user wrote (`source='manual'`) is never overwritten. Editing a drafted text in the UI sets its source to `manual`. When the user wrote one frame description but not the other, only the blank one is drafted and the pair's source stays `manual`. |
 | Per scene: description, first/last frame | **Description** (Phase 8): `UPDATE scene` sets `scene_description` (trimmed, at most 4,000 characters) and `scene_description_source='manual'`; a blank description sets both to NULL. **Frame**: `INSERT asset` (`kind='frame'`, `source='upload'`, the original file exactly as uploaded, `width` and `height` as displayed), then `UPDATE scene.first_frame_asset_id` or `last_frame_asset_id`, in one transaction. Remove sets the column to NULL, and the `asset` row and the file stay. Replacing a frame inserts a new asset and repoints the column. **Normalised frames are not stored in this phase**: the preview is rendered on request at the project's current generation size, because that size can change after an upload. Phase 9 normalises again at submission with the same function (`services/frame_images.normalise_frame`) and stores the exact file it sends as a `derived` frame asset. Readiness is computed (`services/scene_inputs.missing_inputs`) and never stored. |
 | Generate one clip per scene | **Generate** (Phase 9): `INSERT job` (`type='generate_clip'`, `provider='gpu'`, `scene_id=<scene>`), only for a ready scene that is not longer than the project's maximum and has no active clip job; "Generate all ready scenes" inserts one per scene that is ready and has no selected take, all in one transaction. The dispatcher starts the job while fewer than `max_parallel_generations` clip jobs are `running` (read every tick). **Start**: the first time, `INSERT asset` for each frame as sent (`kind='frame'`, `source='derived'`, a PNG at the generation size, unless an identical one exists) and `UPDATE job.input` with the request, before anything is uploaded; then the frames are uploaded, the job is submitted, and `UPDATE job` sets `provider_job_id` and the exact body (nothing in between). **Each tick** `UPDATE job` sets `phase`, `last_checked_at` and `output.remote`. **On success**, in one transaction: `INSERT asset` (`kind='clip'`, `source='ai'`, `provenance` as in Section 5), `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`) and `UPDATE scene.selected_clip_asset_id` (the new take is the selected one); then the server's job is purged and `job.output.purge` is merged in. A pre-emption is `UPDATE job SET status='queued', attempt=attempt+1, provider_job_id=NULL` (up to 3 attempts). A proposal replaces the scenes, which deletes their jobs (`ON DELETE CASCADE`), so it is refused while a clip job is active; a cut edit is refused for the scenes it would change while they have one. |
 | Preview clips, regenerate or mute (human checkpoint) | **Regenerate**: another `job` (new random seed) and `asset` row, which becomes the selected take. **Select take**: `UPDATE scene.selected_clip_asset_id`, only to the clip of a succeeded `generate_clip` job of that scene. **Clip sound**: `UPDATE scene.use_clip_sound`. **Cancel**: for a queued job, `status='cancelled'`; for a running one the server is asked first (`DELETE /v1/jobs/{id}`), and when it does not answer nothing changes; the server's answer is merged into `output.cancel`. Takes are never deleted. A take whose `provenance.scene_start_s` and `scene_end_s` no longer equal the scene's is shown as out of date. |
@@ -752,7 +837,7 @@ Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snaps
 2. **Table names:** lowercase `snake_case`, singular (`project`, `asset`, `scene`, `job`, `transcript`, `setting`, `api_snapshot`), mapped from the PascalCase model names in `ANALYSIS.md`.
 3. **Cascade rules:** `ON DELETE CASCADE` from `project` to its owned rows (`asset`, `transcript`, `scene`, `job`), and `ON DELETE SET NULL` for the optional asset references on `scene` and `job` (so deleting one asset doesn't delete a whole scene). `ANALYSIS.md` doesn't state delete behaviour anywhere; this is a reasonable default, not a documented rule.
 4. **Indexes** beyond the primary/foreign keys (Section 4, "Recommended indexes") are my suggestions based on the dispatcher's described access patterns (Section 3.3), not a list given in `ANALYSIS.md`.
-5. **`job.input` / `job.output` JSON shapes.** The `transcribe`, `plan_scenes`, `generate_clip` and `render_final` shapes were built and checked against the real servers (and, for the render, the image's FFmpeg) in Phases 5, 6, 9 and 10, and the `transcript.words` shape (as of 2026-10-05) and the model's `answer` inside `plan_scenes` output are verbatim from a real response (`ANALYSIS.md` Section 5.1 and 5.2); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
+5. **`job.input` / `job.output` JSON shapes.** The `transcribe`, `plan_scenes`, `draft_descriptions`, `generate_clip` and `render_final` shapes were built and checked against the real servers (and, for the render, the image's FFmpeg) in Phases 5, 6, 9, 10 and 12, and the `transcript.words` shape (as of 2026-10-05) and the model's `answer` inside `plan_scenes` output are verbatim from a real response (`ANALYSIS.md` Section 5.1 and 5.2); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
 6. **`scene.index`** is assumed zero-based and contiguous per project; `ANALYSIS.md` doesn't state the numbering convention explicitly.
 7. **`project.language` default `'en'`** reflects the English-only decision (Revision 3 decisions table) but isn't given as a literal column default in `ANALYSIS.md`.
 8. **Timestamp population** (`DEFAULT CURRENT_TIMESTAMP`) is a SQLite/SQLAlchemy convention I chose; `ANALYSIS.md` doesn't describe how timestamp columns get their values.

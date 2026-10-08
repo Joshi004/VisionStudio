@@ -27,6 +27,7 @@ import { elapsedText, statusColor, typicalText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { clipCell, generateLabel, hasActiveClipJob } from "./clipView";
 import { CutEditor } from "./CutEditor";
+import { DraftDescriptionsPanel } from "./DraftDescriptionsPanel";
 import { missingText } from "./promptHints";
 import { SceneInputsDrawer } from "./SceneInputsDrawer";
 import { useScenePlayer } from "./scenePlayer";
@@ -261,6 +262,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
 
         {scenes.length > 0 && data && (
           <>
+            <DraftDescriptionsPanel project={project} data={data} now={now} />
             <Stack gap={4}>
               <Group gap="sm" align="center">
                 <Text size="sm" fw={600}>

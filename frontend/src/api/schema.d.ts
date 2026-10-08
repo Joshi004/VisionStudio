@@ -391,6 +391,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/draft-descriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft Descriptions
+         * @description Starts drafting the scene descriptions (a paid call to the language model), or returns
+         *     the draft that is already active. The same request as an earlier one reuses its stored
+         *     answer unless `run_again` is sent. Text the user wrote is never overwritten.
+         */
+        post: operations["draft_descriptions_api_projects__project_id__draft_descriptions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/scenes": {
         parameters: {
             query?: never;
@@ -451,7 +473,8 @@ export interface paths {
         head?: never;
         /**
          * Update Scene
-         * @description Saves the scene's description (`scene_description_source = manual`).
+         * @description Saves the scene's description and frame descriptions that are sent. Each one that
+         *     changes is marked as written by the author (`manual`).
          */
         patch: operations["update_scene_api_projects__project_id__scenes__scene_id__patch"];
         trace?: never;
@@ -850,6 +873,17 @@ export interface components {
             /** Text Diff */
             text_diff: string[] | null;
         };
+        /**
+         * DraftDescriptionsRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        DraftDescriptionsRequest: {
+            /**
+             * Run Again
+             * @default false
+             */
+            run_again: boolean;
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /** Detail */
@@ -928,7 +962,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "generate_clip" | "render_final";
             /**
              * Status
              * @enum {string}
@@ -985,7 +1019,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "generate_clip" | "render_final";
             /**
              * Status
              * @enum {string}
@@ -1114,6 +1148,8 @@ export interface components {
             negative_prompt: string | null;
             /** Cut Instructions */
             cut_instructions: string | null;
+            /** Description Instructions */
+            description_instructions: string | null;
             /** Script Text */
             script_text: string | null;
             voiceover: components["schemas"]["VoiceoverOut"] | null;
@@ -1170,6 +1206,8 @@ export interface components {
             negative_prompt?: string | null;
             /** Cut Instructions */
             cut_instructions?: string | null;
+            /** Description Instructions */
+            description_instructions?: string | null;
             /** Script Text */
             script_text?: string | null;
         };
@@ -1282,6 +1320,16 @@ export interface components {
             last_word: number | null;
             /** Scene Description */
             scene_description: string | null;
+            /** Scene Description Source */
+            scene_description_source: ("manual" | "ai") | null;
+            /** First Frame Description */
+            first_frame_description: string | null;
+            /** Last Frame Description */
+            last_frame_description: string | null;
+            /** Frame Descriptions Source */
+            frame_descriptions_source: ("manual" | "ai") | null;
+            /** Description Job Id */
+            description_job_id: number | null;
             /** Prompt */
             prompt: string | null;
             first_frame: components["schemas"]["FrameOut"] | null;
@@ -1306,11 +1354,17 @@ export interface components {
         };
         /**
          * SceneUpdate
-         * @description A scene's description. Null or blank clears it.
+         * @description The texts of a scene. Only the fields that are sent are changed, and null or blank
+         *     clears one. A text that is saved becomes the author's (`manual`): a later AI draft never
+         *     overwrites it.
          */
         SceneUpdate: {
             /** Scene Description */
-            scene_description: string | null;
+            scene_description?: string | null;
+            /** First Frame Description */
+            first_frame_description?: string | null;
+            /** Last Frame Description */
+            last_frame_description?: string | null;
         };
         /**
          * SceneWordOut
@@ -1345,6 +1399,12 @@ export interface components {
             max_parallel_generations: number;
             /** Render Blocked Reason */
             render_blocked_reason: string | null;
+            description_job: components["schemas"]["JobSummary"] | null;
+            description_llm: components["schemas"]["LlmInfoOut"];
+            /** Draft Blocked Reason */
+            draft_blocked_reason: string | null;
+            /** Draftable Count */
+            draftable_count: number;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -2448,6 +2508,50 @@ export interface operations {
             };
         };
     };
+    draft_descriptions_api_projects__project_id__draft_descriptions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DraftDescriptionsRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There are no scenes yet, a proposal is running, the scenes are out of date, there are too many, or every text was written by the user. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_scenes_api_projects__project_id__scenes_get: {
         parameters: {
             query?: never;
@@ -2575,7 +2679,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The description is too long. */
+            /** @description A text is too long. */
             422: {
                 headers: {
                     [name: string]: unknown;

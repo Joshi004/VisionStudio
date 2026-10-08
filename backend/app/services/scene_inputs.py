@@ -14,7 +14,7 @@ The original file is kept as uploaded. The normalised frame is made on demand
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterable, Sequence
+from collections.abc import AsyncIterable, Mapping, Sequence
 from typing import Any, Final, Literal, cast
 
 from sqlalchemy import select, update
@@ -97,31 +97,59 @@ def _was_updated(result: object) -> bool:
     return cast(CursorResult[Any], result).rowcount == 1
 
 
-async def set_description(
-    session: AsyncSession, project_id: int, scene_id: int, text: str | None
-) -> None:
-    """Saves the description as typed by the user (`scene_description_source = manual`).
+_TEXT_LABELS: Final[dict[str, str]] = {
+    "scene_description": "description",
+    "first_frame_description": "first frame description",
+    "last_frame_description": "last frame description",
+}
 
-    The text is trimmed, and a blank description clears both columns. Commits.
+
+def _text_or_none(value: str | None) -> str | None:
+    return (value or "").strip() or None
+
+
+async def set_texts(
+    session: AsyncSession, project_id: int, scene_id: int, changes: Mapping[str, str | None]
+) -> None:
+    """Saves the texts as typed by the user. `changes` holds only the fields that were sent.
+
+    Each text is trimmed, and a blank one is cleared. A text that equals what is stored is
+    left alone, so saving an AI draft without editing it keeps it the AI's. A text that
+    changed becomes the author's: the description's `scene_description_source`, or the pair's
+    `frame_descriptions_source` for the two frame descriptions (the pair is the author's as
+    soon as the author edits either, and has no source when both are blank). A later draft
+    never overwrites the author's text. The job that wrote an AI text stays on the scene, so
+    the draft can still be compared with what the author made of it. Commits.
+
     Raises DescriptionTooLong or SceneGone.
     """
-    cleaned = (text or "").strip()
-    if len(cleaned) > DESCRIPTION_MAX_CHARS:
-        raise DescriptionTooLong(
-            f"The description must be at most {DESCRIPTION_MAX_CHARS:,} characters."
-        )
-    result = await session.execute(
-        update(Scene)
-        .where(Scene.id == scene_id, Scene.project_id == project_id)
-        .values(
-            scene_description=cleaned or None,
-            scene_description_source="manual" if cleaned else None,
-        )
-        .execution_options(synchronize_session=False)
-    )
-    if not _was_updated(result):
+    new_texts = {field: _text_or_none(text) for field, text in changes.items()}
+    for field, text in new_texts.items():
+        if text is not None and len(text) > DESCRIPTION_MAX_CHARS:
+            raise DescriptionTooLong(
+                f"The {_TEXT_LABELS[field]} must be at most {DESCRIPTION_MAX_CHARS:,} characters."
+            )
+
+    scene = await get_scene(session, project_id, scene_id)
+    if scene is None:
         await session.rollback()
         raise SceneGone
+
+    if "scene_description" in new_texts:
+        text = new_texts["scene_description"]
+        if text != _text_or_none(scene.scene_description):
+            scene.scene_description = text
+            scene.scene_description_source = "manual" if text else None
+
+    frames_changed = False
+    for field in ("first_frame_description", "last_frame_description"):
+        if field in new_texts and new_texts[field] != _text_or_none(getattr(scene, field)):
+            setattr(scene, field, new_texts[field])
+            frames_changed = True
+    if frames_changed:
+        has_text = scene.first_frame_description or scene.last_frame_description
+        scene.frame_descriptions_source = "manual" if has_text else None
+
     await session.commit()
 
 

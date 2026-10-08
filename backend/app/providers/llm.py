@@ -13,6 +13,7 @@ the job, because a paid call must be recorded on the job after every attempt.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -138,6 +139,26 @@ async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> 
         usage=usage if isinstance(usage, dict) else None,
         response_id=response_id if isinstance(response_id, str) else None,
     )
+
+
+def parse_json_object(content: str) -> Any:
+    """Parses the model's text as JSON. Models sometimes wrap JSON in a code fence or add a
+    sentence around it, so a plain parse is followed by a search for the outer braces.
+
+    Raises ValueError, with a message fit for the user, when there is no JSON in the text.
+    """
+    text = content.strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except ValueError:
+            pass
+    raise ValueError("The model's answer was not valid JSON.")
 
 
 def usage_counts(usage: object) -> dict[str, int | None]:

@@ -61,6 +61,11 @@ CHECKING_CUTS: Final = "checking the cuts"
 MODEL_FAILED_SPLITTER: Final = "the language model failed: using the rule-based splitter"
 SAVING_SCENES: Final = "saving the scenes"
 
+# --- Running: scene descriptions (Phase 12) ----------------------------------------------
+# It also uses PREPARING_PROMPT, REUSING_ANSWER and `asking_model` from above.
+CHECKING_DESCRIPTIONS: Final = "checking the descriptions"
+SAVING_DESCRIPTIONS: Final = "saving the descriptions"
+
 # --- Finished ---------------------------------------------------------------------
 DONE: Final = "done"
 FAILED: Final = "failed"

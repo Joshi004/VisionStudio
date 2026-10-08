@@ -145,9 +145,24 @@ REGISTRY: tuple[SettingSpec, ...] = (
         key="llm_model",
         group=GROUP_LLM,
         label="LLM model",
-        help="Model name sent with every language model call.",
+        help="Model that proposes the scene cuts.",
         value_type="string",
         default="zai-org/GLM-5.3-Flash",
+        pattern=TextPattern(
+            regex=r"[A-Za-z0-9._/:-]{1,200}",
+            message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
+        ),
+    ),
+    SettingSpec(
+        key="description_llm_model",
+        group=GROUP_LLM,
+        label="Description model",
+        help=(
+            "Model that writes the scene descriptions and frame descriptions. It uses the "
+            "LLM URL above. A larger model writes better, and costs more."
+        ),
+        value_type="string",
+        default="zai-org/GLM-5.3",
         pattern=TextPattern(
             regex=r"[A-Za-z0-9._/:-]{1,200}",
             message="Use letters, numbers and these characters only: . _ / : - (up to 200).",

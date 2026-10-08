@@ -17,6 +17,7 @@ export type Draft = {
   prompt_suffix: string;
   negative_prompt: string;
   cut_instructions: string;
+  description_instructions: string;
 };
 
 export const NUMBER_FIELDS = [
@@ -35,6 +36,7 @@ const TEXT_FIELDS = [
   "prompt_suffix",
   "negative_prompt",
   "cut_instructions",
+  "description_instructions",
 ] as const;
 
 function toPercent(volume: number): number {
@@ -56,6 +58,7 @@ export function initialDraft(project: ProjectDetail): Draft {
     prompt_suffix: project.prompt_suffix ?? "",
     negative_prompt: project.negative_prompt ?? "",
     cut_instructions: project.cut_instructions ?? "",
+    description_instructions: project.description_instructions ?? "",
   };
 }
 
