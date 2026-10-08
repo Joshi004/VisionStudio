@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
+import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { isValidProjectId, PROJECTS_KEY } from "./projects";
 import type { components } from "./schema";
 
@@ -37,20 +38,42 @@ async function fetchScenes(projectId: number) {
 }
 
 /**
+ * True while any job the scenes carry is waiting or running: the proposal, the description
+ * draft, or a scene's clip, first frame or image prompt.
+ */
+export function scenesHaveActiveJob(data: ScenesState | undefined): boolean {
+  if (data === undefined) {
+    return false;
+  }
+  return (
+    isJobActive(data.job) ||
+    isJobActive(data.description_job) ||
+    data.scenes.some(
+      (scene) =>
+        isJobActive(scene.clip_job) ||
+        isJobActive(scene.frame_job) ||
+        isJobActive(scene.image_prompt_job),
+    )
+  );
+}
+
+/**
  * A project's scenes, the proposal they came from and whether they are out of date. It
- * lives under the project's key, so saving the script or the voiceover refreshes it.
+ * lives under the project's key, so saving the script or the voiceover refreshes it. It is
+ * loaded again every few seconds while any of its jobs is waiting or running.
  */
 export function useScenes(projectId: number) {
   return useQuery({
     queryKey: scenesKey(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: isValidProjectId(projectId),
+    refetchInterval: (query) => (scenesHaveActiveJob(query.state.data) ? ACTIVE_POLL_MS : false),
   });
 }
 
 /**
- * Starts the proposal (a paid call to the language model) and returns at once. Progress
- * shows after a Refresh.
+ * Starts the proposal (a paid call to the language model) and returns at once. The page
+ * follows its progress by itself.
  */
 export function useProposeScenes(projectId: number) {
   const queryClient = useQueryClient();
@@ -74,8 +97,8 @@ export function useProposeScenes(projectId: number) {
 
 /**
  * Starts drafting the scene descriptions (a paid call to the language model) and returns at
- * once. Progress shows after a Refresh. A 422 means the scenes changed since the page was
- * loaded, so they are loaded again.
+ * once. The page follows its progress by itself. A 422 means the scenes changed since the
+ * page was loaded, so they are loaded again.
  */
 export function useDraftDescriptions(projectId: number) {
   const queryClient = useQueryClient();
@@ -124,7 +147,12 @@ export function useEditCut(projectId: number) {
       }
       return data;
     },
-    onSuccess: (data) => queryClient.setQueryData(scenesKey(projectId), data),
+    onSuccess: async (data) => {
+      // A check that is still on its way would arrive after this answer and show the old
+      // scenes again, so it is cancelled first.
+      await queryClient.cancelQueries({ queryKey: scenesKey(projectId), exact: true });
+      queryClient.setQueryData(scenesKey(projectId), data);
+    },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 422) {
         void queryClient.invalidateQueries({ queryKey: scenesKey(projectId) });

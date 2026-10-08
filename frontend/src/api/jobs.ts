@@ -4,6 +4,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { GPU_KEY } from "./gpu";
+import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { PROJECTS_KEY } from "./projects";
 import type { components } from "./schema";
 
@@ -32,11 +33,15 @@ async function fetchJobs(projectId: number | undefined) {
   return data;
 }
 
-/** The newest jobs, all of them or those of one project. */
+/**
+ * The newest jobs, all of them or those of one project. They are loaded again every few
+ * seconds while any of them is waiting or running.
+ */
 export function useJobs(projectId?: number) {
   return useQuery({
     queryKey: [...JOBS_KEY, "list", projectId ?? "all"],
     queryFn: () => fetchJobs(projectId),
+    refetchInterval: (query) => (query.state.data?.some(isJobActive) ? ACTIVE_POLL_MS : false),
   });
 }
 
@@ -53,12 +58,16 @@ async function fetchJob(jobId: number) {
   return data;
 }
 
-/** One job with its input and output. Nothing is loaded while `jobId` is null. */
+/**
+ * One job with its input and output. Nothing is loaded while `jobId` is null. It is loaded
+ * again every few seconds while the job is waiting or running.
+ */
 export function useJob(jobId: number | null) {
   return useQuery({
     queryKey: [...JOBS_KEY, "detail", jobId],
     queryFn: () => fetchJob(jobId as number),
     enabled: jobId !== null,
+    refetchInterval: (query) => (isJobActive(query.state.data) ? ACTIVE_POLL_MS : false),
   });
 }
 

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "./client";
+import { STATUS_POLL_MS } from "./polling";
 import type { components } from "./schema";
 
 export type HealthResponse = components["schemas"]["HealthResponse"];
@@ -21,9 +22,11 @@ async function fetchHealth(): Promise<HealthResponse> {
   throw new Error(`Unexpected response from /api/health: ${response.status}`);
 }
 
+/** The backend status in the header. It is loaded again every 30 seconds. */
 export function useHealth() {
   return useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
+    refetchInterval: STATUS_POLL_MS,
   });
 }

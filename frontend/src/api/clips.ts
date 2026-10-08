@@ -36,7 +36,7 @@ export function useStartMutation<TVariables, TResult>(
 
 /**
  * Starts a clip for one scene (Generate, and Regenerate when it has one) and returns at once.
- * The clip takes minutes: progress shows after a Refresh.
+ * The clip takes minutes: the page follows its progress by itself.
  */
 export function useGenerateClip(projectId: number) {
   return useStartMutation(projectId, async ({ sceneId }: { sceneId: number }) => {

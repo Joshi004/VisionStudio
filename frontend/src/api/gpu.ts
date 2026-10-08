@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
+import { STATUS_POLL_MS } from "./polling";
 import type { components } from "./schema";
 
 export type ConnectionTest = components["schemas"]["ConnectionTest"];
@@ -64,9 +65,16 @@ async function fetchStatus() {
   return data;
 }
 
-/** What the banner reads. Stored state only: it never calls the GPU server. */
+/**
+ * What the banner reads. Stored state only: it never calls the GPU server. It is loaded
+ * again every 30 seconds, so a change shows without a Refresh.
+ */
 export function useGpuStatus() {
-  return useQuery({ queryKey: GPU_STATUS_KEY, queryFn: fetchStatus });
+  return useQuery({
+    queryKey: GPU_STATUS_KEY,
+    queryFn: fetchStatus,
+    refetchInterval: STATUS_POLL_MS,
+  });
 }
 
 async function fetchContract() {

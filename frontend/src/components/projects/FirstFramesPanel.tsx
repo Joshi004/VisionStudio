@@ -23,9 +23,8 @@ type FirstFramesPanelProps = {
  * "Generate first frames": one paid image from the image model for every scene that has a
  * current image prompt and no first frame, or an AI first frame that is out of date. Frames the
  * user uploaded are kept. It follows the same rules as the other paid steps: only from a click,
- * with a confirmation that shows the number of images and the estimated cost, and progress
- * shows after a Refresh. Each scene's job and status are in the scenes table and in the
- * scene's drawer.
+ * with a confirmation that shows the number of images and the estimated cost. Progress shows
+ * by itself. Each scene's job and status are in the scenes table and in the scene's drawer.
  */
 export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
   const generate = useGenerateFirstFrames(project.id);
@@ -74,7 +73,7 @@ export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
       </Text>
       <Text size="xs" c="dimmed">
         {firstFrameCountsLine(counts, data.scenes.length)}
-        {counts.making > 0 ? ". Press Refresh to see progress." : ""}
+        {counts.making > 0 ? ". This updates by itself." : ""}
       </Text>
 
       {generate.isError && (
@@ -86,7 +85,7 @@ export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
         <Text size="xs" c="dimmed">
           {generate.data.created === 0
             ? "No first frame needed to start."
-            : `Started ${generate.data.created} first ${generate.data.created === 1 ? "frame" : "frames"}. Press Refresh to see progress.`}
+            : `Started ${generate.data.created} first ${generate.data.created === 1 ? "frame" : "frames"}. This updates by itself.`}
         </Text>
       )}
 

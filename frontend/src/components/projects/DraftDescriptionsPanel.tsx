@@ -12,7 +12,7 @@ import { llmHost } from "./sceneView";
 type DraftDescriptionsPanelProps = {
   project: ProjectDetail;
   data: ScenesState;
-  /** Milliseconds since 1970 as of the last load, for the job's elapsed time. */
+  /** The current time in milliseconds since 1970, for the job's elapsed time. */
   now: number;
 };
 
@@ -20,7 +20,7 @@ type DraftDescriptionsPanelProps = {
  * "Draft descriptions with AI": one paid call that writes every scene's video prompt (for a clip
  * made from its first frame) and its first frame description. It never writes a last frame
  * description. Text the user wrote is kept. It follows the same rules as the scene proposal:
- * only from a click, with a confirmation, and progress shows after a Refresh.
+ * only from a click, with a confirmation. Progress shows by itself.
  */
 export function DraftDescriptionsPanel({ project, data, now }: DraftDescriptionsPanelProps) {
   const draft = useDraftDescriptions(project.id);
@@ -105,7 +105,7 @@ export function DraftDescriptionsPanel({ project, data, now }: DraftDescriptions
           </Group>
           {isActive && (
             <Text size="xs" c="dimmed">
-              A draft takes 1 to 5 minutes. Press Refresh to see its progress.
+              A draft takes 1 to 5 minutes. This updates by itself.
             </Text>
           )}
         </Stack>

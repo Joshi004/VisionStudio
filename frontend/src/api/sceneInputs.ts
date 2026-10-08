@@ -18,7 +18,7 @@ export const DESCRIPTION_MAX_CHARS = 4000;
 
 /**
  * Every change to a scene's inputs answers with the scenes as they are afterwards, so the
- * page shows it at once with no Refresh. After a 404 (the scene was merged away by a cut
+ * page shows it at once. After a 404 (the scene was merged away by a cut
  * edit, or the generation size changed) the page may be showing old data, so it is loaded
  * again.
  */
@@ -29,7 +29,12 @@ export function useSceneInputsMutation<TVariables>(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSuccess: (data) => queryClient.setQueryData(scenesKey(projectId), data),
+    onSuccess: async (data) => {
+      // A check that is still on its way would arrive after this answer and show the old
+      // scenes again, so it is cancelled first.
+      await queryClient.cancelQueries({ queryKey: scenesKey(projectId), exact: true });
+      queryClient.setQueryData(scenesKey(projectId), data);
+    },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 404) {
         void queryClient.invalidateQueries({ queryKey: scenesKey(projectId) });

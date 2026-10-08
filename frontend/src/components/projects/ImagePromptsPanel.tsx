@@ -22,8 +22,8 @@ type ImagePromptsPanelProps = {
  * "Write image prompts": one paid call to the language model for every scene that needs a
  * detailed prompt for its first frame (none yet, or an AI prompt that is out of date). Prompts
  * the user wrote are kept. It follows the same rules as the scene proposal and the drafts: only
- * from a click, with a confirmation that shows the number of calls, and progress shows after a
- * Refresh. Each scene's job and status are in the scenes table and in the scene's drawer.
+ * from a click, with a confirmation that shows the number of calls. Progress shows by itself.
+ * Each scene's job and status are in the scenes table and in the scene's drawer.
  */
 export function ImagePromptsPanel({ project, data }: ImagePromptsPanelProps) {
   const write = useWriteImagePrompts(project.id);
@@ -69,7 +69,7 @@ export function ImagePromptsPanel({ project, data }: ImagePromptsPanelProps) {
       </Text>
       <Text size="xs" c="dimmed">
         {imagePromptCountsLine(counts, data.scenes.length)}
-        {counts.writing > 0 ? ". Press Refresh to see progress." : ""}
+        {counts.writing > 0 ? ". This updates by itself." : ""}
       </Text>
 
       {write.isError && (
@@ -81,7 +81,7 @@ export function ImagePromptsPanel({ project, data }: ImagePromptsPanelProps) {
         <Text size="xs" c="dimmed">
           {write.data.created === 0
             ? "No image prompt needed to start."
-            : `Started ${write.data.created} image ${write.data.created === 1 ? "prompt" : "prompts"}. Press Refresh to see progress.`}
+            : `Started ${write.data.created} image ${write.data.created === 1 ? "prompt" : "prompts"}. This updates by itself.`}
         </Text>
       )}
 

@@ -4,7 +4,9 @@ import { Link } from "react-router";
 
 import { describeError } from "../../api/errors";
 import { useJob, type JobDetail } from "../../api/jobs";
+import { isJobActive } from "../../api/polling";
 import { formatDateTime } from "../../format";
+import { useNow } from "../../hooks/useNow";
 import { elapsedText, jobTypeLabel } from "./jobFormat";
 import { JobActions } from "./JobActions";
 import { JobStatusBadge } from "./JobStatusBadge";
@@ -84,6 +86,8 @@ function JobDetails({ job, now }: { job: JobDetail; now: number }) {
 /** The whole job on the right of the page: its times, its error, and its input and output JSON. */
 export function JobDetailDrawer({ jobId, onClose }: { jobId: number | null; onClose: () => void }) {
   const { data: job, isLoading, isError, error, dataUpdatedAt } = useJob(jobId);
+  // The clock ticks once a second while the job is waiting or running.
+  const now = useNow(isJobActive(job), dataUpdatedAt);
 
   return (
     <Drawer
@@ -99,7 +103,7 @@ export function JobDetailDrawer({ jobId, onClose }: { jobId: number | null; onCl
           {describeError(error)} Press Refresh to try again.
         </Alert>
       )}
-      {job && jobId !== null && job.id === jobId && <JobDetails job={job} now={dataUpdatedAt} />}
+      {job && jobId !== null && job.id === jobId && <JobDetails job={job} now={now} />}
     </Drawer>
   );
 }

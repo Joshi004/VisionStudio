@@ -9,7 +9,7 @@ export type GenerateFirstFramesResult = components["schemas"]["GenerateFirstFram
 
 /**
  * Starts a first frame job (a paid image from the image model) for every scene that needs
- * one, and returns at once. Progress shows after a Refresh. After a refusal the page may be
+ * one, and returns at once. The page follows its progress by itself. After a refusal the page may be
  * showing old data, so the scenes are loaded again.
  */
 export function useGenerateFirstFrames(projectId: number) {

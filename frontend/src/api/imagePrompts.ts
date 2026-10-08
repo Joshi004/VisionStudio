@@ -8,7 +8,7 @@ export type WriteImagePromptsResult = components["schemas"]["WriteImagePromptsOu
 
 /**
  * Starts an image prompt job (a paid call to the language model) for every scene that needs
- * one, and returns at once. Progress shows after a Refresh. After a refusal the page may be
+ * one, and returns at once. The page follows its progress by itself. After a refusal the page may be
  * showing old data, so the scenes are loaded again.
  */
 export function useWriteImagePrompts(projectId: number) {

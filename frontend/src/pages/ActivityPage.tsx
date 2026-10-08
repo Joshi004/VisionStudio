@@ -4,12 +4,14 @@ import { Link } from "react-router";
 
 import { describeError } from "../api/errors";
 import { useJobs } from "../api/jobs";
+import { isJobActive } from "../api/polling";
 import { useProjects } from "../api/projects";
 import { JobActions } from "../components/jobs/JobActions";
 import { JobDetailDrawer } from "../components/jobs/JobDetailDrawer";
 import { JobStatusBadge } from "../components/jobs/JobStatusBadge";
 import { elapsedText, jobTypeLabel } from "../components/jobs/jobFormat";
 import { formatDateTime } from "../format";
+import { useNow } from "../hooks/useNow";
 
 function firstLine(text: string | null): string {
   if (!text) {
@@ -25,9 +27,9 @@ export function ActivityPage() {
   const projects = useProjects();
   const projectId = projectFilter === null ? undefined : Number(projectFilter);
   const { data: jobs, isLoading, isError, error, dataUpdatedAt } = useJobs(projectId);
-  // Elapsed times are worked out from the stored times as of the last time the data was
-  // loaded (on page load, Refresh or returning to the tab). There is no timer.
-  const now = dataUpdatedAt;
+  // Elapsed times are worked out from the stored times and the clock, which ticks once a
+  // second while any job in the list is waiting or running.
+  const now = useNow(jobs?.some(isJobActive) ?? false, dataUpdatedAt);
 
   return (
     <Stack gap="md">

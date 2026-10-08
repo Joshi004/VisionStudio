@@ -19,9 +19,11 @@ import {
 import { useGenerateClip, useGenerateReadyScenes } from "../../api/clips";
 import { describeError } from "../../api/errors";
 import type { ProjectDetail } from "../../api/projects";
-import { useProposeScenes, useScenes, type Scene } from "../../api/scenes";
+import { useProposeScenes, useScenes, scenesHaveActiveJob, type Scene } from "../../api/scenes";
 import { useTranscription } from "../../api/transcription";
 import { formatDateTime } from "../../format";
+import { useNow } from "../../hooks/useNow";
+import { useRefreshWhenFinished } from "../../hooks/useRefreshWhenFinished";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText, statusColor, typicalText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
@@ -72,9 +74,12 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
   const [showMissing, setShowMissing] = useState(false);
 
   const { data, isLoading, isError, error, dataUpdatedAt } = scenesQuery;
-  // Elapsed times are worked out from the stored times as of the last time the data was
-  // loaded (on page load, Refresh or returning to the tab). There is no timer.
-  const now = dataUpdatedAt;
+  // Elapsed times are worked out from the stored times and the clock, which ticks once a
+  // second while any job of the scenes is waiting or running. When the last one finishes,
+  // the whole page is loaded.
+  const anyJobActive = scenesHaveActiveJob(data);
+  const now = useNow(anyJobActive, dataUpdatedAt);
+  useRefreshWhenFinished(anyJobActive);
 
   const job = data?.job ?? null;
   const proposal = data?.proposal ?? null;
@@ -196,7 +201,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
             </Group>
             {isActive && (
               <Text size="xs" c="dimmed">
-                A proposal takes about 20 seconds. Press Refresh to see its progress.
+                A proposal takes about 20 seconds. This updates by itself.
               </Text>
             )}
           </Stack>
@@ -299,8 +304,8 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                 </Button>
                 <Text size="xs" c="dimmed">
                   Starts a clip for each ready scene that has none yet. Each takes 5 to 10 minutes
-                  on the GPU server, and at most {data.max_parallel_generations} run at once. Press
-                  Refresh to see progress.
+                  on the GPU server, and at most {data.max_parallel_generations} run at once. The
+                  page updates by itself.
                 </Text>
               </Group>
               {generateAll.isError && (

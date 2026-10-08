@@ -1,11 +1,19 @@
-import { useIsFetching, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 export function useRefreshAll() {
   const queryClient = useQueryClient();
-  const isRefreshing = useIsFetching() > 0;
+  // Only the user's own Refresh shows a spinner. The checks that run by themselves while
+  // a job is going (and the status checks) must not make the button flash.
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  function refresh() {
-    void queryClient.invalidateQueries();
+  async function refresh() {
+    setIsRefreshing(true);
+    try {
+      await queryClient.invalidateQueries();
+    } finally {
+      setIsRefreshing(false);
+    }
   }
 
   return { refresh, isRefreshing };

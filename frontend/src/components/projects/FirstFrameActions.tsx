@@ -41,7 +41,7 @@ type FirstFrameActionsProps = {
    * prompt, so they are saved first.
    */
   edited: boolean;
-  /** Milliseconds since 1970 as of the last load, for the elapsed time (no timer). */
+  /** The current time in milliseconds since 1970, for the elapsed time. */
   now: number;
 };
 
@@ -149,7 +149,7 @@ export function FirstFrameActions({
           </Group>
           {active && (
             <Text size="xs" c="dimmed">
-              An image takes 20 to 50 seconds. Press Refresh to see its progress.
+              An image takes 20 to 50 seconds. This updates by itself.
             </Text>
           )}
         </Stack>

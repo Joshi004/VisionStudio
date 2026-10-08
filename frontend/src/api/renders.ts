@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
+import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { isValidProjectId, PROJECTS_KEY } from "./projects";
 import { scenesKey } from "./scenes";
 import type { components } from "./schema";
@@ -30,19 +31,23 @@ async function fetchRenders(projectId: number) {
   return data;
 }
 
-/** The newest render job and the finished renders of a project. Reads the database only. */
+/**
+ * The newest render job and the finished renders of a project. Reads the database only. It
+ * is loaded again every few seconds while the render is waiting or running.
+ */
 export function useRenders(projectId: number) {
   return useQuery({
     queryKey: rendersKey(projectId),
     queryFn: () => fetchRenders(projectId),
     enabled: isValidProjectId(projectId),
+    refetchInterval: (query) => (isJobActive(query.state.data?.job) ? ACTIVE_POLL_MS : false),
   });
 }
 
 /**
- * Starts a render and returns at once. Progress shows after a Refresh. After a refused start
- * the page may be showing old data (a clip was changed, the scenes went out of date), so the
- * scenes and the renders are loaded again.
+ * Starts a render and returns at once. The page follows its progress by itself. After a
+ * refused start the page may be showing old data (a clip was changed, the scenes went out of
+ * date), so the scenes and the renders are loaded again.
  */
 export function useStartRender(projectId: number) {
   const queryClient = useQueryClient();

@@ -12,7 +12,7 @@ import { generateLabel, hasActiveClipJob, takeLine } from "./clipView";
 type SceneClipSectionProps = {
   project: ProjectDetail;
   scene: Scene;
-  /** Milliseconds since 1970 as of the last load, for the elapsed time (no timer). */
+  /** The current time in milliseconds since 1970, for the elapsed time. */
   now: number;
 };
 
@@ -53,8 +53,8 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
       {blocked === null && (
         <Text size="xs" c="dimmed">
           A clip takes about {scene.target_frames} frames ({project.fps} fps) and 5 to 10 minutes
-          on the GPU server. Each press makes a new take with a new random seed. Press Refresh to
-          see progress.
+          on the GPU server. Each press makes a new take with a new random seed. The page updates
+          by itself.
         </Text>
       )}
 

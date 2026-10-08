@@ -12,9 +12,12 @@ import {
 } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
+import { isJobActive } from "../../api/polling";
 import type { ProjectDetail } from "../../api/projects";
 import { useStartTranscription, useTranscription, type Transcript } from "../../api/transcription";
 import { formatDateTime } from "../../format";
+import { useNow } from "../../hooks/useNow";
+import { useRefreshWhenFinished } from "../../hooks/useRefreshWhenFinished";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
@@ -70,13 +73,14 @@ function ScriptWords({ transcript }: { transcript: Transcript }) {
 export function TranscriptSection({ project }: { project: ProjectDetail }) {
   const { data, isLoading, isError, error, dataUpdatedAt } = useTranscription(project.id);
   const start = useStartTranscription(project.id);
-  // Elapsed times are worked out from the stored times as of the last time the data was
-  // loaded (on page load, Refresh or returning to the tab). There is no timer.
-  const now = dataUpdatedAt;
 
   const job = data?.job ?? null;
   const transcript = data?.transcript ?? null;
-  const isActive = job !== null && (job.status === "queued" || job.status === "running");
+  const isActive = isJobActive(job);
+  // Elapsed times are worked out from the stored times and the clock, which ticks once a
+  // second while the job is waiting or running. When it finishes, the whole page is loaded.
+  const now = useNow(isActive, dataUpdatedAt);
+  useRefreshWhenFinished(isActive);
   const hasScript = project.script_text !== null && project.script_text.trim() !== "";
 
   let blockedReason: string | null = null;
@@ -134,7 +138,7 @@ export function TranscriptSection({ project }: { project: ProjectDetail }) {
             </Group>
             {isActive && (
               <Text size="xs" c="dimmed">
-                A transcription takes about 2 minutes. Press Refresh to see its progress.
+                A transcription takes about 2 minutes. This updates by itself.
               </Text>
             )}
           </Stack>

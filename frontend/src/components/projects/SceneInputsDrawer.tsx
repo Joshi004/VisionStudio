@@ -76,7 +76,7 @@ type SceneInputsDrawerProps = {
   /** The image model that makes first frames, and its price per image, for the confirmation. */
   imageModel: string;
   pricePerImage: number;
-  /** Milliseconds since 1970 as of the last load, for the clip job's elapsed time. */
+  /** The current time in milliseconds since 1970, for the clip job's elapsed time. */
   now: number;
   onSelect: (sceneId: number) => void;
   onClose: () => void;

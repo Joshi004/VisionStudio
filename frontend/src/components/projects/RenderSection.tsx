@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Alert, Badge, Button, Group, Loader, Paper, Stack, Text, Title } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
+import { isJobActive } from "../../api/polling";
 import type { ProjectDetail } from "../../api/projects";
 import { useRenders, useStartRender } from "../../api/renders";
 import { useScenes } from "../../api/scenes";
+import { useNow } from "../../hooks/useNow";
+import { useRefreshWhenFinished } from "../../hooks/useRefreshWhenFinished";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
@@ -27,11 +30,12 @@ export function RenderSection({ project }: { project: ProjectDetail }) {
   const blockedReason = scenesQuery.data?.render_blocked_reason ?? null;
   const job = rendersQuery.data?.job ?? null;
   const renders = rendersQuery.data?.renders ?? [];
-  // Elapsed times are worked out from the stored times as of the last time the data was
-  // loaded (on page load, Refresh or returning to the tab). There is no timer.
-  const now = rendersQuery.dataUpdatedAt;
 
-  const isActive = job !== null && (job.status === "queued" || job.status === "running");
+  const isActive = isJobActive(job);
+  // Elapsed times are worked out from the stored times and the clock, which ticks once a
+  // second while the render is waiting or running. When it finishes, the whole page is loaded.
+  const now = useNow(isActive, rendersQuery.dataUpdatedAt);
+  useRefreshWhenFinished(isActive);
   const newest = renders[0] ?? null;
   const picked =
     choice !== null && choice.newestAssetId === newest?.asset_id
@@ -93,7 +97,7 @@ export function RenderSection({ project }: { project: ProjectDetail }) {
             </Group>
             {isActive && (
               <Text size="xs" c="dimmed">
-                Press Refresh to see its progress.
+                This updates by itself.
               </Text>
             )}
           </Stack>

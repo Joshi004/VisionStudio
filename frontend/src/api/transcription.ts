@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
+import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { isValidProjectId, PROJECTS_KEY } from "./projects";
 import type { components } from "./schema";
 
@@ -25,17 +26,19 @@ async function fetchTranscription(projectId: number) {
 
 /**
  * The newest transcribe job and transcript of a project. It lives under the project's
- * key, so saving the script or the voiceover refreshes whether it is out of date.
+ * key, so saving the script or the voiceover refreshes whether it is out of date. It is
+ * loaded again every few seconds while the job is waiting or running.
  */
 export function useTranscription(projectId: number) {
   return useQuery({
     queryKey: [...PROJECTS_KEY, projectId, "transcription"],
     queryFn: () => fetchTranscription(projectId),
     enabled: isValidProjectId(projectId),
+    refetchInterval: (query) => (isJobActive(query.state.data?.job) ? ACTIVE_POLL_MS : false),
   });
 }
 
-/** Starts the job and returns at once. Progress shows after a Refresh. */
+/** Starts the job and returns at once. The page follows its progress by itself. */
 export function useStartTranscription(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({

@@ -21,7 +21,7 @@ type ImagePromptActionsProps = {
    * texts, so they are saved first.
    */
   edited: boolean;
-  /** Milliseconds since 1970 as of the last load, for the elapsed time (no timer). */
+  /** The current time in milliseconds since 1970, for the elapsed time. */
   now: number;
 };
 
@@ -91,7 +91,7 @@ export function ImagePromptActions({ project, scene, model, edited, now }: Image
           </Group>
           {active && (
             <Text size="xs" c="dimmed">
-              An image prompt takes about 20 seconds. Press Refresh to see its progress.
+              An image prompt takes about 20 seconds. This updates by itself.
             </Text>
           )}
         </Stack>

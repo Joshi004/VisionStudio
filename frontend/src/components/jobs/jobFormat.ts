@@ -56,8 +56,9 @@ type Timed = Pick<JobSummary, "status" | "created_at" | "started_at" | "finished
 
 /**
  * How long a job has waited, run or taken, worked out from the stored times and `now`
- * (milliseconds since 1970). It is computed when the page renders, so it is right
- * whenever you look, with no timer (ANALYSIS.md Section 3.4).
+ * (milliseconds since 1970). It is computed when the page renders, so it is right whenever
+ * you look. A page that shows a running job passes a `now` from `useNow`, which ticks once a
+ * second (ANALYSIS.md Section 3.4).
  */
 export function elapsedText(job: Timed, now: number): string {
   const created = Date.parse(job.created_at);
