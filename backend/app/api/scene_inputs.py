@@ -1,9 +1,9 @@
 """Scene inputs (Phase 8): the description, the first and last frame, and the frame preview.
 
-`PATCH .../scenes/{id}` saves the description and the two frame descriptions (Phase 12 added
-the frame descriptions). `POST` and `DELETE .../scenes/{id}/frames/{slot}`
-set and remove a frame. Each answers with the scenes as they are afterwards (`ScenesOut`),
-so the page shows the change without another request.
+`PATCH .../scenes/{id}` saves the description, the two frame descriptions (Phase 12 added
+the frame descriptions) and the first frame's image prompt (Phase 16). `POST` and `DELETE`
+`.../scenes/{id}/frames/{slot}` set and remove a frame. Each answers with the scenes as they
+are afterwards (`ScenesOut`), so the page shows the change without another request.
 
 `GET .../frames/{asset_id}/preview` renders a stored frame as the video model will get it:
 RGB, centre-cropped and resized to the project's generation size (ANALYSIS.md Section 5.3).
@@ -62,6 +62,8 @@ class SceneUpdate(BaseModel):
     scene_description: StrictStr | None = None
     first_frame_description: StrictStr | None = None
     last_frame_description: StrictStr | None = None
+    # The detailed prompt for the image model that makes the first frame (Phase 16).
+    image_prompt: StrictStr | None = None
 
 
 def _scene_missing(scene_id: int) -> HTTPException:
@@ -89,8 +91,8 @@ async def _require_scene(session: AsyncSession, project_id: int, scene_id: int) 
 async def update_scene(
     project_id: int, scene_id: int, body: SceneUpdate, session: SessionDep
 ) -> ScenesOut:
-    """Saves the scene's description and frame descriptions that are sent. Each one that
-    changes is marked as written by the author (`manual`).
+    """Saves the scene's description, frame descriptions and image prompt that are sent. Each
+    one that changes is marked as written by the author (`manual`).
     """
     project = await load_project(session, project_id)
     await _require_scene(session, project.id, scene_id)

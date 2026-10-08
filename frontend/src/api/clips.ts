@@ -16,7 +16,7 @@ export type GenerateReadyResult = components["schemas"]["GenerateReadyOut"];
  * After a refused or failed start the page may be showing old data (a scene was merged, the
  * scenes went out of date, a proposal began), so the scenes are loaded again.
  */
-function useStartMutation<TVariables, TResult>(
+export function useStartMutation<TVariables, TResult>(
   projectId: number,
   mutationFn: (variables: TVariables) => Promise<TResult>,
 ) {

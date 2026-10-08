@@ -26,6 +26,7 @@ import {
 import type { Scene } from "../../api/scenes";
 import { FrameSlot } from "./FrameSlot";
 import { clipModeText } from "./clipView";
+import { ImagePromptActions } from "./ImagePromptActions";
 import { countWords, missingText, promptHints } from "./promptHints";
 import { SceneClipSection } from "./SceneClipSection";
 import { seconds } from "./sceneView";
@@ -35,6 +36,7 @@ const TEXT_KEYS: TextKey[] = [
   "scene_description",
   "first_frame_description",
   "last_frame_description",
+  "image_prompt",
 ];
 
 /** Who wrote a text, and whether the box holds changes that are not saved yet. */
@@ -68,6 +70,8 @@ type SceneInputsDrawerProps = {
   scenes: Scene[];
   /** The scene being edited. The drawer is closed when this is null or the scene is gone. */
   sceneId: number | null;
+  /** The model that writes image prompts, for the confirmation of Write image prompt. */
+  imagePromptModel: string;
   /** Milliseconds since 1970 as of the last load, for the clip job's elapsed time. */
   now: number;
   onSelect: (sceneId: number) => void;
@@ -84,6 +88,7 @@ export function SceneInputsDrawer({
   project,
   scenes,
   sceneId,
+  imagePromptModel,
   now,
   onSelect,
   onClose,
@@ -101,6 +106,7 @@ export function SceneInputsDrawer({
     scene_description: scene?.scene_description ?? "",
     first_frame_description: scene?.first_frame_description ?? "",
     last_frame_description: scene?.last_frame_description ?? "",
+    image_prompt: scene?.image_prompt ?? "",
   };
   const typed = scene !== undefined && edit?.sceneId === scene.id ? edit.texts : {};
   const draftOf = (key: TextKey) => typed[key] ?? saved[key];
@@ -260,6 +266,50 @@ export function SceneInputsDrawer({
                   : undefined
               }
             />
+            <Textarea
+              label={
+                <Group gap="xs">
+                  <span>First frame image prompt</span>
+                  <SourceBadge
+                    source={scene.image_prompt_source}
+                    edited={changed.includes("image_prompt")}
+                  />
+                  {scene.image_prompt_out_of_date && !changed.includes("image_prompt") && (
+                    <Badge color="orange" variant="light">
+                      Out of date
+                    </Badge>
+                  )}
+                </Group>
+              }
+              description="A detailed prompt for the image model, written from the first frame description, the description, the narration and the project's style. Keep the main subject out of the bottom tenth: that strip is cut off later."
+              placeholder="Not written yet. Write it with the AI below, or type your own."
+              value={draftOf("image_prompt")}
+              onChange={(event) => type("image_prompt", event.currentTarget.value)}
+              autosize
+              minRows={4}
+              maxRows={14}
+              error={
+                draftOf("image_prompt").length > DESCRIPTION_MAX_CHARS
+                  ? `At most ${DESCRIPTION_MAX_CHARS.toLocaleString()} characters.`
+                  : undefined
+              }
+            />
+            <Text size="xs" c="dimmed" ta="right">
+              {countWords(draftOf("image_prompt"))} words · 120 to 220 works best
+            </Text>
+            {scene.image_prompt_out_of_date && (
+              <Text size="xs" c="orange.8">
+                The descriptions, narration or style changed after this prompt was written.
+              </Text>
+            )}
+            <ImagePromptActions
+              project={project}
+              scene={scene}
+              model={imagePromptModel}
+              edited={dirty}
+              now={now}
+            />
+
             <Textarea
               label={
                 <Group gap="xs">

@@ -28,6 +28,12 @@ import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { clipCell, clipModeText, generateLabel, hasActiveClipJob } from "./clipView";
 import { CutEditor } from "./CutEditor";
 import { DraftDescriptionsPanel } from "./DraftDescriptionsPanel";
+import { ImagePromptsPanel } from "./ImagePromptsPanel";
+import {
+  hasActiveImagePromptJob,
+  imagePromptFailed,
+  imagePromptText,
+} from "./imagePromptView";
 import { missingText } from "./promptHints";
 import { SceneInputsDrawer } from "./SceneInputsDrawer";
 import { useScenePlayer } from "./scenePlayer";
@@ -263,6 +269,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
         {scenes.length > 0 && data && (
           <>
             <DraftDescriptionsPanel project={project} data={data} now={now} />
+            <ImagePromptsPanel project={project} data={data} />
             <Stack gap={4}>
               <Group gap="sm" align="center">
                 <Text size="sm" fw={600}>
@@ -432,6 +439,27 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                             <Text size="xs" c="dimmed">
                               {clipModeText(scene.clip_mode)}
                             </Text>
+                            <Text size="xs" c="dimmed">
+                              {imagePromptText(scene)}
+                            </Text>
+                            {scene.image_prompt_job !== null && hasActiveImagePromptJob(scene) && (
+                              <Text size="xs" c="dimmed">
+                                {scene.image_prompt_job.phase}
+                              </Text>
+                            )}
+                            {imagePromptFailed(scene) && (
+                              <Tooltip
+                                label={
+                                  scene.image_prompt_job?.error ?? "The image prompt failed."
+                                }
+                                multiline
+                                w={260}
+                              >
+                                <Badge color="red" variant="light">
+                                  image prompt failed
+                                </Badge>
+                              </Tooltip>
+                            )}
                             <Button
                               size="compact-xs"
                               variant="default"
@@ -523,6 +551,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
         project={project}
         scenes={scenes}
         sceneId={inputsSceneId}
+        imagePromptModel={data?.image_prompt_llm.model ?? ""}
         now={now}
         onSelect={setInputsSceneId}
         onClose={() => setInputsSceneId(null)}

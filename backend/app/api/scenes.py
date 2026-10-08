@@ -35,6 +35,7 @@ from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.generate_clip import MAX_PARALLEL_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
+from app.jobs.write_image_prompt import IMAGE_PROMPT_MODEL_KEY
 from app.providers import video_generator
 from app.services import clips as clips_service
 from app.services import (
@@ -48,6 +49,7 @@ from app.services import (
     transcript_matching,
 )
 from app.services import descriptions as descriptions_service
+from app.services import image_prompts as image_prompts_service
 from app.services import renders as renders_service
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
@@ -187,6 +189,18 @@ class SceneOut(BaseModel):
     last_frame_description_source: TextSource | None
     # The job that last wrote AI text into this scene. Kept after the user edits the text.
     description_job_id: int | None
+    # The detailed prompt for the image model that makes the first frame (Phase 16), who wrote
+    # it, and the `write_image_prompt` job that last wrote AI text into it.
+    image_prompt: str | None
+    image_prompt_source: TextSource | None
+    image_prompt_job_id: int | None
+    # The AI prompt was written from inputs that differ from the scene's now (computed from
+    # the hash its job kept, never stored). False for a prompt the user wrote.
+    image_prompt_out_of_date: bool
+    # The newest job that writes this scene's image prompt, whatever its status.
+    image_prompt_job: JobSummary | None
+    # Why an image prompt cannot be written for this scene now, or None when it can.
+    image_prompt_blocked_reason: str | None
     # What will be sent to the video model: the project's style prefix, the saved description
     # and the prompt suffix. None while there is no description.
     prompt: str | None
@@ -294,6 +308,13 @@ class ScenesOut(BaseModel):
     draft_blocked_reason: str | None
     # How many scenes have at least one text the AI may write (not the author's own).
     draftable_count: int
+    # The model the next image prompt will be written by, and the address after Docker mapping.
+    image_prompt_llm: LlmInfoOut
+    # Why "Write image prompts" cannot start any job now, or None when it can.
+    image_prompts_blocked_reason: str | None
+    # How many jobs "Write image prompts" would start: scenes with text to work from and no
+    # prompt or an out-of-date AI prompt, and nothing running.
+    image_prompt_candidate_count: int
 
 
 def _int(value: object) -> int | None:
@@ -421,6 +442,9 @@ def _scene_out(
     active_clip: Job | None,
     clip_job: Job | None,
     takes: list[clips_service.Take],
+    prompt_out_of_date: bool,
+    prompt_job: Job | None,
+    prompt_blocked: str | None,
 ) -> SceneOut:
     missing = scene_inputs.missing_inputs(scene)
     return SceneOut(
@@ -445,6 +469,16 @@ def _scene_out(
         ),
         last_frame_description_source=cast(TextSource | None, scene.last_frame_description_source),
         description_job_id=scene.description_job_id,
+        image_prompt=scene.image_prompt,
+        image_prompt_source=cast(TextSource | None, scene.image_prompt_source),
+        image_prompt_job_id=scene.image_prompt_job_id,
+        image_prompt_out_of_date=prompt_out_of_date,
+        image_prompt_job=(
+            job_summary(JobRow(job=prompt_job, project_name=project.name, scene_index=scene.index))
+            if prompt_job is not None
+            else None
+        ),
+        image_prompt_blocked_reason=prompt_blocked,
         prompt=scene_prompt.assemble_prompt(
             project.style_prefix, scene.scene_description, project.prompt_suffix
         ),
@@ -501,6 +535,16 @@ async def propose_scenes(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"Clips are being generated for {generating} {noun}. Wait for them, or cancel "
             "them, before proposing scenes.",
+        )
+    # The same for image prompts (Phase 16): deleting a scene deletes the job that is writing
+    # its prompt, and the paid answer with it.
+    writing = len(await image_prompts_service.active_prompt_jobs(session, project.id))
+    if writing:
+        noun = "scene" if writing == 1 else "scenes"
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Image prompts are being written for {writing} {noun}. Wait for them to finish "
+            "before proposing scenes.",
         )
 
     if project.voiceover_asset_id is None:
@@ -657,6 +701,24 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     takes = await clips_service.takes_by_scene(session, project.id)
     max_parallel = await settings_service.get_int(session, MAX_PARALLEL_KEY)
 
+    # Image prompts (Phase 16): the newest job of each scene, which prompts are out of date
+    # (computed from the hash their job kept), and why a prompt cannot be written.
+    image_prompt_llm = await _llm_info(session, IMAGE_PROMPT_MODEL_KEY)
+    prompt_jobs = await store.latest_jobs_by_scene(
+        session, project.id, image_prompts_service.IMAGE_PROMPT_JOB
+    )
+    active_prompts = await image_prompts_service.active_prompt_jobs(session, project.id)
+    prompt_states = await image_prompts_service.prompt_states(session, project, state.scenes)
+    prompts_project_block = image_prompts_service.project_block(
+        state.scenes,
+        plan_job=state.job,
+        stale_reasons=state.stale_reasons,
+        draft_job=description_job,
+    )
+
+    def prompt_out_of_date(scene: Scene) -> bool:
+        return scene.id in prompt_states and prompt_states[scene.id].out_of_date
+
     scene_outs = [
         _scene_out(
             scene,
@@ -668,9 +730,21 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             active_clip=active_clips.get(scene.id),
             clip_job=clip_jobs.get(scene.id),
             takes=takes.get(scene.id, []),
+            prompt_out_of_date=prompt_out_of_date(scene),
+            prompt_job=prompt_jobs.get(scene.id),
+            prompt_blocked=prompts_project_block or image_prompts_service.scene_block(scene),
         )
         for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
     ]
+    prompt_candidates = sum(
+        1
+        for scene in state.scenes
+        if image_prompts_service.is_candidate(
+            scene,
+            out_of_date=prompt_out_of_date(scene),
+            active=active_prompts.get(scene.id),
+        )
+    )
     generate_ready_count = sum(
         1
         for scene in state.scenes
@@ -709,6 +783,10 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             state.scenes, plan_job=state.job, stale_reasons=state.stale_reasons
         ),
         draftable_count=description_writer.draftable_count(state.scenes),
+        image_prompt_llm=image_prompt_llm,
+        image_prompts_blocked_reason=prompts_project_block
+        or image_prompts_service.all_block(prompt_candidates, len(active_prompts)),
+        image_prompt_candidate_count=prompt_candidates,
     )
 
 
@@ -799,6 +877,16 @@ async def edit_cut(project_id: int, body: CutEditRequest, session: SessionDep) -
         raise _unprocessable(
             f"{_scene_numbers(generating)} {verb} a clip being generated. Wait for {pronoun} "
             "to finish, or cancel the job, before changing this cut."
+        )
+    # An image prompt being written is lost with its scene's jobs, paid answer included.
+    active_prompts = await image_prompts_service.active_prompt_jobs(session, project.id)
+    writing = [scene for scene in affected if scene.id in active_prompts]
+    if writing:
+        verb = "has" if len(writing) == 1 else "have"
+        pronoun = "it" if len(writing) == 1 else "them"
+        raise _unprocessable(
+            f"{_scene_numbers(writing)} {verb} an image prompt being written. Wait for "
+            f"{pronoun} to finish before changing this cut."
         )
     with_inputs = [scene for scene in affected if scene_cuts.has_inputs(scene)]
     if with_inputs and not body.discard_inputs:

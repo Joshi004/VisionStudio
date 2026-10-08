@@ -38,11 +38,15 @@ export function useSceneInputsMutation<TVariables>(
   });
 }
 
-/** The texts of a scene: the description (the video prompt) and the two frame descriptions. */
+/**
+ * The texts of a scene: the description (the video prompt), the two frame descriptions and the
+ * first frame's image prompt.
+ */
 export type SceneTexts = {
   scene_description?: string;
   first_frame_description?: string;
   last_frame_description?: string;
+  image_prompt?: string;
 };
 
 /**

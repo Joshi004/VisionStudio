@@ -66,6 +66,11 @@ SAVING_SCENES: Final = "saving the scenes"
 CHECKING_DESCRIPTIONS: Final = "checking the descriptions"
 SAVING_DESCRIPTIONS: Final = "saving the descriptions"
 
+# --- Running: image prompts (Phase 16) --------------------------------------------------
+# It also uses PREPARING_PROMPT, REUSING_ANSWER and `asking_model` from above.
+CHECKING_IMAGE_PROMPT: Final = "checking the image prompt"
+SAVING_IMAGE_PROMPT: Final = "saving the image prompt"
+
 # --- Finished ---------------------------------------------------------------------
 DONE: Final = "done"
 FAILED: Final = "failed"

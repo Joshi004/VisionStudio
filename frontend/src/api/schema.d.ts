@@ -473,8 +473,8 @@ export interface paths {
         head?: never;
         /**
          * Update Scene
-         * @description Saves the scene's description and frame descriptions that are sent. Each one that
-         *     changes is marked as written by the author (`manual`).
+         * @description Saves the scene's description, frame descriptions and image prompt that are sent. Each
+         *     one that changes is marked as written by the author (`manual`).
          */
         patch: operations["update_scene_api_projects__project_id__scenes__scene_id__patch"];
         trace?: never;
@@ -519,6 +519,52 @@ export interface paths {
         get: operations["frame_preview_api_projects__project_id__frames__asset_id__preview_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/write-image-prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Image Prompts
+         * @description Starts one image prompt job (a paid call to the language model) for every scene that
+         *     has text to work from and no prompt, or an AI prompt that is out of date, and no job
+         *     running. Prompts the user wrote are skipped. All the jobs are created in one transaction.
+         *     The page asks before calling this, and it shows how many it will start
+         *     (`ScenesOut.image_prompt_candidate_count`).
+         */
+        post: operations["write_image_prompts_api_projects__project_id__write_image_prompts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/write-image-prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Image Prompt
+         * @description Starts writing the image prompt of one scene (a paid call to the language model), or
+         *     returns the job already active for it. The same request as an earlier one reuses its stored
+         *     answer unless `run_again` is sent. A prompt the user wrote is refused: clear it first.
+         */
+        post: operations["write_image_prompt_api_projects__project_id__scenes__scene_id__write_image_prompt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1070,7 +1116,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_clip" | "render_final";
             /**
              * Status
              * @enum {string}
@@ -1127,7 +1173,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_clip" | "render_final";
             /**
              * Status
              * @enum {string}
@@ -1642,6 +1688,17 @@ export interface components {
             last_frame_description_source: ("manual" | "ai") | null;
             /** Description Job Id */
             description_job_id: number | null;
+            /** Image Prompt */
+            image_prompt: string | null;
+            /** Image Prompt Source */
+            image_prompt_source: ("manual" | "ai") | null;
+            /** Image Prompt Job Id */
+            image_prompt_job_id: number | null;
+            /** Image Prompt Out Of Date */
+            image_prompt_out_of_date: boolean;
+            image_prompt_job: components["schemas"]["JobSummary"] | null;
+            /** Image Prompt Blocked Reason */
+            image_prompt_blocked_reason: string | null;
             /** Prompt */
             prompt: string | null;
             first_frame: components["schemas"]["FrameOut"] | null;
@@ -1682,6 +1739,8 @@ export interface components {
             first_frame_description?: string | null;
             /** Last Frame Description */
             last_frame_description?: string | null;
+            /** Image Prompt */
+            image_prompt?: string | null;
         };
         /**
          * SceneWordOut
@@ -1722,6 +1781,11 @@ export interface components {
             draft_blocked_reason: string | null;
             /** Draftable Count */
             draftable_count: number;
+            image_prompt_llm: components["schemas"]["LlmInfoOut"];
+            /** Image Prompts Blocked Reason */
+            image_prompts_blocked_reason: string | null;
+            /** Image Prompt Candidate Count */
+            image_prompt_candidate_count: number;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -2007,6 +2071,24 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * WriteImagePromptRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        WriteImagePromptRequest: {
+            /**
+             * Run Again
+             * @default false
+             */
+            run_again: boolean;
+        };
+        /** WriteImagePromptsOut */
+        WriteImagePromptsOut: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
+            /** Created */
+            created: number;
         };
     };
     responses: never;
@@ -3162,6 +3244,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_image_prompts_api_projects__project_id__write_image_prompts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WriteImagePromptsOut"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Image prompts cannot be written now: there are no scenes, a proposal or a draft is running, the scenes are out of date, the scene has no text to work from, or the prompt was written by the user. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    write_image_prompt_api_projects__project_id__scenes__scene_id__write_image_prompt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WriteImagePromptRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Image prompts cannot be written now: there are no scenes, a proposal or a draft is running, the scenes are out of date, the scene has no text to work from, or the prompt was written by the user. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

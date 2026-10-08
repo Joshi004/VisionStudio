@@ -135,6 +135,9 @@ class Scene(Base):
             "last_frame_description_source IN ('manual', 'ai')",
             name="last_frame_description_source_valid",
         ),
+        CheckConstraint(
+            "image_prompt_source IN ('manual', 'ai')", name="image_prompt_source_valid"
+        ),
         UniqueConstraint("project_id", "index"),
         Index("idx_scene_project", "project_id"),
     )
@@ -164,6 +167,15 @@ class Scene(Base):
     description_job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
     )
+    # Added in Phase 16: the detailed prompt for the image model that makes the first frame,
+    # written by the AI (one `write_image_prompt` job per scene) or by hand. The job keeps the
+    # exact request and a hash of the inputs, so whether the prompt is out of date is worked
+    # out when it is read, never stored.
+    image_prompt: Mapped[str | None] = mapped_column(default=None)
+    image_prompt_source: Mapped[str | None] = mapped_column(default=None)
+    image_prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
+    )
     first_frame_asset_id: Mapped[int | None] = mapped_column(
         ForeignKey("asset.id", ondelete="SET NULL"), default=None
     )
@@ -183,7 +195,7 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
-            "'generate_clip', 'render_final')",
+            "'write_image_prompt', 'generate_clip', 'render_final')",
             name="type_valid",
         ),
         CheckConstraint(

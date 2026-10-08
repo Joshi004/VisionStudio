@@ -39,6 +39,9 @@ NO_INPUTS: Final[dict[str, None]] = {
     "first_frame_description_source": None,
     "last_frame_description_source": None,
     "description_job_id": None,
+    "image_prompt": None,
+    "image_prompt_source": None,
+    "image_prompt_job_id": None,
     "first_frame_asset_id": None,
     "last_frame_asset_id": None,
     "selected_clip_asset_id": None,
@@ -220,14 +223,15 @@ def _has_text(value: object) -> bool:
 
 def has_inputs(scene: Scene | Any) -> bool:
     """True when the scene holds something the user (or a later phase) put there: a
-    description, either frame or a chosen clip. Replacing such a scene asks first. Keep the
-    columns in step with `NO_INPUTS`.
+    description, an image prompt, either frame or a chosen clip. Replacing such a scene asks
+    first. Keep the columns in step with `NO_INPUTS`.
     """
     description = scene.scene_description
     return bool(
         (isinstance(description, str) and description.strip())
         or _has_text(scene.first_frame_description)
         or _has_text(scene.last_frame_description)
+        or _has_text(scene.image_prompt)
         or scene.first_frame_asset_id is not None
         or scene.last_frame_asset_id is not None
         or scene.selected_clip_asset_id is not None

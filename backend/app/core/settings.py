@@ -169,6 +169,21 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="image_prompt_llm_model",
+        group=GROUP_LLM,
+        label="Image prompt model",
+        help=(
+            "Model that writes a detailed image prompt for each scene's first frame, one call "
+            "per scene. It uses the LLM URL above."
+        ),
+        value_type="string",
+        default="zai-org/GLM-5.3-Flash",
+        pattern=TextPattern(
+            regex=r"[A-Za-z0-9._/:-]{1,200}",
+            message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
+        ),
+    ),
+    SettingSpec(
         key="max_parallel_generations",
         group=GROUP_LIMITS,
         label="Maximum parallel clip generations",

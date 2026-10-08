@@ -110,13 +110,16 @@ _TEXT_LABELS: Final[dict[str, str]] = {
     "scene_description": "description",
     "first_frame_description": "first frame description",
     "last_frame_description": "last frame description",
+    "image_prompt": "image prompt",
 }
 
 
-# Each frame description and the column that says who wrote it (Phase 15).
-_FRAME_TEXT_SOURCES: Final[dict[str, str]] = {
+# Each text besides the description and the column that says who wrote it: the frame
+# descriptions (Phase 15) and the first frame's image prompt (Phase 16).
+_OWN_SOURCE_COLUMNS: Final[dict[str, str]] = {
     "first_frame_description": "first_frame_description_source",
     "last_frame_description": "last_frame_description_source",
+    "image_prompt": "image_prompt_source",
 }
 
 
@@ -132,10 +135,11 @@ async def set_texts(
     Each text is trimmed, and a blank one is cleared. A text that equals what is stored is
     left alone, so saving an AI draft without editing it keeps it the AI's. A text that
     changed becomes the author's, in its own source column (`scene_description_source`,
-    `first_frame_description_source` or `last_frame_description_source`), and a text that
-    was cleared has no source. Editing one text never changes another's source. A later
-    draft never overwrites the author's text. The job that wrote an AI text stays on the
-    scene, so the draft can still be compared with what the author made of it. Commits.
+    `first_frame_description_source`, `last_frame_description_source` or
+    `image_prompt_source`), and a text that was cleared has no source. Editing one text never
+    changes another's source. A later draft never overwrites the author's text. The job that
+    wrote an AI text stays on the scene, so the draft can still be compared with what the
+    author made of it. Commits.
 
     Raises DescriptionTooLong or SceneGone.
     """
@@ -157,7 +161,7 @@ async def set_texts(
             scene.scene_description = text
             scene.scene_description_source = "manual" if text else None
 
-    for field, source_column in _FRAME_TEXT_SOURCES.items():
+    for field, source_column in _OWN_SOURCE_COLUMNS.items():
         if field in new_texts and new_texts[field] != _text_or_none(getattr(scene, field)):
             setattr(scene, field, new_texts[field])
             setattr(scene, source_column, "manual" if new_texts[field] else None)

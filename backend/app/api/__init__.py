@@ -9,6 +9,7 @@ from app.api import (
     gpu,
     health,
     image_lab,
+    image_prompts,
     jobs,
     projects,
     renders,
@@ -27,6 +28,7 @@ api_router.include_router(jobs.router, tags=["jobs"])
 api_router.include_router(transcription.router, tags=["transcription"])
 api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(scene_inputs.router, tags=["scenes"])
+api_router.include_router(image_prompts.router, tags=["scenes"])
 api_router.include_router(clips.router, tags=["scenes"])
 api_router.include_router(renders.router, tags=["renders"])
 api_router.include_router(image_lab.router, tags=["image-lab"])

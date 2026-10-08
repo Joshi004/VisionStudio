@@ -105,18 +105,23 @@ async def find_cached_answer(
     input_hash: str,
     exclude_job_id: int,
     job_type: str = PLAN_JOB,
+    scene_id: int | None = None,
 ) -> Job | None:
     """The newest earlier job of this type (a proposal, unless another is named) that sent
-    exactly this request and kept a usable answer.
+    exactly this request and kept a usable answer. For a job type with one job per scene,
+    `scene_id` looks at that scene's jobs only (the lookback window would fill up otherwise).
 
     Any status counts: a job that failed after the paid call (interrupted by a restart,
     say) still holds the answer it paid for (ANALYSIS.md Section 6.2, rule 3). A job that
     itself reused an answer holds none, so a hit always points at the job that paid.
     """
+    statement = select(Job).where(
+        Job.project_id == project_id, Job.type == job_type, Job.id != exclude_job_id
+    )
+    if scene_id is not None:
+        statement = statement.where(Job.scene_id == scene_id)
     statement = (
-        select(Job)
-        .where(Job.project_id == project_id, Job.type == job_type, Job.id != exclude_job_id)
-        .order_by(Job.id.desc())
+        statement.order_by(Job.id.desc())
         .limit(_CACHE_LOOKBACK)
         .execution_options(populate_existing=True)
     )
