@@ -19,6 +19,7 @@ import asyncio.subprocess
 import json
 import logging
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -289,6 +290,76 @@ def _parse_video_probe(data: Any) -> VideoProbe | None:
         duration_s=_number(video.get("duration")) or format_duration,
         audio=audio,
     )
+
+
+# Below this, the sound is silence for loudness purposes (the gate of EBU R128 is -70 LUFS).
+_SILENCE_LUFS = -70.0
+# The JSON block `loudnorm` prints at the end of its measuring run.
+_LOUDNORM_JSON = re.compile(r"\{[^{}]*\"input_i\"[^{}]*\}", re.DOTALL)
+
+
+async def measure_loudness(
+    path: Path,
+    *,
+    duration_s: float | None = None,
+    pre_filters: Sequence[str] = (),
+    timeout_s: float = 120.0,
+) -> float | None:
+    """The integrated loudness of a file's first audio stream, in LUFS (EBU R128).
+
+    With `duration_s`, only the first `duration_s` seconds are measured: a clip is longer
+    than the scene that uses it, and only the scene's part is heard. The measuring run
+    writes nothing (`-f null`).
+
+    `pre_filters` are audio filters applied before the measurement, so the sound is measured
+    as it will be heard. A mono file counts 3 dB louder once it plays on two channels, so
+    two sounds that end up in one stereo mix are compared after the same conversion to
+    stereo (`render_commands.stereo_filters`).
+
+    Returns None when the file has no sound, is silent (at or below -70 LUFS) or is too
+    short to measure (loudness is measured in 400 ms blocks), when FFmpeg cannot run, or
+    when it prints something unusable. Never raises.
+    """
+    args = ["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info"]
+    if duration_s is not None:
+        args += ["-t", f"{duration_s:.6f}"]
+    args += [
+        "-i",
+        file_input(path),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-af",
+        ",".join([*pre_filters, "loudnorm=print_format=json"]),
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not measure loudness: %s", exc)
+        return None
+
+    text = result.stderr.decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        tail = text[-_STDERR_LOG_CHARS:]
+        _logger.info("ffmpeg loudness exit code %s: %s", result.returncode, tail.strip())
+        return None
+
+    # The last block is the measurement; anything before it is the input description.
+    blocks = _LOUDNORM_JSON.findall(text)
+    if not blocks:
+        return None
+    try:
+        data = json.loads(blocks[-1])
+    except ValueError:
+        _logger.warning("ffmpeg printed a loudness block that is not JSON")
+        return None
+    loudness = _number(data.get("input_i")) if isinstance(data, dict) else None
+    if loudness is None or loudness <= _SILENCE_LUFS:
+        return None
+    return loudness
 
 
 async def tool_version(tool: Tool) -> str | None:

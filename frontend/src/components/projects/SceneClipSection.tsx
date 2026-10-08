@@ -93,7 +93,7 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
         label="Use this scene's own clip sound in the final video"
         description={
           project.clip_sound_volume > 0
-            ? `Mixed quietly under the voiceover, at ${Math.round(project.clip_sound_volume * 100)}% (Project settings).`
+            ? `Mixed under the voiceover at ${Math.round(project.clip_sound_volume * 100)}% of its level (Project settings).`
             : "The project's clip sound volume is 0, so no clip sound is used."
         }
         checked={scene.use_clip_sound}

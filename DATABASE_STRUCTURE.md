@@ -149,7 +149,7 @@ One row per video. Holds output settings (pre-filled from orientation — Sectio
 | `style_prefix` | TEXT | NULL | blank | Guideline: style, sent as LTX's `Style:` prefix |
 | `prompt_suffix` | TEXT | NULL | blank | Guideline: camera/lighting/colour/pacing, always appended |
 | `negative_prompt` | TEXT | NULL | blank | Guideline: what to avoid |
-| `clip_sound_volume` | REAL | NOT NULL | 0.2 | 0 = off; volume of each clip's own sound under the voiceover |
+| `clip_sound_volume` | REAL | NOT NULL | 0.2 | 0 = off; otherwise each clip's own sound, as a share of the voiceover's level (0.2 = 14 dB under the voice, 0.05 = 26 dB). The render measures the loudness of the voiceover and of each clip, so every clip lands at the same distance under the voice |
 | `cut_instructions` | TEXT | NULL | blank | Extra instructions for the AI that proposes cuts |
 | `script_text` | TEXT | NULL | — | Pasted in step B of the flow; `NULL` until then |
 | `language` | TEXT | NOT NULL | `'en'` | Voiceover language (English-only decision) |
@@ -668,17 +668,22 @@ On success, in one transaction: `INSERT asset` (`kind='final'`, `source='derived
     "frame_count": 361, "fps": 24.0, "width": 1080, "height": 1920, "duration_s": 15.041667, "size_bytes": 6504578,
     "audio": { "codec": "aac", "sample_rate": 48000, "channels": 2, "duration_s": 15.04 }
   },
-  "clips": [ { "scene_index": 0, "sound": "clip" }, { "scene_index": 1, "sound": "muted" } ],
+  "voiceover_loudness_lufs": -35.9,
+  "clips": [
+    { "scene_index": 0, "sound": "clip", "loudness_lufs": -11.3, "gain_db": -38.6 },
+    { "scene_index": 1, "sound": "muted", "loudness_lufs": null, "gain_db": null }
+  ],
   "seconds": { "trim": 1.2, "join": 2.6 }
 }
 ```
 
-`clips[].sound` says where a scene's sound came from: `"clip"` (the clip's own sound), `"muted"` (the scene's switch is off: silence of the same length) or `"none in the clip"` (the clip has no sound: silence). `seconds` is the time of the two stages.
+`clips[].sound` says where a scene's sound came from: `"clip"` (the clip's own sound), `"muted"` (the scene's switch is off: silence of the same length), `"off (volume 0)"` (the project's clip sound volume is 0: silence) or `"none in the clip"` (the clip has no sound: silence). `voiceover_loudness_lufs` is the voiceover's integrated loudness and `clips[].loudness_lufs` is that of the part of the clip the scene uses (EBU R128, in LUFS, both measured as 48 kHz stereo, as the mix hears them: a mono voiceover on two channels is 3 dB louder than the file alone); `clips[].gain_db` is the gain the render gave the clip's sound (0 or less). A level is `null` when nothing was measured: a muted or silent scene, a volume of 0, or a clip that is silent or too short to measure (its gain is then the plain volume in dB). `seconds` is the time of the two stages.
 
 ```json
 {
   "job_id": 40, "timeline_version": 1, "voiceover_asset_id": 75, "clip_asset_ids": [87, 86, 90],
-  "clip_sound_volume": 0.2, "muted_scene_indexes": [], "fps": 24, "frame_count": 361,
+  "clip_sound_volume": 0.2, "clip_sound_level": "share of the voiceover's measured loudness",
+  "voiceover_loudness_lufs": -35.9, "muted_scene_indexes": [], "fps": 24, "frame_count": 361,
   "ffmpeg_version": "7.1.5-0+deb13u1",
   "video": "libx264 crf 18 preset medium yuv420p", "audio": "aac 192k 48000 Hz stereo"
 }
@@ -686,7 +691,7 @@ On success, in one transaction: `INSERT asset` (`kind='final'`, `source='derived
 
 That is the provenance of the `final` asset. `muted_scene_indexes` lists the scenes (0-based) whose switch was off.
 
-**How the file is made.** Stage 1, per clip: the picture is cut to exactly `frames` frames at the project's fps, scaled to cover the output size and centre-cropped to it (a 1088 wide clip for a 1080 wide video only loses 4 pixels on each side); the sound is converted to 48 kHz stereo, cut to the same length, faded for 20 ms at both ends (the fade-out sits where the clip's own sound ends, since LTX sound is 17 to 45 ms shorter than its video), and padded with silence to exactly `round(frames * 48000 / fps)` samples; a muted scene or a clip without sound gets that much silence. The result is a MOV with `libx264 -crf 12 -preset veryfast -bf 0` and PCM 16-bit sound. Stage 2: the MOVs are joined with the concat demuxer, the clips' sound goes through `volume=<clip_sound_volume>`, and it is mixed under the voiceover with `amix=inputs=2:duration=first:dropout_transition=0:normalize=0` (the voiceover first; `normalize=0` keeps it at its own level, where the default would lower it by 6 dB); a mono voiceover is made stereo with `pan`, because the automatic conversion lowers it by 3 dB. The result is encoded with `libx264 -crf 18 -preset medium -profile:v high -pix_fmt yuv420p -r <fps> -fps_mode cfr`, AAC 192 kb/s and `-movflags +faststart`.
+**How the file is made.** Stage 1, per clip: the picture is cut to exactly `frames` frames at the project's fps, scaled to cover the output size and centre-cropped to it (a 1088 wide clip for a 1080 wide video only loses 4 pixels on each side); the sound is converted to 48 kHz stereo, lowered by the clip's gain (`volume=<gain>dB`, from the measured loudness of the voiceover and of the clip: `min(0, voice + 20 * log10(clip_sound_volume) - clip)`, in LUFS and dB), cut to the same length, faded for 20 ms at both ends (the fade-out sits where the clip's own sound ends, since LTX sound is 17 to 45 ms shorter than its video), and padded with silence to exactly `round(frames * 48000 / fps)` samples; a muted scene or a clip without sound gets that much silence. The result is a MOV with `libx264 -crf 12 -preset veryfast -bf 0` and PCM 16-bit sound. Stage 2: the MOVs are joined with the concat demuxer, and the clips' sound, already at its level, is mixed under the voiceover with `amix=inputs=2:duration=first:dropout_transition=0:normalize=0` (the voiceover first; `normalize=0` keeps it at its own level, where the default would lower it by 6 dB); a mono voiceover is made stereo with `pan`, because the automatic conversion lowers it by 3 dB. The result is encoded with `libx264 -crf 18 -preset medium -profile:v high -pix_fmt yuv420p -r <fps> -fps_mode cfr`, AAC 192 kb/s and `-movflags +faststart`.
 
 ---
 

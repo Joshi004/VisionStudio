@@ -161,7 +161,7 @@ export function ProjectSettingsForm({
             <Title order={4}>Clip sound</Title>
             <NumberInput
               label="Volume"
-              description="How loud each clip's own sound is under the voiceover. 0 turns it off, and 20 is a quiet starting guess to tune by ear."
+              description="How loud each clip's own sound is, as a percent of the voiceover's level: 100 is as loud as the voice, 20 is about 14 dB under it, 5 about 26 dB under. Each clip is measured, so every scene sits at the same level. 0 turns it off."
               value={draft.clip_sound_percent}
               onChange={(value) => edit("clip_sound_percent", value)}
               step={5}

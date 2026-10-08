@@ -4,12 +4,19 @@ The render has two stages, and each is one FFmpeg run:
 
 1. **Trim, per clip** (`trim_args`): the clip's picture is cut to exactly the scene's frame
    count, cropped to the output size, at the project's fps; its sound is cut to the same
-   length, made 48 kHz stereo and faded for 20 ms at both ends, or replaced by silence of the
-   same length. The result is a MOV with visually lossless H.264 and uncompressed PCM sound.
-   (MP4 is a poor container for PCM, and MOV keeps exact timestamps.)
+   length, made 48 kHz stereo, lowered by the clip's own gain (see below) and faded for 20 ms
+   at both ends, or replaced by silence of the same length. The result is a MOV with visually
+   lossless H.264 and uncompressed PCM sound. (MP4 is a poor container for PCM, and MOV keeps
+   exact timestamps.)
 2. **Join and mix** (`join_args`): the trimmed clips are joined in order with FFmpeg's concat
-   demuxer (they all share the same parameters), the clips' sound is lowered to the project's
-   volume and mixed under the voiceover, and the final H.264 and AAC file is written.
+   demuxer (they all share the same parameters), their sound is mixed under the voiceover,
+   and the final H.264 and AAC file is written.
+
+**The clip sound level is relative to the voiceover.** The project's clip sound volume is a
+share of the voiceover's level: at 5%, a clip's sound sits 26 dB under the voice, whatever
+loudness the clip came with. The render measures the voiceover and each clip's loudness
+(`ffmpeg.measure_loudness`), and `clip_gain_db` gives each clip the gain that puts it at that
+distance under the voice. A clip is never made louder than it is.
 
 The voiceover stays at its own level. FFmpeg's `amix` divides every input by the number of
 inputs unless told not to, which would make the voiceover 6 dB quieter (measured on the
@@ -22,6 +29,7 @@ plain file and never a protocol or an option.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +54,26 @@ class ClipAudio:
     # How long the sound is, as ffprobe reports it. LTX sound is 17 to 45 ms shorter than
     # its video, so the rest of the scene is filled with silence.
     duration_s: float | None
+    # The gain given to this clip's sound, in dB (0 or less). See `clip_gain_db`.
+    gain_db: float
+
+
+def clip_gain_db(volume: float, voice_lufs: float | None, clip_lufs: float | None) -> float:
+    """The gain, in dB, that puts a clip's sound `volume` (a share of the voiceover's level)
+    under the voiceover. `volume` is from above 0 to 1: 0.2 is 14 dB under the voice, 0.05 is
+    26 dB under.
+
+    With both loudnesses (in LUFS) the clip is brought to `voice + 20 * log10(volume)`, and a
+    clip that is already quieter than that keeps its own level: it is never boosted, so the
+    16-bit sound cannot clip. When either loudness is unknown (a silent or very short clip),
+    the plain volume is used, as if the clip were as loud as the voice.
+    """
+    if volume <= 0:
+        raise ValueError("The clip sound volume must be above 0.")
+    below_voice_db = 20 * math.log10(volume)
+    if voice_lufs is None or clip_lufs is None:
+        return below_voice_db
+    return min(0.0, voice_lufs + below_voice_db - clip_lufs)
 
 
 def stereo_filters(channels: int | None) -> list[str]:
@@ -78,7 +106,8 @@ def trim_args(
 ) -> list[str]:
     """Stage 1: one clip, trimmed to `frames` frames, at the output size, as a MOV.
 
-    `audio` is None for silence (a muted scene, or a clip with no sound).
+    `audio` is None for silence (a muted scene, a clip with no sound, or a clip sound volume
+    of 0).
     """
     if frames < 1:
         raise ValueError("A clip needs at least one frame.")
@@ -108,6 +137,7 @@ def trim_args(
         steps = [
             *stereo_filters(audio.channels),
             f"aresample={SAMPLE_RATE}",
+            f"volume={audio.gain_db:.2f}dB",
             "asetpts=PTS-STARTPTS",
             f"atrim=end={available:.6f}",
             f"afade=t=in:st=0:d={fade:.6f}",
@@ -173,12 +203,12 @@ def join_args(
     dest: Path,
     *,
     fps: int,
-    volume: float,
     voiceover_channels: int | None,
 ) -> list[str]:
     """Stage 2: join the trimmed clips, mix their sound under the voiceover, and encode.
 
-    The voiceover is the first mix input and sets the length of the sound
+    The clips' sound is already at its level under the voice (stage 1), so it is mixed as
+    it is. The voiceover is the first mix input and sets the length of the sound
     (`duration=first`). The video is the joined clips: exactly the timeline's frames.
     """
     voice = [
@@ -188,8 +218,7 @@ def join_args(
     ]
     graph = (
         f"[1:a:0]{','.join(voice)}[voice];"
-        f"[0:a:0]volume={volume:g},"
-        f"aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo[clips];"
+        f"[0:a:0]aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo[clips];"
         "[voice][clips]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix]"
     )
     return [

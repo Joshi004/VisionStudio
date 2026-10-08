@@ -11,9 +11,12 @@ matter, and a restart renders the same timeline again from the start (`start_aga
 The steps, which are also the phases the page shows:
 
 1. *checking the clips*: every clip is read with ffprobe and must have the frames its scene
-   needs, so a bad file is named before any FFmpeg run is spent on the others;
+   needs, so a bad file is named before any FFmpeg run is spent on the others. Then, when the
+   clip sound volume is above 0, the loudness of the voiceover and of the part of each clip's
+   sound its scene uses is measured, so each clip can be set at the same distance under the
+   voice (`render_commands.clip_gain_db`);
 2. *trimming clip i of n* (stage 1): each clip becomes a MOV with exactly its frame count,
-   at the output size, with its sound at 48 kHz stereo or silence;
+   at the output size, with its sound at 48 kHz stereo, at its gain, or silence;
 3. *joining the clips and mixing the sound* (stage 2): the MOVs are joined, the clip sound
    is mixed under the voiceover, and the final H.264 and AAC file is written;
 4. *checking the video*: size, frame count, fps and length are compared with the timeline;
@@ -157,6 +160,18 @@ def parse_timeline(recorded: object) -> _Timeline:
     )
 
 
+@dataclass(frozen=True)
+class _ClipSound:
+    """Where a scene's sound in the render came from and what was done to it, for the job's
+    output. `loudness_lufs` is None when the clip was not measured (no sound, muted, volume
+    0, or too quiet or short to measure), and `gain_db` is None when no gain was applied.
+    """
+
+    label: str
+    loudness_lufs: float | None
+    gain_db: float | None
+
+
 class RenderFinalHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "local"
@@ -191,21 +206,33 @@ class RenderFinalHandler(JobHandler):
         sources, voiceover_path, voiceover_channels, voiceover_s = await self._check_sources(
             storage, timeline
         )
+        voiceover_lufs, clip_lufs = await _measure_levels(
+            timeline, sources, voiceover_path, voiceover_channels
+        )
 
         # Stage 1: each clip, trimmed to its scene.
         started = time.monotonic()
         trimmed: list[Path] = []
-        sounds: list[str] = []
+        sounds: list[_ClipSound] = []
         for number, clip in enumerate(timeline.clips, start=1):
             await self._phase(job_id, phases.trimming(number, len(timeline.clips)))
             source = sources[clip.asset_id]
             audio = None
-            if clip.clip_sound and source.probe.audio is not None:
+            if timeline.volume > 0 and clip.clip_sound and source.probe.audio is not None:
                 audio = render_commands.ClipAudio(
                     channels=source.probe.audio.channels,
                     duration_s=source.probe.audio.duration_s,
+                    gain_db=render_commands.clip_gain_db(
+                        timeline.volume, voiceover_lufs, clip_lufs[number - 1]
+                    ),
                 )
-            sounds.append(_sound_label(clip, audio))
+            sounds.append(
+                _ClipSound(
+                    label=_sound_label(clip, audio, timeline.volume),
+                    loudness_lufs=clip_lufs[number - 1],
+                    gain_db=None if audio is None else audio.gain_db,
+                )
+            )
             dest = storage.new_temp_path("mov")
             temp_paths.append(dest)
             await _run_ffmpeg(
@@ -238,7 +265,6 @@ class RenderFinalHandler(JobHandler):
                 voiceover_path,
                 final,
                 fps=timeline.fps,
-                volume=timeline.volume,
                 voiceover_channels=voiceover_channels,
             ),
             JOIN_TIMEOUT_S,
@@ -258,6 +284,7 @@ class RenderFinalHandler(JobHandler):
             probe,
             timeline,
             sounds,
+            voiceover_lufs,
             (trim_seconds, join_seconds),
         )
 
@@ -324,7 +351,8 @@ class RenderFinalHandler(JobHandler):
         final: Path,
         probe: ffmpeg.VideoProbe,
         timeline: _Timeline,
-        sounds: list[str],
+        sounds: list[_ClipSound],
+        voiceover_lufs: float | None,
         seconds: tuple[float, float],
     ) -> None:
         temp = await storage.describe_temp(final)
@@ -350,8 +378,14 @@ class RenderFinalHandler(JobHandler):
                 "size_bytes": temp.size_bytes,
                 "audio": audio_out,
             },
+            "voiceover_loudness_lufs": _tenth(voiceover_lufs),
             "clips": [
-                {"scene_index": clip.scene_index, "sound": sound}
+                {
+                    "scene_index": clip.scene_index,
+                    "sound": sound.label,
+                    "loudness_lufs": _tenth(sound.loudness_lufs),
+                    "gain_db": _tenth(sound.gain_db),
+                }
                 for clip, sound in zip(timeline.clips, sounds, strict=True)
             ],
             "seconds": {"trim": round(seconds[0], 1), "join": round(seconds[1], 1)},
@@ -362,6 +396,8 @@ class RenderFinalHandler(JobHandler):
             "voiceover_asset_id": timeline.voiceover_id,
             "clip_asset_ids": [clip.asset_id for clip in timeline.clips],
             "clip_sound_volume": timeline.volume,
+            "clip_sound_level": "share of the voiceover's measured loudness",
+            "voiceover_loudness_lufs": _tenth(voiceover_lufs),
             "muted_scene_indexes": [c.scene_index for c in timeline.clips if not c.clip_sound],
             "fps": timeline.fps,
             "frame_count": probe.frame_count,
@@ -420,11 +456,55 @@ class _Source:
     probe: ffmpeg.VideoProbe
 
 
-def _sound_label(clip: _Clip, audio: render_commands.ClipAudio | None) -> str:
+def _sound_label(clip: _Clip, audio: render_commands.ClipAudio | None, volume: float) -> str:
     """Where a scene's sound in the render came from, for the job's output."""
     if audio is not None:
         return "clip"
-    return "none in the clip" if clip.clip_sound else "muted"
+    if not clip.clip_sound:
+        return "muted"
+    return "off (volume 0)" if volume <= 0 else "none in the clip"
+
+
+def _tenth(value: float | None) -> float | None:
+    """A level rounded to 0.1 dB for the job's output."""
+    return None if value is None else round(value, 1)
+
+
+async def _measure_levels(
+    timeline: _Timeline,
+    sources: dict[int, _Source],
+    voiceover_path: Path,
+    voiceover_channels: int | None,
+) -> tuple[float | None, list[float | None]]:
+    """The loudness (LUFS) of the voiceover, and of each clip's sound over the part its
+    scene uses (in the order of the timeline). Nothing is measured when the clip sound
+    volume is 0, and a clip with no sound, or whose switch is off, is not measured either.
+
+    Every sound is measured after the same conversion to stereo the render does, because
+    that is how the mix hears it: a mono voiceover on two channels is 3 dB louder than the
+    file measures, and comparing it as mono would put the clips 3 dB too far under it.
+
+    A level that cannot be measured is None, and the clip then gets the plain volume
+    (`render_commands.clip_gain_db`). With no voiceover level, no clip is measured: it
+    would not be used.
+    """
+    levels: list[float | None] = [None] * len(timeline.clips)
+    if timeline.volume <= 0:
+        return None, levels
+    voiceover_lufs = await ffmpeg.measure_loudness(
+        voiceover_path, pre_filters=render_commands.stereo_filters(voiceover_channels)
+    )
+    if voiceover_lufs is None:
+        return None, levels
+    for position, clip in enumerate(timeline.clips):
+        audio = sources[clip.asset_id].probe.audio
+        if clip.clip_sound and audio is not None:
+            levels[position] = await ffmpeg.measure_loudness(
+                sources[clip.asset_id].path,
+                duration_s=clip.frames / timeline.fps,
+                pre_filters=render_commands.stereo_filters(audio.channels),
+            )
+    return voiceover_lufs, levels
 
 
 def _write_new_file(path: Path, text: str) -> None:

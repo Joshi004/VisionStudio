@@ -22,7 +22,7 @@ export function renderSummary(
   const muted = scenes.filter((scene) => !scene.use_clip_sound).length;
   const percent = Math.round(clipSoundVolume * 100);
   const mutedText = muted > 0 ? ` (${plural(muted, "scene")} muted)` : "";
-  return `${uses}, and clip sound at ${percent}%${mutedText}.`;
+  return `${uses}, and clip sound at ${percent}% of the voiceover's level${mutedText}.`;
 }
 
 /** "7 Oct, 08:40 · 14.2 s · 1080 x 1920 · clip sound 20% · 1 scene muted · 4.1 MB". */
