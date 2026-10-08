@@ -1086,10 +1086,10 @@ That is the provenance of the `final` asset. `muted_scene_indexes` lists the sce
 | `description_llm_model` | `"zai-org/GLM-5.3"` | the model that drafts scene descriptions (Phase 12); uses `llm_base_url` |
 | `image_prompt_llm_model` | `"zai-org/GLM-5.3-Flash"` | the model that writes each scene's image prompt, one call per scene (Phase 16); uses `llm_base_url` |
 | `image_model` | `"seedream-5.0-lite"` | the image model that makes each scene's first frame, one paid image per scene (Phase 17); uses `llm_base_url` (the Image lab keeps its own model box) |
-| `max_parallel_generations` | `4` | |
-| `max_parallel_image_generations` | `2` | how many first frames are made at once (Phase 17); 1 to 4 |
+| `max_parallel_generations` | `4` | no range enforced |
+| `max_parallel_image_generations` | `2` | how many first frames are made at once (Phase 17); no range enforced |
 | `poll_interval_seconds` | `15` | |
-| `max_parallel_ffmpeg` | `1` | |
+| `max_parallel_ffmpeg` | `1` | no range enforced |
 | `api_contract_sources` | `[{"name": "guide", "base": "gpu", "path": "/v1/guide?format=json"}, {"name": "openapi", "base": "gpu", "path": "/openapi.json"}]` | the two sources shown, no environment variable (Phase 4) |
 
 `api_contract_sources` is a list, not a text or number, so it has its own endpoints (`PUT` and `DELETE /api/gpu/contract/sources`) and the generic settings API answers 404 for it. Each entry has a `name` (`[a-z0-9][a-z0-9_-]{0,39}`, unique, and it is what `api_snapshot.source` holds), a `base` (`gpu` means the GPU server URL, `transcription` means the transcription URL, which falls back to the GPU server URL when blank) and a `path` (starts with one `/`, at most 500 characters, no whitespace and no `#`; a query string is allowed). One to five entries, and no two with the same `base` and `path`. This replaces the earlier example `["guide", "openapi"]`, which could not say which server a source lives on.

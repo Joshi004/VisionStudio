@@ -77,8 +77,11 @@ class SettingSpec:
     def __post_init__(self) -> None:
         if self.env_var is not None and self.value_type != "string":
             raise ValueError(f"{self.key}: only string settings can have an environment variable")
-        if self.value_type == "integer" and (self.min_value is None or self.max_value is None):
-            raise ValueError(f"{self.key}: an integer setting needs a minimum and a maximum")
+        # An integer setting may leave min_value and max_value unset (both None) to take any
+        # whole number with no range check. Setting only one of the two is still refused, since
+        # a half-open range is almost certainly a mistake.
+        if self.value_type == "integer" and (self.min_value is None) != (self.max_value is None):
+            raise ValueError(f"{self.key}: set both min_value and max_value, or neither")
 
 
 GROUP_GPU = "GPU server"
@@ -205,12 +208,11 @@ REGISTRY: tuple[SettingSpec, ...] = (
         label="Maximum parallel clip generations",
         help=(
             "How many clips may generate on the GPU server at the same time. It applies the "
-            "next time the app looks for work, and running jobs are not stopped."
+            "next time the app looks for work, and running jobs are not stopped. No range is "
+            "enforced: you are trusted to pick a number your GPU server can actually handle."
         ),
         value_type="integer",
         default=4,
-        min_value=1,
-        max_value=16,
     ),
     SettingSpec(
         key="max_parallel_image_generations",
@@ -219,12 +221,11 @@ REGISTRY: tuple[SettingSpec, ...] = (
         help=(
             "How many first frames may be made by the image model at the same time. Each image "
             "takes 20 to 50 seconds. It applies the next time the app looks for work, and "
-            "running jobs are not stopped."
+            "running jobs are not stopped. No range is enforced: you are trusted to pick a "
+            "number Bitdeer can actually handle."
         ),
         value_type="integer",
         default=2,
-        min_value=1,
-        max_value=4,
     ),
     SettingSpec(
         key="poll_interval_seconds",
@@ -243,11 +244,12 @@ REGISTRY: tuple[SettingSpec, ...] = (
         key="max_parallel_ffmpeg",
         group=GROUP_LIMITS,
         label="Maximum parallel FFmpeg runs",
-        help="How many FFmpeg renders may run at the same time. It applies to the next render.",
+        help=(
+            "How many FFmpeg renders may run at the same time. It applies to the next render. "
+            "No range is enforced: you are trusted to pick a number this machine can handle."
+        ),
         value_type="integer",
         default=1,
-        min_value=1,
-        max_value=4,
     ),
 )
 
