@@ -68,9 +68,16 @@ CONCURRENCY_LIMIT: Final = 4
 # One call, and one more if it fails in a way that can pass (ANALYSIS.md Section 5.8, 6.2).
 MAX_ATTEMPTS: Final = 2
 RETRY_DELAY_S: Final = 5.0
-# The Flash model reasons before it answers: "high" effort took 16 to 19 s for the scene
-# proposal (Phase 6). A call that times out is paid for and lost, so this is generous.
-REQUEST_TIMEOUT_S: Final = 180.0
+# The Flash model reasons before it answers: an image prompt took 2 to 15 s. A call that
+# times out is paid for and lost, so this is generous: the 8,000 tokens it may use would take
+# about 200 s at 40 tokens a second, the slowest GLM-5.3 speed seen, in case the model of
+# this job is switched to it. The answer is streamed, so this limits only the whole call.
+REQUEST_TIMEOUT_S: Final = 300.0
+# The longest wait for the first piece of the answer, or between two pieces. Bitdeer held a
+# tiny request for 15 s and paused 10 s in the middle of an answer (streaming spike), so this
+# is eight times the longest silence seen. Past it the call is stuck, not thinking: the
+# model's reasoning is streamed too.
+IDLE_TIMEOUT_S: Final = 120.0
 RAW_CONTENT_MAX_CHARS: Final = 20_000
 
 _CUT_CHANGED = (
@@ -262,7 +269,9 @@ class WriteImagePromptHandler(JobHandler):
             await self._phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
             started = time.monotonic()
             try:
-                result = await llm.complete(base_url, body, timeout_s=REQUEST_TIMEOUT_S)
+                result = await llm.complete(
+                    base_url, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
+                )
             except LlmCallError as exc:
                 outcome.failure = _failure_text(exc)
                 outcome.attempts.append(

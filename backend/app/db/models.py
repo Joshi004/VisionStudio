@@ -35,6 +35,10 @@ class Project(Base):
     __tablename__ = "project"
     __table_args__ = (
         CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
+        CheckConstraint(
+            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')",
+            name="video_model_valid",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -57,6 +61,10 @@ class Project(Base):
     # places, look, sound), the counterpart of `cut_instructions`.
     description_instructions: Mapped[str | None] = mapped_column(default=None)
     script_text: Mapped[str | None] = mapped_column(default=None)
+    # Added in Phase 19: the video model that makes this project's clips (`ltx-2.3` or
+    # `ltx-2.5`). NULL means "use the app's default" (the `default_video_model` setting). A
+    # scene's own `video_model` wins over this one.
+    video_model: Mapped[str | None] = mapped_column(default=None)
     language: Mapped[str] = mapped_column(default="en", server_default=text("'en'"))
     # Circular reference with `asset` (DATABASE_STRUCTURE.md Section 3): `asset.project_id`
     # points back at this table. `use_alter=True` tells SQLAlchemy's dependency sorter the
@@ -138,6 +146,10 @@ class Scene(Base):
         CheckConstraint(
             "image_prompt_source IN ('manual', 'ai')", name="image_prompt_source_valid"
         ),
+        CheckConstraint(
+            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')",
+            name="video_model_valid",
+        ),
         UniqueConstraint("project_id", "index"),
         Index("idx_scene_project", "project_id"),
     )
@@ -186,6 +198,9 @@ class Scene(Base):
     selected_clip_asset_id: Mapped[int | None] = mapped_column(
         ForeignKey("asset.id", ondelete="SET NULL"), default=None
     )
+    # Added in Phase 19: the video model that makes this scene's clips. NULL means "use the
+    # project's" (and, when that is NULL too, the app's default).
+    video_model: Mapped[str | None] = mapped_column(default=None)
 
 
 class Job(Base):
@@ -195,7 +210,8 @@ class Job(Base):
     __table_args__ = (
         CheckConstraint(
             "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
-            "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final')",
+            "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
+            "'lab_video', 'write_lab_video_prompt', 'auto_pipeline')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -210,7 +226,10 @@ class Job(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    # NULL only for the jobs of the Video lab (Phase 19), which belongs to no project.
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="CASCADE"), default=None
+    )
     scene_id: Mapped[int | None] = mapped_column(
         ForeignKey("scene.id", ondelete="CASCADE"), default=None
     )
@@ -326,3 +345,46 @@ class LabImage(Base):
     height: Mapped[int]
     size_bytes: Mapped[int]
     sha256: Mapped[str]
+
+
+class LabVideoRun(Base):
+    """One video the Video lab made, or is making (Phase 19).
+
+    The lab belongs to no project, so its work runs as `job` rows with `project_id` NULL
+    (`lab_video`). The job holds the status, the phase and the exact request that was sent;
+    this row holds what the page lists and compares: the model, the prompt, the form's
+    parameters and, once the job has finished, the file under `media/lab/`. The runs that one
+    "run on both models" click starts share a `group_key`, so the page shows them side by side.
+    """
+
+    __tablename__ = "lab_video_run"
+    __table_args__ = (
+        CheckConstraint("video_model IN ('ltx-2.3', 'ltx-2.5')", name="video_model_valid"),
+        Index("idx_lab_video_run_created", "created_at"),
+        Index("idx_lab_video_run_group", "group_key"),
+        Index("idx_lab_video_run_job", "job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    group_key: Mapped[str | None] = mapped_column(default=None)
+    video_model: Mapped[str]
+    endpoint: Mapped[str]
+    prompt: Mapped[str]
+    # What the form held: mode, orientation, size, fps, duration, frame count, seed and, for
+    # LTX-2.3 only, the negative prompt.
+    params: Mapped[Any] = mapped_column(JSON)
+    # {source: "lab" | "asset", id} when the run started from a first frame, else NULL.
+    first_frame: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The result, NULL until the job has finished and the clip was stored.
+    path: Mapped[str | None] = mapped_column(default=None)
+    size_bytes: Mapped[int | None] = mapped_column(default=None)
+    sha256: Mapped[str | None] = mapped_column(default=None)
+    width: Mapped[int | None] = mapped_column(default=None)
+    height: Mapped[int | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)

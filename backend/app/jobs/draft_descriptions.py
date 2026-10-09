@@ -67,8 +67,14 @@ RETRY_DELAY_S: Final = 5.0
 # The model thinks before it writes, and how long it thinks varies: 15 scenes took 90 s once
 # (6,570 reasoning tokens) and 263 s another time (9,708), at roughly 40 output tokens a
 # second. A call that times out is paid for and lost, and its retry is paid again, so this
-# is the time a full 32,000-token answer could need.
+# is the time a full 32,000-token answer could need. The answer is streamed, so this limits
+# only the whole call.
 REQUEST_TIMEOUT_S: Final = 900.0
+# The longest wait for the first piece of the answer, or between two pieces. Bitdeer held a
+# tiny request for 15 s and paused 10 s in the middle of an answer (streaming spike), so this
+# is eight times the longest silence seen. Past it the call is stuck, not thinking: the
+# model's reasoning is streamed too.
+IDLE_TIMEOUT_S: Final = 120.0
 RAW_CONTENT_MAX_CHARS: Final = 20_000
 
 
@@ -257,7 +263,9 @@ class DraftDescriptionsHandler(JobHandler):
             await self._phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
             started = time.monotonic()
             try:
-                result = await llm.complete(base_url, body, timeout_s=REQUEST_TIMEOUT_S)
+                result = await llm.complete(
+                    base_url, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
+                )
             except LlmCallError as exc:
                 outcome.failure = _failure_text(exc)
                 outcome.attempts.append(

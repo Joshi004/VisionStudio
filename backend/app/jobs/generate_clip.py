@@ -1,5 +1,5 @@
-"""The `generate_clip` job: one LTX clip for one scene (ANALYSIS.md Section 3.3, 5.3, 5.8
-and 6.4).
+"""The `generate_clip` job: one LTX clip (LTX-2.3 or LTX-2.5) for one scene (ANALYSIS.md
+Section 3.3, 5.3, 5.8 and 6.4).
 
 It is a remote job, so the three steps follow `JobHandler`:
 
@@ -9,16 +9,19 @@ It is a remote job, so the three steps follow `JobHandler`:
 - `finish`: download the clip, check it with ffprobe, store it as a take and make it the
   scene's selected take, then purge the job on the server.
 
-**The request is built once.** The first `start` works out the clip mode (a scene with a last
-frame is made by keyframe interpolation, one without by image-to-video from its first frame:
-`scene_inputs.clip_mode`), the endpoint, the prompt, the size, the frame count, the seed and
-the normalised frame or frames from the scene and the project as they are then, and stores
-that in `job.input`. Every later attempt (after pre-emption, an expired result or a
-Resubmit) sends the same stored request to the same stored endpoint with the same seed and
-re-uploads the same files, because "the correct response to a pre-emption failure is to
-resubmit the exact same request unchanged" (the server's guide). A frame added or removed
-after the click changes nothing for a job already prepared. A new seed comes only with a
-new job.
+**The request is built once.** The first `start` works out the video model (the Regenerate
+choice in `job.input`, else the scene's, the project's or the app's default:
+`video_models.resolve`), the clip mode (a scene with a last frame is made by keyframe
+interpolation, one without by image-to-video from its first frame:
+`scene_inputs.clip_mode`), the endpoint (`video_generator.endpoint_for`: LTX-2.5 has no
+keyframe endpoint yet, so such a scene falls back to LTX-2.3 and the job says so), the
+prompt, the size, the frame count, the seed and the normalised frame or frames from the scene
+and the project as they are then, and stores that in `job.input`. Every later attempt (after
+pre-emption, an expired result or a Resubmit) sends the same stored request to the same
+stored endpoint with the same seed and re-uploads the same files, because "the correct
+response to a pre-emption failure is to resubmit the exact same request unchanged" (the
+server's guide). A frame added or removed after the click changes nothing for a job already
+prepared. A new seed comes only with a new job.
 
 Failure handling follows ANALYSIS.md Section 5.8, row by row (see the notes in each
 method). A dropped connection never fails the job.
@@ -54,6 +57,7 @@ from app.services import (
     frame_counts,
     scene_inputs,
     scene_prompt,
+    video_models,
 )
 from app.services.assets import add_asset
 from app.services.storage import StorageError, TempFile, get_storage
@@ -64,6 +68,7 @@ JOB_TYPE: Final = clips.GENERATE_JOB
 GPU_URL_KEY: Final = "gpu_api_base_url"
 PARTITION_KEY: Final = "gpu_partition"
 DEFAULT_NEGATIVE_PROMPT_KEY: Final = "default_negative_prompt"
+DEFAULT_VIDEO_MODEL_KEY: Final = "default_video_model"
 MAX_PARALLEL_KEY: Final = "max_parallel_generations"
 
 SERVER_RETRY_DELAY_S: Final = 5.0
@@ -92,6 +97,8 @@ class GenerateClipHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "gpu"
     restart_rule = "resume"
+    # The Video lab's clips use the same GPUs, so they share these slots.
+    concurrency_group = "video_generation"
 
     async def concurrency_limit(self, session: AsyncSession) -> int:
         return await settings_service.get_int(session, MAX_PARALLEL_KEY)
@@ -109,11 +116,12 @@ class GenerateClipHandler(JobHandler):
             default_negative_prompt = await settings_service.get_str(
                 session, DEFAULT_NEGATIVE_PROMPT_KEY
             )
+            default_video_model = await settings_service.get_str(session, DEFAULT_VIDEO_MODEL_KEY)
             await session.commit()
 
         plan = await self._stored_plan(job)
         if plan is None:
-            plan = await self._prepare(job, partition, default_negative_prompt)
+            plan = await self._prepare(job, partition, default_negative_prompt, default_video_model)
             if plan is None:
                 return  # the job was failed, or cancelled, in there
         await self._upload_and_submit(job, base_url, plan)
@@ -134,7 +142,7 @@ class GenerateClipHandler(JobHandler):
             return None
         # Only a keyframe clip has a last frame. A first-frame job stores none.
         last_id: int | None = None
-        if endpoint == video_generator.KEYFRAME_PATH:
+        if video_generator.clip_mode_for(endpoint) == "first_and_last":
             last_id = _sent_asset_id(recorded.get("last_frame"))
             if last_id is None:
                 return None
@@ -147,14 +155,25 @@ class GenerateClipHandler(JobHandler):
         return _Plan(endpoint=endpoint, request=request, first=first, last=last, recorded=recorded)
 
     async def _prepare(
-        self, job: Job, partition: str, default_negative_prompt: str
+        self,
+        job: Job,
+        partition: str,
+        default_negative_prompt: str,
+        default_video_model: str,
     ) -> _Plan | None:
-        """Works out the clip mode, the request and the frames to send. Runs on the first
-        attempt only.
+        """Works out the video model, the clip mode, the request and the frames to send. Runs
+        on the first attempt only.
+
+        The model is the Regenerate choice stored in `job.input["video_model"]`, else the
+        scene's, the project's or the app's default (`video_models.resolve`). The endpoint
+        follows from the model and the clip mode (`video_generator.endpoint_for`). The model
+        asked for, the model that made the clip, where the choice came from and the note when
+        they differ (LTX-2.5 has no keyframe interpolation yet) are all stored in `job.input`.
 
         The negative prompt is the project's own when it has one, otherwise the app's default
         negative prompt (a global setting). It is stored in the request like everything else,
-        so a later attempt sends the same one.
+        so a later attempt sends the same one. LTX-2.5 has no such field, so its request has
+        none (`video_generator.build_request`).
 
         The mode comes from the scene's frames as they are now (a last frame attached means
         keyframe interpolation, none means image-to-video from the first frame), and is
@@ -167,7 +186,9 @@ class GenerateClipHandler(JobHandler):
         await self._phase(job.id, phases.PREPARING_FRAMES)
         async with SessionLocal() as session:
             scene = await session.get(Scene, job.scene_id) if job.scene_id is not None else None
-            project = await session.get(Project, job.project_id)
+            project = (
+                await session.get(Project, job.project_id) if job.project_id is not None else None
+            )
             first = await _frame(session, scene.first_frame_asset_id) if scene else None
             last = await _frame(session, scene.last_frame_asset_id) if scene else None
             mode = scene_inputs.clip_mode(scene) if scene else None
@@ -186,7 +207,12 @@ class GenerateClipHandler(JobHandler):
         if block is not None or prompt is None or first is None or (needs_last and last is None):
             await self._fail(job.id, block or "The scene is not ready any more.")
             return None
-        endpoint = video_generator.ENDPOINTS[mode]
+        asked = job.input.get("video_model") if isinstance(job.input, dict) else None
+        requested_model, model_source = video_models.resolve(
+            asked, scene.video_model, project.video_model, default_video_model
+        )
+        choice = video_generator.endpoint_for(requested_model, mode)
+        endpoint = choice.endpoint
 
         fps = project.fps
         target = frame_counts.target_frames(scene.start_s, scene.end_s, fps)
@@ -242,6 +268,10 @@ class GenerateClipHandler(JobHandler):
                 if last is not None and last_sent is not None
                 else None
             ),
+            "video_model": choice.model,
+            "video_model_requested": requested_model,
+            "video_model_source": model_source,
+            "model_note": choice.note,
             "endpoint": endpoint,
             "request": request,
         }
@@ -290,7 +320,7 @@ class GenerateClipHandler(JobHandler):
                 await self._phase(job.id, phases.SUBMITTING)
                 # A keyframe plan always has two frames and a first-frame plan one (`_prepare`
                 # and `_stored_plan` both guarantee it).
-                if plan.endpoint == video_generator.KEYFRAME_PATH:
+                if video_generator.clip_mode_for(plan.endpoint) == "first_and_last":
                     body = video_generator.with_keyframes(
                         plan.request, uploads[0]["remote_asset_id"], uploads[1]["remote_asset_id"]
                     )
@@ -511,6 +541,13 @@ class GenerateClipHandler(JobHandler):
             "provider": "gpu",
             "pipeline": remote.get("pipeline") if isinstance(remote, dict) else None,
             "endpoint": recorded.get("endpoint"),
+            # Which video model made the clip (an older job names none, but its endpoint
+            # does), what was asked for, which level chose it, and why they differ, if they do.
+            "video_model": recorded.get("video_model")
+            or video_generator.model_for(recorded.get("endpoint")),
+            "video_model_requested": recorded.get("video_model_requested"),
+            "video_model_source": recorded.get("video_model_source"),
+            "model_note": recorded.get("model_note"),
             # How the clip was made: the LTX mode the request named (None for keyframe
             # interpolation, which has no such field) and from which frames.
             "mode": request.get("mode"),

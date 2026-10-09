@@ -30,9 +30,16 @@ _logger = logging.getLogger(__name__)
 ACTIVE_STATUSES = ("queued", "running")
 ERROR_MAX_CHARS = 4000
 
+# What the Activity page calls the owner of a job that belongs to no project (the Video lab).
+NO_PROJECT_NAME = "Video lab"
+
 # Job types that can be cancelled while they run, because the server has a cancel for them
 # (Phase 9). A transcription cannot yet: its cancel is not built.
-REMOTE_CANCEL_TYPES = frozenset({"generate_clip"})
+REMOTE_CANCEL_TYPES = frozenset({"generate_clip", "lab_video"})
+
+# An automatic run does nothing itself: it only makes other jobs. Stopping it at any time just
+# stops it making more (the jobs it made that have not started are cancelled with it).
+AUTO_RUN_TYPE = "auto_pipeline"
 
 # One backend process, so a module lock is enough to make "create, unless one is active" atomic.
 _create_lock = asyncio.Lock()
@@ -57,10 +64,13 @@ class JobRow:
 
 
 def can_cancel(job: Job) -> bool:
-    """A job that has not started, one the server no longer knows, or (for the types that
-    have a cancel on the server) a running one that is not yet fetching its result.
+    """A job that has not started, one the server no longer knows, an automatic run, or (for
+    the types that have a cancel on the server) a running one that is not yet fetching its
+    result.
     """
     if job.status == "queued" or is_not_found(job):
+        return True
+    if job.status == "running" and job.type == AUTO_RUN_TYPE:
         return True
     return (
         job.status == "running"
@@ -70,10 +80,16 @@ def can_cancel(job: Job) -> bool:
 
 
 def needs_remote_cancel(job: Job) -> bool:
-    """Is there a job on the server to cancel? Only a running job that has been submitted,
-    and that the server still knows.
+    """Is there a job on the server to cancel? Only a running job of a type the server can
+    cancel, that has been submitted, and that the server still knows. (An automatic run keeps
+    a marker in its provider job id: it is not an id on the server.)
     """
-    return job.status == "running" and job.provider_job_id is not None and not is_not_found(job)
+    return (
+        job.status == "running"
+        and job.type in REMOTE_CANCEL_TYPES
+        and job.provider_job_id is not None
+        and not is_not_found(job)
+    )
 
 
 def can_resubmit(job: Job) -> bool:
@@ -101,17 +117,23 @@ async def _update(
 async def create_job(
     session: AsyncSession,
     *,
-    project_id: int,
+    project_id: int | None,
     type: str,
     provider: str,
     input: dict[str, Any],
     scene_id: int | None = None,
     commit: bool = True,
+    dedupe: bool = True,
 ) -> tuple[Job, bool]:
     """Creates a queued job, unless one of this type is already active for the project
     (or for the scene). Returns `(job, created)`: the existing job when it was not created.
 
     This is what makes two quick clicks on one button create one job (Section 3.3).
+
+    `project_id` is None only for the Video lab's jobs, which belong to no project. They pass
+    `dedupe=False`: each click is a paid run of its own (two runs of one prompt with another
+    seed, or of one prompt on both models, are what the lab is for), so none is merged into
+    an earlier one.
 
     With `commit=False` the job is only flushed, so a caller can create several jobs in one
     transaction (Generate all) and commit them together. It must hold the database's write
@@ -119,23 +141,26 @@ async def create_job(
     between the check and the commit.
     """
     async with _create_lock:
-        statement = (
-            select(Job)
-            .where(
-                Job.project_id == project_id,
-                Job.type == type,
-                Job.status.in_(ACTIVE_STATUSES),
-                Job.scene_id.is_(None) if scene_id is None else Job.scene_id == scene_id,
+        if dedupe:
+            statement = (
+                select(Job)
+                .where(
+                    Job.project_id.is_(None)
+                    if project_id is None
+                    else Job.project_id == project_id,
+                    Job.type == type,
+                    Job.status.in_(ACTIVE_STATUSES),
+                    Job.scene_id.is_(None) if scene_id is None else Job.scene_id == scene_id,
+                )
+                .order_by(Job.id)
+                .limit(1)
+                .execution_options(populate_existing=True)
             )
-            .order_by(Job.id)
-            .limit(1)
-            .execution_options(populate_existing=True)
-        )
-        existing = (await session.execute(statement)).scalars().first()
-        if existing is not None:
-            if commit:
-                await session.commit()
-            return existing, False
+            existing = (await session.execute(statement)).scalars().first()
+            if existing is not None:
+                if commit:
+                    await session.commit()
+                return existing, False
 
         job = Job(
             project_id=project_id,
@@ -152,7 +177,7 @@ async def create_job(
             await session.commit()
         else:
             await session.flush()
-    _logger.info("job %d created: type=%s project=%d", job.id, type, project_id)
+    _logger.info("job %d created: type=%s project=%s", job.id, type, project_id)
     return job, True
 
 
@@ -235,6 +260,28 @@ async def record_poll(
         values["output"] = output
     await _update(session, job_id, ("running",), **values)
     await session.commit()
+
+
+async def save_progress(
+    session: AsyncSession,
+    job_id: int,
+    *,
+    phase: str,
+    output: dict[str, Any],
+    provider_job_id: str | None = None,
+) -> bool:
+    """Saves where a long-running job is (an automatic run): its phase and output, in one
+    UPDATE, and notes that it was checked. `provider_job_id`, when given, is the marker that
+    makes the dispatcher check the job every tick.
+
+    Does not commit: the caller commits it together with the jobs the run made in the same
+    step, so a run's output never names a job that was not created, and the other way round.
+    False means the job is no longer running (it was cancelled): the caller rolls back.
+    """
+    values: dict[str, Any] = {"phase": phase, "output": output, "last_checked_at": utcnow()}
+    if provider_job_id is not None:
+        values["provider_job_id"] = provider_job_id
+    return await _update(session, job_id, ("running",), **values)
 
 
 async def merge_output(session: AsyncSession, job_id: int, values: dict[str, Any]) -> None:
@@ -423,7 +470,7 @@ async def waiting_job_count(session: AsyncSession) -> int:
 def _rows_statement() -> Any:
     return (
         select(Job, Project.name, Scene.index)
-        .join(Project, Project.id == Job.project_id)
+        .outerjoin(Project, Project.id == Job.project_id)
         .outerjoin(Scene, Scene.id == Job.scene_id)
         .execution_options(populate_existing=True)
     )
@@ -436,7 +483,8 @@ async def list_jobs(session: AsyncSession, *, project_id: int | None, limit: int
         statement = statement.where(Job.project_id == project_id)
     result = await session.execute(statement)
     return [
-        JobRow(job=job, project_name=name, scene_index=index) for job, name, index in result.all()
+        JobRow(job=job, project_name=name or NO_PROJECT_NAME, scene_index=index)
+        for job, name, index in result.all()
     ]
 
 
@@ -446,4 +494,4 @@ async def get_job_row(session: AsyncSession, job_id: int) -> JobRow | None:
     if row is None:
         return None
     job, name, index = row
-    return JobRow(job=job, project_name=name, scene_index=index)
+    return JobRow(job=job, project_name=name or NO_PROJECT_NAME, scene_index=index)

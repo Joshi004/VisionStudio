@@ -26,6 +26,11 @@ _ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
 }
 
 
+class SettingChoiceItem(BaseModel):
+    value: str
+    label: str
+
+
 class SettingItem(BaseModel):
     key: str
     group: str
@@ -39,6 +44,8 @@ class SettingItem(BaseModel):
     allow_blank: bool
     min_value: int | None
     max_value: int | None
+    # The allowed values of a setting that has a fixed set of them (shown as a choice list).
+    choices: list[SettingChoiceItem] | None
     will_call: str | None
     note: str | None
     updated_at: datetime | None
@@ -77,6 +84,11 @@ def _to_item(effective: settings_service.EffectiveSetting) -> SettingItem:
         allow_blank=spec.allow_blank,
         min_value=spec.min_value,
         max_value=spec.max_value,
+        choices=(
+            [SettingChoiceItem(value=c.value, label=c.label) for c in spec.choices]
+            if spec.choices is not None
+            else None
+        ),
         will_call=effective.will_call,
         note=effective.note,
         updated_at=effective.updated_at,

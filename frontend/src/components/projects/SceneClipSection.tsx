@@ -1,13 +1,27 @@
-import { Alert, Badge, Button, Group, Paper, Stack, Switch, Text } from "@mantine/core";
+import { useState } from "react";
+import { Alert, Badge, Button, Group, Paper, Select, Stack, Switch, Text } from "@mantine/core";
 
-import { useGenerateClip, useSelectTake, useSetClipSound } from "../../api/clips";
+import {
+  useGenerateClip,
+  useSelectTake,
+  useSetClipSound,
+  useSetSceneVideoModel,
+} from "../../api/clips";
 import { describeError } from "../../api/errors";
 import type { ProjectDetail } from "../../api/projects";
 import type { Scene } from "../../api/scenes";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText, typicalText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
-import { generateLabel, hasActiveClipJob, takeLine } from "./clipView";
+import {
+  INHERIT,
+  VIDEO_MODELS,
+  isVideoModel,
+  modelChoices,
+  videoModelLabel,
+  type VideoModel,
+} from "../../videoModels";
+import { generateLabel, hasActiveClipJob, modelSourceText, takeLine } from "./clipView";
 
 type SceneClipSectionProps = {
   project: ProjectDetail;
@@ -17,13 +31,21 @@ type SceneClipSectionProps = {
 };
 
 /**
- * A scene's clip: Generate or Regenerate, the status of the newest job, the clip sound
- * switch, and every take with its own player (with sound) and Use this take.
+ * A scene's clip: Generate or Regenerate (with the video model for that one take), the status
+ * of the newest job, the scene's own video model, the clip sound switch, and every take with
+ * its model, its own player (with sound) and Use this take.
  */
 export function SceneClipSection({ project, scene, now }: SceneClipSectionProps) {
   const generate = useGenerateClip(project.id);
   const selectTake = useSelectTake(project.id);
   const setSound = useSetClipSound(project.id);
+  const setModel = useSetSceneVideoModel(project.id);
+  // The model picked for the next take only. Null: the scene's effective model.
+  const [override, setOverride] = useState<VideoModel | null>(null);
+
+  const chosenModel = override ?? scene.effective_video_model;
+  const chosenNote: string | undefined = scene.video_model_notes[chosenModel];
+  const projectModel = project.video_model ?? project.default_video_model;
 
   const job = scene.clip_job;
   const active = hasActiveClipJob(scene);
@@ -36,9 +58,28 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
         Clip
       </Text>
 
-      <Group gap="sm" align="center">
+      <Group gap="sm" align="flex-end">
+        <Select
+          label="Model for this take"
+          size="xs"
+          data={VIDEO_MODELS}
+          value={chosenModel}
+          onChange={(value) =>
+            setOverride(
+              isVideoModel(value) && value !== scene.effective_video_model ? value : null,
+            )
+          }
+          allowDeselect={false}
+          disabled={blocked !== null}
+          w={130}
+        />
         <Button
-          onClick={() => generate.mutate({ sceneId: scene.id })}
+          onClick={() =>
+            generate.mutate(
+              { sceneId: scene.id, videoModel: override ?? undefined },
+              { onSuccess: () => setOverride(null) },
+            )
+          }
           loading={generate.isPending}
           disabled={blocked !== null}
         >
@@ -51,11 +92,22 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
         )}
       </Group>
       {blocked === null && (
-        <Text size="xs" c="dimmed">
-          A clip takes about {scene.target_frames} frames ({project.fps} fps) and 5 to 10 minutes
-          on the GPU server. Each press makes a new take with a new random seed. The page updates
-          by itself.
-        </Text>
+        <Stack gap={2}>
+          <Text size="xs" c="dimmed">
+            Made with {videoModelLabel(chosenModel)} (
+            {override !== null
+              ? "this take only"
+              : modelSourceText(scene.effective_video_model_source)}
+            ). A clip takes about {scene.target_frames} frames ({project.fps} fps) and 5 to 10
+            minutes on the GPU server. Each press makes a new take with a new random seed. The
+            page updates by itself.
+          </Text>
+          {chosenNote !== undefined && (
+            <Text size="xs" c="orange.8">
+              {chosenNote}
+            </Text>
+          )}
+        </Stack>
       )}
 
       {generate.isError && (
@@ -86,6 +138,25 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
           <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
             {job.error}
           </Text>
+        </Alert>
+      )}
+
+      <Select
+        label="Video model for this scene"
+        description="Used by Generate and Regenerate unless you pick another model for one take. Clips already made keep the model they were made with."
+        data={modelChoices(`Project default (${videoModelLabel(projectModel)})`)}
+        value={scene.video_model ?? INHERIT}
+        onChange={(value) =>
+          value !== null &&
+          setModel.mutate({ sceneId: scene.id, videoModel: isVideoModel(value) ? value : null })
+        }
+        allowDeselect={false}
+        disabled={setModel.isPending}
+        maw={360}
+      />
+      {setModel.isError && (
+        <Alert color="red" title="The video model was not changed">
+          {describeError(setModel.error)}
         </Alert>
       )}
 
@@ -123,9 +194,19 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
             <Paper key={take.asset_id} withBorder p="xs" radius="md">
               <Stack gap={6}>
                 <Group justify="space-between">
-                  <Text size="sm" fw={600}>
-                    Take {scene.takes.length - index}
-                  </Text>
+                  <Group gap="xs">
+                    <Text size="sm" fw={600}>
+                      Take {scene.takes.length - index}
+                    </Text>
+                    {take.video_model !== null && (
+                      <Badge
+                        variant="light"
+                        color={take.video_model === "ltx-2.5" ? "blue" : "gray"}
+                      >
+                        {videoModelLabel(take.video_model)}
+                      </Badge>
+                    )}
+                  </Group>
                   {take.selected ? (
                     <Badge color="green" variant="light">
                       Used in the final video
@@ -157,6 +238,11 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
                 <Text size="xs" c="dimmed">
                   {takeLine(take)}
                 </Text>
+                {take.model_note !== null && (
+                  <Text size="xs" c="orange.8">
+                    {take.model_note}
+                  </Text>
+                )}
                 {take.out_of_date && (
                   <Text size="xs" c="orange.8">
                     The scene's cuts changed after this take was made, so it no longer matches

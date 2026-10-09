@@ -18,6 +18,8 @@ export type Draft = {
   negative_prompt: string;
   cut_instructions: string;
   description_instructions: string;
+  /** "" is "use the app's default"; otherwise the id of a video model. */
+  video_model: string;
 };
 
 export const NUMBER_FIELDS = [
@@ -59,6 +61,7 @@ export function initialDraft(project: ProjectDetail): Draft {
     negative_prompt: project.negative_prompt ?? "",
     cut_instructions: project.cut_instructions ?? "",
     description_instructions: project.description_instructions ?? "",
+    video_model: project.video_model ?? "",
   };
 }
 
@@ -79,6 +82,9 @@ export function changedFields(project: ProjectDetail, draft: Draft): ProjectUpda
     if (draft[field] !== saved[field]) {
       changes[field] = draft[field] === "" ? null : Number(draft[field]);
     }
+  }
+  if (draft.video_model !== saved.video_model) {
+    changes.video_model = draft.video_model === "" ? null : draft.video_model;
   }
   if (draft.clip_sound_percent !== saved.clip_sound_percent) {
     changes.clip_sound_volume =

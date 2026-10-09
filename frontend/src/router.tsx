@@ -9,6 +9,7 @@ import { ProjectPage } from "./pages/ProjectPage";
 import { ProjectSettingsPage } from "./pages/ProjectSettingsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { VideoLabPage } from "./pages/VideoLabPage";
 
 export const router = createBrowserRouter([
   {
@@ -22,6 +23,7 @@ export const router = createBrowserRouter([
       { path: "projects/:projectId/settings", element: <ProjectSettingsPage /> },
       { path: "activity", element: <ActivityPage /> },
       { path: "image-lab", element: <ImageLabPage /> },
+      { path: "video-lab", element: <VideoLabPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

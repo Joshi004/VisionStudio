@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Button, Group, NumberInput, Stack, Text, TextInput } from "@mantine/core";
+import { Badge, Button, Group, NumberInput, Select, Stack, Text, TextInput } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import { useResetSetting, useSaveSetting, type SettingItem } from "../../api/settings";
@@ -14,8 +14,11 @@ function SourceBadge({ setting }: { setting: SettingItem }) {
   return <Badge color="gray">Built-in default</Badge>;
 }
 
-function displayValue(value: string | number): string {
-  return value === "" ? "(blank)" : String(value);
+function displayValue(setting: SettingItem): string {
+  const { default: value, choices } = setting;
+  if (value === "") return "(blank)";
+  // A setting with a fixed set of values shows the name of the default, not its id.
+  return choices?.find((choice) => choice.value === value)?.label ?? String(value);
 }
 
 /**
@@ -61,6 +64,17 @@ export function SettingRow({ setting }: { setting: SettingItem }) {
             clampBehavior="none"
             error={errorMessage}
           />
+        ) : setting.choices ? (
+          <Select
+            style={{ flex: 1 }}
+            label={label}
+            description={description}
+            data={setting.choices.map((choice) => ({ value: choice.value, label: choice.label }))}
+            value={String(draft)}
+            onChange={(value) => value !== null && changeDraft(value)}
+            allowDeselect={false}
+            error={errorMessage}
+          />
         ) : (
           <TextInput
             style={{ flex: 1 }}
@@ -97,7 +111,7 @@ export function SettingRow({ setting }: { setting: SettingItem }) {
       <Group gap="xs">
         <SourceBadge setting={setting} />
         <Text size="xs" c="dimmed">
-          Default: {displayValue(setting.default)}
+          Default: {displayValue(setting)}
           {setting.env_var ? ` · Environment variable: ${setting.env_var}` : ""}
         </Text>
       </Group>

@@ -299,8 +299,9 @@ export interface paths {
         put?: never;
         /**
          * Cancel Job
-         * @description Cancels a job that has not started, one the GPU server no longer knows, or a running
-         *     clip job (which is cancelled on the GPU server first).
+         * @description Cancels a job that has not started, one the GPU server no longer knows, a running
+         *     clip job (which is cancelled on the GPU server first), or an automatic run (with the jobs
+         *     it made that have not started).
          */
         post: operations["cancel_job_api_jobs__job_id__cancel_post"];
         delete?: never;
@@ -651,7 +652,8 @@ export interface paths {
          * @description Starts generating a clip for the scene (Generate, and Regenerate when it has one).
          *
          *     A scene that already has a clip being generated returns that job: two quick clicks make
-         *     one job. Each new job gets its own random seed, so it makes a new take.
+         *     one job. Each new job gets its own random seed, so it makes a new take. The optional
+         *     `video_model` makes this one take with that model.
          */
         post: operations["generate_clip_api_projects__project_id__scenes__scene_id__generate_post"];
         delete?: never;
@@ -723,6 +725,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/scenes/{scene_id}/video-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Video Model
+         * @description Sets the scene's own video model, or clears it (`null`) to use the project's. It
+         *     changes the clips generated from now on, not the ones already made.
+         */
+        put: operations["set_video_model_api_projects__project_id__scenes__scene_id__video_model_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/render": {
         parameters: {
             query?: never;
@@ -758,6 +781,31 @@ export interface paths {
         get: operations["get_renders_api_projects__project_id__renders_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/auto-generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Auto Generate
+         * @description The newest automatic run of the project and where it is. Reads the database only.
+         */
+        get: operations["get_auto_generate_api_projects__project_id__auto_generate_get"];
+        put?: never;
+        /**
+         * Start Auto Generate
+         * @description Starts the automatic flow (every step to the final video, with paid calls), or returns
+         *     the run that is already active.
+         */
+        post: operations["start_auto_generate_api_projects__project_id__auto_generate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -872,6 +920,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/videos/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description The newest runs first. Pass the last id you have as `before_id` for the next page.
+         */
+        get: operations["list_runs_api_lab_videos_runs_get"];
+        put?: never;
+        /**
+         * Create Runs
+         * @description Starts one run per chosen model. Each is a paid GPU job of 5 to 10 minutes.
+         */
+        post: operations["create_runs_api_lab_videos_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/videos/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_lab_videos_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/videos/prompt-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Prompt Draft
+         * @description Starts the job that writes a multi-shot prompt from an idea (a paid call to the language
+         *     model). Follow it with `GET /api/jobs/{id}`: when it has succeeded, `output.prompt` is the
+         *     prompt and `output.warnings` is what to look at.
+         */
+        post: operations["create_prompt_draft_api_lab_videos_prompt_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -912,6 +1023,35 @@ export interface components {
             /** Tags */
             tags: components["schemas"]["TagGroupOut"][];
         };
+        /** AutoGenerateOut */
+        AutoGenerateOut: {
+            job: components["schemas"]["JobSummary"] | null;
+            /** Steps */
+            steps: components["schemas"]["StepOut"][];
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            /** Start Blocked Reason */
+            start_blocked_reason: string | null;
+            confirmations: components["schemas"]["ConfirmationsOut"];
+            /** Max Tries */
+            max_tries: number;
+        };
+        /**
+         * AutoGenerateRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        AutoGenerateRequest: {
+            /**
+             * Accept Mismatch
+             * @default false
+             */
+            accept_mismatch: boolean;
+            /**
+             * Discard Scenes With Inputs
+             * @default false
+             */
+            discard_scenes_with_inputs: boolean;
+        };
         /** ChecksOut */
         ChecksOut: {
             /** Entries */
@@ -929,6 +1069,17 @@ export interface components {
         ClipSoundRequest: {
             /** Use Clip Sound */
             use_clip_sound: boolean;
+        };
+        /**
+         * ConfirmationsOut
+         * @description What the page asks before a run starts. Both only matter when the run will propose
+         *     scenes, and are empty otherwise.
+         */
+        ConfirmationsOut: {
+            /** Mismatch */
+            mismatch: string | null;
+            /** Scenes With Inputs */
+            scenes_with_inputs: number;
         };
         /** ConnectionState */
         ConnectionState: {
@@ -1109,6 +1260,28 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** FirstFrameIn */
+        FirstFrameIn: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "lab" | "asset";
+            /** Id */
+            id: number;
+        };
+        /** FirstFrameOut */
+        FirstFrameOut: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "lab" | "asset";
+            /** Id */
+            id: number;
+            /** Url */
+            url: string | null;
+        };
         /**
          * FrameOut
          * @description A scene's first or last frame: the original upload, and how it will be framed.
@@ -1170,6 +1343,11 @@ export interface components {
             /** Created */
             created: number;
         };
+        /** GenerateRequest */
+        GenerateRequest: {
+            /** Video Model */
+            video_model?: ("ltx-2.3" | "ltx-2.5") | null;
+        };
         /** GpuStatus */
         GpuStatus: {
             server: components["schemas"]["ServerStatusOut"];
@@ -1198,7 +1376,7 @@ export interface components {
             /** Id */
             id: number;
             /** Project Id */
-            project_id: number;
+            project_id: number | null;
             /** Project Name */
             project_name: string;
             /** Scene Id */
@@ -1209,7 +1387,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline";
             /**
              * Status
              * @enum {string}
@@ -1255,7 +1433,7 @@ export interface components {
             /** Id */
             id: number;
             /** Project Id */
-            project_id: number;
+            project_id: number | null;
             /** Project Name */
             project_name: string;
             /** Scene Id */
@@ -1266,7 +1444,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline";
             /**
              * Status
              * @enum {string}
@@ -1470,6 +1648,76 @@ export interface components {
             /** Next Before Id */
             next_before_id: number | null;
         };
+        /** LabVideoRunCreate */
+        LabVideoRunCreate: {
+            /** Prompt */
+            prompt: string;
+            /** Models */
+            models: ("ltx-2.3" | "ltx-2.5")[];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "quality" | "fast";
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Duration S */
+            duration_s: number;
+            /** Seed */
+            seed?: number | null;
+            /** Negative Prompt */
+            negative_prompt?: string | null;
+            first_frame?: components["schemas"]["FirstFrameIn"] | null;
+        };
+        /** LabVideoRunOut */
+        LabVideoRunOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Group Key */
+            group_key: string | null;
+            /**
+             * Video Model
+             * @enum {string}
+             */
+            video_model: "ltx-2.3" | "ltx-2.5";
+            /** Endpoint */
+            endpoint: string;
+            /** Prompt */
+            prompt: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            first_frame: components["schemas"]["FirstFrameOut"] | null;
+            job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Frame Count */
+            frame_count: number | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Audio Codec */
+            audio_codec: string | null;
+        };
+        /** LabVideoRunsOut */
+        LabVideoRunsOut: {
+            /** Runs */
+            runs: components["schemas"]["LabVideoRunOut"][];
+        };
         /** LlmInfoOut */
         LlmInfoOut: {
             /** Model */
@@ -1515,6 +1763,17 @@ export interface components {
              */
             fetched_at: string;
             diff: components["schemas"]["ContractDiffOut"];
+        };
+        /** ProblemOut */
+        ProblemOut: {
+            /** Scene Id */
+            scene_id: number | null;
+            /** Scene Number */
+            scene_number: number | null;
+            /** Tries */
+            tries: number;
+            /** Message */
+            message: string;
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -1570,6 +1829,13 @@ export interface components {
             description_instructions: string | null;
             /** Script Text */
             script_text: string | null;
+            /** Video Model */
+            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            /**
+             * Default Video Model
+             * @enum {string}
+             */
+            default_video_model: "ltx-2.3" | "ltx-2.5";
             voiceover: components["schemas"]["VoiceoverOut"] | null;
         };
         /** ProjectFrameOut */
@@ -1659,6 +1925,19 @@ export interface components {
             description_instructions?: string | null;
             /** Script Text */
             script_text?: string | null;
+            /** Video Model */
+            video_model?: string | null;
+        };
+        /** PromptDraftCreate */
+        PromptDraftCreate: {
+            /** Idea */
+            idea: string;
+            /** Shots */
+            shots: number;
+            /** Duration S */
+            duration_s: number;
+            /** First Frame Note */
+            first_frame_note?: string | null;
         };
         /**
          * ProposalOut
@@ -1816,6 +2095,22 @@ export interface components {
             clip_mode: "first_frame" | "first_and_last";
             /** Use Clip Sound */
             use_clip_sound: boolean;
+            /** Video Model */
+            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            /**
+             * Effective Video Model
+             * @enum {string}
+             */
+            effective_video_model: "ltx-2.3" | "ltx-2.5";
+            /**
+             * Effective Video Model Source
+             * @enum {string}
+             */
+            effective_video_model_source: "scene" | "project" | "global";
+            /** Video Model Notes */
+            video_model_notes: {
+                [key: string]: string;
+            };
             /** Selected Clip Asset Id */
             selected_clip_asset_id: number | null;
             /** Target Frames */
@@ -1946,6 +2241,13 @@ export interface components {
             /** Error */
             error: string | null;
         };
+        /** SettingChoiceItem */
+        SettingChoiceItem: {
+            /** Value */
+            value: string;
+            /** Label */
+            label: string;
+        };
         /** SettingItem */
         SettingItem: {
             /** Key */
@@ -1978,6 +2280,8 @@ export interface components {
             min_value: number | null;
             /** Max Value */
             max_value: number | null;
+            /** Choices */
+            choices: components["schemas"]["SettingChoiceItem"][] | null;
             /** Will Call */
             will_call: string | null;
             /** Note */
@@ -2056,6 +2360,22 @@ export interface components {
             /** Cuts Removed */
             cuts_removed: number;
         };
+        /** StepOut */
+        StepOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "skipped" | "failed" | "stopped";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+        };
         /** TagGroupOut */
         TagGroupOut: {
             /** Tag */
@@ -2091,6 +2411,12 @@ export interface components {
             audio_codec: string | null;
             /** Clip Mode */
             clip_mode: ("first_frame" | "first_and_last") | null;
+            /** Video Model */
+            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            /** Mode */
+            mode: string | null;
+            /** Model Note */
+            model_note: string | null;
             /** Selected */
             selected: boolean;
             /** Out Of Date */
@@ -2167,6 +2493,11 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VideoModelRequest */
+        VideoModelRequest: {
+            /** Video Model */
+            video_model: ("ltx-2.3" | "ltx-2.5") | null;
         };
         /** VoiceoverOut */
         VoiceoverOut: {
@@ -3598,7 +3929,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GenerateRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -3759,6 +4094,51 @@ export interface operations {
             };
         };
     };
+    set_video_model_api_projects__project_id__scenes__scene_id__video_model_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     start_render_api_projects__project_id__render_post: {
         parameters: {
             query?: never;
@@ -3835,6 +4215,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_auto_generate_api_projects__project_id__auto_generate_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoGenerateOut"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_auto_generate_api_projects__project_id__auto_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AutoGenerateRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The recording differs from the script, or scenes with inputs would be replaced, and the request did not confirm it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A run cannot start: there is no voiceover or script, or another job of the project is waiting or running. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -4051,6 +4524,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_lab_videos_runs_get: {
+        parameters: {
+            query?: {
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVideoRunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_runs_api_lab_videos_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabVideoRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVideoRunsOut"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_api_lab_videos_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVideoRunOut"];
+                };
+            };
+            /** @description No run has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_prompt_draft_api_lab_videos_prompt_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptDraftCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

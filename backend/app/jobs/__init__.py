@@ -5,7 +5,8 @@
 - `dispatcher.py`: the one loop that moves jobs forward.
 - `phases.py`: the phase labels the UI shows.
 - one module per job type (`transcribe.py`, `plan_scenes.py`, `draft_descriptions.py`,
-  `write_image_prompt.py`, `generate_frame.py`, `generate_clip.py`, `render_final.py`).
+  `write_image_prompt.py`, `generate_frame.py`, `generate_clip.py`, `render_final.py`,
+  `generate_lab_video.py`, `write_lab_video_prompt.py`, `auto_pipeline.py`).
 
 A new job type is a new handler module plus one line in `register_handlers` below. The
 dispatcher loop is not touched.
@@ -21,13 +22,16 @@ def register_handlers() -> None:
     handler modules can import the rest of the package without a cycle.
     """
     from app.jobs import handlers
+    from app.jobs.auto_pipeline import AutoPipelineHandler
     from app.jobs.draft_descriptions import DraftDescriptionsHandler
     from app.jobs.generate_clip import GenerateClipHandler
     from app.jobs.generate_frame import GenerateFrameHandler
+    from app.jobs.generate_lab_video import GenerateLabVideoHandler
     from app.jobs.plan_scenes import PlanScenesHandler
     from app.jobs.render_final import RenderFinalHandler
     from app.jobs.transcribe import TranscribeHandler
     from app.jobs.write_image_prompt import WriteImagePromptHandler
+    from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
 
     handlers.register(TranscribeHandler())
     handlers.register(PlanScenesHandler())
@@ -36,3 +40,6 @@ def register_handlers() -> None:
     handlers.register(GenerateFrameHandler())
     handlers.register(GenerateClipHandler())
     handlers.register(RenderFinalHandler())
+    handlers.register(GenerateLabVideoHandler())
+    handlers.register(WriteLabVideoPromptHandler())
+    handlers.register(AutoPipelineHandler())

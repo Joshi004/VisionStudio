@@ -271,7 +271,9 @@ def _user_message(
         f"contradict it): {_quoted(project.prompt_suffix, 'nothing')}"
     )
     lines.append(
-        f"Sent to the video model as things to avoid: {_quoted(project.negative_prompt, 'nothing')}"
+        "Sent to LTX-2.3 as things to avoid (LTX-2.5 has no negative prompt and never sees it, "
+        "so what must not appear has to be left out of the video prompt itself): "
+        f"{_quoted(project.negative_prompt, 'nothing')}"
     )
     instructions = (project.description_instructions or "").strip()
     if instructions:
@@ -322,7 +324,9 @@ def build_request(
             {"role": "user", "content": _user_message(project, scenes, paragraphs)},
         ],
         "max_tokens": MAX_TOKENS,
-        "stream": False,
+        "stream": True,
+        # Without this the stream carries no token counts, which the job records.
+        "stream_options": {"include_usage": True},
         "response_format": {"type": "json_object"},
         "reasoning_effort": REASONING_EFFORT,
     }

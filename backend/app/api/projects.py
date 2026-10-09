@@ -20,6 +20,7 @@ from app.db.session import SessionDep
 from app.services import projects as projects_service
 from app.services import voiceover as voiceover_service
 from app.services.storage import media_url
+from app.services.video_models import VideoModel
 
 router = APIRouter()
 
@@ -59,6 +60,8 @@ class ProjectUpdate(BaseModel):
     cut_instructions: StrictStr | None = None
     description_instructions: StrictStr | None = None
     script_text: StrictStr | None = None
+    # `null` means "use the app's default video model".
+    video_model: StrictStr | None = None
 
 
 class VoiceoverOut(BaseModel):
@@ -99,6 +102,10 @@ class ProjectDetail(BaseModel):
     cut_instructions: str | None
     description_instructions: str | None
     script_text: str | None
+    # The project's own choice (`ltx-2.3` or `ltx-2.5`), or null to use the app's default.
+    video_model: VideoModel | None
+    # The app's default video model, so the page can say what "default" means right now.
+    default_video_model: VideoModel
     voiceover: VoiceoverOut | None
 
 
@@ -121,7 +128,14 @@ def _voiceover_out(asset: Asset | None) -> VoiceoverOut | None:
     )
 
 
-def _detail(project: Project, voiceover: Asset | None) -> ProjectDetail:
+def _video_model(value: str | None) -> VideoModel | None:
+    # The database CHECK constraint keeps a stored value to the known models.
+    return cast(VideoModel, value) if value is not None else None
+
+
+def _detail(
+    project: Project, voiceover: Asset | None, default_video_model: VideoModel
+) -> ProjectDetail:
     return ProjectDetail(
         id=project.id,
         name=project.name,
@@ -141,6 +155,8 @@ def _detail(project: Project, voiceover: Asset | None) -> ProjectDetail:
         cut_instructions=project.cut_instructions,
         description_instructions=project.description_instructions,
         script_text=project.script_text,
+        video_model=_video_model(project.video_model),
+        default_video_model=default_video_model,
         voiceover=_voiceover_out(voiceover),
     )
 
@@ -182,14 +198,14 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
         project = await projects_service.create_project(session, body.name, body.orientation)
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    return _detail(project, None)
+    return _detail(project, None, await projects_service.default_video_model(session))
 
 
 @router.get("/projects/{project_id}", response_model=ProjectDetail, responses=_NOT_FOUND)
 async def get_project(project_id: int, session: SessionDep) -> ProjectDetail:
     project = await load_project(session, project_id)
     voiceover = await projects_service.get_voiceover(session, project)
-    return _detail(project, voiceover)
+    return _detail(project, voiceover, await projects_service.default_video_model(session))
 
 
 @router.patch(
@@ -209,7 +225,7 @@ async def update_project(
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     voiceover = await projects_service.get_voiceover(session, project)
-    return _detail(project, voiceover)
+    return _detail(project, voiceover, await projects_service.default_video_model(session))
 
 
 _VOICEOVER_UPLOAD_RESPONSES = {
@@ -274,4 +290,4 @@ async def upload_voiceover(project_id: int, request: Request, session: SessionDe
         )
     except voiceover_service.VoiceoverRejected as exc:
         raise HTTPException(exc.status_code, exc.message) from exc
-    return _detail(project, asset)
+    return _detail(project, asset, await projects_service.default_video_model(session))

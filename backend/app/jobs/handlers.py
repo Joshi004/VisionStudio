@@ -42,11 +42,15 @@ class JobHandler(ABC):
     job_type: ClassVar[str]
     provider: ClassVar[Provider]
     restart_rule: ClassVar[RestartRule]
+    # Job types that return the same group share one pool of running slots (the Video lab's
+    # clips and a scene's clips both use the GPU). None: the job type is its own pool. Every
+    # handler of a group must return the same `concurrency_limit`.
+    concurrency_group: ClassVar[str | None] = None
 
     @abstractmethod
     async def concurrency_limit(self, session: AsyncSession) -> int:
-        """How many jobs of this type may be running at once. Read at every tick, so a
-        change in Settings applies at once.
+        """How many jobs of this type (or of its group) may be running at once. Read at every
+        tick, so a change in Settings applies at once.
         """
 
     @abstractmethod
@@ -77,3 +81,9 @@ def get_handler(job_type: str) -> JobHandler | None:
 
 def all_handlers() -> list[JobHandler]:
     return list(_registry.values())
+
+
+def slot_key(job_type: str) -> str:
+    """The pool a job type's running slots are counted in: its group, else the type itself."""
+    handler = _registry.get(job_type)
+    return job_type if handler is None else (handler.concurrency_group or job_type)

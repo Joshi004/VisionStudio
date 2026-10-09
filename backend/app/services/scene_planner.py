@@ -32,9 +32,13 @@ from app.services.transcript_matching import normalise
 # small context windows). About 10 minutes of speech.
 MAX_SCRIPT_WORDS: Final = 1500
 # Hidden reasoning tokens are billed as output (Section 6.2, rule 4), so the answer is capped.
-MAX_TOKENS: Final = 16000
-# GLM-5.3-Flash always reasons. "high" gave the same cuts as "max" in half the time, while
-# "low" ignored the length limits (Phase 6 plan, Spike 3).
+# At 16,000 a run that kept reasoning was cut off twice (Flash, one script), and its paid
+# answer was lost. 32,000 is what the scene descriptions send to GLM-5.3. Only the tokens
+# used are billed, so a higher cap costs nothing unless the model needs it.
+MAX_TOKENS: Final = 32000
+# GLM-5.3 and GLM-5.3-Flash always reason. On Flash, "high" gave the same cuts as "max" in
+# half the time, while "low" ignored the length limits (Phase 6 plan, Spike 3). "high" stays
+# for GLM-5.3 too, so the quality of the cuts is not traded for speed.
 REASONING_EFFORT: Final = "high"
 # A cut is moved at most this many words to make its quoted words match.
 CHECKSUM_WINDOW: Final = 3
@@ -108,7 +112,9 @@ def build_request(
             {"role": "user", "content": user},
         ],
         "max_tokens": MAX_TOKENS,
-        "stream": False,
+        "stream": True,
+        # Without this the stream carries no token counts, which the job records.
+        "stream_options": {"include_usage": True},
         "response_format": {"type": "json_object"},
         "reasoning_effort": REASONING_EFFORT,
     }

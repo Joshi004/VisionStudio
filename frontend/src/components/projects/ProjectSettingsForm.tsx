@@ -6,6 +6,7 @@ import {
   Group,
   NumberInput,
   Paper,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -15,6 +16,7 @@ import {
 
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
+import { INHERIT, modelChoices, videoModelLabel } from "../../videoModels";
 import { changedFields, initialDraft, type Draft, type NUMBER_FIELDS } from "./settingsDraft";
 
 type ProjectSettingsFormProps = {
@@ -158,6 +160,29 @@ export function ProjectSettingsForm({
 
         <Paper withBorder p="md" radius="md">
           <Stack gap="md">
+            <Title order={4}>Video model</Title>
+            <Select
+              aria-label="Video model"
+              description="Makes this project's clips unless a scene chooses its own (in its clip section). Regenerate can also pick a model for one take."
+              data={modelChoices(
+                `App default (currently ${videoModelLabel(project.default_video_model)})`,
+              )}
+              value={draft.video_model === "" ? INHERIT : draft.video_model}
+              onChange={(value) =>
+                edit("video_model", value === null || value === INHERIT ? "" : value)
+              }
+              allowDeselect={false}
+              maw={360}
+            />
+            <Text size="xs" c="dimmed">
+              LTX-2.5 has no negative prompt, so the Negative prompt below is used by LTX-2.3 only.
+              A scene that has a last frame is always made by LTX-2.3 for now.
+            </Text>
+          </Stack>
+        </Paper>
+
+        <Paper withBorder p="md" radius="md">
+          <Stack gap="md">
             <Title order={4}>Clip sound</Title>
             <NumberInput
               label="Volume"
@@ -198,8 +223,8 @@ export function ProjectSettingsForm({
               minRows={2}
             />
             <Textarea
-              label="Negative prompt"
-              description="What to avoid, for example: blurry, low quality, text, watermark, speech, talking, voices. Leave blank to use the app's default (Settings, Video model)."
+              label="Negative prompt (LTX-2.3 only)"
+              description="What to avoid, for example: blurry, low quality, text, watermark, speech, talking, voices. Leave blank to use the app's default (Settings, Video model). LTX-2.5 ignores it: say what you want in the prompt instead."
               value={draft.negative_prompt}
               onChange={(event) => edit("negative_prompt", event.currentTarget.value)}
               autosize

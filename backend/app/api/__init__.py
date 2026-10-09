@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api import (
+    auto_pipeline,
     clips,
     first_frames,
     gpu,
@@ -18,6 +19,7 @@ from app.api import (
     scenes,
     settings,
     transcription,
+    video_lab,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -33,4 +35,6 @@ api_router.include_router(image_prompts.router, tags=["scenes"])
 api_router.include_router(first_frames.router, tags=["scenes"])
 api_router.include_router(clips.router, tags=["scenes"])
 api_router.include_router(renders.router, tags=["renders"])
+api_router.include_router(auto_pipeline.router, tags=["auto-generate"])
 api_router.include_router(image_lab.router, tags=["image-lab"])
+api_router.include_router(video_lab.router, tags=["video-lab"])

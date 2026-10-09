@@ -22,6 +22,7 @@ from app.jobs import dispatcher, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
+from app.services import auto_pipeline as auto_pipeline_service
 
 GPU_URL_KEY = "gpu_api_base_url"
 
@@ -35,6 +36,9 @@ JobType = Literal[
     "generate_frame",
     "generate_clip",
     "render_final",
+    "lab_video",
+    "write_lab_video_prompt",
+    "auto_pipeline",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]
@@ -50,7 +54,8 @@ _NOT_ALLOWED = {
 
 class JobSummary(BaseModel):
     id: int
-    project_id: int
+    # None for the Video lab's jobs, which belong to no project (`project_name` then says so).
+    project_id: int | None
     project_name: str
     scene_id: int | None
     scene_index: int | None
@@ -167,8 +172,9 @@ async def _cancel_on_server(base_url: str, provider_job_id: str) -> dict[str, An
     },
 )
 async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
-    """Cancels a job that has not started, one the GPU server no longer knows, or a running
-    clip job (which is cancelled on the GPU server first).
+    """Cancels a job that has not started, one the GPU server no longer knows, a running
+    clip job (which is cancelled on the GPU server first), or an automatic run (with the jobs
+    it made that have not started).
     """
     job = (await _load_row(session, job_id)).job
     was_not_found = store.is_not_found(job)
@@ -185,6 +191,11 @@ async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
         await store.cancel_job(session, job_id)
     except JobActionError as exc:
         raise HTTPException(exc.status_code, exc.message) from exc
+
+    # A stopped automatic run starts nothing more, so what it made and has not started is
+    # cancelled too. What is already running finishes on its own, and its result stays.
+    if job.type == store.AUTO_RUN_TYPE:
+        await auto_pipeline_service.cancel_queued_children(session, job)
 
     # A job that was still uploading may have been submitted while it was being cancelled.
     # Its start notices (`mark_submitted` fails) and cancels it too; this covers the other order.

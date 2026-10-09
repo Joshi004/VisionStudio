@@ -50,15 +50,18 @@ from app.services import (
     scene_planner,
     scene_prompt,
     transcript_matching,
+    video_models,
 )
 from app.services import descriptions as descriptions_service
 from app.services import first_frames as first_frames_service
 from app.services import image_prompts as image_prompts_service
+from app.services import projects as projects_service
 from app.services import renders as renders_service
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
 from app.services.scene_inputs import ClipMode, MissingInput
 from app.services.storage import media_url
+from app.services.video_models import ModelSource, VideoModel
 
 _logger = logging.getLogger(__name__)
 
@@ -166,6 +169,13 @@ class TakeOut(BaseModel):
     # How the clip was made: from the first frame alone, or from both frames. None for a clip
     # that did not record its endpoint.
     clip_mode: ClipMode | None
+    # The video model that made the clip (an older clip is told by its endpoint), and the
+    # recipe the request named (`quality` or `fast`). None when the clip recorded neither.
+    video_model: VideoModel | None
+    mode: str | None
+    # Why the model that made the clip is not the one that was asked for (LTX-2.5 cannot make
+    # a clip from a first and a last frame yet), or None.
+    model_note: str | None
     # This is the take the final video uses.
     selected: bool
     # The scene's cuts have changed since this take was made.
@@ -240,6 +250,15 @@ class SceneOut(BaseModel):
     clip_mode: ClipMode
     # Whether the final video uses this scene's own clip sound.
     use_clip_sound: bool
+    # The scene's own video model choice, or None to use the project's (and then the app's).
+    video_model: VideoModel | None
+    # The model the next Generate uses, and which level chose it.
+    effective_video_model: VideoModel
+    effective_video_model_source: Literal["scene", "project", "global"]
+    # For each model that cannot make this scene's clip the way it is set up, why, and which
+    # model is used instead (LTX-2.5 with a last frame). Keyed by model id. A model that can
+    # make the clip is not listed.
+    video_model_notes: dict[str, str]
     # The take the final video uses, if any.
     selected_clip_asset_id: int | None
     # How many frames the scene lasts at the project's frame rate (Phase 10 uses it too).
@@ -459,6 +478,9 @@ def _take_out(take: clips_service.Take, scene: Scene, project: Project) -> TakeO
     codec = audio.get("codec") if isinstance(audio, dict) else None
     seed = recorded.get("seed")
     target = recorded.get("target_frames")
+    model = recorded.get("video_model")
+    mode = recorded.get("mode")
+    note = recorded.get("model_note")
     return TakeOut(
         asset_id=take.asset.id,
         job_id=take.job.id,
@@ -470,10 +492,36 @@ def _take_out(take: clips_service.Take, scene: Scene, project: Project) -> TakeO
         duration_s=take.asset.duration_s,
         audio_codec=codec if isinstance(codec, str) else None,
         clip_mode=video_generator.clip_mode_for(recorded.get("endpoint")),
+        video_model=(
+            model
+            if video_models.is_video_model(model)
+            else video_generator.model_for(recorded.get("endpoint"))
+        ),
+        mode=mode if isinstance(mode, str) else None,
+        model_note=note if isinstance(note, str) else None,
         selected=scene.selected_clip_asset_id == take.asset.id,
         out_of_date=clips_service.take_is_out_of_date(recorded, scene),
         too_short=clips_service.take_is_too_short(recorded, scene, project),
     )
+
+
+def _stored_model(value: str | None) -> VideoModel | None:
+    # The database CHECK constraint keeps a stored value to the known models.
+    return cast(VideoModel, value) if value is not None else None
+
+
+def _scene_source(source: ModelSource) -> str:
+    return "global" if source == "regenerate" else source
+
+
+def _model_notes(clip_mode: ClipMode) -> dict[str, str]:
+    """Why a model cannot make a clip of this mode as asked, for each that cannot."""
+    notes: dict[str, str] = {}
+    for model in video_models.MODEL_IDS:
+        note = video_generator.endpoint_for(model, clip_mode).note
+        if note is not None:
+            notes[model] = note
+    return notes
 
 
 def _scene_out(
@@ -493,8 +541,13 @@ def _scene_out(
     frame_job: Job | None,
     frame_blocked: str | None,
     frame_choices: list[Asset],
+    default_video_model: VideoModel,
 ) -> SceneOut:
     missing = scene_inputs.missing_inputs(scene)
+    clip_mode = scene_inputs.clip_mode(scene)
+    effective_model, model_source = video_models.resolve(
+        None, scene.video_model, project.video_model, default_video_model
+    )
     first_asset = frames.get(scene.first_frame_asset_id or 0)
     first_out_of_date = first_frames_service.frame_out_of_date(scene, first_asset)
     return SceneOut(
@@ -556,8 +609,15 @@ def _scene_out(
         ],
         missing=missing,
         ready=not missing,
-        clip_mode=scene_inputs.clip_mode(scene),
+        clip_mode=clip_mode,
         use_clip_sound=scene.use_clip_sound,
+        video_model=_stored_model(scene.video_model),
+        effective_video_model=effective_model,
+        # The Regenerate choice is not a level the scene knows about, so it is never `regenerate`.
+        effective_video_model_source=cast(
+            Literal["scene", "project", "global"], _scene_source(model_source)
+        ),
+        video_model_notes=_model_notes(clip_mode),
         selected_clip_asset_id=scene.selected_clip_asset_id,
         target_frames=clips_service.target_frames_for(scene, project),
         clip_job=(
@@ -779,6 +839,7 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     clip_jobs = await store.latest_jobs_by_scene(session, project.id, clips_service.GENERATE_JOB)
     takes = await clips_service.takes_by_scene(session, project.id)
     max_parallel = await settings_service.get_int(session, MAX_PARALLEL_KEY)
+    default_video_model = await projects_service.default_video_model(session)
 
     # Image prompts (Phase 16): the newest job of each scene, which prompts are out of date
     # (computed from the hash their job kept), and why a prompt cannot be written.
@@ -832,6 +893,7 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             frame_job=frame_jobs.get(scene.id),
             frame_blocked=frame_blocked(scene),
             frame_choices=choices.get(scene.id, []),
+            default_video_model=default_video_model,
         )
         for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
     ]

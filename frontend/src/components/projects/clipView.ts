@@ -1,5 +1,6 @@
 import type { Take } from "../../api/clips";
 import type { Scene } from "../../api/scenes";
+import { videoModelLabel } from "../../videoModels";
 
 /** True while the scene's newest clip job is waiting or running. */
 export function hasActiveClipJob(scene: Pick<Scene, "clip_job">): boolean {
@@ -34,9 +35,24 @@ export function clipModeText(mode: Scene["clip_mode"]): string {
   return mode === "first_and_last" ? "First and last frame" : "First frame only";
 }
 
-/** "first frame only · seed 1527961933 · 81 frames · 3.38 s · sound: aac". */
+/** Which level chose the model that makes the scene's next clip, for a hint under the choice. */
+export function modelSourceText(source: Scene["effective_video_model_source"]): string {
+  if (source === "scene") {
+    return "chosen for this scene";
+  }
+  return source === "project" ? "the project's choice" : "the app's default";
+}
+
+/**
+ * "LTX-2.5 quality · first frame only · seed 1527961933 · 81 frames · 3.38 s · sound: aac".
+ * An older clip that recorded no model is told by its endpoint, so it starts with LTX-2.3.
+ */
 export function takeLine(take: Take): string {
   const parts: string[] = [];
+  if (take.video_model !== null) {
+    const name = videoModelLabel(take.video_model);
+    parts.push(take.mode !== null ? `${name} ${take.mode}` : name);
+  }
   if (take.clip_mode !== null) {
     parts.push(clipModeText(take.clip_mode).toLowerCase());
   }

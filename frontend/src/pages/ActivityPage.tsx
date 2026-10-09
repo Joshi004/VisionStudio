@@ -85,13 +85,24 @@ export function ActivityPage() {
                   <Table.Td>{job.id}</Table.Td>
                   <Table.Td>{jobTypeLabel(job.type)}</Table.Td>
                   <Table.Td>
-                    <Anchor
-                      component={Link}
-                      to={`/projects/${job.project_id}`}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {job.project_name}
-                    </Anchor>
+                    {job.project_id === null ? (
+                      // The Video lab's jobs belong to no project.
+                      <Anchor
+                        component={Link}
+                        to="/video-lab"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {job.project_name}
+                      </Anchor>
+                    ) : (
+                      <Anchor
+                        component={Link}
+                        to={`/projects/${job.project_id}`}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {job.project_name}
+                      </Anchor>
+                    )}
                   </Table.Td>
                   <Table.Td>{job.scene_index === null ? "—" : job.scene_index + 1}</Table.Td>
                   <Table.Td>

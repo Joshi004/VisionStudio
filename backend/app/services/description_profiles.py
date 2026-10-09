@@ -10,10 +10,13 @@ Everything else about drafting (the task, the consistency rules, the frame rules
 answer, the job, the API and the page) knows nothing about LTX. To use another video model,
 add a profile below and point `ACTIVE_PROFILE` at it.
 
-Two profiles exist. `ltx-2.3-keyframe` (Phase 12) was written for clips made from a first and
+Three profiles exist. `ltx-2.3-keyframe` (Phase 12) was written for clips made from a first and
 a last frame, and stays here unchanged because earlier drafting jobs name it. `ltx-2.3-first-frame`
-(Phase 15) is the active one: clips start from a first frame alone, so its video prompts say
-what changes from that frame and where the action ends.
+(Phase 15) was written for clips that start from a first frame alone, and stays unchanged for the
+same reason. `ltx-first-frame` (Phase 19) is the active one: it writes for LTX-2.3 and LTX-2.5
+alike, so a scene's prompt can be made with either model and the takes compared. Both models
+read a first-frame prompt the same way (the server's guide and Lightricks' prompting guide agree
+on it), so only the request differs between them, never the prompt.
 
 The text here is the lever for better prompts, so a change to it is a change to every future
 draft. Raise `version` whenever any text in a profile changes: the job stores the profile's
@@ -238,6 +241,123 @@ LTX_23_FIRST_FRAME: Final = PromptProfile(
     ),
 )
 
-# The video adapter the job asks for. `LTX_23_KEYFRAME` stays above, unchanged, because jobs
-# from Phase 12 name it.
-ACTIVE_PROFILE: Final = LTX_23_FIRST_FRAME
+# --- LTX-2.3 and LTX-2.5 image-to-video from a first frame (Phase 19) ------------------------
+
+# What differs from `ltx-2.3-first-frame`, from the server's guide and Lightricks' prompting
+# guide for LTX-2.5 (the LTX-2.3 section of the server's guide agrees on every point):
+# - sound is written where it happens, inside the sentence of the action it belongs to, not as a
+#   closing sentence;
+# - 4 to 8 sentences, each with a verb that does something;
+# - pauses are written in (the model adds none by itself), and the camera says where the subject
+#   ends up after it moves;
+# - one lighting logic, and feeling shown through physical cues;
+# - a named cut ("a hard cut transitions to") is a real edit for LTX-2.5, so it is warned about.
+_LTX_FIRST_FRAME_EXAMPLE: Final = json.dumps(
+    {
+        "scene": 1,
+        "continuity": "new_place",
+        "first_frame": (
+            "Close-up at water level, a 35 mm look with shallow depth of field. A cream paper "
+            "boat with a faded blue stripe along its edge sits at the rim of a rain puddle "
+            "between dark, wet cobblestones, its bow pointing across the water. A single yellow "
+            "leaf floats in the puddle beyond it. Flat overcast light, a muted palette of grey, "
+            "slate blue and cream. Portrait frame, the boat near the centre, the puddle filling "
+            "the lower half."
+        ),
+        "video_prompt": (
+            "A gust of wind pushes the paper boat off the rim and into the puddle with a soft "
+            "splash. It drifts slowly across the water, turning a quarter turn as ripples "
+            "spread behind it and the water laps against the stone. It nudges the floating "
+            "leaf aside, pauses for a beat, then comes to rest against the far edge, rocking "
+            "gently as the last ripples fade. Slow pan right, following the boat until it sits "
+            "near the centre of the frame, with a faint rain patter and a low gust of wind "
+            "underneath. No music, no voices."
+        ),
+    },
+    ensure_ascii=False,
+)
+
+# A transition named in words is an edit for LTX-2.5. A clip made from one first frame is one
+# continuous shot, so these are warned about (the Video lab is where cuts are tried).
+_NAMED_CUT: Final = re.compile(
+    r"\b(hard|match|jump|smash) cut\b|\bcuts? away\b|\bcuts? (?:to|into)\b", re.IGNORECASE
+)
+
+LTX_FIRST_FRAME: Final = PromptProfile(
+    id="ltx-first-frame",
+    version=1,
+    video_model="LTX-2.3 or LTX-2.5 image-to-video from a first frame (one continuous shot)",
+    video_prompt_rules="\n".join(
+        [
+            'Rules for "video_prompt", the motion prompt for LTX. LTX starts from the first '
+            "frame and makes the clip as one continuous shot from this prompt. Nothing else "
+            "says where the clip ends:",
+            "1. The first frame already shows how everything looks. Describe only what CHANGES "
+            "from it. Never describe again its looks, colours, materials or setting: that makes "
+            "the video drift away from the frame. Name a subject only as far as is needed to "
+            "say what it does.",
+            "2. One flowing paragraph in the present tense, 4 to 8 short sentences in all "
+            "(action, camera, light and sound count), at most 200 words. A scene of 2 to 3 "
+            "seconds sits at the low end and one of 6 seconds at the high end: about one "
+            "action for every 2 to 3 seconds.",
+            "3. The main action first, in one clear sentence. Then the specific movements and "
+            "gestures, as literal, chronological verbs (lifts, turns, drifts). Every sentence "
+            "has a verb that does something: appearance alone gives the video model nothing "
+            "to animate. Show feeling through physical cues (a breath, a lowered gaze, "
+            'slumped shoulders), never with a label such as "sad".',
+            "4. Write the pace in. The video model adds no pause you do not ask for, so put "
+            'the beats into the action ("it pauses for a beat", "a moment of stillness").',
+            "5. Say where the action ends: the final position or state, in plain words (for "
+            'example "comes to rest against the far edge"). This is the only thing that fixes '
+            "the end of the clip.",
+            '6. Camera: name exactly one move in plain words, such as "static camera", "slow '
+            'push-in", "slow pull-back", "slow pan left", "handheld, slightly drifting" or '
+            '"slow tracking shot following the boat", and say where the subject ends up '
+            'after it ("until the cup fills the lower third"). Choose it from what the scene '
+            "needs, and vary it across the video instead of repeating one move.",
+            "7. Light: one lighting logic for the whole shot. Say how the light changes, only "
+            "if it does.",
+            "8. Sound: write it where it happens, inside the sentence of the action it belongs "
+            'to ("the broom scrapes over the stone as it sweeps"), concrete and specific, not '
+            "as a closing sentence of its own. By default there is no music, no speech and no "
+            'singing, and you say so once, briefly, at the very end ("No music, no voices."). '
+            "The author's instructions can change this.",
+            '9. Never use: double quotes (they make people speak), "cut to" or any scene '
+            "change or named transition (hard cut, match cut, dissolve), times or seconds, "
+            '"the video starts with", on-screen text.',
+            '10. Plain film language and restrained adjectives ("red dress", not "vibrant '
+            'crimson dress"). No technical specs: no focal lengths, f-stops, resolutions or '
+            "camera model names. The frame already sets the look.",
+        ]
+    ),
+    example=_LTX_FIRST_FRAME_EXAMPLE,
+    max_video_words=200,
+    rules=(
+        TextRule(
+            _DOUBLE_QUOTES,
+            "Double quotes found. The video model lip-syncs quoted speech, and there is no "
+            "dialogue here.",
+        ),
+        _CUT_TO_FIRST_FRAME,
+        TextRule(
+            _NAMED_CUT,
+            "A named cut (\u201chard cut\u201d, \u201cmatch cut\u201d, \u201ccuts away\u201d) "
+            "found. LTX-2.5 treats it as a real edit, but a clip made from one first frame is "
+            "one continuous shot. Try cuts in the Video lab.",
+        ),
+        TextRule(
+            _TIMESTAMP,
+            "A time such as \u201c0:03\u201d or \u201c3 seconds\u201d found. The clip's length "
+            "is set by the scene.",
+        ),
+        TextRule(
+            _VIDEO_STARTS_WITH,
+            "\u201cthe video starts with\u201d found. The first frame already shows the start: "
+            "describe the motion.",
+        ),
+    ),
+)
+
+# The video adapter the job asks for. `LTX_23_KEYFRAME` and `LTX_23_FIRST_FRAME` stay above,
+# unchanged, because jobs from Phase 12 and Phase 15 name them.
+ACTIVE_PROFILE: Final = LTX_FIRST_FRAME

@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { label: "Projects", to: "/projects" },
   { label: "Activity", to: "/activity" },
   { label: "Image lab", to: "/image-lab" },
+  { label: "Video lab", to: "/video-lab" },
   { label: "Settings", to: "/settings" },
 ];
 

@@ -54,7 +54,10 @@ function JobDetails({ job, now }: { job: JobDetail; now: number }) {
       </Group>
       <Field label="Type">{jobTypeLabel(job.type)}</Field>
       <Field label="Project">
-        <Anchor component={Link} to={`/projects/${job.project_id}`}>
+        <Anchor
+          component={Link}
+          to={job.project_id === null ? "/video-lab" : `/projects/${job.project_id}`}
+        >
           {job.project_name}
         </Anchor>
       </Field>

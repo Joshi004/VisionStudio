@@ -8,6 +8,9 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   generate_frame: "First frame",
   generate_clip: "Clip generation",
   render_final: "Final render",
+  lab_video: "Video lab clip",
+  write_lab_video_prompt: "Video lab prompt",
+  auto_pipeline: "Automatic generation",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

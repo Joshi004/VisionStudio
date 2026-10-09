@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Asset, Job, Project, Scene
 from app.jobs import store
-from app.services import frame_counts, scene_inputs
+from app.services import frame_counts, scene_inputs, video_models
 
 _logger = logging.getLogger(__name__)
 
@@ -245,3 +245,27 @@ async def set_clip_sound(
         raise SceneGone
     await session.commit()
     _logger.info("scene %d: clip sound %s", scene_id, "on" if use_clip_sound else "off")
+
+
+async def set_video_model(
+    session: AsyncSession, project_id: int, scene_id: int, video_model: str | None
+) -> None:
+    """Sets the scene's own video model, or None to use the project's (and then the app's).
+    Commits. It changes the clips generated from now on; clips already made keep the model
+    they were made with.
+
+    Raises SceneGone, and ValueError for a model that is not known.
+    """
+    if video_model is not None and not video_models.is_video_model(video_model):
+        raise ValueError(f"{video_model} is not a known video model.")
+    result = await session.execute(
+        update(Scene)
+        .where(Scene.id == scene_id, Scene.project_id == project_id)
+        .values(video_model=video_model)
+        .execution_options(synchronize_session=False)
+    )
+    if not _was_updated(result):
+        await session.rollback()
+        raise SceneGone
+    await session.commit()
+    _logger.info("scene %d: video model %s", scene_id, video_model or "inherited")

@@ -1,22 +1,32 @@
-"""The video adapter: LTX-2.3 on the GPU server (ANALYSIS.md Section 5.3, 5.4 and 6.4).
+"""The video adapter: LTX-2.3 and LTX-2.5 on the GPU server (ANALYSIS.md Section 5.3, 5.4
+and 6.4).
 
 `VideoGenerator` is split into steps, because the dispatcher saves the server's job id
 right after submitting and resumes after a restart. Upload, status, download, cancel and
 purge are the calls every backend shares (`gpu_server.py`). What is specific to LTX lives
-here. A clip is made by one of two endpoints, chosen once per job from the scene's frames
-(`scene_inputs.clip_mode`):
+here. A clip is made by one endpoint, chosen once per job from the video model and the
+scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
 
-- keyframe interpolation, `POST /v1/ltx/videos/keyframe-interpolation`
+- LTX-2.3 keyframe interpolation, `POST /v1/ltx/videos/keyframe-interpolation`
   (`KeyframeInterpolationRequest`), when the scene has a last frame. `with_keyframes` puts
   the first keyframe at `frame_idx` 0 and the last at `num_frames - 1`, both with strength
   1.0. The endpoint has no `enhance_prompt` field, so the prompt is never rewritten.
-- image-to-video, `POST /v1/ltx/videos/generate` (`TextToVideoRequest`), when it has only a
-  first frame. `with_first_frame` attaches the frame at `frame_idx` 0 with strength 1.0.
-  `build_request` always sends `mode: "quality"` (the default, `fast`, silently ignores the
-  negative prompt) and `enhance_prompt: false` (a rewrite would be invisible).
+- LTX-2.3 image-to-video, `POST /v1/ltx/videos/generate` (`TextToVideoRequest`), when the
+  scene has only a first frame. `with_first_frame` attaches the frame at `frame_idx` 0 with
+  strength 1.0. `build_request` always sends `mode: "quality"` (the default, `fast`,
+  silently ignores the negative prompt) and `enhance_prompt: false` (a rewrite would be
+  invisible).
+- LTX-2.5 image-to-video, `POST /v1/ltx25/videos/generate` (`Ltx25TextToVideoRequest`),
+  with the same first-frame body. `mode: "quality"` there is the DFR recipe (sharper detail,
+  more GPU memory). The endpoint has no `negative_prompt` field (neither recipe uses
+  guidance), so `build_request` never sends one to it.
 
-Neither body sends `orientation`, `duration_seconds` (the frame count is computed here) or
-`crf` (the pipeline's own default applies).
+LTX-2.5 has no keyframe interpolation endpoint yet. A scene that has a last frame therefore
+falls back to LTX-2.3, and `endpoint_for` says so in a note. When the server adds the
+endpoint, it is one more entry in `ENDPOINTS` (and one in `_REQUEST_SCHEMAS`).
+
+No body sends `orientation`, `duration_seconds` (the frame count is computed here), `crf`
+(the pipeline's own default applies) or `auto_duration` (the voiceover sets the length).
 
 - `frame_limits`: the limits the approved OpenAPI document declares for `num_frames` on the
   endpoint in use.
@@ -32,27 +42,84 @@ from typing import Any, Final
 
 from app.core import outbound
 from app.providers import gpu_server
+from app.services import video_models
 from app.services.frame_counts import MIN_NUM_FRAMES
 from app.services.scene_inputs import ClipMode
+from app.services.video_models import VideoModel
 
 KEYFRAME_PATH: Final = "/v1/ltx/videos/keyframe-interpolation"
 GENERATE_PATH: Final = "/v1/ltx/videos/generate"
-ENDPOINTS: Final[dict[ClipMode, str]] = {
-    "first_frame": GENERATE_PATH,
-    "first_and_last": KEYFRAME_PATH,
+LTX25_GENERATE_PATH: Final = "/v1/ltx25/videos/generate"
+# Which endpoint makes a clip, by video model and by how the clip is made. A pair that is
+# missing (LTX-2.5 with a last frame) falls back to LTX-2.3 in `endpoint_for`.
+ENDPOINTS: Final[dict[tuple[VideoModel, ClipMode], str]] = {
+    ("ltx-2.3", "first_frame"): GENERATE_PATH,
+    ("ltx-2.3", "first_and_last"): KEYFRAME_PATH,
+    ("ltx-2.5", "first_frame"): LTX25_GENERATE_PATH,
 }
 _REQUEST_SCHEMAS: Final[dict[str, str]] = {
     KEYFRAME_PATH: "KeyframeInterpolationRequest",
     GENERATE_PATH: "TextToVideoRequest",
+    LTX25_GENERATE_PATH: "Ltx25TextToVideoRequest",
 }
+# The endpoints that take `mode` and `enhance_prompt` (the keyframe endpoint has neither).
+_MODE_ENDPOINTS: Final = frozenset({GENERATE_PATH, LTX25_GENERATE_PATH})
+# The endpoints that have a `negative_prompt` field. LTX-2.5 has none: it runs without
+# guidance, so there would be nothing for one to act on.
+_NEGATIVE_PROMPT_ENDPOINTS: Final = frozenset({GENERATE_PATH, KEYFRAME_PATH})
+_LTX23_PREFIX: Final = "/v1/ltx/"
+_LTX25_PREFIX: Final = "/v1/ltx25/"
 _SIZE_MULTIPLE: Final = 64
+
+
+@dataclass(frozen=True)
+class EndpointChoice:
+    """The endpoint a clip is made by, and the model that endpoint belongs to.
+
+    `model` differs from the model asked for when there was no endpoint for it (then `note`
+    says why, in words meant for the user).
+    """
+
+    endpoint: str
+    model: VideoModel
+    note: str | None
+
+
+def endpoint_for(model: VideoModel, mode: ClipMode) -> EndpointChoice:
+    """The endpoint that makes a clip of this `mode` with `model`.
+
+    LTX-2.5 has no keyframe interpolation yet, so a clip with a last frame is made by
+    LTX-2.3 and the note says so.
+    """
+    endpoint = ENDPOINTS.get((model, mode))
+    if endpoint is not None:
+        return EndpointChoice(endpoint=endpoint, model=model, note=None)
+    fallback: VideoModel = "ltx-2.3"
+    note = (
+        f"{video_models.label(model)} cannot make a clip from a first and a last frame yet, "
+        f"so {video_models.label(fallback)} is used for this clip."
+    )
+    return EndpointChoice(endpoint=ENDPOINTS[(fallback, mode)], model=fallback, note=note)
+
+
+def model_for(endpoint: object) -> VideoModel | None:
+    """The video model a recorded endpoint belongs to, or None for an endpoint that belongs
+    to neither (every older clip names an `/v1/ltx/` path, so it counts as LTX-2.3).
+    """
+    if not isinstance(endpoint, str):
+        return None
+    if endpoint.startswith(_LTX25_PREFIX):
+        return "ltx-2.5"
+    if endpoint.startswith(_LTX23_PREFIX):
+        return "ltx-2.3"
+    return None
 
 
 def clip_mode_for(endpoint: object) -> ClipMode | None:
     """The mode a recorded endpoint stands for, or None for an endpoint this phase does not
     know (a job or a clip from before it never has one).
     """
-    for mode, path in ENDPOINTS.items():
+    for (_model, mode), path in ENDPOINTS.items():
         if endpoint == path:
             return mode
     return None
@@ -150,17 +217,20 @@ def build_request(
     fps: int,
     seed: int,
     partition: str,
+    mode: str = "quality",
 ) -> dict[str, Any]:
     """The body for `endpoint` without its frames (those need the server's asset ids).
 
-    `negative_prompt` is sent only when it is not blank: it replaces the pipeline's own
-    default, so leaving it out keeps that default. The caller passes the project's own
+    `negative_prompt` is sent only to an endpoint that has the field (the two LTX-2.3
+    endpoints; LTX-2.5 has none) and only when it is not blank: it replaces the pipeline's
+    own default, so leaving it out keeps that default. The caller passes the project's own
     negative prompt, or the app's default negative prompt (a global setting) when the
     project has none, so it is blank only when both are. `partition` is sent only when the
-    setting is not blank. For `/v1/ltx/videos/generate` the body also says `mode: "quality"`
-    and `enhance_prompt: false` explicitly, so neither relies on a server default. A request
-    holds only what the user chose and the numbers worked out from it, so it can be stored
-    and sent again unchanged.
+    setting is not blank. For the two generate endpoints (LTX-2.3 and LTX-2.5) the body also
+    says `mode` and `enhance_prompt: false` explicitly, so neither relies on a server default.
+    `mode` is `quality` unless the caller says otherwise (a scene's clip is always quality;
+    the Video lab can also ask for `fast`). A request holds only what the user chose and the
+    numbers worked out from it, so it can be stored and sent again unchanged.
     """
     body: dict[str, Any] = {
         "prompt": prompt,
@@ -170,10 +240,10 @@ def build_request(
         "frame_rate": float(fps),
         "seed": seed,
     }
-    if endpoint == GENERATE_PATH:
-        body["mode"] = "quality"
+    if endpoint in _MODE_ENDPOINTS:
+        body["mode"] = mode
         body["enhance_prompt"] = False
-    if negative_prompt is not None and negative_prompt.strip():
+    if endpoint in _NEGATIVE_PROMPT_ENDPOINTS and negative_prompt and negative_prompt.strip():
         body["negative_prompt"] = negative_prompt
     if partition:
         body["partition"] = partition

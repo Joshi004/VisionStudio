@@ -6,9 +6,13 @@ clip yet. The dispatcher does the work: it starts the jobs while fewer than the 
 parallel clip generations" setting are running.
 
 `POST .../scenes/{id}/select-take` makes one of a scene's finished clips the one the final
-video uses, and `PUT .../scenes/{id}/clip-sound` switches the scene's own clip sound on or off.
-Both answer with the scenes as they are afterwards (`ScenesOut`), so the page shows the change
+video uses, `PUT .../scenes/{id}/clip-sound` switches the scene's own clip sound on or off and
+`PUT .../scenes/{id}/video-model` sets (or clears) the scene's own video model. All three
+answer with the scenes as they are afterwards (`ScenesOut`), so the page shows the change
 without another request.
+
+`generate` may carry a `video_model`: the model for that one take (the Regenerate picker). It
+is kept in `job.input`, and the job works out the rest (`jobs/generate_clip.py`).
 
 Cancelling a clip job is `POST /api/jobs/{id}/cancel` (`api/jobs.py`), which also cancels it on
 the GPU server.
@@ -36,6 +40,7 @@ from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.services import clips as clips_service
 from app.services import scenes as scenes_service
+from app.services.video_models import VideoModel
 
 router = APIRouter()
 
@@ -65,6 +70,21 @@ class ClipSoundRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     use_clip_sound: StrictBool
+
+
+class GenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The video model for this one take. Left out, the scene's own choice, the project's or the
+    # app's default is used. Nothing is saved: the scene keeps its own choice.
+    video_model: VideoModel | None = None
+
+
+class VideoModelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The scene's own video model, or `null` to use the project's (and then the app's).
+    video_model: VideoModel | None
 
 
 class GenerateReadyOut(BaseModel):
@@ -102,11 +122,17 @@ def _find_scene(state: scenes_service.ScenesState, scene_id: int) -> Scene | Non
     status_code=status.HTTP_202_ACCEPTED,
     responses={**_NOT_FOUND, **_BLOCKED},
 )
-async def generate_clip(project_id: int, scene_id: int, session: SessionDep) -> JobDetail:
+async def generate_clip(
+    project_id: int,
+    scene_id: int,
+    session: SessionDep,
+    body: GenerateRequest | None = None,
+) -> JobDetail:
     """Starts generating a clip for the scene (Generate, and Regenerate when it has one).
 
     A scene that already has a clip being generated returns that job: two quick clicks make
-    one job. Each new job gets its own random seed, so it makes a new take.
+    one job. Each new job gets its own random seed, so it makes a new take. The optional
+    `video_model` makes this one take with that model.
     """
     project = await load_project(session, project_id)
     state = await _locked_state(session, project)
@@ -129,7 +155,11 @@ async def generate_clip(project_id: int, scene_id: int, session: SessionDep) -> 
         type=clips_service.GENERATE_JOB,
         provider="gpu",
         scene_id=scene.id,
-        input={"requested": "generate"},
+        input=(
+            {"requested": "generate", "video_model": body.video_model}
+            if body is not None and body.video_model is not None
+            else {"requested": "generate"}
+        ),
     )
     dispatcher.nudge()
     return job_detail(JobRow(job=job, project_name=project.name, scene_index=scene.index))
@@ -223,6 +253,27 @@ async def set_clip_sound(
         raise _scene_missing(scene_id)
     try:
         await clips_service.set_clip_sound(session, project.id, scene_id, body.use_clip_sound)
+    except clips_service.SceneGone:
+        raise _scene_missing(scene_id) from None
+    return await scenes_out(session, project)
+
+
+@router.put(
+    "/projects/{project_id}/scenes/{scene_id}/video-model",
+    response_model=ScenesOut,
+    responses=_NOT_FOUND,
+)
+async def set_video_model(
+    project_id: int, scene_id: int, body: VideoModelRequest, session: SessionDep
+) -> ScenesOut:
+    """Sets the scene's own video model, or clears it (`null`) to use the project's. It
+    changes the clips generated from now on, not the ones already made.
+    """
+    project = await load_project(session, project_id)
+    if not 1 <= scene_id <= _MAX_ID:
+        raise _scene_missing(scene_id)
+    try:
+        await clips_service.set_video_model(session, project.id, scene_id, body.video_model)
     except clips_service.SceneGone:
         raise _scene_missing(scene_id) from None
     return await scenes_out(session, project)

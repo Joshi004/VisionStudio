@@ -9,6 +9,14 @@ itself and so get around those rules.
 
 `complete` makes **one** attempt. The retries (at most one, Section 6.2 rule 4) belong to
 the job, because a paid call must be recorded on the job after every attempt.
+
+The request asks for a streamed answer (`"stream": true`, server-sent events). A reasoning
+model can take minutes over a long answer, and an answer that is sent in one piece cannot
+tell "still working" from "stuck". Streamed, it arrives as it is written, so there are two
+limits: `timeout_s` for the whole call and `idle_timeout_s` for the silence between two
+pieces. The stream is read to its end and returned as one `ChatResult`, so callers do not
+see the difference. A server that ignores `"stream": true` and answers with one JSON object
+is still understood.
 """
 
 from __future__ import annotations
@@ -22,8 +30,10 @@ from app.core.urls import docker_mapped, join_url
 
 CHAT_PATH: Final = "/chat/completions"
 MESSAGE_MAX_CHARS: Final = 500
-# The answer can carry the model's reasoning, which is large. JSON answers stay far below this.
-ANSWER_MAX_BYTES: Final = 5 * 1024 * 1024
+# A streamed answer carries the model's reasoning too, and every piece is wrapped in about
+# 250 bytes of JSON for roughly one token (measured on Bitdeer). The largest request asks for
+# 32,000 tokens, which is about 8 MB, so this leaves room to spare.
+ANSWER_MAX_BYTES: Final = 24 * 1024 * 1024
 
 LlmErrorKind = Literal["unreachable", "rate_limited", "server_error", "refused", "bad_answer"]
 
@@ -99,8 +109,13 @@ def _transport_error(exc: outbound.OutboundError) -> LlmCallError:
     return LlmCallError("refused", str(exc))  # a bad address, or a redirect
 
 
-async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> ChatResult:
+async def complete(
+    base_url: str, body: dict[str, Any], *, timeout_s: float, idle_timeout_s: float
+) -> ChatResult:
     """Sends one chat completion request and returns the model's text.
+
+    `timeout_s` limits the whole call and `idle_timeout_s` the wait for the first piece of
+    the answer and the silence between two pieces after it.
 
     Raises `LlmCallError` for anything that is not a usable answer. An answer with no text
     is returned with `content == ""` so the caller can record its `finish_reason`.
@@ -111,6 +126,7 @@ async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> 
             join_url(base_url, CHAT_PATH),
             json=body,
             timeout_s=timeout_s,
+            idle_timeout_s=idle_timeout_s,
             max_bytes=ANSWER_MAX_BYTES,
         )
     except outbound.OutboundError as exc:
@@ -118,6 +134,86 @@ async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> 
 
     if response.status_code != 200:
         raise _error_for(response)
+    text = response.body.decode("utf-8", errors="replace")
+    if text.lstrip().startswith("{"):
+        return _read_whole_answer(response)  # the server ignored "stream": true
+    return _read_stream(text)
+
+
+def _stream_error_message(error: object) -> str:
+    """The explanation inside an error piece of a stream, or a plain fallback."""
+    message = error.get("message") if isinstance(error, dict) else error
+    if isinstance(message, str) and message.strip():
+        text = message.strip()
+    else:
+        text = "The server reported an error while it was answering."
+    return text[:MESSAGE_MAX_CHARS]
+
+
+def _read_stream(text: str) -> ChatResult:
+    """Joins a streamed answer (server-sent events) into one `ChatResult`.
+
+    Each piece is a line `data: {json}`. Its `choices[0].delta.content` is a piece of the
+    answer, and `delta.reasoning_content` (the model thinking aloud) is left out. The piece
+    with the `finish_reason` and the last one, which has the token counts and no choices,
+    are read the same way. The stream ends with `data: [DONE]`. Blank lines and `:` comment
+    lines (keep-alives) are skipped.
+
+    Raises `LlmCallError` for an error piece, a piece that is not JSON, an answer that is not
+    a stream at all, and a stream that ended before the model finished.
+    """
+    parts: list[str] = []
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
+    response_id: str | None = None
+    pieces = 0
+
+    for raw_line in text.split("\n"):
+        line = raw_line.rstrip("\r")
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:") :].strip()
+        if payload == "[DONE]":
+            break
+        try:
+            chunk = json.loads(payload)
+        except (ValueError, RecursionError):
+            chunk = None
+        if not isinstance(chunk, dict):
+            raise LlmCallError("bad_answer", "The server's answer held a piece that was not JSON.")
+        if chunk.get("error"):
+            raise LlmCallError("server_error", _stream_error_message(chunk["error"]))
+        pieces += 1
+
+        if response_id is None and isinstance(chunk.get("id"), str):
+            response_id = chunk["id"]
+        if isinstance(chunk.get("usage"), dict):
+            usage = chunk["usage"]
+        choices = chunk.get("choices")
+        choice = choices[0] if isinstance(choices, list) and choices else None
+        if not isinstance(choice, dict):
+            continue  # the last piece carries the token counts and no choice
+        delta = choice.get("delta")
+        piece = delta.get("content") if isinstance(delta, dict) else None
+        if isinstance(piece, str):
+            parts.append(piece)
+        if isinstance(choice.get("finish_reason"), str):
+            finish_reason = choice["finish_reason"]
+
+    if pieces == 0:
+        raise LlmCallError("bad_answer", "The server's answer was not a stream of answer pieces.")
+    if finish_reason is None:
+        raise LlmCallError("bad_answer", "The server's answer ended before the model had finished.")
+    return ChatResult(
+        content="".join(parts),
+        finish_reason=finish_reason,
+        usage=usage,
+        response_id=response_id,
+    )
+
+
+def _read_whole_answer(response: outbound.OutboundResponse) -> ChatResult:
+    """Reads an answer that came as one JSON object instead of a stream."""
     try:
         data = response.json()
     except (ValueError, RecursionError):

@@ -270,7 +270,9 @@ def build_request(
             {"role": "user", "content": _user_message(inputs)},
         ],
         "max_tokens": MAX_TOKENS,
-        "stream": False,
+        "stream": True,
+        # Without this the stream carries no token counts, which the job records.
+        "stream_options": {"include_usage": True},
         "response_format": {"type": "json_object"},
         "reasoning_effort": REASONING_EFFORT,
     }

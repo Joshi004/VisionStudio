@@ -20,6 +20,10 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (Phase 18, 2026-10-09):** no schema change. A new global setting, `default_negative_prompt` (a text for the video model: no background music, singing or speech, no on-screen text, logos or watermarks, and common video artifacts). A `generate_clip` job sends the project's own `negative_prompt` when it has one, otherwise this default, and a new project starts with this text as its own `negative_prompt`. Before this, a project with a blank `negative_prompt` sent none, and the GPU server's own default applied. See Sections 4.1, 5 and 6.
 
+**Update (Phase 19, 2026-10-09):** migration `0008`. LTX-2.5 runs next to LTX-2.3, and the video model is chosen per app, project and scene. `project` and `scene` gain a nullable `video_model` (`ltx-2.3` or `ltx-2.5`; NULL means "inherit": the scene takes the project's, the project takes the global setting `default_video_model`). **`job.project_id` becomes nullable** and `job.type` gains `lab_video` and `write_lab_video_prompt`: the new Video lab belongs to no project, and its jobs are normal background jobs. A new table, `lab_video_run`, holds what the Video lab lists and compares (the model, the prompt, the settings, and the stored clip). A clip's job and asset record which model made it. No `negative_prompt` is sent to LTX-2.5 (it has none), so the project's and the global negative prompts are LTX-2.3 only. See Sections 3, 4.1, 4.4, 4.5, 4.10, 5, 6 and 7.
+
+**Update (Phase 20, 2026-10-09):** migration `0009`. A new job type, `auto_pipeline`: one run of the automatic flow of a project, which makes the jobs of the manual steps one step after the other and starts a step only when every scene has finished the one before. **No table or column is added**: the run keeps its state in `job.input` and `job.output` (including the ids of the jobs it made, so a restart continues where it was), and only the `job.type` CHECK gains the new value. A run is a project job (`scene_id` is NULL, `provider='local'`) and keeps a fixed marker in `provider_job_id` so the dispatcher checks it every tick. Its jobs are ordinary jobs of the existing types, with `input.auto_run_id` naming the run. See Sections 4.5, 5 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -63,7 +67,7 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 ## 3. Entity-relationship overview
 
-Nine tables, all scoped under one `project` except the four global ones (`setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`), which hold no `project_id` because they describe the app, the GPU server or a manual test, not one video.
+Ten tables, all scoped under one `project` except the five global ones (`setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, and, from Phase 19, `lab_video_run`), which hold no `project_id` because they describe the app, the GPU server or a manual test, not one video. The Video lab's jobs are rows of `job` too, with a NULL `project_id` (Phase 19).
 
 ```mermaid
 erDiagram
@@ -103,6 +107,10 @@ erDiagram
     API_SNAPSHOT {
         integer id PK
     }
+    LAB_VIDEO_RUN {
+        integer id PK
+        integer job_id FK
+    }
 
     PROJECT ||--o{ ASSET         : "owns"
     PROJECT ||--o{ SCENE         : "owns"
@@ -117,6 +125,7 @@ erDiagram
     SCENE   }o--o| JOB           : "description_job_id"
     SCENE   }o--o| JOB           : "image_prompt_job_id"
     JOB     }o--o| ASSET         : "result_asset_id"
+    LAB_VIDEO_RUN }o--o| JOB     : "job_id"
 ```
 
 `SETTING` and `API_SNAPSHOT` have no edges to `PROJECT` — they are global, as described in Sections 3.7 and 6.5.
@@ -135,9 +144,10 @@ erDiagram
 | `scene` | `selected_clip_asset_id` | `asset.id` | Yes (until a clip is generated) |
 | `scene` | `description_job_id` | `job.id` | Yes (until an AI draft writes into the scene; `SET NULL` if that job row is ever removed). Added in Phase 12. |
 | `scene` | `image_prompt_job_id` | `job.id` | Yes (until the AI writes the scene's image prompt; `SET NULL` if that job row is ever removed). Added in Phase 16. |
-| `job` | `project_id` | `project.id` | No |
+| `job` | `project_id` | `project.id` | Yes: NULL only for the Video lab's jobs (`lab_video`, `write_lab_video_prompt`), which belong to no project. Every other job type always has one. Phase 19 |
 | `job` | `scene_id` | `scene.id` | Yes (only per-scene job types set this) |
 | `job` | `result_asset_id` | `asset.id` | Yes (until the job succeeds) |
+| `lab_video_run` | `job_id` | `job.id` | Yes (the `lab_video` job that makes the run's clip; `SET NULL` if that job row is ever removed). Phase 19 |
 
 Note the one circular-looking reference: `asset.project_id` points at `project`, and `project.voiceover_asset_id` points back at `asset`. This isn't a problem in practice because of the order things happen in (Section 1 of `ANALYSIS.md`): the project row is created first with `voiceover_asset_id` left `NULL`, the voiceover file is uploaded afterwards as an `asset` row, and only then is `project.voiceover_asset_id` updated to point at it.
 
@@ -170,11 +180,12 @@ One row per video. Holds output settings (pre-filled from orientation — Sectio
 | `max_scene_seconds` | REAL | NOT NULL | 6.0 | Longest allowed scene (your 5–6 s cap) |
 | `style_prefix` | TEXT | NULL | blank | Guideline: style, sent as LTX's `Style:` prefix |
 | `prompt_suffix` | TEXT | NULL | blank | Guideline: camera/lighting/colour/pacing, always appended |
-| `negative_prompt` | TEXT | NULL | the `default_negative_prompt` setting's text when the project is created (blank if that setting is blank) | Guideline: what to avoid. When it is blank, a clip is made with the `default_negative_prompt` setting instead (Section 6) |
+| `negative_prompt` | TEXT | NULL | the `default_negative_prompt` setting's text when the project is created (blank if that setting is blank) | Guideline: what to avoid. When it is blank, a clip is made with the `default_negative_prompt` setting instead (Section 6). LTX-2.3 only: LTX-2.5 has no negative prompt and is never sent one (Phase 19) |
 | `clip_sound_volume` | REAL | NOT NULL | 0.2 | 0 = off; otherwise each clip's own sound, as a share of the voiceover's level (0.2 = 14 dB under the voice, 0.05 = 26 dB). The render measures the loudness of the voiceover and of each clip, so every clip lands at the same distance under the voice |
 | `cut_instructions` | TEXT | NULL | blank | Extra instructions for the AI that proposes cuts |
 | `description_instructions` | TEXT | NULL | blank | Extra instructions for the AI that drafts the video prompts and first-frame descriptions: places and recurring subjects (animals, objects, people where needed), look, sound wishes (Phase 12; wording of Phase 15) |
 | `script_text` | TEXT | NULL | — | Pasted in step B of the flow; `NULL` until then |
+| `video_model` | TEXT | NULL | — | `ltx-2.3` \| `ltx-2.5`. The video model that makes this project's clips. NULL means "use the app's default" (the `default_video_model` setting, Section 6). A scene's own `video_model` wins over it. Phase 19 |
 | `language` | TEXT | NOT NULL | `'en'` | Voiceover language (English-only decision) |
 | `voiceover_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Set once the voiceover is uploaded |
 
@@ -198,6 +209,7 @@ CREATE TABLE project (
     cut_instructions   TEXT,
     description_instructions TEXT,
     script_text        TEXT,
+    video_model        TEXT CHECK (video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')),
     language           TEXT NOT NULL DEFAULT 'en',
     voiceover_asset_id INTEGER REFERENCES asset(id) ON DELETE SET NULL
 );
@@ -303,6 +315,7 @@ One cut = one clip (called "Segment" in Revision 1 of `ANALYSIS.md`). The centra
 | `last_frame_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Optional (Phase 14). When set, the scene's clip is made by keyframe interpolation and ends on it. When NULL, the clip is made from the first frame alone (image-to-video). There is no separate on/off flag: the clip mode is derived from this column (`scene_inputs.clip_mode`) |
 | `use_clip_sound` | BOOLEAN | NOT NULL | true | Per-scene switch; false mutes this scene's own sound |
 | `selected_clip_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Which generated take is used in the final render |
+| `video_model` | TEXT | NULL | — | `ltx-2.3` \| `ltx-2.5`. The video model that makes this scene's clips. NULL means "use the project's" (and, when that is NULL too, the app's default). It changes the clips made from now on: a clip already made keeps the model it was made with (Phase 19) |
 
 ```sql
 CREATE TABLE scene (
@@ -328,6 +341,7 @@ CREATE TABLE scene (
     last_frame_asset_id       INTEGER REFERENCES asset(id) ON DELETE SET NULL,
     use_clip_sound            BOOLEAN NOT NULL DEFAULT 1,
     selected_clip_asset_id    INTEGER REFERENCES asset(id) ON DELETE SET NULL,
+    video_model               TEXT CHECK (video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')),
     UNIQUE (project_id, "index")
 );
 ```
@@ -341,13 +355,13 @@ Every unit of background work: transcribe, plan scenes, generate a clip, render 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
-| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | Owning project |
+| `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL only for the Video lab's jobs (`lab_video`, `write_lab_video_prompt`), which belong to no project; the Activity page shows them under "Video lab" (Phase 19) |
 | `scene_id` | INTEGER, FK → `scene.id` | NULL | — | Set only for per-scene jobs (`generate_clip`, and since Phase 16 `write_image_prompt`, and since Phase 17 `generate_frame`) |
-| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` |
+| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` \| `lab_video` \| `write_lab_video_prompt` \| `auto_pipeline` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `auto_pipeline`: Phase 20, the automatic flow) |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model, reached at the same Bitdeer address as `llm`) \| `local` |
-| `provider_job_id` | TEXT | NULL | — | The external server's job id, once submitted |
+| `provider_job_id` | TEXT | NULL | — | The external server's job id, once submitted. An `auto_pipeline` run keeps the fixed marker `auto` here instead: it is not an id on any server, it only makes the dispatcher check the run at every tick |
 | `input` | JSON | NOT NULL | — | Exact request sent: prompt, seed, server URL, etc. |
 | `output` | JSON | NULL | — | Raw provider answer (LLM JSON, token usage, etc.) |
 | `result_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Set on success |
@@ -361,9 +375,9 @@ Every unit of background work: transcribe, plan scenes, generate a clip, render 
 ```sql
 CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
-    project_id       INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
     scene_id         INTEGER REFERENCES scene(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final')),
+    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', 'lab_video', 'write_lab_video_prompt', 'auto_pipeline')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -381,7 +395,7 @@ CREATE TABLE job (
 );
 ```
 
-The dispatcher loop (Section 3.3) is the main reader/writer of this table: each tick it checks every `running` job, starts downloads for finished ones, resubmits pre-empted ones, and starts `queued` jobs while fewer than the parallel-generation setting are `running`.
+The dispatcher loop (Section 3.3) is the main reader/writer of this table: each tick it checks every `running` job, starts downloads for finished ones, resubmits pre-empted ones, and starts `queued` jobs while fewer than the parallel-generation setting are `running`. Since Phase 19 a handler can name a *concurrency group*: `generate_clip` and `lab_video` share one pool of slots (`max_parallel_generations`), because both use the GPU server, so the Video lab cannot starve scene clips (or the other way round) beyond that limit. Since Phase 20 an `auto_pipeline` job is a `running` job that does no work itself: its handler's `poll` is the whole run (it reads this table, creates the next jobs, and moves on), so a run is checked every tick like a job on the GPU server and survives a restart (`restart_rule='resume'`). At most 5 runs are `running` at once (a constant).
 
 ### 4.6 `setting`
 
@@ -514,6 +528,51 @@ CREATE TABLE lab_image (
 );
 ```
 
+### 4.10 `lab_video_run`
+
+One video the Video lab made, or is making (Phase 19). The lab belongs to no project, so its work runs as `lab_video` jobs with a NULL `project_id`. The job holds the status, the phase, the exact request and the server's answers (so a run resumes after a restart or a pre-emption like a scene's clip); this row holds what the page lists and compares. The runs that one "run on both models" click starts share a `group_key`, and have the same prompt, first frame, size, length, recipe and seed, so the clips differ only by the model. Nothing is deleted in this iteration. Files live under `media/lab/` and are served at `/media/lab/...`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `lab_video` job. `ON DELETE SET NULL` |
+| `group_key` | TEXT | NULL | — | Shared by the runs one click started (a random hex string) |
+| `video_model` | TEXT | NOT NULL | — | `ltx-2.3` \| `ltx-2.5` |
+| `endpoint` | TEXT | NOT NULL | — | The GPU server path the request goes to, for example `/v1/ltx25/videos/generate` |
+| `prompt` | TEXT | NOT NULL | — | The prompt as sent (trimmed) |
+| `params` | JSON | NOT NULL | — | What the form held and what was sent: `mode`, `orientation`, `width`, `height`, `fps`, `duration_s`, `num_frames`, `seed` and `negative_prompt` (only an LTX-2.3 run has one) |
+| `first_frame` | JSON | NULL | — | `{"source": "lab" \| "asset", "id": n}`: an Image lab image, or a project's frame asset. NULL for text-to-video. Never copied: the run refers to it |
+| `path` | TEXT | NULL | — | The stored clip, relative to the media folder (`lab/<32 hex>.mp4`). NULL until the job has finished |
+| `size_bytes` | INTEGER | NULL | — | |
+| `sha256` | TEXT | NULL | — | |
+| `width`, `height` | INTEGER | NULL | — | As ffprobe reads the clip |
+| `frame_count` | INTEGER | NULL | — | Counted from the file |
+| `duration_s` | REAL | NULL | — | |
+| `audio` | JSON | NULL | — | `{codec, sample_rate, channels}`, NULL when the clip has no sound |
+
+```sql
+CREATE TABLE lab_video_run (
+    id           INTEGER PRIMARY KEY,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    job_id       INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    group_key    TEXT,
+    video_model  TEXT NOT NULL CHECK (video_model IN ('ltx-2.3', 'ltx-2.5')),
+    endpoint     TEXT NOT NULL,
+    prompt       TEXT NOT NULL,
+    params       JSON NOT NULL,
+    first_frame  JSON,
+    path         TEXT,
+    size_bytes   INTEGER,
+    sha256       TEXT,
+    width        INTEGER,
+    height       INTEGER,
+    frame_count  INTEGER,
+    duration_s   REAL,
+    audio        JSON
+);
+```
+
 ### Recommended indexes
 
 Not specified explicitly in `ANALYSIS.md`, but implied by the access patterns it describes (the dispatcher repeatedly scanning jobs by status/type — Section 3.3; scenes read in order — Section 4.3):
@@ -530,6 +589,9 @@ CREATE INDEX idx_api_snapshot_source ON api_snapshot (source, fetched_at);
 CREATE INDEX idx_lab_run_created     ON lab_run (created_at);
 CREATE INDEX idx_lab_image_run       ON lab_image (run_id);
 CREATE INDEX idx_lab_image_created   ON lab_image (created_at);
+CREATE INDEX idx_lab_video_run_created ON lab_video_run (created_at);
+CREATE INDEX idx_lab_video_run_group   ON lab_video_run (group_key);
+CREATE INDEX idx_lab_video_run_job     ON lab_video_run (job_id);
 ```
 
 ---
@@ -618,9 +680,9 @@ At creation, `input` records what the user confirmed and what the proposal is ma
 {
   "server_url": "https://api-inference.bitdeer.ai/v1",
   "endpoint": "/chat/completions",
-  "request": { "model": "zai-org/GLM-5.3-Flash", "messages": ["..."], "max_tokens": 16000,
-               "stream": false, "response_format": { "type": "json_object" },
-               "reasoning_effort": "high" },
+  "request": { "model": "zai-org/GLM-5.3-Flash", "messages": ["..."], "max_tokens": 32000,
+               "stream": true, "stream_options": { "include_usage": true },
+               "response_format": { "type": "json_object" }, "reasoning_effort": "high" },
   "input_hash": "sha256:430e4650..."
 }
 ```
@@ -682,8 +744,8 @@ The handler adds the exact request, before the call is made:
   "server_url": "https://api-inference.bitdeer.ai/v1",
   "endpoint": "/chat/completions",
   "request": { "model": "zai-org/GLM-5.3", "messages": ["..."], "max_tokens": 32000,
-               "stream": false, "response_format": { "type": "json_object" },
-               "reasoning_effort": "high" },
+               "stream": true, "stream_options": { "include_usage": true },
+               "response_format": { "type": "json_object" }, "reasoning_effort": "high" },
   "input_hash": "sha256:7ac2..."
 }
 ```
@@ -749,8 +811,8 @@ At creation, `input` records only the click:
   "server_url": "https://api-inference.bitdeer.ai/v1",
   "endpoint": "/chat/completions",
   "request": { "model": "zai-org/GLM-5.3-Flash", "messages": ["..."], "max_tokens": 8000,
-               "stream": false, "response_format": { "type": "json_object" },
-               "reasoning_effort": "high" },
+               "stream": true, "stream_options": { "include_usage": true },
+               "response_format": { "type": "json_object" }, "reasoning_effort": "high" },
   "input_hash": "sha256:a3f2..."
 }
 ```
@@ -916,6 +978,8 @@ The clip job treats an AI frame like any other first frame: `derived_frames.fram
 
 Since Phase 14 the shape above is the keyframe clip (`clip_mode` `first_and_last`). `mode` is the LTX mode the request named (`"quality"` for image-to-video, null for keyframe interpolation, which has no such field) and `clip_mode` says which frames the clip was made from (`first_frame` or `first_and_last`, derived from `endpoint`). A clip made from the first frame alone has `"endpoint": "/v1/ltx/videos/generate"`, `"pipeline": "ltx:text-to-video"` (the server's name for the whole `/generate` endpoint, which also does image-to-video; it says nothing about the mode), `"mode": "quality"`, `"clip_mode": "first_frame"` and `"last_frame_asset_id": null`. Clips made before Phase 14 have no `mode` or `clip_mode`: the page reads their mode from `endpoint` (`video_generator.clip_mode_for`).
 
+Since Phase 19 a clip also records which video model made it: `video_model` (`ltx-2.3` or `ltx-2.5`), `video_model_requested` (the model that was asked for), `video_model_source` (`regenerate`, `scene`, `project` or `global`: the level that chose it) and `model_note` (why the two differ, otherwise null). They differ in one case: LTX-2.5 has no first-and-last-frame endpoint yet, so a scene with a last frame is made by LTX-2.3 and says so. A clip made by LTX-2.5 has `"endpoint": "/v1/ltx25/videos/generate"`, `"pipeline": "ltx25:text-to-video"`, `"mode": "quality"` (the DFR recipe) and `"negative_prompt": null`, because that endpoint has no such field. A clip from before Phase 19 has none of the four new keys: the page tells its model from `endpoint` (`video_generator.model_for`: every older clip is LTX-2.3).
+
 **A derived frame** (`kind='frame'`, `source='derived'`, `mime='image/png'`, `width` and `height` the generation size): the uploaded frame as it is sent to the video model, made by `frame_images.normalise_frame` at the project's generation size at submission.
 
 ```json
@@ -932,7 +996,9 @@ A `generate_clip` job belongs to a scene (`scene_id`). It is a remote job: `prov
 
 **The clip mode is chosen at that first start** (Phase 14), from the scene's frames as they are then: a scene with a last frame uses keyframe interpolation (`clip_mode` `first_and_last`), a scene without one uses image-to-video from its first frame (`clip_mode` `first_frame`). The mode, the endpoint and the frames are stored in `input`, so a frame added or removed after the click changes nothing for a job already prepared. A job stored before Phase 14 has both frames and the keyframe `endpoint` but no `clip_mode`: it resumes as a keyframe job.
 
-At creation, `input` is `{"requested": "generate"}` (or `"generate_all"`). The first start adds what the request is made from and the request itself, and each submission adds the server address, the uploads and the exact body sent. The two-frame shape (keyframe interpolation):
+**The video model is chosen at the same moment** (Phase 19): the model in `input.video_model` (set at creation by Regenerate's picker, for that one take), else the scene's `video_model`, else the project's, else the `default_video_model` setting (`video_models.resolve`). The endpoint follows from the model and the clip mode (`video_generator.endpoint_for`). The first start stores `video_model` (the model that makes the clip), `video_model_requested`, `video_model_source` and `model_note` next to the endpoint. Like the mode, the model is fixed once the job has started: changing a scene's or a project's model afterwards changes nothing for a job already prepared, and a Resubmit sends the same request to the same model.
+
+At creation, `input` is `{"requested": "generate"}` (or `"generate_all"`), with `"video_model": "ltx-2.3" | "ltx-2.5"` added when Regenerate picked a model for this take. The first start adds what the request is made from and the request itself, and each submission adds the server address, the uploads and the exact body sent. The two-frame shape (keyframe interpolation):
 
 ```json
 {
@@ -996,6 +1062,8 @@ The one-frame shape (image-to-video, `POST /v1/ltx/videos/generate`) differs in 
 
 `mode` and `enhance_prompt` are always sent, so neither relies on a server default (`fast` would silently ignore the negative prompt, and a prompt rewrite is not returned). `negative_prompt` and `partition` are added only as described above. `orientation`, `duration_seconds` and `crf` are never sent.
 
+An LTX-2.5 clip (Phase 19) has the same one-frame shape with `"endpoint": "/v1/ltx25/videos/generate"`, `"video_model": "ltx-2.5"` and a `request` that carries `mode: "quality"` (the DFR recipe) and `enhance_prompt: false` but **never a `negative_prompt`**: the endpoint has no such field, so neither the project's nor the default negative prompt is sent. `auto_duration` is never sent either: the voiceover sets the length. The same stored `request` and the same body shape (`images` with the frame at `frame_idx` 0) go to either model.
+
 While the job runs, `output` holds the server's last answer: `{"remote": {"status", "pipeline", "partition", "typical_run_seconds", "typical_basis", "created_at", "started_at", "finished_at"}}`. When the clip is stored the job succeeds in the same transaction as the asset and the scene's selected take, and `output` becomes:
 
 ```json
@@ -1011,6 +1079,60 @@ While the job runs, `output` holds the server's last answer: `{"remote": {"statu
 ```
 
 `purge` is what the server answered when the finished job was deleted there (best effort: `{"error": "..."}` when it could not be, which never fails the clip). A job that fails on the server, or whose clip cannot be used, is purged too and keeps `output.purge`. A cancelled job holds `output.cancel`, the server's answer to the cancel (`{"cancelled": true, "reason": null}`, or `{"cancelled": false, "error": "..."}` when the server did not know the job), and is not purged.
+
+### `job.input` and `job.output` for a `lab_video` job (Phase 19)
+
+A `lab_video` job belongs to no project (`project_id` and `scene_id` are NULL) and makes one clip on one model for the Video lab. It is a remote job exactly like `generate_clip` (`provider='gpu'`, the same polling, pre-emption, download retry, cleanup and cancel) and shares its slots (`max_parallel_generations`). Unlike a scene's clip, its request is built and checked **when the run is created** (`services/video_lab.create_runs`, against the approved GPU API's limits, so a wrong request is refused before it costs a GPU run) and stored in `input` from the start. A resubmission sends that same request, with the same seed. Each click is a paid run of its own: none is merged into an earlier one.
+
+```json
+{
+  "requested": "lab_video",
+  "run_id": 2,
+  "video_model": "ltx-2.5",
+  "endpoint": "/v1/ltx25/videos/generate",
+  "request": {
+    "prompt": "A wide shot establishes ... A hard cut transitions to ...",
+    "width": 1088, "height": 1920, "num_frames": 121, "frame_rate": 24.0, "seed": 42,
+    "mode": "quality", "enhance_prompt": false
+  },
+  "first_frame": { "source": "lab", "id": 24 },
+  "server_url": "http://host.docker.internal:8012",
+  "uploads": [{ "filename": "lab-frame-lab-24.png", "remote_asset_id": "b8454c2be9594d408c8e4cb9c3157f76" }],
+  "body": { "...": "request, plus images: [{asset_id, frame_idx: 0, strength: 1.0}] when there is a first frame" }
+}
+```
+
+`first_frame` is null for text-to-video (no upload, and no `images` in the body). Each attempt fits the image to the run's size (centred, as a scene's frame is) and uploads it again. An LTX-2.3 run has `negative_prompt` in `request` when the form gave one; an LTX-2.5 run never does. On success, in one transaction: `UPDATE lab_video_run` (`path`, `size_bytes`, `sha256`, `width`, `height`, `frame_count`, `duration_s`, `audio`), `UPDATE job` (`status='succeeded'`, `output`), and the clip is already in `media/lab/`:
+
+```json
+{
+  "run_id": 2,
+  "clip": { "frame_count": 121, "num_frames": 121, "width": 1088, "height": 1920, "fps": 24.0, "duration_s": 5.04,
+            "size_bytes": 4119521, "audio": { "codec": "aac", "sample_rate": 48000, "channels": 2 } },
+  "remote": { "status": "succeeded", "pipeline": "ltx25:text-to-video", "...": "..." },
+  "purge": { "removed_asset_ids": [], "kept_asset_ids": [] }
+}
+```
+
+The clip is not an `asset` (an asset belongs to a project): `lab_video_run.path` points at the file. There is no check of the frame count against a scene's length, because a lab run has no scene.
+
+### `job.input` and `job.output` for a `write_lab_video_prompt` job (Phase 19)
+
+One paid call to the language model that turns a short idea into a multi-shot prompt for LTX-2.5, for the Video lab. It belongs to no project, writes nothing to any table but its own `job` row, and is a local-style job (everything happens in `start`, no provider job id). It follows the other language model jobs: it starts only from a click, saves the exact request before the call and every answer the moment it arrives, tries at most twice (the second only for a rate limit, a server error, no answer or an unusable answer; a refusal is never retried), is never cached, and is never re-run by a restart (`never_rerun`). It uses `llm_base_url` and the `description_llm_model` setting.
+
+```json
+{
+  "requested": "lab_video_prompt",
+  "inputs": { "idea": "An old fisherman mends his net ...", "shots": 3, "duration_s": 9.0, "first_frame": "a grey harbour at dawn" },
+  "profile": { "id": "ltx-2.5-multi-shot", "version": 1 },
+  "instructions_sha256": "sha256:...",
+  "server_url": "https://api-inference.bitdeer.ai/v1",
+  "endpoint": "/chat/completions",
+  "request": { "model": "zai-org/GLM-5.3", "messages": ["..."], "stream": true, "...": "..." }
+}
+```
+
+`output` holds the attempts and token usage like the other model jobs, plus `answer` (the model's JSON, verbatim), and, on success, `prompt` (one line of text), `word_count`, `cuts` (how many cuts the prompt names), `warnings` (a list of text: the number of cuts differs from the shots asked for, a shot list, quoted words the idea did not give, a time, a word count outside 40 to 200) and `seconds`. The page puts `prompt` in the form only when the user chooses to.
 
 ### `job.input`, `job.output` and the `final` asset for a `render_final` job (Phase 10)
 
@@ -1072,6 +1194,64 @@ That is the provenance of the `final` asset. `muted_scene_indexes` lists the sce
 
 **How the file is made.** Stage 1, per clip: the picture is cut to exactly `frames` frames at the project's fps, scaled to cover the output size and centre-cropped to it (a 1088 wide clip for a 1080 wide video only loses 4 pixels on each side); the sound is converted to 48 kHz stereo, lowered by the clip's gain (`volume=<gain>dB`, from the measured loudness of the voiceover and of the clip: `min(0, voice + 20 * log10(clip_sound_volume) - clip)`, in LUFS and dB), cut to the same length, faded for 20 ms at both ends (the fade-out sits where the clip's own sound ends, since LTX sound is 17 to 45 ms shorter than its video), and padded with silence to exactly `round(frames * 48000 / fps)` samples; a muted scene or a clip without sound gets that much silence. The result is a MOV with `libx264 -crf 12 -preset veryfast -bf 0` and PCM 16-bit sound. Stage 2: the MOVs are joined with the concat demuxer, and the clips' sound, already at its level, is mixed under the voiceover with `amix=inputs=2:duration=first:dropout_transition=0:normalize=0` (the voiceover first; `normalize=0` keeps it at its own level, where the default would lower it by 6 dB); a mono voiceover is made stereo with `pan`, because the automatic conversion lowers it by 3 dB. The result is encoded with `libx264 -crf 18 -preset medium -profile:v high -pix_fmt yuv420p -r <fps> -fps_mode cfr`, AAC 192 kb/s and `-movflags +faststart`.
 
+### `job.input` and `job.output` for an `auto_pipeline` job (Phase 20)
+
+One run of the automatic flow of a project. It belongs to the project (`scene_id` is NULL), is a local job (`provider='local'`) and does no work itself: it makes the jobs of the manual steps, one step after the other, and moves on only when every scene has finished the step it is at. Only one is active per project at a time (a second start returns the active one), and a run starts only when no other job of the project is waiting or running. It is **resumable** (`restart_rule='resume'`): `start` saves the marker `auto` in `provider_job_id`, so the dispatcher calls the handler's `poll` at every tick, and all of the run's state is in the row, so a restart continues where it was.
+
+The seven steps, in order, with what the run makes in each and when a target (a scene, or the project) counts as done. Each reuses the rule of the manual step, so a run never makes what its button would refuse:
+
+| Step (`key`) | Job it makes | One job per | Done when |
+|---|---|---|---|
+| `transcribe` | `transcribe` | project | there is a transcript that is not out of date |
+| `scenes` | `plan_scenes` | project | there are scenes that are not out of date, and no proposal is active |
+| `descriptions` | `draft_descriptions` | project | every scene has a `scene_description`, and no draft is active |
+| `image_prompts` | `write_image_prompt` | scene | the scene has an image prompt that is not out of date, or its first frame was uploaded (no prompt is needed) |
+| `first_frames` | `generate_frame` | scene | the scene has a first frame that is not an out-of-date AI frame (an upload is never replaced) |
+| `clips` | `generate_clip` | scene | the scene has a selected clip, or is shorter than one frame |
+| `render` | `render_final` | project | a render this run made has succeeded |
+
+`input` is what the user confirmed when starting, the two questions the manual "Propose scenes" asks:
+
+```json
+{ "accept_mismatch": false, "discard_scenes_with_inputs": false }
+```
+
+`output` is the whole state of the run. A new object is written on every change (the JSON rule). `jobs` names every job the run made, by step and target (a scene's id as text, or `project`), oldest first: the number of tries of a target is the length of its list, so it survives a restart.
+
+```json
+{
+  "step": "first_frames",
+  "steps": {
+    "transcribe":    { "status": "skipped", "done": 1,  "total": 1 },
+    "scenes":        { "status": "done",    "done": 1,  "total": 1 },
+    "descriptions":  { "status": "done",    "done": 1,  "total": 1 },
+    "image_prompts": { "status": "done",    "done": 12, "total": 12 },
+    "first_frames":  { "status": "running", "done": 9,  "total": 12 },
+    "clips":         { "status": "pending", "done": 0,  "total": 0 },
+    "render":        { "status": "pending", "done": 0,  "total": 0 }
+  },
+  "jobs": {
+    "scenes": { "project": [101] },
+    "image_prompts": { "44": [105, 118], "45": [106] },
+    "first_frames": { "44": [130], "45": [131, 140] }
+  },
+  "problems": [
+    { "step": "first_frames", "scene_id": 47, "scene_number": 4, "tries": 3,
+      "message": "Tried 3 times without success. The last try: HTTP 429 ..." }
+  ]
+}
+```
+
+`steps[].status` is `pending`, `running`, `done`, `skipped` (the step was already complete when the run got to it, so it made no job for it) or `failed` (the step the run stopped at). The page also shows `stopped` for the step a cancelled run was at; it is never stored. `done` and `total` count the step's targets (1 and 1 for a project step), and are 0 until the run reaches the step. `phase` reads "step 5 of 7: make first frames (9 of 12 done)". `problems` is what cannot go on: a scene (or the project) that had its tries, or that no job can be made for (a block with the reason: a scene longer than the project's maximum, out-of-date scenes, a mismatch not confirmed). It is replaced on every tick.
+
+**Each tick** (`poll`), in one read and at most one transaction: the run reads the database, passes every step that is complete (in the same tick), and stops at the first that is not. For each of that step's targets that is not done, it waits when a job of the step is queued or running for it (whoever started it); reports it when no job can be made or it has had **3 jobs from this run in this step** (`MAX_TRIES`); and otherwise makes the next job. A retry of a step that asks the language model sends `input.run_again = true`, so it does not reuse the stored answer of the failed try. Every job it makes has `input.auto_run_id` (the run's id), next to the input the manual button gives it. When the run is about to make jobs it takes the write lock first (`lock_scenes`) and reads again under it, like the buttons do, then `INSERT job` for each (`commit=False`) and `UPDATE job` of the run (`phase`, `output`, `last_checked_at`) are committed **together**: a crash leaves both or neither, and a job is never made twice. If the run was cancelled meanwhile, the transaction is rolled back.
+
+**When it stops.** A run fails (`status='failed'`, `error` names the step and the problems, and `output.steps[...].status='failed'`) only when it has at least one problem and nothing is left that could still succeed (no job of the step is queued or running, and none was just made), so the other scenes of the step finish first. A manual change that blocks the run (the scenes became out of date, a proposal was started) is a problem too: the run stops with that reason instead of guessing. Starting again makes a new run, which skips what is already done. It succeeds (`output` as above, every step `done` or `skipped`) once the render it made has succeeded.
+
+**Cancel** works on a queued or a running run (`POST /api/jobs/{id}/cancel`). It also cancels the jobs the run made that have not started; a job that is already running finishes on its own, and its result stays. Nothing is sent to the GPU server for the run itself (the marker is not an id there).
+
+**Paid calls are retried by the run, on purpose.** Every other paid job runs only from a click and is never retried. A run is one click, which the page asks for first and which says that a failed scene is tried up to 3 times in a step, and each try can be paid. A paid job that a restart interrupted is still failed by the dispatcher (`never_rerun` is its own handler's rule), and the run then counts it as one try. The clip step follows "Generate all ready scenes": a scene that already has a selected clip is not made again, even if its first frame changed since.
+
 ---
 
 ## 6. Global settings stored in `setting`
@@ -1088,8 +1268,9 @@ That is the provenance of the `final` asset. `muted_scene_indexes` lists the sce
 | `description_llm_model` | `"zai-org/GLM-5.3"` | the model that drafts scene descriptions (Phase 12); uses `llm_base_url` |
 | `image_prompt_llm_model` | `"zai-org/GLM-5.3-Flash"` | the model that writes each scene's image prompt, one call per scene (Phase 16); uses `llm_base_url` |
 | `image_model` | `"seedream-5.0-lite"` | the image model that makes each scene's first frame, one paid image per scene (Phase 17); uses `llm_base_url` (the Image lab keeps its own model box) |
-| `default_negative_prompt` | `"background music, music, soundtrack, ... jump cut, scene change"` | the negative prompt sent to the video model when a project's own is blank, and the text a new project starts with (Phase 18); the built-in text is a comma-separated list of what to keep out (music, singing, speech, on-screen text, logos, common video artifacts); blank allowed (then the GPU server's own default applies) |
-| `max_parallel_generations` | `4` | no range enforced |
+| `default_video_model` | `"ltx-2.5"` | the video model that makes clips when neither the scene nor its project chooses one (Phase 19); one of `ltx-2.3` or `ltx-2.5` (a fixed set of choices: the page shows a choice list and any other value is refused). A project's `video_model` wins over it, and a scene's over the project's; Regenerate can pick a model for one take |
+| `default_negative_prompt` | `"background music, music, soundtrack, ... jump cut, scene change"` | the negative prompt sent to **LTX-2.3** when a project's own is blank, and the text a new project starts with (Phase 18); LTX-2.5 has no negative prompt and is never sent one (Phase 19); the built-in text is a comma-separated list of what to keep out (music, singing, speech, on-screen text, logos, common video artifacts); blank allowed (then the GPU server's own default applies) |
+| `max_parallel_generations` | `4` | no range enforced. Since Phase 19 it also limits the Video lab's clips: scene clips and lab clips share these slots |
 | `max_parallel_image_generations` | `2` | how many first frames are made at once (Phase 17); no range enforced |
 | `poll_interval_seconds` | `15` | |
 | `max_parallel_ffmpeg` | `1` | no range enforced |
@@ -1127,7 +1308,10 @@ Mapping the flow in `ANALYSIS.md` Section 1 onto table writes, so the structure'
 | Generate one clip per scene | **Generate** (Phase 9): `INSERT job` (`type='generate_clip'`, `provider='gpu'`, `scene_id=<scene>`), only for a ready scene (a description and a first frame) that is not longer than the project's maximum and has no active clip job; "Generate all ready scenes" inserts one per scene that is ready and has no selected take, all in one transaction. The dispatcher starts the job while fewer than `max_parallel_generations` clip jobs are `running` (read every tick). **Start**: the first time, the clip mode is read from the scene (a last frame attached: keyframe interpolation, otherwise image-to-video from the first frame), then `INSERT asset` for each frame as sent (`kind='frame'`, `source='derived'`, a PNG at the generation size, unless an identical one exists; one frame, or two for keyframe interpolation) and `UPDATE job.input` with the `clip_mode`, the `endpoint` and the request, before anything is uploaded; then the frame or frames are uploaded, the job is submitted to the stored endpoint, and `UPDATE job` sets `provider_job_id` and the exact body (nothing in between). **Each tick** `UPDATE job` sets `phase`, `last_checked_at` and `output.remote`. **On success**, in one transaction: `INSERT asset` (`kind='clip'`, `source='ai'`, `provenance` as in Section 5), `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`) and `UPDATE scene.selected_clip_asset_id` (the new take is the selected one); then the server's job is purged and `job.output.purge` is merged in. A pre-emption is `UPDATE job SET status='queued', attempt=attempt+1, provider_job_id=NULL` (up to 3 attempts). A proposal replaces the scenes, which deletes their jobs (`ON DELETE CASCADE`), so it is refused while a clip job is active; a cut edit is refused for the scenes it would change while they have one. |
 | Preview clips, regenerate or mute (human checkpoint) | **Regenerate**: another `job` (new random seed) and `asset` row, which becomes the selected take. **Select take**: `UPDATE scene.selected_clip_asset_id`, only to the clip of a succeeded `generate_clip` job of that scene. **Clip sound**: `UPDATE scene.use_clip_sound`. **Cancel**: for a queued job, `status='cancelled'`; for a running one the server is asked first (`DELETE /v1/jobs/{id}`), and when it does not answer nothing changes; the server's answer is merged into `output.cancel`. Takes are never deleted. A take whose `provenance.scene_start_s` and `scene_end_s` no longer equal the scene's is shown as out of date. |
 | Trim, join, mix, render final video | **Render** (Phase 10): in one transaction that holds the write lock (`lock_scenes`, so a cut edit cannot change a scene halfway), the endpoint reads the scenes and the selected takes, refuses with 422 when `renders.render_block` gives a reason (no voiceover or scenes, a proposal active, the scenes out of date, a scene with no selected clip, or a selected clip with fewer frames than the scene now needs), builds the timeline and `INSERT job` (`type='render_final'`, `provider='local'`, `input={"requested": "render", "timeline": ...}`). A render that is already queued or running is returned instead. The dispatcher starts it while fewer than `max_parallel_ffmpeg` renders are `running`. **Each step** `UPDATE job.phase` (checking the clips, trimming clip i of n, joining the clips and mixing the sound, checking the video, saving the video). The temporary files live in `/data/tmp` and are removed afterwards. **On success**, in one transaction: `INSERT asset` (`kind='final'`, `source='derived'`, provenance as in Section 5) and `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`). A render never changes a `scene` row and never deletes anything; every earlier render stays as a succeeded job with its `final` asset. Only a queued render can be cancelled. A restart queues a running render again, and it renders the same timeline from the start. |
-| Test the image API by hand (Image lab) | **Run** (Phase 13): one synchronous call, not a `job` (the lab belongs to no project, and `job.project_id` is required). The endpoint validates the form, reads each reference (a `lab_image` or a `kind='frame'` `asset`, as an upright RGB JPEG at quality 90, scaled down above 36 megapixels), and ends its read transaction before the call. The call runs in a task of its own, so a browser that goes away does not lose it. **After the call**, in one transaction: `INSERT lab_run` (the form, the request and the answer with every image replaced by its size, `http_status`, `seconds`, `usage`, `error`) and one `INSERT lab_image` (`origin='result'`) for each returned image, whose file was first checked with Pillow and moved to `media/lab/`. A call that failed, was refused or was ignored is a `lab_run` too (`status='failed'`, with `error`). **Upload**: `INSERT lab_image` (`origin='upload'`), the same checks as a scene's frame. Nothing is retried, cached or deleted, and no `scene`, `asset` or `job` row is read for writing: a project's frame is only read, by its `asset` id. |
+| Test the image API by hand (Image lab) | **Run** (Phase 13): one synchronous call, not a `job` (a call of 25 to 40 s that the page waits for; the Video lab below, whose runs take minutes, does use jobs). The endpoint validates the form, reads each reference (a `lab_image` or a `kind='frame'` `asset`, as an upright RGB JPEG at quality 90, scaled down above 36 megapixels), and ends its read transaction before the call. The call runs in a task of its own, so a browser that goes away does not lose it. **After the call**, in one transaction: `INSERT lab_run` (the form, the request and the answer with every image replaced by its size, `http_status`, `seconds`, `usage`, `error`) and one `INSERT lab_image` (`origin='result'`) for each returned image, whose file was first checked with Pillow and moved to `media/lab/`. A call that failed, was refused or was ignored is a `lab_run` too (`status='failed'`, with `error`). **Upload**: `INSERT lab_image` (`origin='upload'`), the same checks as a scene's frame. Nothing is retried, cached or deleted, and no `scene`, `asset` or `job` row is read for writing: a project's frame is only read, by its `asset` id. |
+| Choose the video model (app, project, scene, one take) | **Phase 19.** `UPDATE setting` for `default_video_model`; `UPDATE project.video_model` (through the project's settings, NULL means the app's default); `UPDATE scene.video_model` (its own endpoint, NULL means the project's); and **Regenerate**'s model, which is only `job.input.video_model` of the new job and is never saved on the scene. The model is resolved when a clip job first starts (Section 5, `generate_clip`), so none of these changes a job already prepared or a clip already made. A scene that has a last frame is made by LTX-2.3 whatever is chosen, until LTX-2.5 has a first-and-last-frame endpoint; the clip's provenance says so. |
+| Try prompts on both models, with cuts (Video lab) | **Run** (Phase 19): `INSERT lab_video_run` and `INSERT job` (`type='lab_video'`, `provider='gpu'`, `project_id` NULL) for each chosen model, in **one transaction**, only from a click. Every request is built and checked first, against the limits of the approved GPU API (a model the approved API has no endpoint for refuses the whole click), with the same seed, size, length, recipe, prompt and first frame for both, and `lab_video_run.job_id` is set. The dispatcher starts the jobs while fewer than `max_parallel_generations` clip jobs and lab jobs together are `running`. **Start**: the first frame (if any) is fitted to the run's size and uploaded, and the job is submitted to the stored endpoint, `UPDATE job` setting `provider_job_id` and the exact body. **On success**, in one transaction: the file moves to `media/lab/`, `UPDATE lab_video_run` (the file and what ffprobe read) and `UPDATE job` (`status='succeeded'`, `output`); then the server's job is purged. Nothing is retried beyond what a scene's clip is (pre-emption, an expired result), cached, merged or deleted, and no `scene` or `asset` row is written. **Write a multi-shot prompt**: `INSERT job` (`type='write_lab_video_prompt'`, `provider='llm'`, `project_id` NULL) with the idea in `input.inputs`; its answer is `job.output.prompt`, and nothing else is written. The Activity page lists both under "Video lab". |
+| Run every step automatically | **Start** (Phase 20): `INSERT job` (`type='auto_pipeline'`, `provider='local'`, `scene_id` NULL, `input={"accept_mismatch": ..., "discard_scenes_with_inputs": ...}`), only from a click, and only when the project has a voiceover and a script and no other job waiting or running (422 otherwise); 409 until the recording-differs-from-the-script warning and the replacement of scenes that have inputs are confirmed, the same two questions as "Propose scenes" (and only when the run will propose scenes). A run that is already active is returned instead. **Start of the job**: `UPDATE job` sets `provider_job_id='auto'` (the marker) and the first `phase` and `output`. **Each tick** (`poll`): read-only when nothing needs making; otherwise one transaction that holds the write lock (`lock_scenes`) with `INSERT job` for each job the step needs (the same `type`, `provider`, `scene_id` and `input` as the manual button, plus `input.auto_run_id`, and `input.run_again=true` on a retry that asks the language model) and `UPDATE job` of the run (`phase`, `output`, `last_checked_at`). Each of those jobs then runs under its own handler's rules. **On success** (`finish`): `UPDATE job` (`status='succeeded'`, `output`). **On failure**: `UPDATE job` (`status='failed'`, `error`). **Cancel**: `status='cancelled'` for the run, and for each job it made that is still `queued`. The run changes no `scene`, `asset` or `transcript` row itself: every write to those is its jobs'. |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 
@@ -1141,7 +1325,7 @@ Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snaps
 2. **Table names:** lowercase `snake_case`, singular (`project`, `asset`, `scene`, `job`, `transcript`, `setting`, `api_snapshot`), mapped from the PascalCase model names in `ANALYSIS.md`.
 3. **Cascade rules:** `ON DELETE CASCADE` from `project` to its owned rows (`asset`, `transcript`, `scene`, `job`), and `ON DELETE SET NULL` for the optional asset references on `scene` and `job` (so deleting one asset doesn't delete a whole scene). `ANALYSIS.md` doesn't state delete behaviour anywhere; this is a reasonable default, not a documented rule.
 4. **Indexes** beyond the primary/foreign keys (Section 4, "Recommended indexes") are my suggestions based on the dispatcher's described access patterns (Section 3.3), not a list given in `ANALYSIS.md`.
-5. **`job.input` / `job.output` JSON shapes.** The `transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_clip` and `render_final` shapes were built and checked against the real servers (and, for the render, the image's FFmpeg) in Phases 5, 6, 9, 10, 12 and 16, and the `transcript.words` shape (as of 2026-10-05) and the model's `answer` inside `plan_scenes` output are verbatim from a real response (`ANALYSIS.md` Section 5.1 and 5.2); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
+5. **`job.input` / `job.output` JSON shapes.** The `transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_clip` and `render_final` shapes were built and checked against the real servers (and, for the render, the image's FFmpeg) in Phases 5, 6, 9, 10, 12 and 16 (the `lab_video` and `write_lab_video_prompt` shapes of Phase 19 were checked against mock servers that answer like the real ones, not yet against the real GPU server; the `auto_pipeline` shape of Phase 20 was walked through on a scratch database with the child jobs' results set by hand, not yet against the real servers), and the `transcript.words` shape (as of 2026-10-05) and the model's `answer` inside `plan_scenes` output are verbatim from a real response (`ANALYSIS.md` Section 5.1 and 5.2); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
 6. **`scene.index`** is assumed zero-based and contiguous per project; `ANALYSIS.md` doesn't state the numbering convention explicitly.
 7. **`project.language` default `'en'`** reflects the English-only decision (Revision 3 decisions table) but isn't given as a literal column default in `ANALYSIS.md`.
 8. **Timestamp population** (`DEFAULT CURRENT_TIMESTAMP`) is a SQLite/SQLAlchemy convention I chose; `ANALYSIS.md` doesn't describe how timestamp columns get their values.

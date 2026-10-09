@@ -28,6 +28,7 @@ from app.core.config import env_value
 from app.core.urls import UrlError, docker_mapped, validate_base_url
 from app.db.models import Setting
 from app.db.types import utcnow
+from app.services import video_models
 
 _logger = logging.getLogger(__name__)
 
@@ -55,6 +56,14 @@ class TextPattern:
 
 
 @dataclass(frozen=True)
+class SettingChoice:
+    """One allowed value of a setting that has a fixed set of them, and its name on the page."""
+
+    value: str
+    label: str
+
+
+@dataclass(frozen=True)
 class SettingSpec:
     """Everything the app knows about one global setting."""
 
@@ -73,10 +82,18 @@ class SettingSpec:
     pattern: TextPattern | None = None
     # When the value is blank, use this other setting's value instead.
     blank_falls_back_to: str | None = None
+    # A string setting with a fixed set of allowed values: the page shows a choice list and
+    # any other value is refused.
+    choices: tuple[SettingChoice, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.env_var is not None and self.value_type != "string":
             raise ValueError(f"{self.key}: only string settings can have an environment variable")
+        if self.choices is not None:
+            if self.value_type != "string":
+                raise ValueError(f"{self.key}: only string settings can have choices")
+            if self.default not in {choice.value for choice in self.choices}:
+                raise ValueError(f"{self.key}: the default must be one of the choices")
         # An integer setting may leave min_value and max_value unset (both None) to take any
         # whole number with no range check. Setting only one of the two is still refused, since
         # a half-open range is almost certainly a mistake.
@@ -204,12 +221,30 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="default_video_model",
+        group=GROUP_VIDEO,
+        label="Default video model",
+        help=(
+            "The video model that makes clips when neither the scene nor its project chooses "
+            "one (Project settings, and each scene's clip section). Regenerate can also pick "
+            "a model for one take. LTX-2.5 cuts between several shots only when the prompt "
+            "says so, and has no negative prompt. A scene that has a last frame is always made "
+            "by LTX-2.3 for now: LTX-2.5 has no first-and-last-frame mode yet."
+        ),
+        value_type="string",
+        default=video_models.DEFAULT_MODEL,
+        choices=tuple(
+            SettingChoice(model, video_models.LABELS[model]) for model in video_models.MODEL_IDS
+        ),
+    ),
+    SettingSpec(
         key="default_negative_prompt",
         group=GROUP_VIDEO,
-        label="Default negative prompt",
+        label="Default negative prompt (LTX-2.3 only)",
         help=(
-            "Sent to the video model as its negative prompt whenever a project's own Negative "
-            "prompt (Project settings, Guidelines) is blank. New projects also start with this "
+            "Sent to LTX-2.3 as its negative prompt whenever a project's own Negative "
+            "prompt (Project settings, Guidelines) is blank. LTX-2.5 has no negative prompt "
+            "and never gets it. New projects also start with this "
             "text in their own field. It keeps unwanted background music, speech, on-screen "
             "text and common video artifacts out of the clips. Blank it as well to let the "
             "GPU server's own default apply instead."
@@ -347,6 +382,10 @@ def _validate_text(spec: SettingSpec, raw: object) -> str:
         except UrlError as exc:
             raise SettingValueError(str(exc)) from exc
 
+    if spec.choices is not None and value not in {choice.value for choice in spec.choices}:
+        raise SettingValueError(
+            "Choose one of: " + ", ".join(choice.label for choice in spec.choices) + "."
+        )
     if spec.pattern is not None and not re.fullmatch(spec.pattern.regex, value):
         raise SettingValueError(spec.pattern.message)
     return value

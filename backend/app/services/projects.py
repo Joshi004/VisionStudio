@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Asset, Project
+from app.services import video_models
 
 LANDSCAPE = "landscape"
 PORTRAIT = "portrait"
@@ -33,6 +34,8 @@ DEFAULT_CLIP_SOUND_VOLUME: Final = 0.2
 DEFAULT_LANGUAGE: Final = "en"
 # The global setting whose text a new project starts with as its negative prompt.
 DEFAULT_NEGATIVE_PROMPT_KEY: Final = "default_negative_prompt"
+# The global setting that chooses the video model when neither a scene nor its project does.
+DEFAULT_VIDEO_MODEL_KEY: Final = "default_video_model"
 
 NAME_MAX_CHARS: Final = 200
 GUIDELINE_MAX_CHARS: Final = 2000
@@ -81,6 +84,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "cut_instructions": "Cut instructions",
     "description_instructions": "Description instructions",
     "script_text": "Script",
+    "video_model": "Video model",
 }
 _GUIDELINE_FIELDS: Final = (
     "style_prefix",
@@ -89,7 +93,7 @@ _GUIDELINE_FIELDS: Final = (
     "cut_instructions",
     "description_instructions",
 )
-_NULLABLE_FIELDS: Final = frozenset((*_GUIDELINE_FIELDS, "script_text"))
+_NULLABLE_FIELDS: Final = frozenset((*_GUIDELINE_FIELDS, "script_text", "video_model"))
 
 
 class ProjectValidationError(ValueError):
@@ -171,6 +175,14 @@ def validate_project(project: Project) -> None:
     if project.script_text is not None and len(project.script_text) > SCRIPT_MAX_CHARS:
         raise ProjectValidationError(f"The script must be at most {SCRIPT_MAX_CHARS:,} characters.")
 
+    # NULL means "use the app's default video model".
+    if project.video_model is not None and not video_models.is_video_model(project.video_model):
+        raise ProjectValidationError(
+            "Video model must be one of: "
+            + ", ".join(video_models.LABELS[model] for model in video_models.MODEL_IDS)
+            + ", or the app's default."
+        )
+
 
 def _normalise_name(value: str) -> str:
     return value.strip()
@@ -233,6 +245,14 @@ async def create_project(session: AsyncSession, name: str, orientation: str) -> 
 
 async def get_project(session: AsyncSession, project_id: int) -> Project | None:
     return await session.get(Project, project_id)
+
+
+async def default_video_model(session: AsyncSession) -> video_models.VideoModel:
+    """The app's default video model (the global setting). A saved value that is not a known
+    model (the setting is validated, so only an old row could be) counts as the built-in one.
+    """
+    value = await settings_service.get_str(session, DEFAULT_VIDEO_MODEL_KEY)
+    return value if video_models.is_video_model(value) else video_models.DEFAULT_MODEL
 
 
 async def get_voiceover(session: AsyncSession, project: Project) -> Asset | None:

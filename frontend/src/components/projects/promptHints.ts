@@ -10,6 +10,8 @@ export function countWords(text: string): number {
 // Straight and curly double quotes (LTX lip-syncs quoted speech).
 const DOUBLE_QUOTES = /["\u201c\u201d\u201e]/;
 const CUT_TO = /\bcut to\b/i;
+// A transition named in words is a real edit for LTX-2.5 (same pattern as the backend profile).
+const NAMED_CUT = /\b(hard|match|jump|smash) cut\b|\bcuts? away\b|\bcuts? (?:to|into)\b/i;
 // "0:03", "3 seconds", "2.5 sec". Not a bare "s", so "the 1920s" does not match.
 const TIMESTAMP = /\b\d{1,2}:\d{2}\b|\b\d+(\.\d+)?\s?(sec|secs|second|seconds)\b/i;
 const VIDEO_STARTS_WITH = /\bthe video (starts|begins) with\b/i;
@@ -34,6 +36,11 @@ export function promptHints(description: string): string[] {
   if (CUT_TO.test(description)) {
     hints.push(
       "\u201ccut to\u201d found. Describe one continuous shot instead.",
+    );
+  }
+  if (!CUT_TO.test(description) && NAMED_CUT.test(description)) {
+    hints.push(
+      "A named cut (\u201chard cut\u201d, \u201cmatch cut\u201d, \u201ccuts away\u201d) found. LTX-2.5 treats it as a real edit, but a clip made from one first frame is one continuous shot. Try cuts in the Video lab.",
     );
   }
   if (TIMESTAMP.test(description)) {

@@ -10,6 +10,9 @@ What `request()` enforces (ANALYSIS.md Section 3.6 and 3.7):
 - `localhost` and `127.0.0.1` are mapped to `host.docker.internal`.
 - Only `http` and `https`, and no user name or password in the URL.
 - A time limit for the whole call and a limit on the size of the answer.
+- Optionally, a limit on the silence: the longest wait for the first byte, or between two
+  pieces of a streamed answer (`idle_timeout_s`). It lets a long answer take as long as it
+  needs while a call that has stopped sending is given up on early.
 - Redirects are never followed, not even to the same host.
 - An explicit User-Agent, because Cloudflare rejects Python's default one
   with error 1010 (Section 3.6).
@@ -157,15 +160,27 @@ async def request(
     json: Any = None,
     params: Mapping[str, str] | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    idle_timeout_s: float | None = None,
     max_bytes: int = JSON_MAX_BYTES,
 ) -> OutboundResponse:
     """Calls `url` and returns the answer, whatever its status code.
+
+    `timeout_s` limits the whole call. `idle_timeout_s`, when given, also limits each wait
+    for more data (the first byte included), so a streamed answer can run for `timeout_s`
+    as long as it keeps arriving. The answer is read to its end before it is returned.
 
     A non-2xx answer is returned, not raised: the caller decides what it means.
     Raises `OutboundError` when there is no usable answer at all.
     """
     return await _send(
-        method, url, json=json, params=params, files=None, timeout_s=timeout_s, max_bytes=max_bytes
+        method,
+        url,
+        json=json,
+        params=params,
+        files=None,
+        timeout_s=timeout_s,
+        idle_timeout_s=idle_timeout_s,
+        max_bytes=max_bytes,
     )
 
 
@@ -231,6 +246,7 @@ async def _send(
     timeout_s: float,
     max_bytes: int,
     data: Mapping[str, str] | None = None,
+    idle_timeout_s: float | None = None,
 ) -> OutboundResponse:
     async def read_body(response: httpx.Response, final_url: str) -> OutboundResponse:
         body = await _read_limited(response, max_bytes)
@@ -249,6 +265,7 @@ async def _send(
         data=data,
         files=files,
         timeout_s=timeout_s,
+        idle_timeout_s=idle_timeout_s,
         handle=read_body,
     )
     return result
@@ -264,12 +281,17 @@ async def _call[T](
     timeout_s: float,
     handle: Callable[[httpx.Response, str], Awaitable[T]],
     data: Mapping[str, str] | None = None,
+    idle_timeout_s: float | None = None,
 ) -> tuple[T, int]:
     """Makes one call with every check of this module, and lets `handle` read the answer.
 
     Everything that applies to a call lives here once: the URL rules, the Docker mapping,
     the time limit, no redirects, the key only for Bitdeer, and the mapping of transport
     problems to `OutboundError`. Returns what `handle` returned and the HTTP status.
+
+    `timeout_s` limits the whole call. `idle_timeout_s`, when given, limits every single wait
+    for more data from the server (httpx's read timeout), the wait for the first byte
+    included. A stall is then reported differently from a call that took too long.
     """
     final_url = docker_mapped(url)
     try:
@@ -280,6 +302,7 @@ async def _call[T](
     client = _get_client()
     netloc = urlsplit(final_url).netloc
     started = time.monotonic()
+    timeout = timeout_s if idle_timeout_s is None else httpx.Timeout(timeout_s, read=idle_timeout_s)
 
     try:
         async with asyncio.timeout(timeout_s):
@@ -291,7 +314,7 @@ async def _call[T](
                 data=data,
                 files=files,
                 headers=auth_headers_for(final_url),
-                timeout=timeout_s,
+                timeout=timeout,
             ) as response:
                 if response.is_redirect:
                     location = response.headers.get("location", "")[:_MAX_LOCATION_CHARS]
@@ -305,7 +328,12 @@ async def _call[T](
     except OutboundError as exc:
         _log_call(method, final_url, started, f"refused ({exc.reason})")
         raise
-    except (TimeoutError, httpx.TimeoutException):
+    except (TimeoutError, httpx.TimeoutException) as exc:
+        if idle_timeout_s is not None and isinstance(exc, httpx.ReadTimeout):
+            _log_call(method, final_url, started, "stalled")
+            raise OutboundError(
+                "timeout", f"{netloc} stopped sending for {idle_timeout_s:g} s."
+            ) from None
         _log_call(method, final_url, started, "timeout")
         raise OutboundError("timeout", f"No answer from {netloc} within {timeout_s:g} s.") from None
     except httpx.TransportError as exc:

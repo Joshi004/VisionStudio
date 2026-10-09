@@ -71,6 +71,11 @@ SAVING_DESCRIPTIONS: Final = "saving the descriptions"
 CHECKING_IMAGE_PROMPT: Final = "checking the image prompt"
 SAVING_IMAGE_PROMPT: Final = "saving the image prompt"
 
+# --- Running: the Video lab (Phase 19) ---------------------------------------------------
+# The lab's clips use the clip phases above. Its prompt helper also uses PREPARING_PROMPT and
+# `asking_model`.
+CHECKING_VIDEO_PROMPT: Final = "checking the video prompt"
+
 # --- Running: first frames (Phase 17) ---------------------------------------------------
 PREPARING_IMAGE_REQUEST: Final = "preparing the image request"
 GENERATING_IMAGE: Final = "generating the image"
@@ -86,6 +91,14 @@ CANCELLED: Final = "cancelled"
 
 def preempted(next_attempt: int) -> str:
     return f"pre-empted: submitting again (attempt {next_attempt} of {MAX_ATTEMPTS})"
+
+
+def auto_step(number: int, total: int, label: str, done: int, count: int) -> str:
+    """Where an automatic run is: "step 5 of 7: make first frames (4 of 12 done)". `count` is
+    the number of targets of the step; a project-level step has one, and shows no count.
+    """
+    text = f"step {number} of {total}: {label.lower()}"
+    return f"{text} ({done} of {count} done)" if count > 1 else text
 
 
 def trimming(number: int, total: int) -> str:

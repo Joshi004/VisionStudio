@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
+import { AutoPipelineSection } from "../components/projects/AutoPipelineSection";
 import { RenderSection } from "../components/projects/RenderSection";
 import { ScenesSection } from "../components/projects/ScenesSection";
 import { ScriptSection } from "../components/projects/ScriptSection";
@@ -65,6 +66,7 @@ export function ProjectPage() {
 
           <VoiceoverSection project={project} />
           <ScriptSection project={project} />
+          <AutoPipelineSection project={project} />
           <TranscriptSection project={project} />
           <ScenesSection project={project} />
           <RenderSection project={project} />

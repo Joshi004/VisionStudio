@@ -15,9 +15,9 @@ the loop:
    120 s, or the poll interval if that is longer).
 3. Ask each running remote job's handler to `poll`. A handler that says "ready" gets its
    `finish` started as a task.
-4. Start queued jobs while their type has free slots. Before the first GPU job is started,
-   the recorded GPU API is checked, and nothing starts unless it still matches the
-   approved version (ANALYSIS.md Section 6.5).
+4. Start queued jobs while their type (or concurrency group) has free slots. Before the
+   first GPU job is started, the recorded GPU API is checked, and nothing starts unless it
+   still matches the approved version (ANALYSIS.md Section 6.5).
 5. Wait.
 
 One uvicorn process runs one loop (Section 3.2). Run a second process and each would run
@@ -162,8 +162,9 @@ class _Dispatcher:
             interval = await settings_service.get_int(session, POLL_INTERVAL_KEY)
             running = await self._jobs(session, "running")
             queued = await self._jobs(session, "queued")
+            # By pool: job types of one concurrency group share their slots.
             limits = {
-                handler.job_type: await handler.concurrency_limit(session)
+                handlers.slot_key(handler.job_type): await handler.concurrency_limit(session)
                 for handler in handlers.all_handlers()
             }
             await session.commit()  # end the read before any network call
@@ -268,15 +269,16 @@ class _Dispatcher:
         limits: dict[str, int],
         gpu_blocked: bool,
     ) -> None:
-        running_by_type = Counter(job.type for job in running)
-        free = {job_type: limit - running_by_type[job_type] for job_type, limit in limits.items()}
+        running_by_pool = Counter(handlers.slot_key(job.type) for job in running)
+        free = {pool: limit - running_by_pool[pool] for pool, limit in limits.items()}
         contract: contract_guard.CheckResult | None = None
 
         for job, handler in waiting:
             if handler.provider == "gpu" and gpu_blocked:
                 continue  # `_server_answers` already set the phase
 
-            if free.get(job.type, 0) <= 0:
+            pool = handlers.slot_key(job.type)
+            if free.get(pool, 0) <= 0:
                 await self._set_queued_phase(job.id, phases.WAITING_FOR_SLOT)
                 continue
 
@@ -292,7 +294,7 @@ class _Dispatcher:
                 claimed = await store.claim(session, job.id)
             if not claimed:
                 continue  # cancelled in the meantime
-            free[job.type] -= 1
+            free[pool] -= 1
             self._retry_after.pop(job.id, None)
             self._spawn(job.id, handler.start(job.id))
 

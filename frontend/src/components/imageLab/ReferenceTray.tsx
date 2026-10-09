@@ -31,7 +31,7 @@ import {
   type ReferenceItem,
 } from "./labView";
 
-const ACCEPT = "image/png,image/jpeg,image/webp";
+export const ACCEPT = "image/png,image/jpeg,image/webp";
 
 type ReferenceTrayProps = {
   items: ReferenceItem[];
@@ -41,7 +41,7 @@ type ReferenceTrayProps = {
 };
 
 /** A thumbnail that keeps the image's own shape. */
-function Thumb({ url, width, height }: { url: string; width: number | null; height: number | null }) {
+export function Thumb({ url, width, height }: { url: string; width: number | null; height: number | null }) {
   return (
     <img
       src={url}
@@ -250,13 +250,13 @@ export function ReferenceTray({ items, onChange, mode }: ReferenceTrayProps) {
   );
 }
 
-type PickerProps = {
+export type PickerProps = {
   opened: boolean;
   onClose: () => void;
   onPick: (item: ReferenceItem) => void;
 };
 
-function LibraryPicker({ opened, onClose, onPick }: PickerProps) {
+export function LibraryPicker({ opened, onClose, onPick }: PickerProps) {
   const library = useLabLibrary(opened);
   return (
     <Modal opened={opened} onClose={onClose} title="From earlier results" size="xl" centered>
@@ -294,7 +294,7 @@ function LibraryPicker({ opened, onClose, onPick }: PickerProps) {
   );
 }
 
-function ProjectPicker({ opened, onClose, onPick }: PickerProps) {
+export function ProjectPicker({ opened, onClose, onPick }: PickerProps) {
   const projects = useProjects();
   const [projectId, setProjectId] = useState<string | null>(null);
   const frames = useProjectFrames(projectId === null ? null : Number(projectId));
