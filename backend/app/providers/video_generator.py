@@ -153,8 +153,10 @@ def build_request(
 ) -> dict[str, Any]:
     """The body for `endpoint` without its frames (those need the server's asset ids).
 
-    `negative_prompt` is sent only when the project has one: it replaces the pipeline's
-    own default, so leaving it out keeps that default. `partition` is sent only when the
+    `negative_prompt` is sent only when it is not blank: it replaces the pipeline's own
+    default, so leaving it out keeps that default. The caller passes the project's own
+    negative prompt, or the app's default negative prompt (a global setting) when the
+    project has none, so it is blank only when both are. `partition` is sent only when the
     setting is not blank. For `/v1/ltx/videos/generate` the body also says `mode: "quality"`
     and `enhance_prompt: false` explicitly, so neither relies on a server default. A request
     holds only what the user chose and the numbers worked out from it, so it can be stored

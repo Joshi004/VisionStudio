@@ -20,6 +20,7 @@ from typing import Final
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import settings as settings_service
 from app.db.models import Asset, Project
 
 LANDSCAPE = "landscape"
@@ -30,6 +31,8 @@ DEFAULT_MIN_SCENE_SECONDS: Final = 2.0
 DEFAULT_MAX_SCENE_SECONDS: Final = 6.0
 DEFAULT_CLIP_SOUND_VOLUME: Final = 0.2
 DEFAULT_LANGUAGE: Final = "en"
+# The global setting whose text a new project starts with as its negative prompt.
+DEFAULT_NEGATIVE_PROMPT_KEY: Final = "default_negative_prompt"
 
 NAME_MAX_CHARS: Final = 200
 GUIDELINE_MAX_CHARS: Final = 2000
@@ -197,6 +200,15 @@ async def create_project(session: AsyncSession, name: str, orientation: str) -> 
         raise ProjectValidationError("Orientation must be landscape or portrait.")
     sizes = ORIENTATION_DEFAULTS[orientation]
 
+    # The app's default negative prompt, so the new project shows it and can edit it. It is
+    # left out when blank, or when it is longer than a project's own field accepts (the
+    # global setting has no length limit, and project creation must not fail because of it).
+    default_negative_prompt = (
+        await settings_service.get_str(session, DEFAULT_NEGATIVE_PROMPT_KEY)
+    ).strip()
+    if len(default_negative_prompt) > GUIDELINE_MAX_CHARS:
+        default_negative_prompt = ""
+
     # Every default is set here, rather than left to the column defaults, because the
     # column defaults only apply at INSERT time and validation runs before that.
     project = Project(
@@ -210,6 +222,7 @@ async def create_project(session: AsyncSession, name: str, orientation: str) -> 
         min_scene_seconds=DEFAULT_MIN_SCENE_SECONDS,
         max_scene_seconds=DEFAULT_MAX_SCENE_SECONDS,
         clip_sound_volume=DEFAULT_CLIP_SOUND_VOLUME,
+        negative_prompt=default_negative_prompt or None,
         language=DEFAULT_LANGUAGE,
     )
     validate_project(project)

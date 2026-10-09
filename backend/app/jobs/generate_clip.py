@@ -63,6 +63,7 @@ _logger = logging.getLogger(__name__)
 JOB_TYPE: Final = clips.GENERATE_JOB
 GPU_URL_KEY: Final = "gpu_api_base_url"
 PARTITION_KEY: Final = "gpu_partition"
+DEFAULT_NEGATIVE_PROMPT_KEY: Final = "default_negative_prompt"
 MAX_PARALLEL_KEY: Final = "max_parallel_generations"
 
 SERVER_RETRY_DELAY_S: Final = 5.0
@@ -105,11 +106,14 @@ class GenerateClipHandler(JobHandler):
                 return
             base_url = await settings_service.get_str(session, GPU_URL_KEY)
             partition = await settings_service.get_str(session, PARTITION_KEY)
+            default_negative_prompt = await settings_service.get_str(
+                session, DEFAULT_NEGATIVE_PROMPT_KEY
+            )
             await session.commit()
 
         plan = await self._stored_plan(job)
         if plan is None:
-            plan = await self._prepare(job, partition)
+            plan = await self._prepare(job, partition, default_negative_prompt)
             if plan is None:
                 return  # the job was failed, or cancelled, in there
         await self._upload_and_submit(job, base_url, plan)
@@ -142,9 +146,15 @@ class GenerateClipHandler(JobHandler):
             return None
         return _Plan(endpoint=endpoint, request=request, first=first, last=last, recorded=recorded)
 
-    async def _prepare(self, job: Job, partition: str) -> _Plan | None:
+    async def _prepare(
+        self, job: Job, partition: str, default_negative_prompt: str
+    ) -> _Plan | None:
         """Works out the clip mode, the request and the frames to send. Runs on the first
         attempt only.
+
+        The negative prompt is the project's own when it has one, otherwise the app's default
+        negative prompt (a global setting). It is stored in the request like everything else,
+        so a later attempt sends the same one.
 
         The mode comes from the scene's frames as they are now (a last frame attached means
         keyframe interpolation, none means image-to-video from the first frame), and is
@@ -206,10 +216,13 @@ class GenerateClipHandler(JobHandler):
                 await self._fail(job.id, str(exc))
                 return None
 
+        project_negative_prompt = (project.negative_prompt or "").strip()
+        negative_prompt = project_negative_prompt or default_negative_prompt.strip() or None
+
         request = video_generator.build_request(
             endpoint=endpoint,
             prompt=prompt,
-            negative_prompt=project.negative_prompt,
+            negative_prompt=negative_prompt,
             width=project.gen_width,
             height=project.gen_height,
             num_frames=num_frames,

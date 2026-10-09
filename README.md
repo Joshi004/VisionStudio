@@ -85,3 +85,11 @@ backend container reads it, through `env_file: .env` in
 **Never run `docker compose config` or `docker inspect` on a running
 container and share the output.** Both print resolved environment values,
 including the secrets from `.env`.
+
+
+
+
+
+
+
+

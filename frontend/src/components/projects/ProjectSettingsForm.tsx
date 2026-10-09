@@ -199,7 +199,7 @@ export function ProjectSettingsForm({
             />
             <Textarea
               label="Negative prompt"
-              description="What to avoid, for example: blurry, low quality, text, watermark, speech, talking, voices."
+              description="What to avoid, for example: blurry, low quality, text, watermark, speech, talking, voices. Leave blank to use the app's default (Settings, Video model)."
               value={draft.negative_prompt}
               onChange={(event) => edit("negative_prompt", event.currentTarget.value)}
               autosize

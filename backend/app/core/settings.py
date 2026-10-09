@@ -87,6 +87,7 @@ class SettingSpec:
 GROUP_GPU = "GPU server"
 GROUP_LLM = "Language model"
 GROUP_IMAGE = "Image model"
+GROUP_VIDEO = "Video model"
 GROUP_LIMITS = "Limits"
 
 # The order here is the order on the Settings page. Defaults come from
@@ -201,6 +202,27 @@ REGISTRY: tuple[SettingSpec, ...] = (
             regex=r"[A-Za-z0-9._/:-]{1,200}",
             message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
         ),
+    ),
+    SettingSpec(
+        key="default_negative_prompt",
+        group=GROUP_VIDEO,
+        label="Default negative prompt",
+        help=(
+            "Sent to the video model as its negative prompt whenever a project's own Negative "
+            "prompt (Project settings, Guidelines) is blank. New projects also start with this "
+            "text in their own field. It keeps unwanted background music, speech, on-screen "
+            "text and common video artifacts out of the clips. Blank it as well to let the "
+            "GPU server's own default apply instead."
+        ),
+        value_type="string",
+        default=(
+            "background music, music, soundtrack, score, song, singing, lyrics, jingle, "
+            "narration, voice-over, dialogue, speech, talking, on-screen text, captions, "
+            "subtitles, titles, logo, watermark, blurry, low quality, distorted, warped, "
+            "flickering, glitch, extra limbs, deformed hands, duplicated subject, jump cut, "
+            "scene change"
+        ),
+        allow_blank=True,
     ),
     SettingSpec(
         key="max_parallel_generations",
