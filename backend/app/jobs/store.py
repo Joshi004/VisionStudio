@@ -30,8 +30,10 @@ _logger = logging.getLogger(__name__)
 ACTIVE_STATUSES = ("queued", "running")
 ERROR_MAX_CHARS = 4000
 
-# What the Activity page calls the owner of a job that belongs to no project (the Video lab).
+# What the Activity page calls the owner of a job that belongs to no project (the Video lab,
+# or for a speech the Voice lab).
 NO_PROJECT_NAME = "Video lab"
+VOICE_LAB_NAME = "Voice lab"
 
 # Job types that can be cancelled while they run, because the server has a cancel for them
 # (Phase 9). A transcription cannot yet: its cancel is not built.
@@ -467,6 +469,13 @@ async def waiting_job_count(session: AsyncSession) -> int:
     return int((await session.execute(statement)).scalar_one())
 
 
+def owner_name(job: Job, project_name: str | None) -> str:
+    """The project's name, or the lab the job belongs to when it has no project."""
+    if project_name:
+        return project_name
+    return VOICE_LAB_NAME if job.type == "lab_voice" else NO_PROJECT_NAME
+
+
 def _rows_statement() -> Any:
     return (
         select(Job, Project.name, Scene.index)
@@ -483,7 +492,7 @@ async def list_jobs(session: AsyncSession, *, project_id: int | None, limit: int
         statement = statement.where(Job.project_id == project_id)
     result = await session.execute(statement)
     return [
-        JobRow(job=job, project_name=name or NO_PROJECT_NAME, scene_index=index)
+        JobRow(job=job, project_name=owner_name(job, name), scene_index=index)
         for job, name, index in result.all()
     ]
 
@@ -494,4 +503,4 @@ async def get_job_row(session: AsyncSession, job_id: int) -> JobRow | None:
     if row is None:
         return None
     job, name, index = row
-    return JobRow(job=job, project_name=name or NO_PROJECT_NAME, scene_index=index)
+    return JobRow(job=job, project_name=owner_name(job, name), scene_index=index)

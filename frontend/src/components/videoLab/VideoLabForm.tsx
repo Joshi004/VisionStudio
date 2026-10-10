@@ -40,7 +40,7 @@ function runLabel(models: VideoModel[]): string {
 
 /**
  * The Video lab's form: the prompt, the model or models, the recipe, the shape and length of
- * the clip, the seed and an optional first frame. Two models make two runs that differ only
+ * the clip, the seed and an optional first frame and last frame. Two models make two runs that differ only
  * by the model: the same prompt, first frame, size, length, recipe and seed.
  */
 export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormProps) {
@@ -138,7 +138,17 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
 
         <FirstFramePicker
           value={state.firstFrame}
-          onChange={(firstFrame) => update({ firstFrame })}
+          // Without a first frame there can be no last frame.
+          onChange={(firstFrame) =>
+            update(firstFrame === null ? { firstFrame, lastFrame: null } : { firstFrame })
+          }
+        />
+
+        <FirstFramePicker
+          role="last"
+          value={state.lastFrame}
+          disabled={state.firstFrame === null}
+          onChange={(lastFrame) => update({ lastFrame })}
         />
 
         <PromptHelper

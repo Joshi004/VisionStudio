@@ -13,8 +13,8 @@ It is a remote job, so the three steps follow `JobHandler`:
 choice in `job.input`, else the scene's, the project's or the app's default:
 `video_models.resolve`), the clip mode (a scene with a last frame is made by keyframe
 interpolation, one without by image-to-video from its first frame:
-`scene_inputs.clip_mode`), the endpoint (`video_generator.endpoint_for`: LTX-2.5 has no
-keyframe endpoint yet, so such a scene falls back to LTX-2.3 and the job says so), the
+`scene_inputs.clip_mode`), the endpoint (`video_generator.endpoint_for`: each model has an
+endpoint for both modes; a pair without one would fall back to LTX-2.3 and the job says so), the
 prompt, the size, the frame count, the seed and the normalised frame or frames from the scene
 and the project as they are then, and stores that in `job.input`. Every later attempt (after
 pre-emption, an expired result or a Resubmit) sends the same stored request to the same
@@ -168,7 +168,8 @@ class GenerateClipHandler(JobHandler):
         scene's, the project's or the app's default (`video_models.resolve`). The endpoint
         follows from the model and the clip mode (`video_generator.endpoint_for`). The model
         asked for, the model that made the clip, where the choice came from and the note when
-        they differ (LTX-2.5 has no keyframe interpolation yet) are all stored in `job.input`.
+        they differ (only when a model has no endpoint for the clip mode) are all stored in
+        `job.input`.
 
         The negative prompt is the project's own when it has one, otherwise the app's default
         negative prompt (a global setting). It is stored in the request like everything else,
@@ -320,14 +321,12 @@ class GenerateClipHandler(JobHandler):
                 await self._phase(job.id, phases.SUBMITTING)
                 # A keyframe plan always has two frames and a first-frame plan one (`_prepare`
                 # and `_stored_plan` both guarantee it).
-                if video_generator.clip_mode_for(plan.endpoint) == "first_and_last":
-                    body = video_generator.with_keyframes(
-                        plan.request, uploads[0]["remote_asset_id"], uploads[1]["remote_asset_id"]
-                    )
-                else:
-                    body = video_generator.with_first_frame(
-                        plan.request, uploads[0]["remote_asset_id"]
-                    )
+                body = video_generator.with_frames(
+                    plan.endpoint,
+                    plan.request,
+                    uploads[0]["remote_asset_id"],
+                    uploads[1]["remote_asset_id"] if len(uploads) > 1 else None,
+                )
                 provider_job_id = await video_generator.submit(base_url, plan.endpoint, body)
                 break
             except StorageError:
@@ -548,7 +547,7 @@ class GenerateClipHandler(JobHandler):
             "video_model_requested": recorded.get("video_model_requested"),
             "video_model_source": recorded.get("video_model_source"),
             "model_note": recorded.get("model_note"),
-            # How the clip was made: the LTX mode the request named (None for keyframe
+            # How the clip was made: the LTX mode the request named (None for LTX-2.3 keyframe
             # interpolation, which has no such field) and from which frames.
             "mode": request.get("mode"),
             "clip_mode": video_generator.clip_mode_for(recorded.get("endpoint")),

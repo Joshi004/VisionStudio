@@ -9,14 +9,25 @@ import { referenceFromImage, type ReferenceItem } from "../imageLab/labView";
 type FirstFramePickerProps = {
   value: ReferenceItem | null;
   onChange: (value: ReferenceItem | null) => void;
+  /** "first" (the default) is the frame a clip starts on, "last" the frame it ends on. */
+  role?: "first" | "last";
+  /** The last frame can only be chosen after the first. */
+  disabled?: boolean;
 };
 
 /**
- * The image a clip starts from (optional: without one the clip is made from the prompt alone).
- * Upload a file, pick an earlier Image lab result or upload, or take a frame of any project.
- * The image is cut to the clip's shape (centred) and sent as the clip's literal first frame.
+ * The image a clip starts from, or ends on (optional: without a first frame the clip is made
+ * from the prompt alone). Upload a file, pick an earlier Image lab result or upload, or take a
+ * frame of any project. The image is cut to the clip's shape (centred) and sent as the clip's
+ * literal first frame, or as the frame its ending is guided to.
  */
-export function FirstFramePicker({ value, onChange }: FirstFramePickerProps) {
+export function FirstFramePicker({
+  value,
+  onChange,
+  role = "first",
+  disabled = false,
+}: FirstFramePickerProps) {
+  const isLast = role === "last";
   const upload = useLabUpload();
   const fileInput = useRef<HTMLInputElement>(null);
   const [picker, setPicker] = useState<"library" | "project" | null>(null);
@@ -34,21 +45,32 @@ export function FirstFramePicker({ value, onChange }: FirstFramePickerProps) {
     <Stack gap="xs">
       <Group justify="space-between" align="center">
         <Text size="sm" fw={600}>
-          First frame (optional)
+          {isLast ? "Last frame (optional)" : "First frame (optional)"}
         </Text>
         <Group gap="xs">
           <Button
             size="compact-sm"
             variant="default"
             loading={upload.isPending}
+            disabled={disabled}
             onClick={() => fileInput.current?.click()}
           >
             Upload
           </Button>
-          <Button size="compact-sm" variant="default" onClick={() => setPicker("library")}>
+          <Button
+            size="compact-sm"
+            variant="default"
+            disabled={disabled}
+            onClick={() => setPicker("library")}
+          >
             From the Image lab
           </Button>
-          <Button size="compact-sm" variant="default" onClick={() => setPicker("project")}>
+          <Button
+            size="compact-sm"
+            variant="default"
+            disabled={disabled}
+            onClick={() => setPicker("project")}
+          >
             From a project
           </Button>
           {value !== null && (
@@ -61,7 +83,11 @@ export function FirstFramePicker({ value, onChange }: FirstFramePickerProps) {
 
       {value === null ? (
         <Text size="sm" c="dimmed">
-          No first frame: the clip is made from the prompt alone (text-to-video).
+          {isLast
+            ? disabled
+              ? "Choose a first frame before a last frame."
+              : "No last frame: the clip is free to end anywhere."
+            : "No first frame: the clip is made from the prompt alone (text-to-video)."}
         </Text>
       ) : (
         <Group gap="sm" align="flex-start" wrap="nowrap">
@@ -71,8 +97,9 @@ export function FirstFramePicker({ value, onChange }: FirstFramePickerProps) {
           <Stack gap={2}>
             <Text size="sm">{value.label}</Text>
             <Text size="xs" c="dimmed">
-              The clip starts on this image, so describe only what moves, the camera and the
-              sound. With LTX-2.5, write the cuts after that opening shot.
+              {isLast
+                ? "The clip ends on this image. Use a frame of the same place, subject and light as the first one: very different frames cross-dissolve instead of moving."
+                : "The clip starts on this image, so describe only what moves, the camera and the sound. With LTX-2.5, write the cuts after that opening shot."}
             </Text>
           </Stack>
         </Group>

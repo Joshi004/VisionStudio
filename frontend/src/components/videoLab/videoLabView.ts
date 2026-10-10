@@ -21,6 +21,8 @@ export type VideoLabFormState = {
   negativePrompt: string;
   /** The image the clip starts from, or null for text-to-video. */
   firstFrame: ReferenceItem | null;
+  /** The image the clip ends on (needs a first frame), or null. */
+  lastFrame: ReferenceItem | null;
 };
 
 export const DEFAULT_FORM: VideoLabFormState = {
@@ -33,6 +35,7 @@ export const DEFAULT_FORM: VideoLabFormState = {
   seed: "",
   negativePrompt: "",
   firstFrame: null,
+  lastFrame: null,
 };
 
 /** A whole number from the text of a box, or null when it is not one. */
@@ -59,6 +62,9 @@ export function formProblem(state: VideoLabFormState): string | null {
   if (duration === null || duration < DURATION_MIN_S || duration > DURATION_MAX_S) {
     return `The length must be from ${DURATION_MIN_S} to ${DURATION_MAX_S} seconds.`;
   }
+  if (state.lastFrame !== null && state.firstFrame === null) {
+    return "A last frame needs a first frame too.";
+  }
   if (state.seed.trim() !== "") {
     const seed = wholeNumber(state.seed);
     if (seed === null || seed >= SEED_LIMIT) {
@@ -82,6 +88,9 @@ export function toRequest(state: VideoLabFormState): LabVideoRunCreate {
     negative_prompt: state.models.includes("ltx-2.3") && negative !== "" ? negative : null,
     first_frame: state.firstFrame
       ? { source: state.firstFrame.source, id: state.firstFrame.id }
+      : null,
+    last_frame: state.lastFrame
+      ? { source: state.lastFrame.source, id: state.lastFrame.id }
       : null,
   };
 }
@@ -162,7 +171,6 @@ export function stateFromRuns(runs: LabVideoRun[]): VideoLabFormState {
   const orientation = textParam(first, "orientation");
   const duration = numberParam(first, "duration_s");
   const seed = numberParam(first, "seed");
-  const frame = first.first_frame;
   return {
     prompt: first.prompt,
     models: runs.map((run) => run.video_model),
@@ -171,16 +179,22 @@ export function stateFromRuns(runs: LabVideoRun[]): VideoLabFormState {
     durationS: duration ?? DEFAULT_FORM.durationS,
     seed: seed === null ? "" : String(seed),
     negativePrompt: runs.map(negativePromptOf).find((text) => text !== null) ?? "",
-    firstFrame:
-      frame !== null && frame.url !== null
-        ? {
-            source: frame.source,
-            id: frame.id,
-            url: frame.url,
-            width: null,
-            height: null,
-            label: frame.source === "lab" ? `lab image ${frame.id}` : `project frame ${frame.id}`,
-          }
-        : null,
+    firstFrame: referenceOf(first.first_frame),
+    lastFrame: referenceOf(first.last_frame),
+  };
+}
+
+/** A frame a run used as a form item, only while its image still exists. */
+function referenceOf(frame: LabVideoRun["first_frame"]): ReferenceItem | null {
+  if (frame === null || frame.url === null) {
+    return null;
+  }
+  return {
+    source: frame.source,
+    id: frame.id,
+    url: frame.url,
+    width: null,
+    height: null,
+    label: frame.source === "lab" ? `lab image ${frame.id}` : `project frame ${frame.id}`,
   };
 }

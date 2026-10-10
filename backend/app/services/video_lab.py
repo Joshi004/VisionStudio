@@ -33,6 +33,7 @@ from app.jobs import store
 from app.providers import contract_guard, video_generator
 from app.services import api_contract, frame_counts, projects, video_models
 from app.services import lab_prompt_writer as prompt_writer
+from app.services.scene_inputs import ClipMode
 from app.services.video_models import VideoModel
 
 _logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ class LabVideoInputError(ValueError):
 
 @dataclass(frozen=True)
 class FirstFrameRef:
-    """The image a run starts from: an upload or a result in the lab, or a project's frame."""
+    """The image a run starts or ends on: an upload or a result in the lab, or a project's frame."""
 
     source: FrameSource
     id: int
@@ -78,6 +79,8 @@ class LabVideoForm:
     # LTX-2.3 only. Blank or None sends none, so the pipeline's own default applies.
     negative_prompt: str | None
     first_frame: FirstFrameRef | None
+    # Needs a first frame. A run with both frames moves from the first to the last.
+    last_frame: FirstFrameRef | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +116,8 @@ def validate_form(form: LabVideoForm) -> None:
         raise LabVideoInputError(
             f"The negative prompt must be at most {NEGATIVE_PROMPT_MAX_CHARS:,} characters."
         )
+    if form.last_frame is not None and form.first_frame is None:
+        raise LabVideoInputError("A last frame needs a first frame too.")
 
 
 def validate_prompt_draft(idea: str, shots: int, duration_s: float, note: str | None) -> None:
@@ -138,7 +143,7 @@ def validate_prompt_draft(idea: str, shots: int, duration_s: float, note: str | 
         )
 
 
-# --- The first frame ------------------------------------------------------------------------
+# --- The first and last frame ----------------------------------------------------------------
 
 
 async def first_frame_path(session: AsyncSession, ref: FirstFrameRef) -> str:
@@ -157,8 +162,15 @@ async def first_frame_path(session: AsyncSession, ref: FirstFrameRef) -> str:
 # --- Starting runs ---------------------------------------------------------------------------
 
 
+def _frame_json(ref: FirstFrameRef | None) -> dict[str, Any] | None:
+    return None if ref is None else {"source": ref.source, "id": ref.id}
+
+
 async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]:
     """Checks the form and starts one run per model. Commits.
+
+    A run with a last frame is made by the model's first-and-last-frame endpoint, one without
+    by its image-to-video (or text-to-video) endpoint.
 
     Raises LabVideoInputError. Every request is checked against the limits of the approved GPU
     API first (ANALYSIS.md Section 5.3 and 5.8: a wrong request wastes a GPU run), so a model
@@ -167,6 +179,8 @@ async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]
     validate_form(form)
     if form.first_frame is not None:
         await first_frame_path(session, form.first_frame)  # only checks that it exists
+    if form.last_frame is not None:
+        await first_frame_path(session, form.last_frame)
 
     sizes = projects.ORIENTATION_DEFAULTS[form.orientation]
     fps = projects.DEFAULT_FPS
@@ -179,16 +193,14 @@ async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]
 
     negative_prompt = (form.negative_prompt or "").strip() or None
     group_key = secrets.token_hex(8)
-    frame_json: dict[str, Any] | None = (
-        {"source": form.first_frame.source, "id": form.first_frame.id}
-        if form.first_frame is not None
-        else None
-    )
+    frame_json = _frame_json(form.first_frame)
+    last_frame_json = _frame_json(form.last_frame)
+    clip_mode: ClipMode = "first_and_last" if form.last_frame is not None else "first_frame"
 
     # Every request is built and checked before any row is written.
     planned: list[tuple[VideoModel, str, dict[str, Any], dict[str, Any]]] = []
     for model in form.models:
-        endpoint = video_generator.endpoint_for(model, "first_frame").endpoint
+        endpoint = video_generator.endpoint_for(model, clip_mode).endpoint
         try:
             if spec is None:
                 raise ValueError(video_generator.no_endpoint_message(endpoint))
@@ -231,6 +243,7 @@ async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]
             prompt=form.prompt.strip(),
             params=params,
             first_frame=frame_json,
+            last_frame=last_frame_json,
         )
         session.add(run)
         await session.flush()
@@ -246,6 +259,7 @@ async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]
                 "endpoint": endpoint,
                 "request": request,
                 "first_frame": frame_json,
+                "last_frame": last_frame_json,
             },
             commit=False,
             dedupe=False,

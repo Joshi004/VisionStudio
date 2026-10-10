@@ -130,6 +130,7 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
       {groups.map((group) => {
         const first = group.runs[0];
         const frame = first.first_frame;
+        const lastFrame = first.last_frame;
         return (
           <Paper key={group.key} withBorder p="md" radius="md">
             <Stack gap="sm">
@@ -140,13 +141,23 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
                       <Thumb url={frame.url} width={null} height={null} />
                     </div>
                   )}
+                  {lastFrame !== null && lastFrame.url !== null && (
+                    <div style={{ width: 56, flexShrink: 0 }}>
+                      <Thumb url={lastFrame.url} width={null} height={null} />
+                    </div>
+                  )}
                   <Stack gap={2}>
                     <Text size="sm" lineClamp={4} style={{ whiteSpace: "pre-wrap" }}>
                       {first.prompt}
                     </Text>
                     <Text size="xs" c="dimmed">
                       {paramsLine(first)}
-                      {frame !== null ? " · from a first frame" : " · text-to-video"} ·{" "}
+                      {lastFrame !== null
+                        ? " · first to last frame"
+                        : frame !== null
+                          ? " · from a first frame"
+                          : " · text-to-video"}{" "}
+                      ·{" "}
                       {formatDateTime(first.created_at)}
                     </Text>
                   </Stack>

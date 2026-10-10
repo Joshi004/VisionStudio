@@ -107,6 +107,13 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
               {chosenNote}
             </Text>
           )}
+          {scene.clip_mode === "first_and_last" && (
+            <Text size="xs" c="dimmed">
+              This scene has a last frame, so the clip moves from the first frame to the last.
+              Frames of the same place, subject and light work best: very different frames
+              cross-dissolve instead of moving.
+            </Text>
+          )}
         </Stack>
       )}
 

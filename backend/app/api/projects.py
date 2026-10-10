@@ -62,10 +62,14 @@ class ProjectUpdate(BaseModel):
     script_text: StrictStr | None = None
     # `null` means "use the app's default video model".
     video_model: StrictStr | None = None
+    # The saved voice that speaks the script when the app makes the voiceover. `null`: none.
+    voice_id: StrictInt | None = None
 
 
 class VoiceoverOut(BaseModel):
     asset_id: int
+    # "upload": the user's file. "ai": made by the app from the script (Breeze TTS).
+    source: Literal["upload", "ai"]
     url: str
     mime: str
     size_bytes: int
@@ -106,6 +110,8 @@ class ProjectDetail(BaseModel):
     video_model: VideoModel | None
     # The app's default video model, so the page can say what "default" means right now.
     default_video_model: VideoModel
+    # The saved voice that speaks the script when the app makes the voiceover, or null.
+    voice_id: int | None
     voiceover: VoiceoverOut | None
 
 
@@ -119,6 +125,7 @@ def _voiceover_out(asset: Asset | None) -> VoiceoverOut | None:
         return None
     return VoiceoverOut(
         asset_id=asset.id,
+        source="ai" if asset.source == "ai" else "upload",
         url=media_url(asset.path),
         mime=asset.mime,
         size_bytes=asset.size_bytes,
@@ -157,6 +164,7 @@ def _detail(
         script_text=project.script_text,
         video_model=_video_model(project.video_model),
         default_video_model=default_video_model,
+        voice_id=project.voice_id,
         voiceover=_voiceover_out(voiceover),
     )
 

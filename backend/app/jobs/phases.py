@@ -76,6 +76,23 @@ SAVING_IMAGE_PROMPT: Final = "saving the image prompt"
 # `asking_model`.
 CHECKING_VIDEO_PROMPT: Final = "checking the video prompt"
 
+# --- Running: speech (Phase 21) ------------------------------------------------------------
+# A speech is made in one request per piece of the script. It also uses SUBMITTING and the
+# cluster phases above, with the piece named (`speech_part`) when there is more than one.
+UPLOADING_VOICE: Final = "uploading the voice recording"
+DOWNLOADING_SPEECH: Final = "downloading the speech"
+JOINING_SPEECH: Final = "joining the speech parts"
+CHECKING_SPEECH: Final = "checking the speech"
+SAVING_SPEECH: Final = "saving the speech"
+
+
+def speech_part(label: str, part: int, parts: int) -> str:
+    """A phase label with the piece it is about: "running on cluster (part 2 of 3)". A speech
+    of one piece has no suffix.
+    """
+    return label if parts <= 1 else f"{label} (part {part} of {parts})"
+
+
 # --- Running: first frames (Phase 17) ---------------------------------------------------
 PREPARING_IMAGE_REQUEST: Final = "preparing the image request"
 GENERATING_IMAGE: Final = "generating the image"

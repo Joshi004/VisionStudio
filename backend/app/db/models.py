@@ -76,6 +76,11 @@ class Project(Base):
     voiceover_asset_id: Mapped[int | None] = mapped_column(
         ForeignKey("asset.id", ondelete="SET NULL", use_alter=True), default=None
     )
+    # Added in Phase 21: the saved voice that speaks the script when the voiceover is made by
+    # the app (Breeze TTS) instead of uploaded. NULL: none chosen.
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
 
 
 class Asset(Base):
@@ -211,7 +216,8 @@ class Job(Base):
         CheckConstraint(
             "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
             "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
-            "'lab_video', 'write_lab_video_prompt', 'auto_pipeline')",
+            "'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', "
+            "'generate_voiceover')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -379,6 +385,8 @@ class LabVideoRun(Base):
     params: Mapped[Any] = mapped_column(JSON)
     # {source: "lab" | "asset", id} when the run started from a first frame, else NULL.
     first_frame: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # Same shape as `first_frame`, only on a run that moves from a first to a last frame.
+    last_frame: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # The result, NULL until the job has finished and the clip was stored.
     path: Mapped[str | None] = mapped_column(default=None)
     size_bytes: Mapped[int | None] = mapped_column(default=None)
@@ -388,3 +396,69 @@ class LabVideoRun(Base):
     frame_count: Mapped[int | None] = mapped_column(default=None)
     duration_s: Mapped[float | None] = mapped_column(default=None)
     audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+
+
+class Voice(Base):
+    """A saved voice: a clean recording and its exact transcript, which Breeze TTS clones
+    (Phase 21). A voice made in the Voice lab points at the lab run that made it and shares
+    that run's file. A voice is never deleted, like every stored file.
+    """
+
+    __tablename__ = "voice"
+    __table_args__ = (
+        CheckConstraint("origin IN ('upload', 'lab_run')", name="origin_valid"),
+        Index("idx_voice_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    name: Mapped[str]
+    # The stored recording, under `media/lab/`.
+    path: Mapped[str]
+    mime: Mapped[str]
+    size_bytes: Mapped[int]
+    sha256: Mapped[str]
+    duration_s: Mapped[float]
+    # What the recording says, word for word. The server needs it to clone the voice.
+    transcript: Mapped[str]
+    origin: Mapped[str]
+    # The lab run the recording came from (origin `lab_run`). Not a foreign key: it is only
+    # a note of where the file came from.
+    lab_voice_run_id: Mapped[int | None] = mapped_column(default=None)
+
+
+class LabVoiceRun(Base):
+    """One speech the Voice lab made, or is making (Phase 21).
+
+    Like `lab_video_run`, the job holds the status and the exact request, and this row holds
+    what the page lists: the mode, the text, the settings and, once the job has finished, the
+    stored WAV under `media/lab/`.
+    """
+
+    __tablename__ = "lab_voice_run"
+    __table_args__ = (
+        CheckConstraint("mode IN ('design', 'clone', 'direction')", name="mode_valid"),
+        Index("idx_lab_voice_run_created", "created_at"),
+        Index("idx_lab_voice_run_job", "job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    # design: a voice made from a description. clone: a saved voice reads the text.
+    # direction: a saved voice reads the text, steered by the instruction.
+    mode: Mapped[str]
+    text: Mapped[str]
+    instruction: Mapped[str | None] = mapped_column(default=None)
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    # seed and cfg_scale.
+    params: Mapped[Any] = mapped_column(JSON)
+    # The result, NULL until the job has finished and the speech was stored.
+    path: Mapped[str | None] = mapped_column(default=None)
+    size_bytes: Mapped[int | None] = mapped_column(default=None)
+    sha256: Mapped[str | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)

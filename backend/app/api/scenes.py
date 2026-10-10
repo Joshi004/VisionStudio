@@ -173,8 +173,8 @@ class TakeOut(BaseModel):
     # recipe the request named (`quality` or `fast`). None when the clip recorded neither.
     video_model: VideoModel | None
     mode: str | None
-    # Why the model that made the clip is not the one that was asked for (LTX-2.5 cannot make
-    # a clip from a first and a last frame yet), or None.
+    # Why the model that made the clip is not the one that was asked for (a model with no
+    # endpoint for the clip mode), or None.
     model_note: str | None
     # This is the take the final video uses.
     selected: bool

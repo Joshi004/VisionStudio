@@ -66,6 +66,8 @@ class LabVideoRunCreate(BaseModel):
     # LTX-2.3 only. Left out or blank: the pipeline's own default applies.
     negative_prompt: StrictStr | None = None
     first_frame: FirstFrameIn | None = None
+    # Needs a first frame. The clip then moves from the first frame to this one.
+    last_frame: FirstFrameIn | None = None
 
 
 class PromptDraftCreate(BaseModel):
@@ -97,6 +99,7 @@ class LabVideoRunOut(BaseModel):
     # seed and, for LTX-2.3, the negative prompt.
     params: dict[str, Any]
     first_frame: FirstFrameOut | None
+    last_frame: FirstFrameOut | None
     # The run's job: its status, phase and error, with cancel and resubmit.
     job: JobSummary | None
     # The finished clip, from /media (with Range requests, so it seeks). None until then.
@@ -125,11 +128,11 @@ async def _frame_urls(
     """
     wanted: dict[str, set[int]] = {"lab": set(), "asset": set()}
     for row in rows:
-        frame = row.run.first_frame
-        if isinstance(frame, dict) and frame.get("source") in wanted:
-            frame_id = frame.get("id")
-            if isinstance(frame_id, int):
-                wanted[str(frame["source"])].add(frame_id)
+        for frame in (row.run.first_frame, row.run.last_frame):
+            if isinstance(frame, dict) and frame.get("source") in wanted:
+                frame_id = frame.get("id")
+                if isinstance(frame_id, int):
+                    wanted[str(frame["source"])].add(frame_id)
 
     urls: dict[tuple[str, int], str] = {}
     if wanted["lab"]:
@@ -145,17 +148,17 @@ async def _frame_urls(
     return urls
 
 
-def _run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> LabVideoRunOut:
-    run = row.run
-    frame = run.first_frame
-    first_frame: FirstFrameOut | None = None
+def _frame_out(frame: Any, frame_urls: dict[tuple[str, int], str]) -> FirstFrameOut | None:
     if isinstance(frame, dict) and frame.get("source") in ("lab", "asset"):
         frame_id = frame.get("id")
         if isinstance(frame_id, int):
             source: Literal["lab", "asset"] = "lab" if frame["source"] == "lab" else "asset"
-            first_frame = FirstFrameOut(
-                source=source, id=frame_id, url=frame_urls.get((source, frame_id))
-            )
+            return FirstFrameOut(source=source, id=frame_id, url=frame_urls.get((source, frame_id)))
+    return None
+
+
+def _run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> LabVideoRunOut:
+    run = row.run
     audio = run.audio
     codec = audio.get("codec") if isinstance(audio, dict) else None
     return LabVideoRunOut(
@@ -167,7 +170,8 @@ def _run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> L
         endpoint=run.endpoint,
         prompt=run.prompt,
         params=run.params if isinstance(run.params, dict) else {},
-        first_frame=first_frame,
+        first_frame=_frame_out(run.first_frame, frame_urls),
+        last_frame=_frame_out(run.last_frame, frame_urls),
         job=(
             job_summary(JobRow(job=row.job, project_name=store.NO_PROJECT_NAME, scene_index=None))
             if row.job is not None
@@ -207,6 +211,11 @@ async def create_runs(body: LabVideoRunCreate, session: SessionDep) -> LabVideoR
         first_frame=(
             video_lab.FirstFrameRef(source=body.first_frame.source, id=body.first_frame.id)
             if body.first_frame is not None
+            else None
+        ),
+        last_frame=(
+            video_lab.FirstFrameRef(source=body.last_frame.source, id=body.last_frame.id)
+            if body.last_frame is not None
             else None
         ),
     )

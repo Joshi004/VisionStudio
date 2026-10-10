@@ -1,11 +1,11 @@
 """Automatic generation (the `auto_pipeline` job; ANALYSIS.md Section 3.3).
 
 `POST /api/projects/{id}/auto-generate` starts one run and returns at once with HTTP 202. The
-run goes through the manual steps one after the other (transcribe, propose scenes,
-descriptions, image prompts, first frames, clips, final render), and starts a step only when
-every scene has finished the one before. A scene whose job fails is tried again, up to
-`max_tries` jobs in a step, and then the run stops and says what is wrong. The dispatcher does
-the work (`jobs/auto_pipeline.py`).
+run goes through the manual steps one after the other (make the voiceover when there is
+none, transcribe, propose scenes, descriptions, image prompts, first frames, clips, final
+render), and starts a step only when every scene has finished the one before. A scene whose
+job fails is tried again, up to `max_tries` jobs in a step, and then the run stops and says
+what is wrong. The dispatcher does the work (`jobs/auto_pipeline.py`).
 
 Starting is the one consent for everything the run does, paid calls included, so the page asks
 first. `GET .../auto-generate` carries what it must ask: the two questions the manual "Propose
@@ -29,6 +29,7 @@ from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.services import auto_pipeline as auto
+from app.services import projects as projects_service
 
 router = APIRouter()
 
@@ -130,7 +131,8 @@ async def start_auto_generate(
     if run is not None and _is_active(run.status):
         return job_detail(JobRow(job=run, project_name=project.name, scene_index=None))
 
-    block = auto.start_block(project, await auto.active_jobs(session, project.id))
+    voiceover = await projects_service.get_voiceover(session, project)
+    block = auto.start_block(project, await auto.active_jobs(session, project.id), voiceover)
     if block is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, block)
 
@@ -177,7 +179,8 @@ async def get_auto_generate(project_id: int, session: SessionDep) -> AutoGenerat
     if run is not None and _is_active(run.status):
         blocked = "An automatic run is in progress."
     else:
-        blocked = auto.start_block(project, await auto.active_jobs(session, project.id))
+        voiceover = await projects_service.get_voiceover(session, project)
+        blocked = auto.start_block(project, await auto.active_jobs(session, project.id), voiceover)
     needs = await auto.confirmations(session, project)
 
     return AutoGenerateOut(

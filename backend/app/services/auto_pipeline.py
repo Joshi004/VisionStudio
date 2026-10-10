@@ -36,7 +36,14 @@ from app.services import clips as clips_service
 from app.services import first_frames as frames_service
 from app.services import image_prompts as prompts_service
 from app.services import renders as renders_service
-from app.services import scene_cuts, scene_inputs, scene_planner, transcript_matching
+from app.services import (
+    scene_cuts,
+    scene_inputs,
+    scene_planner,
+    transcript_matching,
+    voiceover_generation,
+    voices,
+)
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
 from app.services.descriptions import DRAFT_JOB, draft_block
@@ -82,6 +89,14 @@ class Step:
 
 
 STEPS: Final[tuple[Step, ...]] = (
+    Step(
+        "voiceover",
+        "Make the voiceover",
+        voiceover_generation.JOB_TYPE,
+        "gpu",
+        False,
+        "a voiceover made from the script",
+    ),
     Step(
         "transcribe",
         "Transcribe the voiceover",
@@ -421,12 +436,23 @@ async def active_jobs(session: AsyncSession, project_id: int) -> list[Job]:
     return list((await session.execute(statement)).scalars().all())
 
 
-def start_block(project: Project, active: Sequence[Job]) -> str | None:
+def start_block(
+    project: Project, active: Sequence[Job], voiceover: Asset | None = None
+) -> str | None:
     """Why a run cannot start now, or None. Pure. The run waits for no other job: two kinds of
     work on one project at once could replace each other's results.
+
+    Without a voiceover, the run makes one from the script, so it needs a saved voice. So does
+    a voiceover that was made from an earlier script. An uploaded voiceover is used as it is.
     """
-    if project.voiceover_asset_id is None:
-        return "Upload a voiceover first."
+    if project.voice_id is None:
+        if voiceover is None:
+            return "Upload a voiceover, or choose a saved voice to make one from the script."
+        if voiceover.source == "ai" and not voiceover_generation.is_current(project, voiceover):
+            return (
+                "The voiceover was made from an earlier script. Choose a saved voice to make "
+                "it again, or upload a voiceover."
+            )
     if _blank(project.script_text):
         return "Paste the script first."
     if active:
@@ -558,6 +584,37 @@ def _project_target(
         block=None if done else block,
         job_input=job_input,
     )
+
+
+async def _voiceover(session: AsyncSession, ctx: RunContext) -> StepView:
+    """A voiceover the user uploaded is done as it is. Otherwise the app makes one from the
+    script, in the project's saved voice (and makes it again when the script has changed).
+    """
+    project = ctx.project
+    asset = (
+        await session.get(Asset, project.voiceover_asset_id)
+        if project.voiceover_asset_id is not None
+        else None
+    )
+    latest = await store.latest_job(session, project.id, voiceover_generation.JOB_TYPE)
+    active = _active(latest)
+    done = (
+        asset is not None
+        and (asset.source != "ai" or voiceover_generation.is_current(project, asset))
+        and active is None
+    )
+    if done:
+        return StepView([_project_target(done=True, active=None, block=None, job_input={})])
+
+    voice = await voices.get_voice(session, project.voice_id) if project.voice_id else None
+    block = voiceover_generation.block_reason(project, voice)
+    job_input: dict[str, Any] = {}
+    if block is None and voice is not None:
+        job_input = {
+            **voiceover_generation.build_input(project, voice),
+            "requested": "auto_pipeline",
+        }
+    return StepView([_project_target(done=False, active=active, block=block, job_input=job_input)])
 
 
 async def _transcribe(session: AsyncSession, ctx: RunContext) -> StepView:
@@ -807,6 +864,7 @@ async def _render(session: AsyncSession, ctx: RunContext) -> StepView:
 _Evaluator = Callable[[AsyncSession, RunContext], Coroutine[Any, Any, StepView]]
 
 _EVALUATORS: Final[dict[str, _Evaluator]] = {
+    "voiceover": _voiceover,
     "transcribe": _transcribe,
     "scenes": _scenes,
     "descriptions": _descriptions,

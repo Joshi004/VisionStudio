@@ -6,8 +6,9 @@ the server, cancelling, the shared slots of `max_parallel_generations`):
 
 - `start`: the request was built and checked when the run was created
   (`services/video_lab.create_runs`) and is stored in `job.input`, together with the endpoint,
-  so nothing is worked out here. The first frame, if the run has one, is fitted to the run's
-  size and uploaded. A run without one is text-to-video: the same endpoint, no `images`.
+  so nothing is worked out here. The first frame and the last frame, if the run has them, are
+  fitted to the run's size and uploaded. A run without a first frame is text-to-video: the
+  same endpoint, no `images`.
   Every attempt (after pre-emption, an expired result) sends the same stored request, with the
   same seed, because "the correct response to a pre-emption failure is to resubmit the exact
   same request unchanged" (the server's guide).
@@ -51,6 +52,17 @@ class _LabPlan:
     endpoint: str
     request: dict[str, Any]
     first_frame: video_lab.FirstFrameRef | None
+    last_frame: video_lab.FirstFrameRef | None
+
+
+def _frame_ref(frame: object) -> video_lab.FirstFrameRef | None:
+    """A frame stored on the job's input, or None when there is none or it is malformed."""
+    if not isinstance(frame, dict):
+        return None
+    source, frame_id = frame.get("source"), frame.get("id")
+    if source in ("lab", "asset") and isinstance(frame_id, int):
+        return video_lab.FirstFrameRef(source=source, id=frame_id)
+    return None
 
 
 def _plan(recorded: object) -> _LabPlan | None:
@@ -61,15 +73,15 @@ def _plan(recorded: object) -> _LabPlan | None:
     request = recorded.get("request")
     if not isinstance(endpoint, str) or not isinstance(request, dict):
         return None
-    frame = recorded.get("first_frame")
-    first: video_lab.FirstFrameRef | None = None
-    if isinstance(frame, dict):
-        source, frame_id = frame.get("source"), frame.get("id")
-        if source in ("lab", "asset") and isinstance(frame_id, int):
-            first = video_lab.FirstFrameRef(source=source, id=frame_id)
-        else:
-            return None
-    return _LabPlan(endpoint=endpoint, request=request, first_frame=first)
+    first = _frame_ref(recorded.get("first_frame"))
+    if recorded.get("first_frame") is not None and first is None:
+        return None
+    last = _frame_ref(recorded.get("last_frame"))
+    if recorded.get("last_frame") is not None and last is None:
+        return None
+    if last is not None and first is None:
+        return None
+    return _LabPlan(endpoint=endpoint, request=request, first_frame=first, last_frame=last)
 
 
 def _write_new_file(path: Path, data: bytes) -> None:
@@ -102,15 +114,14 @@ class GenerateLabVideoHandler(GenerateClipHandler):
             return
         await self._upload_and_submit_run(job, base_url, plan)
 
-    async def _first_frame_png(self, plan: _LabPlan) -> Path:
-        """The first frame fitted to the run's size, as a lossless PNG in the temp folder.
-        The caller removes it. Raises FrameUnavailable.
+    async def _frame_png(self, plan: _LabPlan, ref: video_lab.FirstFrameRef, name: str) -> Path:
+        """A frame fitted to the run's size, as a lossless PNG in the temp folder. `name` is
+        "first" or "last", for the messages. The caller removes it. Raises FrameUnavailable.
         """
-        assert plan.first_frame is not None
         width, height = int(plan.request["width"]), int(plan.request["height"])
         async with SessionLocal() as session:
             try:
-                relative = await video_lab.first_frame_path(session, plan.first_frame)
+                relative = await video_lab.first_frame_path(session, ref)
             except video_lab.LabVideoInputError as exc:
                 raise FrameUnavailable(str(exc)) from exc
             await session.commit()
@@ -122,11 +133,11 @@ class GenerateLabVideoHandler(GenerateClipHandler):
                 frame_images.render_frame_png, source, width, height
             )
         except StorageError:
-            raise FrameUnavailable("The first frame's file could not be found on disk.") from None
+            raise FrameUnavailable(f"The {name} frame's file could not be found on disk.") from None
         except Exception as exc:  # Pillow raises many kinds of error for a damaged file.
-            _logger.warning("lab first frame could not be fitted: %s", exc)
+            _logger.warning("lab %s frame could not be fitted: %s", name, exc)
             raise FrameUnavailable(
-                "The first frame could not be read to prepare it for the video model."
+                f"The {name} frame could not be read to prepare it for the video model."
             ) from None
         temp = storage.new_temp_path("png")
         await anyio.to_thread.run_sync(_write_new_file, temp, png)
@@ -137,25 +148,35 @@ class GenerateLabVideoHandler(GenerateClipHandler):
         saved the moment the submit answers, with nothing that can fail in between.
 
         The same answers as a scene's clip: 502 at submit is retried once after a pause, 429
-        puts the job back in the queue, a 400 for an unknown asset id uploads the frame again
+        puts the job back in the queue, a 400 for an unknown asset id uploads the frames again
         once, and 422 or any other refusal fails the job with the server's message.
         """
         storage = get_storage()
         retried_server_error = False
         retried_asset = False
         while True:
-            temp: Path | None = None
+            temps: list[Path] = []
             try:
                 uploads: list[dict[str, Any]] = []
                 body = plan.request
                 if plan.first_frame is not None:
                     await self._phase(job.id, phases.PREPARING_FRAMES)
-                    temp = await self._first_frame_png(plan)
+                    named = [("first", plan.first_frame)]
+                    if plan.last_frame is not None:
+                        named.append(("last", plan.last_frame))
+                    for name, ref in named:
+                        temps.append(await self._frame_png(plan, ref, name))
                     await self._phase(job.id, phases.UPLOADING_FRAMES)
-                    filename = f"lab-frame-{plan.first_frame.source}-{plan.first_frame.id}.png"
-                    remote_id = await video_generator.upload_frame(base_url, temp, filename)
-                    uploads.append({"filename": filename, "remote_asset_id": remote_id})
-                    body = video_generator.with_first_frame(plan.request, remote_id)
+                    for (_name, ref), temp in zip(named, temps, strict=True):
+                        filename = f"lab-frame-{ref.source}-{ref.id}.png"
+                        remote_id = await video_generator.upload_frame(base_url, temp, filename)
+                        uploads.append({"filename": filename, "remote_asset_id": remote_id})
+                    body = video_generator.with_frames(
+                        plan.endpoint,
+                        plan.request,
+                        uploads[0]["remote_asset_id"],
+                        uploads[1]["remote_asset_id"] if len(uploads) > 1 else None,
+                    )
                 if not await self._is_running(job.id):
                     return  # cancelled while uploading: nothing was submitted
                 await self._phase(job.id, phases.SUBMITTING)
@@ -165,7 +186,7 @@ class GenerateLabVideoHandler(GenerateClipHandler):
                 await self._fail(job.id, str(exc))
                 return
             except StorageError:
-                await self._fail(job.id, "The first frame's file could not be found on disk.")
+                await self._fail(job.id, "A frame's file could not be found on disk.")
                 return
             except GpuCallError as exc:
                 if exc.kind == "server_error" and not retried_server_error:
@@ -181,7 +202,7 @@ class GenerateLabVideoHandler(GenerateClipHandler):
                 await self._give_up_starting(job.id, exc)
                 return
             finally:
-                if temp is not None:
+                for temp in temps:
                     storage.discard(temp)
 
         submitted = {

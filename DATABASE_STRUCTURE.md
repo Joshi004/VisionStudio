@@ -24,6 +24,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (Phase 20, 2026-10-09):** migration `0009`. A new job type, `auto_pipeline`: one run of the automatic flow of a project, which makes the jobs of the manual steps one step after the other and starts a step only when every scene has finished the one before. **No table or column is added**: the run keeps its state in `job.input` and `job.output` (including the ids of the jobs it made, so a restart continues where it was), and only the `job.type` CHECK gains the new value. A run is a project job (`scene_id` is NULL, `provider='local'`) and keeps a fixed marker in `provider_job_id` so the dispatcher checks it every tick. Its jobs are ordinary jobs of the existing types, with `input.auto_run_id` naming the run. See Sections 4.5, 5 and 7.
 
+**Update (Phase 21, 2026-10-10):** migration `0010`. Two things from the GPU API 0.5.0 to 0.7.0. (1) **LTX-2.5 first-and-last-frame**: `POST /v1/ltx25/videos/interpolate` replaces the fallback to LTX-2.3, so a scene with a last frame is made by the chosen model's own endpoint (`first_frame_asset_id` and `last_frame_asset_id` in the body, no `negative_prompt`), and the Video lab can take an optional last frame (`lab_video_run.last_frame`). (2) **Breeze TTS 2 text-to-speech** (`POST /v1/breeze-tts/synthesize`): `job.type` gains `lab_voice` and `generate_voiceover`; new tables `voice` (a saved voice: a recording and its exact transcript) and `lab_voice_run` (what the new Voice lab lists); `project.voice_id` names the saved voice that speaks the script when the app makes the voiceover (`asset.kind='voiceover'`, `asset.source='ai'`, with `provenance.script_sha256`). The automatic flow gains a first step, `voiceover`. Breeze TTS 2 is licensed for research and non-commercial use only. See Sections 3, 4.1, 4.5, 4.10, 4.11, 4.12, 5 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -67,7 +69,7 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 ## 3. Entity-relationship overview
 
-Ten tables, all scoped under one `project` except the five global ones (`setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, and, from Phase 19, `lab_video_run`), which hold no `project_id` because they describe the app, the GPU server or a manual test, not one video. The Video lab's jobs are rows of `job` too, with a NULL `project_id` (Phase 19).
+Twelve tables, all scoped under one `project` except the global ones (`setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, and, from Phase 21, `voice` and `lab_voice_run`), which hold no `project_id` because they describe the app, the GPU server or a manual test, not one video. The Video lab's jobs are rows of `job` too, with a NULL `project_id` (Phase 19).
 
 ```mermaid
 erDiagram
@@ -148,6 +150,9 @@ erDiagram
 | `job` | `scene_id` | `scene.id` | Yes (only per-scene job types set this) |
 | `job` | `result_asset_id` | `asset.id` | Yes (until the job succeeds) |
 | `lab_video_run` | `job_id` | `job.id` | Yes (the `lab_video` job that makes the run's clip; `SET NULL` if that job row is ever removed). Phase 19 |
+| `lab_voice_run` | `job_id` | `job.id` | Yes (the `lab_voice` job that makes the run's speech; `SET NULL` if that job row is ever removed). Phase 21 |
+| `lab_voice_run` | `voice_id` | `voice.id` | Yes (the saved voice that read the text; `SET NULL`). Phase 21 |
+| `project` | `voice_id` | `voice.id` | Yes (the saved voice that speaks the script; `SET NULL`). Phase 21 |
 
 Note the one circular-looking reference: `asset.project_id` points at `project`, and `project.voiceover_asset_id` points back at `asset`. This isn't a problem in practice because of the order things happen in (Section 1 of `ANALYSIS.md`): the project row is created first with `voiceover_asset_id` left `NULL`, the voiceover file is uploaded afterwards as an `asset` row, and only then is `project.voiceover_asset_id` updated to point at it.
 
@@ -187,7 +192,8 @@ One row per video. Holds output settings (pre-filled from orientation — Sectio
 | `script_text` | TEXT | NULL | — | Pasted in step B of the flow; `NULL` until then |
 | `video_model` | TEXT | NULL | — | `ltx-2.3` \| `ltx-2.5`. The video model that makes this project's clips. NULL means "use the app's default" (the `default_video_model` setting, Section 6). A scene's own `video_model` wins over it. Phase 19 |
 | `language` | TEXT | NOT NULL | `'en'` | Voiceover language (English-only decision) |
-| `voiceover_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Set once the voiceover is uploaded |
+| `voiceover_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Set once the voiceover is uploaded, or made from the script (`asset.source` `upload` or `ai`) |
+| `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice that speaks the script when the app makes the voiceover (Breeze TTS). `ON DELETE SET NULL`. Phase 21 |
 
 ```sql
 CREATE TABLE project (
@@ -211,7 +217,8 @@ CREATE TABLE project (
     script_text        TEXT,
     video_model        TEXT CHECK (video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')),
     language           TEXT NOT NULL DEFAULT 'en',
-    voiceover_asset_id INTEGER REFERENCES asset(id) ON DELETE SET NULL
+    voiceover_asset_id INTEGER REFERENCES asset(id) ON DELETE SET NULL,
+    voice_id           INTEGER REFERENCES voice(id) ON DELETE SET NULL
 );
 ```
 
@@ -355,9 +362,9 @@ Every unit of background work: transcribe, plan scenes, generate a clip, render 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
-| `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL only for the Video lab's jobs (`lab_video`, `write_lab_video_prompt`), which belong to no project; the Activity page shows them under "Video lab" (Phase 19) |
+| `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL only for the Video lab's jobs (`lab_video`, `write_lab_video_prompt`) and the Voice lab's (`lab_voice`), which belong to no project; the Activity page shows them under "Video lab" and "Voice lab" (Phases 19 and 21) |
 | `scene_id` | INTEGER, FK → `scene.id` | NULL | — | Set only for per-scene jobs (`generate_clip`, and since Phase 16 `write_image_prompt`, and since Phase 17 `generate_frame`) |
-| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` \| `lab_video` \| `write_lab_video_prompt` \| `auto_pipeline` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `auto_pipeline`: Phase 20, the automatic flow) |
+| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` \| `lab_video` \| `write_lab_video_prompt` \| `auto_pipeline` \| `lab_voice` \| `generate_voiceover` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `auto_pipeline`: Phase 20, the automatic flow; `lab_voice` and `generate_voiceover`: Phase 21, Breeze TTS) |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model, reached at the same Bitdeer address as `llm`) \| `local` |
@@ -377,7 +384,7 @@ CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
     scene_id         INTEGER REFERENCES scene(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', 'lab_video', 'write_lab_video_prompt', 'auto_pipeline')),
+    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', 'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', 'generate_voiceover')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -395,7 +402,7 @@ CREATE TABLE job (
 );
 ```
 
-The dispatcher loop (Section 3.3) is the main reader/writer of this table: each tick it checks every `running` job, starts downloads for finished ones, resubmits pre-empted ones, and starts `queued` jobs while fewer than the parallel-generation setting are `running`. Since Phase 19 a handler can name a *concurrency group*: `generate_clip` and `lab_video` share one pool of slots (`max_parallel_generations`), because both use the GPU server, so the Video lab cannot starve scene clips (or the other way round) beyond that limit. Since Phase 20 an `auto_pipeline` job is a `running` job that does no work itself: its handler's `poll` is the whole run (it reads this table, creates the next jobs, and moves on), so a run is checked every tick like a job on the GPU server and survives a restart (`restart_rule='resume'`). At most 5 runs are `running` at once (a constant).
+The dispatcher loop (Section 3.3) is the main reader/writer of this table: each tick it checks every `running` job, starts downloads for finished ones, resubmits pre-empted ones, and starts `queued` jobs while fewer than the parallel-generation setting are `running`. Since Phase 19 a handler can name a *concurrency group*: `generate_clip` and `lab_video` share one pool of slots (`max_parallel_generations`), because both use the GPU server, so the Video lab cannot starve scene clips (or the other way round) beyond that limit. Since Phase 21 `lab_voice` and `generate_voiceover` share a pool of their own, "speech" (2 slots, a constant). Since Phase 20 an `auto_pipeline` job is a `running` job that does no work itself: its handler's `poll` is the whole run (it reads this table, creates the next jobs, and moves on), so a run is checked every tick like a job on the GPU server and survives a restart (`restart_rule='resume'`). At most 5 runs are `running` at once (a constant).
 
 ### 4.6 `setting`
 
@@ -543,6 +550,7 @@ One video the Video lab made, or is making (Phase 19). The lab belongs to no pro
 | `prompt` | TEXT | NOT NULL | — | The prompt as sent (trimmed) |
 | `params` | JSON | NOT NULL | — | What the form held and what was sent: `mode`, `orientation`, `width`, `height`, `fps`, `duration_s`, `num_frames`, `seed` and `negative_prompt` (only an LTX-2.3 run has one) |
 | `first_frame` | JSON | NULL | — | `{"source": "lab" \| "asset", "id": n}`: an Image lab image, or a project's frame asset. NULL for text-to-video. Never copied: the run refers to it |
+| `last_frame` | JSON | NULL | — | Same shape as `first_frame`. Only on a run that moves from a first to a last frame (needs a first frame): LTX-2.5 uses `POST /v1/ltx25/videos/interpolate`, LTX-2.3 keyframe interpolation. Phase 21 |
 | `path` | TEXT | NULL | — | The stored clip, relative to the media folder (`lab/<32 hex>.mp4`). NULL until the job has finished |
 | `size_bytes` | INTEGER | NULL | — | |
 | `sha256` | TEXT | NULL | — | |
@@ -562,6 +570,7 @@ CREATE TABLE lab_video_run (
     prompt       TEXT NOT NULL,
     params       JSON NOT NULL,
     first_frame  JSON,
+    last_frame   JSON,
     path         TEXT,
     size_bytes   INTEGER,
     sha256       TEXT,
@@ -570,6 +579,76 @@ CREATE TABLE lab_video_run (
     frame_count  INTEGER,
     duration_s   REAL,
     audio        JSON
+);
+```
+
+### 4.11 `voice`
+
+A saved voice (Phase 21): a clean recording and its exact transcript, which Breeze TTS 2 clones. A voice comes from an upload (`POST /api/voices`: the recording is received, checked with ffprobe by the voiceover's rules, WAV, MP3, M4A or FLAC and audio only, and stored under `media/lab/`) or from a Voice lab run (`POST /api/lab/voices/runs/{id}/save-voice`: the voice points at the run's own file, nothing is copied). A voice is never deleted, like every stored file; its name and transcript can be edited, its recording never changes. A job copies the recording's path and the transcript into its own `input` when it is created, so editing a voice changes nothing for a speech already under way.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `name` | TEXT | NOT NULL | — | At most 80 characters |
+| `path` | TEXT | NOT NULL | — | The stored recording, relative to the media folder (`lab/<32 hex>.<ext>`) |
+| `mime` | TEXT | NOT NULL | — | `audio/wav`, `audio/mpeg`, `audio/mp4` or `audio/flac` |
+| `size_bytes` | INTEGER | NOT NULL | — | |
+| `sha256` | TEXT | NOT NULL | — | |
+| `duration_s` | REAL | NOT NULL | — | |
+| `transcript` | TEXT | NOT NULL | — | What the recording says, word for word (at most 1,000 characters: the server's limit for `reference_text`) |
+| `origin` | TEXT | NOT NULL | — | `upload` \| `lab_run` |
+| `lab_voice_run_id` | INTEGER | NULL | — | The run the recording came from (`origin='lab_run'`). Not a foreign key: only a note |
+
+```sql
+CREATE TABLE voice (
+    id               INTEGER PRIMARY KEY,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    name             TEXT NOT NULL,
+    path             TEXT NOT NULL,
+    mime             TEXT NOT NULL,
+    size_bytes       INTEGER NOT NULL,
+    sha256           TEXT NOT NULL,
+    duration_s       REAL NOT NULL,
+    transcript       TEXT NOT NULL,
+    origin           TEXT NOT NULL CHECK (origin IN ('upload', 'lab_run')),
+    lab_voice_run_id INTEGER
+);
+```
+
+### 4.12 `lab_voice_run`
+
+One speech the Voice lab made, or is making (Phase 21). Like `lab_video_run`, the lab belongs to no project, so its work runs as `lab_voice` jobs with a NULL `project_id`; the job holds the status, the phase and the exact request. A run is one request, so its text is at most 1,000 characters.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `lab_voice` job. `ON DELETE SET NULL` |
+| `mode` | TEXT | NOT NULL | — | `design` (a voice made from a description), `clone` (a saved voice reads the text) \| `direction` (a saved voice, steered by the instruction) |
+| `text` | TEXT | NOT NULL | — | The text to speak (trimmed) |
+| `instruction` | TEXT | NULL | — | design: the voice description (optional). direction: how to say it. clone: NULL |
+| `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice (clone and direction). `ON DELETE SET NULL` |
+| `params` | JSON | NOT NULL | — | `{"seed": n, "cfg_scale": x}`. The seed is random when the form left it empty; `cfg_scale` is 4 with an instruction and 1 without, as the server recommends |
+| `path` | TEXT | NULL | — | The stored WAV, relative to the media folder (`lab/<32 hex>.wav`). NULL until the job has finished |
+| `size_bytes` | INTEGER | NULL | — | |
+| `sha256` | TEXT | NULL | — | |
+| `duration_s` | REAL | NULL | — | As ffprobe reads the file |
+
+```sql
+CREATE TABLE lab_voice_run (
+    id           INTEGER PRIMARY KEY,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    job_id       INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    mode         TEXT NOT NULL CHECK (mode IN ('design', 'clone', 'direction')),
+    text         TEXT NOT NULL,
+    instruction  TEXT,
+    voice_id     INTEGER REFERENCES voice(id) ON DELETE SET NULL,
+    params       JSON NOT NULL,
+    path         TEXT,
+    size_bytes   INTEGER,
+    sha256       TEXT,
+    duration_s   REAL
 );
 ```
 
@@ -592,6 +671,9 @@ CREATE INDEX idx_lab_image_created   ON lab_image (created_at);
 CREATE INDEX idx_lab_video_run_created ON lab_video_run (created_at);
 CREATE INDEX idx_lab_video_run_group   ON lab_video_run (group_key);
 CREATE INDEX idx_lab_video_run_job     ON lab_video_run (job_id);
+CREATE INDEX idx_voice_created         ON voice (created_at);
+CREATE INDEX idx_lab_voice_run_created ON lab_voice_run (created_at);
+CREATE INDEX idx_lab_voice_run_job     ON lab_voice_run (job_id);
 ```
 
 ---
@@ -978,7 +1060,7 @@ The clip job treats an AI frame like any other first frame: `derived_frames.fram
 
 Since Phase 14 the shape above is the keyframe clip (`clip_mode` `first_and_last`). `mode` is the LTX mode the request named (`"quality"` for image-to-video, null for keyframe interpolation, which has no such field) and `clip_mode` says which frames the clip was made from (`first_frame` or `first_and_last`, derived from `endpoint`). A clip made from the first frame alone has `"endpoint": "/v1/ltx/videos/generate"`, `"pipeline": "ltx:text-to-video"` (the server's name for the whole `/generate` endpoint, which also does image-to-video; it says nothing about the mode), `"mode": "quality"`, `"clip_mode": "first_frame"` and `"last_frame_asset_id": null`. Clips made before Phase 14 have no `mode` or `clip_mode`: the page reads their mode from `endpoint` (`video_generator.clip_mode_for`).
 
-Since Phase 19 a clip also records which video model made it: `video_model` (`ltx-2.3` or `ltx-2.5`), `video_model_requested` (the model that was asked for), `video_model_source` (`regenerate`, `scene`, `project` or `global`: the level that chose it) and `model_note` (why the two differ, otherwise null). They differ in one case: LTX-2.5 has no first-and-last-frame endpoint yet, so a scene with a last frame is made by LTX-2.3 and says so. A clip made by LTX-2.5 has `"endpoint": "/v1/ltx25/videos/generate"`, `"pipeline": "ltx25:text-to-video"`, `"mode": "quality"` (the DFR recipe) and `"negative_prompt": null`, because that endpoint has no such field. A clip from before Phase 19 has none of the four new keys: the page tells its model from `endpoint` (`video_generator.model_for`: every older clip is LTX-2.3).
+Since Phase 19 a clip also records which video model made it: `video_model` (`ltx-2.3` or `ltx-2.5`), `video_model_requested` (the model that was asked for), `video_model_source` (`regenerate`, `scene`, `project` or `global`: the level that chose it) and `model_note` (why the two differ, otherwise null). They differ only when a model has no endpoint for the clip mode (a fallback to LTX-2.3 that says so in `model_note`). Since Phase 21 LTX-2.5 has one for both modes, so a scene with a last frame is made by LTX-2.5's own `POST /v1/ltx25/videos/interpolate` (`"pipeline": "ltx25:interpolate"`, `"clip_mode": "first_and_last"`, `mode` as sent, `negative_prompt` null). An earlier clip that fell back keeps its LTX-2.3 `endpoint` and its `model_note`. A clip made by LTX-2.5 has `"endpoint": "/v1/ltx25/videos/generate"`, `"pipeline": "ltx25:text-to-video"`, `"mode": "quality"` (the DFR recipe) and `"negative_prompt": null`, because that endpoint has no such field. A clip from before Phase 19 has none of the four new keys: the page tells its model from `endpoint` (`video_generator.model_for`: every older clip is LTX-2.3).
 
 **A derived frame** (`kind='frame'`, `source='derived'`, `mime='image/png'`, `width` and `height` the generation size): the uploaded frame as it is sent to the video model, made by `frame_images.normalise_frame` at the project's generation size at submission.
 
@@ -1102,7 +1184,7 @@ A `lab_video` job belongs to no project (`project_id` and `scene_id` are NULL) a
 }
 ```
 
-`first_frame` is null for text-to-video (no upload, and no `images` in the body). Each attempt fits the image to the run's size (centred, as a scene's frame is) and uploads it again. An LTX-2.3 run has `negative_prompt` in `request` when the form gave one; an LTX-2.5 run never does. On success, in one transaction: `UPDATE lab_video_run` (`path`, `size_bytes`, `sha256`, `width`, `height`, `frame_count`, `duration_s`, `audio`), `UPDATE job` (`status='succeeded'`, `output`), and the clip is already in `media/lab/`:
+`first_frame` is null for text-to-video (no upload, and no `images` in the body). Since Phase 21 `last_frame` (same shape, null when there is none, and only with a first frame) names the image the clip ends on: both frames are fitted and uploaded, and the body goes to `/v1/ltx25/videos/interpolate` (`first_frame_asset_id`, `last_frame_asset_id`) or `/v1/ltx/videos/keyframe-interpolation` (`keyframes`). Each attempt fits the image to the run's size (centred, as a scene's frame is) and uploads it again. An LTX-2.3 run has `negative_prompt` in `request` when the form gave one; an LTX-2.5 run never does. On success, in one transaction: `UPDATE lab_video_run` (`path`, `size_bytes`, `sha256`, `width`, `height`, `frame_count`, `duration_s`, `audio`), `UPDATE job` (`status='succeeded'`, `output`), and the clip is already in `media/lab/`:
 
 ```json
 {
@@ -1194,14 +1276,63 @@ That is the provenance of the `final` asset. `muted_scene_indexes` lists the sce
 
 **How the file is made.** Stage 1, per clip: the picture is cut to exactly `frames` frames at the project's fps, scaled to cover the output size and centre-cropped to it (a 1088 wide clip for a 1080 wide video only loses 4 pixels on each side); the sound is converted to 48 kHz stereo, lowered by the clip's gain (`volume=<gain>dB`, from the measured loudness of the voiceover and of the clip: `min(0, voice + 20 * log10(clip_sound_volume) - clip)`, in LUFS and dB), cut to the same length, faded for 20 ms at both ends (the fade-out sits where the clip's own sound ends, since LTX sound is 17 to 45 ms shorter than its video), and padded with silence to exactly `round(frames * 48000 / fps)` samples; a muted scene or a clip without sound gets that much silence. The result is a MOV with `libx264 -crf 12 -preset veryfast -bf 0` and PCM 16-bit sound. Stage 2: the MOVs are joined with the concat demuxer, and the clips' sound, already at its level, is mixed under the voiceover with `amix=inputs=2:duration=first:dropout_transition=0:normalize=0` (the voiceover first; `normalize=0` keeps it at its own level, where the default would lower it by 6 dB); a mono voiceover is made stereo with `pan`, because the automatic conversion lowers it by 3 dB. The result is encoded with `libx264 -crf 18 -preset medium -profile:v high -pix_fmt yuv420p -r <fps> -fps_mode cfr`, AAC 192 kb/s and `-movflags +faststart`.
 
+### `job.input` and `job.output` for a `lab_voice` and a `generate_voiceover` job (Phase 21)
+
+Both are remote jobs on the GPU server's Breeze TTS 2 endpoint (`POST /v1/breeze-tts/synthesize`) and share one handler (`jobs/synthesize_speech.py`). They differ in where the text comes from and what is done with the finished WAV. One request takes at most 1,000 characters of text, and makes about two minutes of speech at most (more is cut off by the server, not refused), so a project's script is split into pieces (`services/speech_chunks.split_script`: whole sentences, then clauses, then words, and a Chinese, Japanese or Korean character counts double). The pieces are made one after the other, each as a job on the server, all with the same recording, seed and guidance, so the voice stays the same. A `lab_voice` run is always one piece.
+
+`input` at creation (`reference` is null for `design`, and `instruction` null for `clone` and for a project's voiceover):
+
+```json
+{
+  "requested": "voiceover",
+  "chunks": ["First 1000 characters of the script.", "The rest."],
+  "instruction": null,
+  "seed": 42,
+  "cfg_scale": 1.0,
+  "script_sha256": "9c1f...",
+  "reference": { "voice_id": 3, "path": "lab/5d1e...e2.wav", "mime": "audio/wav", "text": "Exactly what the recording says." }
+}
+```
+
+A `lab_voice` job has `"requested": "lab_voice"`, `run_id` and `mode` instead of `script_sha256`. `reference` copies the voice's path, mime and transcript as they are at that moment.
+
+Each submission adds what was sent and where the job is:
+
+```json
+{
+  "done": ["7a2c...", "b91d..."],
+  "remote_reference_id": "3f2a9c1e4b7d4a6c9e8f1a2b3c4d5e6f",
+  "server_url": "http://host.docker.internal:8012",
+  "endpoint": "/v1/breeze-tts/synthesize",
+  "body": { "text": "...", "seed": 42, "cfg_scale": 1.0,
+            "reference_audio_asset_id": "3f2a...", "reference_text": "..." }
+}
+```
+
+`done` holds the server's job ids of the pieces that are made, in order; `provider_job_id` is the piece being made. When it succeeds, `finish` adds it to `done` and submits the next piece (`UPDATE job` sets the new `provider_job_id` and `input` together), so a pre-emption (`requeue`, up to 3 attempts) or a restart continues with the first piece that is not in `done`, and the uploaded recording (`remote_reference_id`) is reused (a `400 invalid asset reference` uploads it again once). Nothing is purged on the server before the end, because purging a piece also deletes the uploads no other job uses.
+
+After the last piece: every piece is downloaded to a temp file, joined with FFmpeg's concat demuxer into one mono 24 kHz 16-bit WAV (a single piece is used as it is), checked with ffprobe, and then, in one transaction:
+
+- `lab_voice`: the file moves to `media/lab/`, `UPDATE lab_voice_run` (`path`, `size_bytes`, `sha256`, `duration_s`) and `UPDATE job` (`status='succeeded'`, `output`).
+- `generate_voiceover`: the file moves to `media/<project_id>/`, `INSERT asset` (`kind='voiceover'`, `source='ai'`, `mime='audio/wav'`, `duration_s`, `provenance`), `UPDATE project SET voiceover_asset_id`, and `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`). The earlier voiceover and its file stay.
+
+Then every server job is purged and `output.purge` (one answer per piece) is merged in. `asset.provenance` of an AI voiceover:
+
+```json
+{ "model": "breeze-tts-2", "voice_id": 3, "script_sha256": "9c1f...", "parts": 2, "seed": 42, "cfg_scale": 1.0, "job_id": 188 }
+```
+
+`output` of a `generate_voiceover` job is `{"asset_id": 77, "duration_s": 63.4, "parts": 2, "voice_id": 3}`; of a `lab_voice` job `{"run_id": 9, "speech": {"duration_s": 4.2, "sample_rate": 24000, "channels": 1, "size_bytes": 201644}}`. A voiceover is out of date when the script's hash is no longer `provenance.script_sha256` (`services/voiceover_generation.is_current`); the transcript then becomes stale too, because the voiceover's id changed. Neither job can be cancelled once it runs on the server (the same as a transcription).
+
 ### `job.input` and `job.output` for an `auto_pipeline` job (Phase 20)
 
 One run of the automatic flow of a project. It belongs to the project (`scene_id` is NULL), is a local job (`provider='local'`) and does no work itself: it makes the jobs of the manual steps, one step after the other, and moves on only when every scene has finished the step it is at. Only one is active per project at a time (a second start returns the active one), and a run starts only when no other job of the project is waiting or running. It is **resumable** (`restart_rule='resume'`): `start` saves the marker `auto` in `provider_job_id`, so the dispatcher calls the handler's `poll` at every tick, and all of the run's state is in the row, so a restart continues where it was.
 
-The seven steps, in order, with what the run makes in each and when a target (a scene, or the project) counts as done. Each reuses the rule of the manual step, so a run never makes what its button would refuse:
+The eight steps (since Phase 21; seven before), in order, with what the run makes in each and when a target (a scene, or the project) counts as done. Each reuses the rule of the manual step, so a run never makes what its button would refuse:
 
 | Step (`key`) | Job it makes | One job per | Done when |
 |---|---|---|---|
+| `voiceover` | `generate_voiceover` | project | the project has a voiceover the user uploaded, or one the app made from the script as it is now (`asset.provenance.script_sha256` equals the script's hash). Otherwise the run makes one, in the project's saved voice (`project.voice_id`); a script that changed since is made again. Phase 21 |
 | `transcribe` | `transcribe` | project | there is a transcript that is not out of date |
 | `scenes` | `plan_scenes` | project | there are scenes that are not out of date, and no proposal is active |
 | `descriptions` | `draft_descriptions` | project | every scene has a `scene_description`, and no draft is active |
@@ -1222,6 +1353,7 @@ The seven steps, in order, with what the run makes in each and when a target (a 
 {
   "step": "first_frames",
   "steps": {
+    "voiceover":     { "status": "skipped", "done": 1,  "total": 1 },
     "transcribe":    { "status": "skipped", "done": 1,  "total": 1 },
     "scenes":        { "status": "done",    "done": 1,  "total": 1 },
     "descriptions":  { "status": "done",    "done": 1,  "total": 1 },
@@ -1311,7 +1443,9 @@ Mapping the flow in `ANALYSIS.md` Section 1 onto table writes, so the structure'
 | Test the image API by hand (Image lab) | **Run** (Phase 13): one synchronous call, not a `job` (a call of 25 to 40 s that the page waits for; the Video lab below, whose runs take minutes, does use jobs). The endpoint validates the form, reads each reference (a `lab_image` or a `kind='frame'` `asset`, as an upright RGB JPEG at quality 90, scaled down above 36 megapixels), and ends its read transaction before the call. The call runs in a task of its own, so a browser that goes away does not lose it. **After the call**, in one transaction: `INSERT lab_run` (the form, the request and the answer with every image replaced by its size, `http_status`, `seconds`, `usage`, `error`) and one `INSERT lab_image` (`origin='result'`) for each returned image, whose file was first checked with Pillow and moved to `media/lab/`. A call that failed, was refused or was ignored is a `lab_run` too (`status='failed'`, with `error`). **Upload**: `INSERT lab_image` (`origin='upload'`), the same checks as a scene's frame. Nothing is retried, cached or deleted, and no `scene`, `asset` or `job` row is read for writing: a project's frame is only read, by its `asset` id. |
 | Choose the video model (app, project, scene, one take) | **Phase 19.** `UPDATE setting` for `default_video_model`; `UPDATE project.video_model` (through the project's settings, NULL means the app's default); `UPDATE scene.video_model` (its own endpoint, NULL means the project's); and **Regenerate**'s model, which is only `job.input.video_model` of the new job and is never saved on the scene. The model is resolved when a clip job first starts (Section 5, `generate_clip`), so none of these changes a job already prepared or a clip already made. A scene that has a last frame is made by LTX-2.3 whatever is chosen, until LTX-2.5 has a first-and-last-frame endpoint; the clip's provenance says so. |
 | Try prompts on both models, with cuts (Video lab) | **Run** (Phase 19): `INSERT lab_video_run` and `INSERT job` (`type='lab_video'`, `provider='gpu'`, `project_id` NULL) for each chosen model, in **one transaction**, only from a click. Every request is built and checked first, against the limits of the approved GPU API (a model the approved API has no endpoint for refuses the whole click), with the same seed, size, length, recipe, prompt and first frame for both, and `lab_video_run.job_id` is set. The dispatcher starts the jobs while fewer than `max_parallel_generations` clip jobs and lab jobs together are `running`. **Start**: the first frame (if any) is fitted to the run's size and uploaded, and the job is submitted to the stored endpoint, `UPDATE job` setting `provider_job_id` and the exact body. **On success**, in one transaction: the file moves to `media/lab/`, `UPDATE lab_video_run` (the file and what ffprobe read) and `UPDATE job` (`status='succeeded'`, `output`); then the server's job is purged. Nothing is retried beyond what a scene's clip is (pre-emption, an expired result), cached, merged or deleted, and no `scene` or `asset` row is written. **Write a multi-shot prompt**: `INSERT job` (`type='write_lab_video_prompt'`, `provider='llm'`, `project_id` NULL) with the idea in `input.inputs`; its answer is `job.output.prompt`, and nothing else is written. The Activity page lists both under "Video lab". |
-| Run every step automatically | **Start** (Phase 20): `INSERT job` (`type='auto_pipeline'`, `provider='local'`, `scene_id` NULL, `input={"accept_mismatch": ..., "discard_scenes_with_inputs": ...}`), only from a click, and only when the project has a voiceover and a script and no other job waiting or running (422 otherwise); 409 until the recording-differs-from-the-script warning and the replacement of scenes that have inputs are confirmed, the same two questions as "Propose scenes" (and only when the run will propose scenes). A run that is already active is returned instead. **Start of the job**: `UPDATE job` sets `provider_job_id='auto'` (the marker) and the first `phase` and `output`. **Each tick** (`poll`): read-only when nothing needs making; otherwise one transaction that holds the write lock (`lock_scenes`) with `INSERT job` for each job the step needs (the same `type`, `provider`, `scene_id` and `input` as the manual button, plus `input.auto_run_id`, and `input.run_again=true` on a retry that asks the language model) and `UPDATE job` of the run (`phase`, `output`, `last_checked_at`). Each of those jobs then runs under its own handler's rules. **On success** (`finish`): `UPDATE job` (`status='succeeded'`, `output`). **On failure**: `UPDATE job` (`status='failed'`, `error`). **Cancel**: `status='cancelled'` for the run, and for each job it made that is still `queued`. The run changes no `scene`, `asset` or `transcript` row itself: every write to those is its jobs'. |
+| Run every step automatically | **Start** (Phase 20): `INSERT job` (`type='auto_pipeline'`, `provider='local'`, `scene_id` NULL, `input={"accept_mismatch": ..., "discard_scenes_with_inputs": ...}`), only from a click, and only when the project has a script and a voiceover, or a saved voice to make one with (an AI voiceover made from an earlier script also needs the voice), and no other job waiting or running (422 otherwise); 409 until the recording-differs-from-the-script warning and the replacement of scenes that have inputs are confirmed, the same two questions as "Propose scenes" (and only when the run will propose scenes). A run that is already active is returned instead. **Start of the job**: `UPDATE job` sets `provider_job_id='auto'` (the marker) and the first `phase` and `output`. **Each tick** (`poll`): read-only when nothing needs making; otherwise one transaction that holds the write lock (`lock_scenes`) with `INSERT job` for each job the step needs (the same `type`, `provider`, `scene_id` and `input` as the manual button, plus `input.auto_run_id`, and `input.run_again=true` on a retry that asks the language model) and `UPDATE job` of the run (`phase`, `output`, `last_checked_at`). Each of those jobs then runs under its own handler's rules. **On success** (`finish`): `UPDATE job` (`status='succeeded'`, `output`). **On failure**: `UPDATE job` (`status='failed'`, `error`). **Cancel**: `status='cancelled'` for the run, and for each job it made that is still `queued`. The run changes no `scene`, `asset` or `transcript` row itself: every write to those is its jobs'. |
+| Make speech in the Voice lab, and save voices | **Run** (Phase 21): `INSERT lab_voice_run` and `INSERT job` (`type='lab_voice'`, `provider='gpu'`, `project_id` NULL) in **one transaction**, only from a click, after the form is checked (mode and its fields, 1,000 characters of text, a saved voice for clone and direction); `lab_voice_run.job_id` is set. **Start**: the saved voice's recording is uploaded once, the job is submitted and `UPDATE job` sets `provider_job_id` and the exact body. **On success**: see Section 5. **Save a voice**: `INSERT voice` from an upload (the file goes to `media/lab/` after ffprobe accepts it) or from a finished run (the voice points at the run's file; the transcript starts as the run's text). Editing a voice is `UPDATE voice` of `name` and `transcript` only. Nothing is retried beyond pre-emption, cached, merged or deleted. The Activity page lists the jobs under "Voice lab". |
+| Make the voiceover from the script | **Choose a voice**: `UPDATE project SET voice_id` (`PATCH /api/projects/{id}`; 422 for a voice that does not exist). **Make** (Phase 21): `INSERT job` (`type='generate_voiceover'`, `provider='gpu'`, `scene_id` NULL), only from a click (or from an automatic run's first step), and only when there is a script and a chosen voice that exists, the script needs at most 30 pieces, and no transcription or automatic run is active (422 or 409 otherwise). A job already active is returned instead. **On success**: see Section 5; `project.voiceover_asset_id` points at the new asset, which makes the transcript out of date. |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 
@@ -1325,7 +1459,7 @@ Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snaps
 2. **Table names:** lowercase `snake_case`, singular (`project`, `asset`, `scene`, `job`, `transcript`, `setting`, `api_snapshot`), mapped from the PascalCase model names in `ANALYSIS.md`.
 3. **Cascade rules:** `ON DELETE CASCADE` from `project` to its owned rows (`asset`, `transcript`, `scene`, `job`), and `ON DELETE SET NULL` for the optional asset references on `scene` and `job` (so deleting one asset doesn't delete a whole scene). `ANALYSIS.md` doesn't state delete behaviour anywhere; this is a reasonable default, not a documented rule.
 4. **Indexes** beyond the primary/foreign keys (Section 4, "Recommended indexes") are my suggestions based on the dispatcher's described access patterns (Section 3.3), not a list given in `ANALYSIS.md`.
-5. **`job.input` / `job.output` JSON shapes.** The `transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_clip` and `render_final` shapes were built and checked against the real servers (and, for the render, the image's FFmpeg) in Phases 5, 6, 9, 10, 12 and 16 (the `lab_video` and `write_lab_video_prompt` shapes of Phase 19 were checked against mock servers that answer like the real ones, not yet against the real GPU server; the `auto_pipeline` shape of Phase 20 was walked through on a scratch database with the child jobs' results set by hand, not yet against the real servers), and the `transcript.words` shape (as of 2026-10-05) and the model's `answer` inside `plan_scenes` output are verbatim from a real response (`ANALYSIS.md` Section 5.1 and 5.2); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
+5. **`job.input` / `job.output` JSON shapes.** The `transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_clip` and `render_final` shapes were built and checked against the real servers (and, for the render, the image's FFmpeg) in Phases 5, 6, 9, 10, 12 and 16 (the `lab_video` and `write_lab_video_prompt` shapes of Phase 19 were checked against mock servers that answer like the real ones, not yet against the real GPU server; the `auto_pipeline` shape of Phase 20 was walked through on a scratch database with the child jobs' results set by hand, not yet against the real servers; the `lab_voice` and `generate_voiceover` shapes of Phase 21 were run on a scratch database against a mocked GPU server, including a pre-emption of the second of three pieces, not yet against the real Breeze TTS endpoint), and the `transcript.words` shape (as of 2026-10-05) and the model's `answer` inside `plan_scenes` output are verbatim from a real response (`ANALYSIS.md` Section 5.1 and 5.2); the rest are my reasonable fill-ins consistent with the prose description and should be treated as a starting point, not a spec.
 6. **`scene.index`** is assumed zero-based and contiguous per project; `ANALYSIS.md` doesn't state the numbering convention explicitly.
 7. **`project.language` default `'en'`** reflects the English-only decision (Revision 3 decisions table) but isn't given as a literal column default in `ANALYSIS.md`.
 8. **Timestamp population** (`DEFAULT CURRENT_TIMESTAMP`) is a SQLite/SQLAlchemy convention I chose; `ANALYSIS.md` doesn't describe how timestamp columns get their values.

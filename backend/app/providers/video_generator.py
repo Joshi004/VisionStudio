@@ -8,11 +8,11 @@ here. A clip is made by one endpoint, chosen once per job from the video model a
 scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
 
 - LTX-2.3 keyframe interpolation, `POST /v1/ltx/videos/keyframe-interpolation`
-  (`KeyframeInterpolationRequest`), when the scene has a last frame. `with_keyframes` puts
+  (`KeyframeInterpolationRequest`), when the scene has a last frame. `with_frames` puts
   the first keyframe at `frame_idx` 0 and the last at `num_frames - 1`, both with strength
   1.0. The endpoint has no `enhance_prompt` field, so the prompt is never rewritten.
 - LTX-2.3 image-to-video, `POST /v1/ltx/videos/generate` (`TextToVideoRequest`), when the
-  scene has only a first frame. `with_first_frame` attaches the frame at `frame_idx` 0 with
+  scene has only a first frame. `with_frames` attaches the frame at `frame_idx` 0 with
   strength 1.0. `build_request` always sends `mode: "quality"` (the default, `fast`,
   silently ignores the negative prompt) and `enhance_prompt: false` (a rewrite would be
   invisible).
@@ -21,9 +21,16 @@ scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
   more GPU memory). The endpoint has no `negative_prompt` field (neither recipe uses
   guidance), so `build_request` never sends one to it.
 
-LTX-2.5 has no keyframe interpolation endpoint yet. A scene that has a last frame therefore
-falls back to LTX-2.3, and `endpoint_for` says so in a note. When the server adds the
-endpoint, it is one more entry in `ENDPOINTS` (and one in `_REQUEST_SCHEMAS`).
+- LTX-2.5 first and last frame, `POST /v1/ltx25/videos/interpolate`
+  (`Ltx25InterpolateRequest`), when the scene has a last frame. The body names the two
+  frames as `first_frame_asset_id` and `last_frame_asset_id`. The endpoint has `mode` and
+  `enhance_prompt` like the generate endpoints, and no `negative_prompt`. Two frames of
+  different places make the model cross-dissolve instead of moving the camera, so a scene's
+  two frames should show the same place, subject and light.
+
+`with_frames` builds the part of the body that names the frames, in the shape the chosen
+endpoint wants. Every pair of (model, clip mode) has an endpoint. `endpoint_for` still falls
+back to LTX-2.3 for a pair that has none, and says so in a note.
 
 No body sends `orientation`, `duration_seconds` (the frame count is computed here), `crf`
 (the pipeline's own default applies) or `auto_duration` (the voiceover sets the length).
@@ -50,20 +57,23 @@ from app.services.video_models import VideoModel
 KEYFRAME_PATH: Final = "/v1/ltx/videos/keyframe-interpolation"
 GENERATE_PATH: Final = "/v1/ltx/videos/generate"
 LTX25_GENERATE_PATH: Final = "/v1/ltx25/videos/generate"
+LTX25_INTERPOLATE_PATH: Final = "/v1/ltx25/videos/interpolate"
 # Which endpoint makes a clip, by video model and by how the clip is made. A pair that is
-# missing (LTX-2.5 with a last frame) falls back to LTX-2.3 in `endpoint_for`.
+# missing falls back to LTX-2.3 in `endpoint_for`.
 ENDPOINTS: Final[dict[tuple[VideoModel, ClipMode], str]] = {
     ("ltx-2.3", "first_frame"): GENERATE_PATH,
     ("ltx-2.3", "first_and_last"): KEYFRAME_PATH,
     ("ltx-2.5", "first_frame"): LTX25_GENERATE_PATH,
+    ("ltx-2.5", "first_and_last"): LTX25_INTERPOLATE_PATH,
 }
 _REQUEST_SCHEMAS: Final[dict[str, str]] = {
     KEYFRAME_PATH: "KeyframeInterpolationRequest",
     GENERATE_PATH: "TextToVideoRequest",
     LTX25_GENERATE_PATH: "Ltx25TextToVideoRequest",
+    LTX25_INTERPOLATE_PATH: "Ltx25InterpolateRequest",
 }
-# The endpoints that take `mode` and `enhance_prompt` (the keyframe endpoint has neither).
-_MODE_ENDPOINTS: Final = frozenset({GENERATE_PATH, LTX25_GENERATE_PATH})
+# The endpoints that take `mode` and `enhance_prompt` (the LTX-2.3 keyframe endpoint has neither).
+_MODE_ENDPOINTS: Final = frozenset({GENERATE_PATH, LTX25_GENERATE_PATH, LTX25_INTERPOLATE_PATH})
 # The endpoints that have a `negative_prompt` field. LTX-2.5 has none: it runs without
 # guidance, so there would be nothing for one to act on.
 _NEGATIVE_PROMPT_ENDPOINTS: Final = frozenset({GENERATE_PATH, KEYFRAME_PATH})
@@ -88,8 +98,8 @@ class EndpointChoice:
 def endpoint_for(model: VideoModel, mode: ClipMode) -> EndpointChoice:
     """The endpoint that makes a clip of this `mode` with `model`.
 
-    LTX-2.5 has no keyframe interpolation yet, so a clip with a last frame is made by
-    LTX-2.3 and the note says so.
+    Every pair of model and mode has an endpoint today. For a pair that has none, the clip is
+    made by LTX-2.3 and the note says so.
     """
     endpoint = ENDPOINTS.get((model, mode))
     if endpoint is not None:
@@ -250,21 +260,37 @@ def build_request(
     return body
 
 
-def with_keyframes(
-    request: dict[str, Any], first_remote_id: str, last_remote_id: str
+def with_frames(
+    endpoint: str,
+    request: dict[str, Any],
+    first_remote_id: str,
+    last_remote_id: str | None,
 ) -> dict[str, Any]:
-    """The keyframe body: the first frame is the video's first frame, the last frame its last."""
-    return {
-        **request,
-        "keyframes": [
-            {"asset_id": first_remote_id, "frame_idx": 0, "strength": 1.0},
-            {"asset_id": last_remote_id, "frame_idx": request["num_frames"] - 1, "strength": 1.0},
-        ],
-    }
+    """The full body: `request` plus the frames, in the shape `endpoint` wants.
 
-
-def with_first_frame(request: dict[str, Any], first_remote_id: str) -> dict[str, Any]:
-    """The image-to-video body: the frame is the video's literal first frame (`frame_idx` 0)."""
+    The first frame is always the video's literal first frame. A last frame is needed by the
+    two first-and-last endpoints and ignored by the first-frame ones.
+    """
+    if endpoint in (KEYFRAME_PATH, LTX25_INTERPOLATE_PATH):
+        if last_remote_id is None:
+            raise ValueError(f"{endpoint} needs a last frame.")
+        if endpoint == LTX25_INTERPOLATE_PATH:
+            return {
+                **request,
+                "first_frame_asset_id": first_remote_id,
+                "last_frame_asset_id": last_remote_id,
+            }
+        return {
+            **request,
+            "keyframes": [
+                {"asset_id": first_remote_id, "frame_idx": 0, "strength": 1.0},
+                {
+                    "asset_id": last_remote_id,
+                    "frame_idx": request["num_frames"] - 1,
+                    "strength": 1.0,
+                },
+            ],
+        }
     return {
         **request,
         "images": [{"asset_id": first_remote_id, "frame_idx": 0, "strength": 1.0}],

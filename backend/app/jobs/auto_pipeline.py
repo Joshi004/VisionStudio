@@ -1,10 +1,11 @@
 """The `auto_pipeline` job: one run of the automatic flow of a project.
 
-The run goes through the steps of `services/auto_pipeline.STEPS` (transcribe, propose scenes,
-descriptions, image prompts, first frames, clips, final render). It makes the same jobs the
-manual buttons make, and starts the next step only when every scene has finished the current
-one. A scene (or the project) whose job fails is tried again, up to `MAX_TRIES` jobs in one
-step; after that the run stops and says what is wrong.
+The run goes through the steps of `services/auto_pipeline.STEPS` (make the voiceover when
+there is none, transcribe, propose scenes, descriptions, image prompts, first frames, clips,
+final render). It makes the same jobs the manual buttons make, and starts the next step only
+when every scene has finished the current one. A scene (or the project) whose job fails is
+tried again, up to `MAX_TRIES` jobs in one step; after that the run stops and says what is
+wrong.
 
 How it fits the dispatcher (the loop itself is not touched):
 

@@ -10,6 +10,7 @@ import { ProjectSettingsPage } from "./pages/ProjectSettingsPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { VideoLabPage } from "./pages/VideoLabPage";
+import { VoiceLabPage } from "./pages/VoiceLabPage";
 
 export const router = createBrowserRouter([
   {
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
       { path: "activity", element: <ActivityPage /> },
       { path: "image-lab", element: <ImageLabPage /> },
       { path: "video-lab", element: <VideoLabPage /> },
+      { path: "voice-lab", element: <VoiceLabPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

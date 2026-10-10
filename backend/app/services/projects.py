@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Asset, Project
+from app.db.models import Asset, Project, Voice
 from app.services import video_models
 
 LANDSCAPE = "landscape"
@@ -85,6 +85,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "description_instructions": "Description instructions",
     "script_text": "Script",
     "video_model": "Video model",
+    "voice_id": "Voice",
 }
 _GUIDELINE_FIELDS: Final = (
     "style_prefix",
@@ -93,7 +94,7 @@ _GUIDELINE_FIELDS: Final = (
     "cut_instructions",
     "description_instructions",
 )
-_NULLABLE_FIELDS: Final = frozenset((*_GUIDELINE_FIELDS, "script_text", "video_model"))
+_NULLABLE_FIELDS: Final = frozenset((*_GUIDELINE_FIELDS, "script_text", "video_model", "voice_id"))
 
 
 class ProjectValidationError(ValueError):
@@ -283,6 +284,11 @@ async def update_project(
     unknown = [field for field in changes if field not in _FIELD_LABELS]
     if unknown:
         raise ProjectValidationError(f"{unknown[0]} cannot be changed.")
+
+    # The saved voice that speaks the script. NULL means none is chosen.
+    voice_id = changes.get("voice_id")
+    if isinstance(voice_id, int) and await session.get(Voice, voice_id) is None:
+        raise ProjectValidationError(f"There is no saved voice {voice_id}.")
 
     try:
         for field, value in changes.items():

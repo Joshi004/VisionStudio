@@ -983,6 +983,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/voices/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description The newest runs first. Pass the last id you have as `before_id` for the next page.
+         */
+        get: operations["list_runs_api_lab_voices_runs_get"];
+        put?: never;
+        /**
+         * Create Run
+         * @description Starts one run. It is a paid GPU job of one to three minutes.
+         */
+        post: operations["create_run_api_lab_voices_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/voices/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_lab_voices_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/voices/runs/{run_id}/save-voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save Run As Voice
+         * @description Saves the speech of a finished run as a voice that can be cloned. The transcript is what
+         *     the speech says: left out, it is the run's text.
+         */
+        post: operations["save_run_as_voice_api_lab_voices_runs__run_id__save_voice_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/voices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Voices
+         * @description The saved voices, newest first.
+         */
+        get: operations["list_voices_api_voices_get"];
+        put?: never;
+        /**
+         * Upload Voice
+         * @description Saves a recording (WAV, MP3, M4A or FLAC, sent as the raw request body) as a voice.
+         *     `transcript` is what it says, word for word.
+         */
+        post: operations["upload_voice_api_voices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/voices/{voice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Voice
+         * @description Changes a voice's name and/or transcript. The recording stays.
+         */
+        patch: operations["update_voice_api_voices__voice_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/voiceover/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Voiceover
+         * @description Starts making the voiceover from the script, or returns the job that is already active.
+         *     The new voiceover replaces the project's current one (the old file is kept).
+         */
+        post: operations["generate_voiceover_api_projects__project_id__voiceover_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/voiceover/generation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Voiceover Generation
+         * @description The newest voiceover job and whether the voiceover is up to date. Reads the database
+         *     only.
+         */
+        get: operations["get_voiceover_generation_api_projects__project_id__voiceover_generation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1387,7 +1536,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover";
             /**
              * Status
              * @enum {string}
@@ -1444,7 +1593,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover";
             /**
              * Status
              * @enum {string}
@@ -1671,6 +1820,7 @@ export interface components {
             /** Negative Prompt */
             negative_prompt?: string | null;
             first_frame?: components["schemas"]["FirstFrameIn"] | null;
+            last_frame?: components["schemas"]["FirstFrameIn"] | null;
         };
         /** LabVideoRunOut */
         LabVideoRunOut: {
@@ -1697,6 +1847,7 @@ export interface components {
                 [key: string]: unknown;
             };
             first_frame: components["schemas"]["FirstFrameOut"] | null;
+            last_frame: components["schemas"]["FirstFrameOut"] | null;
             job: components["schemas"]["JobSummary"] | null;
             /** Url */
             url: string | null;
@@ -1717,6 +1868,55 @@ export interface components {
         LabVideoRunsOut: {
             /** Runs */
             runs: components["schemas"]["LabVideoRunOut"][];
+        };
+        /** LabVoiceRunCreate */
+        LabVoiceRunCreate: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "design" | "clone" | "direction";
+            /** Text */
+            text: string;
+            /** Instruction */
+            instruction?: string | null;
+            /** Voice Id */
+            voice_id?: number | null;
+            /** Seed */
+            seed?: number | null;
+            /** Cfg Scale */
+            cfg_scale?: number | null;
+        };
+        /** LabVoiceRunOut */
+        LabVoiceRunOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "design" | "clone" | "direction";
+            /** Text */
+            text: string;
+            /** Instruction */
+            instruction: string | null;
+            voice: components["schemas"]["VoiceBrief"] | null;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /** Duration S */
+            duration_s: number | null;
         };
         /** LlmInfoOut */
         LlmInfoOut: {
@@ -1836,6 +2036,8 @@ export interface components {
              * @enum {string}
              */
             default_video_model: "ltx-2.3" | "ltx-2.5";
+            /** Voice Id */
+            voice_id: number | null;
             voiceover: components["schemas"]["VoiceoverOut"] | null;
         };
         /** ProjectFrameOut */
@@ -1927,6 +2129,8 @@ export interface components {
             script_text?: string | null;
             /** Video Model */
             video_model?: string | null;
+            /** Voice Id */
+            voice_id?: number | null;
         };
         /** PromptDraftCreate */
         PromptDraftCreate: {
@@ -2499,10 +2703,75 @@ export interface components {
             /** Video Model */
             video_model: ("ltx-2.3" | "ltx-2.5") | null;
         };
+        /** VoiceBrief */
+        VoiceBrief: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /** VoiceFromRun */
+        VoiceFromRun: {
+            /** Name */
+            name: string;
+            /** Transcript */
+            transcript?: string | null;
+        };
+        /** VoiceOut */
+        VoiceOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Name */
+            name: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "upload" | "lab_run";
+            /** Url */
+            url: string;
+            /** Mime */
+            mime: string;
+            /** Duration S */
+            duration_s: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Transcript */
+            transcript: string;
+            /** Lab Voice Run Id */
+            lab_voice_run_id: number | null;
+        };
+        /** VoiceUpdate */
+        VoiceUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Transcript */
+            transcript?: string | null;
+        };
+        /** VoiceoverGenerationOut */
+        VoiceoverGenerationOut: {
+            job: components["schemas"]["JobSummary"] | null;
+            /** Blocked */
+            blocked: string | null;
+            /** Voiceover Is Ai */
+            voiceover_is_ai: boolean;
+            /** Voiceover Current */
+            voiceover_current: boolean;
+        };
         /** VoiceoverOut */
         VoiceoverOut: {
             /** Asset Id */
             asset_id: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "upload" | "ai";
             /** Url */
             url: string;
             /** Mime */
@@ -4662,6 +4931,371 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_runs_api_lab_voices_runs_get: {
+        parameters: {
+            query?: {
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVoiceRunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_lab_voices_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabVoiceRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVoiceRunOut"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_api_lab_voices_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVoiceRunOut"];
+                };
+            };
+            /** @description There is no such run or voice. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_run_as_voice_api_lab_voices_runs__run_id__save_voice_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceFromRun"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceOut"];
+                };
+            };
+            /** @description There is no such run or voice. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run has no speech yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_voices_api_voices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceOut"][];
+                };
+            };
+        };
+    };
+    upload_voice_api_voices_post: {
+        parameters: {
+            query: {
+                name: string;
+                transcript: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceOut"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file or a text is not acceptable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_voice_api_voices__voice_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                voice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceOut"];
+                };
+            };
+            /** @description There is no such run or voice. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_voiceover_api_projects__project_id__voiceover_generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Another job of the project is in the way. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has no script or no voice yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_voiceover_generation_api_projects__project_id__voiceover_generation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceoverGenerationOut"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

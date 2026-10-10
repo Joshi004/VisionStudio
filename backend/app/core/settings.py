@@ -228,8 +228,9 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "The video model that makes clips when neither the scene nor its project chooses "
             "one (Project settings, and each scene's clip section). Regenerate can also pick "
             "a model for one take. LTX-2.5 cuts between several shots only when the prompt "
-            "says so, and has no negative prompt. A scene that has a last frame is always made "
-            "by LTX-2.3 for now: LTX-2.5 has no first-and-last-frame mode yet."
+            "says so, and has no negative prompt. A scene that has a last frame is made by the "
+            "chosen model's first-and-last-frame mode. Use two frames of the same place, "
+            "subject and light: very different frames cross-dissolve instead of moving."
         ),
         value_type="string",
         default=video_models.DEFAULT_MODEL,
