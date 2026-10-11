@@ -80,8 +80,3 @@ export function firstFrameCountsLine(counts: FirstFrameCounts, total: number): s
   }
   return parts.join(" · ");
 }
-
-/** "$0.32": the estimated cost of `count` images at `pricePerImage` dollars each. */
-export function estimatedCost(count: number, pricePerImage: number): string {
-  return `$${(count * pricePerImage).toFixed(2)}`;
-}

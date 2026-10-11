@@ -579,8 +579,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
         scenes={scenes}
         sceneId={inputsSceneId}
         imagePromptModel={data?.image_prompt_llm.model ?? ""}
-        imageModel={data?.image_llm.model ?? ""}
-        pricePerImage={data?.price_per_image_usd ?? 0}
+        imageModel={data?.image_model_label ?? ""}
         now={now}
         onSelect={setInputsSceneId}
         onClose={() => setInputsSceneId(null)}

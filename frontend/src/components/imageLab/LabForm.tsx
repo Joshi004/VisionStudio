@@ -1,9 +1,10 @@
 import { Button, Group, Select, SegmentedControl, Stack, Text, TextInput, Textarea } from "@mantine/core";
 
-import type { LabMode } from "../../api/imageLab";
+import type { LabEngine, LabMode } from "../../api/imageLab";
 import {
   blockedReason,
   costText,
+  ENGINE_LABELS,
   MODE_LABELS,
   MODE_NOTES,
   parseExtra,
@@ -11,21 +12,57 @@ import {
   type LabFormState,
   type ReferenceItem,
 } from "./labView";
+import { QwenFields } from "./QwenFields";
 import { ReferenceTray } from "./ReferenceTray";
 
 type LabFormProps = {
   state: LabFormState;
   onChange: (update: (current: LabFormState) => LabFormState) => void;
   onRun: () => void;
+  /** True while a Seedream call is in flight (it holds the form until it answers). */
   running: boolean;
+  /** True while the request that starts a Qwen run is on its way. */
+  starting: boolean;
 };
 
 /**
- * The form of one test. Every field is sent as it is: a setting the API ignores is still sent,
- * so the result shows whether it did anything. "Not sent" leaves a setting out, to see the
+ * The form of one test: the model first, then that model's own fields. The two models share the
+ * prompt and the seed, so the same text can be tried on both.
+ */
+export function LabForm({ state, onChange, onRun, running, starting }: LabFormProps) {
+  return (
+    <Stack gap="md">
+      <Stack gap={4}>
+        <Text size="sm" fw={500}>
+          Model
+        </Text>
+        <SegmentedControl
+          value={state.engine}
+          onChange={(value) => onChange((current) => ({ ...current, engine: value as LabEngine }))}
+          data={(Object.keys(ENGINE_LABELS) as LabEngine[]).map((engine) => ({
+            value: engine,
+            label: ENGINE_LABELS[engine],
+          }))}
+          disabled={running}
+        />
+      </Stack>
+      {state.engine === "qwen" ? (
+        <QwenFields state={state} onChange={onChange} onRun={onRun} starting={starting} />
+      ) : (
+        <SeedreamFields state={state} onChange={onChange} onRun={onRun} running={running} />
+      )}
+    </Stack>
+  );
+}
+
+type SeedreamFieldsProps = Pick<LabFormProps, "state" | "onChange" | "onRun" | "running">;
+
+/**
+ * The form of one Seedream test. Every field is sent as it is: a setting the API ignores is still
+ * sent, so the result shows whether it did anything. "Not sent" leaves a setting out, to see the
  * API's own default.
  */
-export function LabForm({ state, onChange, onRun, running }: LabFormProps) {
+function SeedreamFields({ state, onChange, onRun, running }: SeedreamFieldsProps) {
   function set<K extends keyof LabFormState>(key: K, value: LabFormState[K]) {
     onChange((current) => ({ ...current, [key]: value }));
   }

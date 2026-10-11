@@ -7,7 +7,9 @@
 - one module per job type (`transcribe.py`, `plan_scenes.py`, `draft_descriptions.py`,
   `write_image_prompt.py`, `generate_frame.py`, `generate_clip.py`, `render_final.py`,
   `generate_lab_video.py`, `write_lab_video_prompt.py`, `auto_pipeline.py`,
-  `lab_voice.py`, `generate_voiceover.py`).
+  `lab_voice.py`, `generate_voiceover.py`, `generate_lab_image.py`).
+- `remote_image.py`: the remote steps the two Qwen image jobs (`generate_frame` and
+  `lab_image`) share.
 
 A new job type is a new handler module plus one line in `register_handlers` below. The
 dispatcher loop is not touched.
@@ -27,6 +29,7 @@ def register_handlers() -> None:
     from app.jobs.draft_descriptions import DraftDescriptionsHandler
     from app.jobs.generate_clip import GenerateClipHandler
     from app.jobs.generate_frame import GenerateFrameHandler
+    from app.jobs.generate_lab_image import GenerateLabImageHandler
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
     from app.jobs.generate_voiceover import GenerateVoiceoverHandler
     from app.jobs.lab_voice import LabVoiceHandler
@@ -48,3 +51,4 @@ def register_handlers() -> None:
     handlers.register(AutoPipelineHandler())
     handlers.register(LabVoiceHandler())
     handlers.register(GenerateVoiceoverHandler())
+    handlers.register(GenerateLabImageHandler())

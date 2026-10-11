@@ -222,8 +222,8 @@ export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
           </List>
           <Alert color="yellow" title="This makes paid calls">
             <Text size="sm">
-              The language model (scenes, descriptions, image prompts), the image model (first
-              frames) and your GPU server (transcription, clips) are called. A scene that fails is
+              The language model (scenes, descriptions, image prompts) and your GPU server (first
+              frames, transcription, clips) are called. A scene that fails is
               tried again, up to {maxTries} tries in a step, and each try can be paid. Stopping
               the run does not take back a call that is already running.
             </Text>

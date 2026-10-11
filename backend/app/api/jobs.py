@@ -41,6 +41,7 @@ JobType = Literal[
     "auto_pipeline",
     "lab_voice",
     "generate_voiceover",
+    "lab_image",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

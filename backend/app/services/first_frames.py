@@ -2,9 +2,9 @@
 the earlier frames of a scene are, and when a new frame may become the scene's first frame
 (Phase 17; ANALYSIS.md Section 4.2 and 6.2; DATABASE_STRUCTURE.md Section 4.2, 4.5 and 7).
 
-The request is `jobs/generate_frame.py`'s, the call is `providers/image_api.py`'s and the size
-and the crop are `services/frame_geometry.py`'s and `services/frame_images.py`'s. This module
-holds the rules around them:
+The request and the steps of the job are `jobs/generate_frame.py`'s, the call is
+`providers/image_generator.py`'s and the fitting of the image to the frame size is
+`services/frame_images.py`'s. This module holds the rules around them:
 
 - `scene_block`, `is_candidate`, `all_block`: why a frame cannot be made for a scene now, and
   which scenes "Generate first frames" covers. The project-level reasons (no scenes, a

@@ -11,8 +11,9 @@ changes:
 - its name and version, which are stored on every job that wrote a prompt.
 
 Everything else (the task, the data sent, the JSON answer, the job, the API and the page)
-knows nothing about Seedream. To use another image model, add a profile below and point
-`ACTIVE_IMAGE_PROFILE` at it.
+knows nothing about which image model it is. The profile in use is Qwen-Image-2.1, which makes
+the first frames on the GPU server. The Seedream profile stays below for reference. To use
+another image model, add a profile and point `ACTIVE_IMAGE_PROFILE` at it.
 
 The text here is the lever for better prompts, so a change to it is a change to every future
 prompt. Raise `version` whenever any text in a profile, or in the generic instructions in
@@ -169,5 +170,90 @@ SEEDREAM_50_LITE: Final = ImagePromptProfile(
     ),
 )
 
+_QWEN_EXAMPLE_PROMPT: Final = (
+    "A quiet, natural photograph of a small cream paper boat with a faded blue stripe along "
+    "its edge, resting at the rim of a rain puddle with its bow pointing out across the "
+    "still water, about to be nudged in. The scene is a narrow lane paved with dark, rounded "
+    "cobblestones that glisten when wet, and a single yellow leaf floats on the puddle "
+    "beyond the boat. In the tall portrait frame the boat sits in the foreground, just below "
+    "the centre, the puddle fills the middle of the picture, and the lane recedes behind it "
+    "into soft grey blur toward the top, with wet cobblestones running down to the bottom "
+    "edge. The camera is close and low, at water level, looking straight along the surface "
+    "so the boat is at eye level. The lens has a 35 mm look with shallow depth of field: the "
+    "boat and the nearest stones are sharp, and the far end of the lane dissolves into "
+    "blur. The light is flat, even overcast daylight from above, with soft reflections on the "
+    "water and no hard shadows. The palette is muted, in slate grey, cool blue and cream, "
+    "with the yellow leaf as the one warm accent. The finish is quiet natural photography, "
+    "with the ordinary look of an unposed street photograph."
+)
+
+# Written from Qwen's own published guidance (the Qwen-Image-2.1 README and the QwenCloud
+# prompt guide, read on 2026-10-10), not from tests of this model's output here. Qwen reads
+# full sentences and favours long, specific, spatial descriptions; it draws any wording in
+# the picture very readily; and it has no negative prompt. Check these rules against real
+# frames and raise `version` when they change.
+QWEN_IMAGE_21: Final = ImagePromptProfile(
+    id="qwen-image-2.1",
+    version=1,
+    image_model="Qwen-Image-2.1",
+    prompt_rules="\n".join(
+        [
+            'Rules for "image_prompt", the prompt for the image model:',
+            "1. One paragraph of plain English prose, in complete sentences and the present "
+            "tense, 150 to 300 words. No lists, no headings, no labels and no piles of "
+            "comma-separated keywords. The model reads sentences, and does best with a long, "
+            "specific description.",
+            "2. Open with the kind of picture it is, taken from the style (for example 'A "
+            "quiet natural photograph of', 'A soft watercolour illustration of' or 'A "
+            "cinematic still of'), and go straight on to the subject and what it is doing at "
+            "this instant.",
+            "3. Then say, in this order: the setting; where things sit in the frame (the "
+            "foreground, the middle and the background; left, centre and right; the upper and "
+            "lower parts of the picture); the shot size and the angle (wide, medium or "
+            "close-up; eye level, low or high); the lens look (for example '35 mm look, "
+            "shallow depth of field'); the light (where it comes from, its direction and "
+            "quality); the colour palette; and last the style.",
+            "4. Keep everything the first frame description says, and add detail to it. Never "
+            'change it. With no first frame description ("none"), picture the instant just '
+            "before the motion in the video prompt begins. With no video prompt either, the "
+            "first frame description is the whole picture.",
+            "5. It is the instant just before the motion begins: the subject in place and "
+            "ready to move, never in the middle of the action and never after it.",
+            "6. When a subject or a place from the world appears in this scene, put its world "
+            "description into the prompt word for word, and never give it another look. Describe "
+            "anything that is not in the world in full.",
+            "7. Compose for the frame shape you are given, and use the whole frame: say what "
+            "fills each part of it, down to the edges. The picture is trimmed slightly to fit "
+            "the exact size, so keep the main subject and every important detail clear of the "
+            "outer edges.",
+            "8. Nothing is written in the picture: no text, captions, letters, numbers, signs "
+            "with words, labels, posters, screens, pages, logos, watermarks, borders or split "
+            "panels. The model draws any wording it is given, so do not name any of these, not "
+            "even to say there are none, and describe any surface that could carry words (a "
+            "wall, a sign, a screen, a book cover) as plain or blank. Describe only what is "
+            "there.",
+            "9. Describe only what is visible. The model has no negative prompt, and naming a "
+            "thing, even to rule it out ('no people', 'without fog'), can make it appear. Say "
+            "what fills the space instead.",
+            "10. Tell the story through places, objects, nature, animals, light and weather. A "
+            "person appears only if the descriptions put one there, and then incidentally "
+            "(hands at work, a distant figure, someone seen from behind). Never make a face "
+            "the subject, and never name a person.",
+            "11. Put the author's style into words as the last sentence. With none given, keep "
+            "the look the first frame description already has. For a realistic look, describe "
+            "ordinary, natural light and plain framing: glossy studio light and 'cinematic' "
+            "polish pull the picture away from a natural one.",
+            "12. Concrete nouns and plain adjectives. No quality tags (such as 8k, masterpiece "
+            "or highly detailed) and no camera brand names.",
+        ]
+    ),
+    # The same worked scene as the Seedream profile: the inputs do not depend on the model.
+    example_inputs=SEEDREAM_50_LITE.example_inputs,
+    example_answer=json.dumps({"image_prompt": _QWEN_EXAMPLE_PROMPT}, ensure_ascii=False),
+    min_words=150,
+    max_words=300,
+    rules=SEEDREAM_50_LITE.rules,
+)
+
 # The image adapter the job asks for.
-ACTIVE_IMAGE_PROFILE: Final = SEEDREAM_50_LITE
+ACTIVE_IMAGE_PROFILE: Final = QWEN_IMAGE_21

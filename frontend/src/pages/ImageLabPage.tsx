@@ -2,7 +2,14 @@ import { useState } from "react";
 import { Alert, Drawer, Loader, Paper, Stack, Text, Title } from "@mantine/core";
 
 import { describeError } from "../api/errors";
-import { useLabRun, useRunLab, type LabImage, type LabRun } from "../api/imageLab";
+import {
+  useLabRun,
+  useRunLab,
+  useRunQwenLab,
+  type LabEngine,
+  type LabImage,
+  type LabRun,
+} from "../api/imageLab";
 import { LabForm } from "../components/imageLab/LabForm";
 import { LabHistory } from "../components/imageLab/LabHistory";
 import { LabRunView } from "../components/imageLab/LabRunView";
@@ -11,21 +18,42 @@ import {
   DEFAULT_FORM,
   referenceFromImage,
   stateFromRun,
+  toQwenRequest,
   toRequest,
   type LabFormState,
 } from "../components/imageLab/labView";
 
 /**
- * A page for testing Bitdeer's image API by hand: text to image, image to image and an edit,
- * with references from an upload, an earlier result or a project's frames. Every run is kept
- * with its exact request and answer, so results can be compared later. It belongs to no
- * project and changes none.
+ * A page for testing two image models by hand and comparing what they make. Qwen-Image-2.1 runs
+ * on your GPU server (text to image, a few minutes, no price). Seedream is Bitdeer's paid API
+ * (text to image, image to image and an edit, with references from an upload, an earlier result
+ * or a project's frames). Every run is kept with its exact request and answer, so results can be
+ * compared later. It belongs to no project and changes none.
  */
 export function ImageLabPage() {
   const [form, setForm] = useState<LabFormState>(DEFAULT_FORM);
   const [openRunId, setOpenRunId] = useState<number | null>(null);
+  // The model of the run the Result panel shows, and the Qwen run it follows.
+  const [shown, setShown] = useState<LabEngine | null>(null);
+  const [qwenRunId, setQwenRunId] = useState<number | null>(null);
   const run = useRunLab();
+  const qwen = useRunQwenLab();
+  const qwenRun = useLabRun(qwenRunId);
   const opened = useLabRun(openRunId);
+
+  function start() {
+    if (form.engine === "qwen") {
+      setShown("qwen");
+      qwen.mutate(toQwenRequest(form), { onSuccess: (started) => setQwenRunId(started.id) });
+    } else {
+      setShown("seedream");
+      run.mutate(toRequest(form));
+    }
+  }
+
+  // The Qwen run is polled by id; until the first answer, the run the start returned stands in.
+  const result = shown === "qwen" ? (qwenRun.data ?? qwen.data) : run.data;
+  const startError = shown === "qwen" ? qwen.error : run.error;
 
   function addAsReference(image: LabImage) {
     setForm((current) => ({
@@ -45,9 +73,11 @@ export function ImageLabPage() {
       <Stack gap={4}>
         <Title order={2}>Image lab</Title>
         <Text size="sm" c="dimmed">
-          Try Bitdeer's image API by hand and compare what comes back. Each setting is sent as you
-          set it, and the answer is shown as it came, including a setting the API ignored or a call
-          it refused. It is a paid call (about $0.035 per image), and it belongs to no project.
+          Try an image model by hand and compare what comes back: Qwen-Image-2.1 on your GPU server
+          (the model that makes the first frames) or Seedream on Bitdeer. Each setting is sent as
+          you set it, and the answer is shown as it came, including a setting the model ignored or a
+          call it refused. Seedream is a paid call (about $0.035 per image). Nothing here belongs
+          to a project.
         </Text>
       </Stack>
 
@@ -55,22 +85,23 @@ export function ImageLabPage() {
         <LabForm
           state={form}
           onChange={setForm}
-          onRun={() => run.mutate(toRequest(form))}
+          onRun={start}
           running={run.isPending}
+          starting={qwen.isPending}
         />
       </Paper>
 
-      {run.isError && (
-        <Alert color="red" title="The run was not made">
-          {describeError(run.error)}
+      {startError !== null && (
+        <Alert color="red" title="The run was not started">
+          {describeError(startError)}
         </Alert>
       )}
 
-      {run.data && (
+      {result && (
         <Paper withBorder p="md" radius="md">
           <Stack gap="sm">
             <Title order={4}>Result</Title>
-            <LabRunView run={run.data} onUseAsReference={addAsReference} onLoad={loadIntoForm} />
+            <LabRunView run={result} onUseAsReference={addAsReference} onLoad={loadIntoForm} />
           </Stack>
         </Paper>
       )}

@@ -136,7 +136,7 @@ STEPS: Final[tuple[Step, ...]] = (
         "first_frames",
         "Make first frames",
         frames_service.FRAME_JOB,
-        "image",
+        "gpu",
         True,
         "a first frame",
     ),

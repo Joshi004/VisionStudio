@@ -31,13 +31,14 @@ ACTIVE_STATUSES = ("queued", "running")
 ERROR_MAX_CHARS = 4000
 
 # What the Activity page calls the owner of a job that belongs to no project (the Video lab,
-# or for a speech the Voice lab).
+# or for a speech the Voice lab, or for an image on the GPU server the Image lab).
 NO_PROJECT_NAME = "Video lab"
 VOICE_LAB_NAME = "Voice lab"
+IMAGE_LAB_NAME = "Image lab"
 
 # Job types that can be cancelled while they run, because the server has a cancel for them
 # (Phase 9). A transcription cannot yet: its cancel is not built.
-REMOTE_CANCEL_TYPES = frozenset({"generate_clip", "lab_video"})
+REMOTE_CANCEL_TYPES = frozenset({"generate_clip", "lab_video", "generate_frame", "lab_image"})
 
 # An automatic run does nothing itself: it only makes other jobs. Stopping it at any time just
 # stops it making more (the jobs it made that have not started are cancelled with it).
@@ -372,7 +373,7 @@ async def cancel_job(session: AsyncSession, job_id: int) -> Job:
     if not can_cancel(job):
         if job.status == "running" and job.phase in phases.FINISHING_PHASES:
             message = (
-                "The clip has been made and is being downloaded and checked, so it can no "
+                "The result has been made and is being downloaded and checked, so it can no "
                 "longer be cancelled. Wait a moment and refresh."
             )
         elif job.status == "running" and job.provider == "gpu":
@@ -473,7 +474,9 @@ def owner_name(job: Job, project_name: str | None) -> str:
     """The project's name, or the lab the job belongs to when it has no project."""
     if project_name:
         return project_name
-    return VOICE_LAB_NAME if job.type == "lab_voice" else NO_PROJECT_NAME
+    if job.type == "lab_voice":
+        return VOICE_LAB_NAME
+    return IMAGE_LAB_NAME if job.type == "lab_image" else NO_PROJECT_NAME
 
 
 def _rows_statement() -> Any:

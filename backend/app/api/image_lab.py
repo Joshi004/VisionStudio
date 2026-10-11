@@ -1,9 +1,13 @@
-"""The Image lab (Phase 13): manual tests of Bitdeer's image API.
+"""The Image lab (Phase 13 and 22): manual tests of two image models.
 
-`POST /api/lab/images/runs` makes one call (text to image, image to image, or an edit) and
-answers with the saved run when it is done. It takes 25 to 40 s, so it is one synchronous
-request, not a job, and nginx gives `/api/lab/` a longer time limit. It is a paid call and
-only ever starts from this request. See `services/image_lab.py`.
+`POST /api/lab/images/runs` makes one call to Bitdeer's Seedream API (text to image, image to
+image, or an edit) and answers with the saved run when it is done. It takes 25 to 40 s, so it is
+one synchronous request, not a job, and nginx gives `/api/lab/` a longer time limit. It is a paid
+call and only ever starts from this request.
+
+`POST /api/lab/images/qwen-runs` starts one run of Qwen-Image-2.1 on the GPU server and answers
+at once (HTTP 202) with the run, which is `running`: it takes minutes, so it is a `lab_image` job
+and the page polls for it. See `services/image_lab.py`.
 
 The other routes read the database only: the history of runs, one run with its request and
 raw answer, the lab's own images (uploads and results), and a project's frames, so they can
@@ -21,10 +25,12 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 
 from app.api.errors import ErrorResponse
 from app.api.projects import content_length, load_project, require_octet_stream
-from app.db.models import LabImage, LabRun
+from app.db.models import Job, LabImage, LabRun
 from app.db.session import SessionDep
+from app.jobs import dispatcher
+from app.providers import image_generator
 from app.services import frame_images, image_lab
-from app.services.image_lab import LabForm, LabInputError, Ref
+from app.services.image_lab import LabForm, LabInputError, QwenLabForm, Ref
 from app.services.storage import media_url
 
 _logger = logging.getLogger(__name__)
@@ -80,6 +86,21 @@ class LabRunRequest(BaseModel):
     references: list[LabReferenceIn] = Field(default_factory=list, max_length=100)
 
 
+class QwenLabRunRequest(BaseModel):
+    """The form for a run on the GPU server's Qwen-Image-2.1: text to image only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: StrictStr
+    # quality: the base model (40 steps). fast: the Turbo model (8 steps).
+    mode: Literal["quality", "fast"] = "quality"
+    aspect_ratio: Literal["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"] = "9:16"
+    # Null: a random seed.
+    seed: StrictInt | None = None
+    # Quality mode only. Null: the server's own number of steps.
+    steps: StrictInt | None = None
+
+
 class LabImageOut(BaseModel):
     id: int
     created_at: datetime
@@ -106,12 +127,18 @@ class LabReferenceOut(BaseModel):
 class LabRunOut(BaseModel):
     id: int
     created_at: datetime
+    # "seedream": Bitdeer's API, one synchronous call. "qwen": Qwen-Image-2.1, a GPU server job.
+    engine: Literal["seedream", "qwen"]
     mode: LabMode
     endpoint: str
     model: str
     prompt: str
     params: dict[str, Any]
-    status: Literal["succeeded", "failed"]
+    # "running" only for a run on the GPU server that is still going.
+    status: Literal["running", "succeeded", "failed"]
+    # The job that makes a run on the GPU server, and where it is ("queued on cluster"...).
+    job_id: int | None
+    phase: str | None
     http_status: int | None
     error: str | None
     seconds: float | None
@@ -171,10 +198,30 @@ def _image_out(image: LabImage) -> LabImageOut:
     )
 
 
+def _status_of(
+    run: LabRun, job: Job | None
+) -> tuple[Literal["running", "succeeded", "failed"], str | None]:
+    """The run's status and error as the page shows them. A run on the GPU server is `running`
+    in its row until its job finishes it, so a job that failed or was cancelled is read here.
+    """
+    if run.status == "succeeded":
+        return "succeeded", run.error
+    if run.status == "failed":
+        return "failed", run.error
+    if job is None:
+        return "failed", "The job that was making this image no longer exists."
+    if job.status == "failed":
+        return "failed", job.error or "The job failed."
+    if job.status == "cancelled":
+        return "failed", "Cancelled before the image was made."
+    return "running", None
+
+
 def _run_out(
     run: LabRun,
     images: list[LabImage],
     details: dict[tuple[str, int], image_lab.ReferenceDetail],
+    job: Job | None,
     *,
     with_payloads: bool,
 ) -> LabRunOut:
@@ -192,17 +239,21 @@ def _run_out(
                 height=detail.height if detail is not None else None,
             )
         )
+    status_text, error = _status_of(run, job)
     return LabRunOut(
         id=run.id,
         created_at=run.created_at,
+        engine="qwen" if run.endpoint == image_generator.GENERATE_PATH else "seedream",
         mode=run.mode,  # type: ignore[arg-type]  # the database CHECK keeps this to the modes
         endpoint=run.endpoint,
         model=run.model,
         prompt=run.prompt,
         params=run.params if isinstance(run.params, dict) else {},
-        status="succeeded" if run.status == "succeeded" else "failed",
+        status=status_text,
+        job_id=run.job_id,
+        phase=job.phase if job is not None and status_text == "running" else None,
         http_status=run.http_status,
-        error=run.error,
+        error=error,
         seconds=run.seconds,
         request_bytes=run.request_bytes,
         usage=run.usage if isinstance(run.usage, dict) else None,
@@ -221,8 +272,12 @@ async def _runs_out(
 ) -> list[LabRunOut]:
     images = await image_lab.images_by_run(session, [run.id for run in runs])
     details = await image_lab.reference_details(session, runs)
+    jobs = await image_lab.jobs_for_runs(session, runs)
     return [
-        _run_out(run, images.get(run.id, []), details, with_payloads=with_payloads) for run in runs
+        _run_out(
+            run, images.get(run.id, []), details, jobs.get(run.id), with_payloads=with_payloads
+        )
+        for run in runs
     ]
 
 
@@ -272,6 +327,39 @@ async def create_run(body: LabRunRequest, session: SessionDep) -> LabRunOut:
     run = await image_lab.get_run(session, run_id)
     if run is None:  # cannot happen: runs are never deleted
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "The run was not saved.")
+    return (await _runs_out(session, [run], with_payloads=True))[0]
+
+
+@router.post(
+    "/lab/images/qwen-runs",
+    response_model=LabRunOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        422: {
+            "model": ErrorResponse,
+            "description": "The form is not acceptable (an empty prompt, steps in fast mode, a "
+            "seed out of range), or the approved GPU API has no image endpoint yet.",
+        }
+    },
+)
+async def create_qwen_run(body: QwenLabRunRequest, session: SessionDep) -> LabRunOut:
+    """Starts one run of Qwen-Image-2.1 on the GPU server and answers at once with the run,
+    which is `running`. It takes minutes (the server loads the model for each image), so it is a
+    job: poll `GET /api/lab/images/runs/{id}` until the status is `succeeded` or `failed`. Each
+    click is a run of its own.
+    """
+    form = QwenLabForm(
+        prompt=body.prompt,
+        mode=body.mode,
+        aspect_ratio=body.aspect_ratio,
+        seed=body.seed,
+        steps=body.steps,
+    )
+    try:
+        run, _job = await image_lab.create_qwen_run(session, form)
+    except LabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    dispatcher.nudge()
     return (await _runs_out(session, [run], with_payloads=True))[0]
 
 

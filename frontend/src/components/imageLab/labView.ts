@@ -1,11 +1,13 @@
 import {
   MAX_REFERENCES,
   PRICE_PER_IMAGE_USD,
+  type LabEngine,
   type LabImage,
   type LabMode,
   type LabRun,
   type LabRunRequest,
   type ProjectFrame,
+  type QwenLabRunRequest,
 } from "../../api/imageLab";
 
 /** An image that will be sent as a reference, with what is needed to show it. */
@@ -19,7 +21,18 @@ export type ReferenceItem = {
   label: string;
 };
 
+export type QwenMode = QwenLabRunRequest["mode"];
+export type QwenShape = QwenLabRunRequest["aspect_ratio"];
+
 export type LabFormState = {
+  /** Which model the form is for. The fields below belong to one or the other. */
+  engine: LabEngine;
+  // --- Qwen-Image-2.1 (the GPU server): text to image only ---
+  qwenMode: QwenMode;
+  aspectRatio: QwenShape;
+  /** Quality mode only. Empty: the server's own number of steps. */
+  steps: string;
+  // --- Seedream (Bitdeer) ---
   mode: LabMode;
   model: string;
   prompt: string;
@@ -27,7 +40,7 @@ export type LabFormState = {
   sizePreset: string;
   customSize: string;
   watermark: "off" | "on" | "unset";
-  /** Empty: not sent. */
+  /** Empty: not sent to Seedream, a random one for Qwen. */
   seed: string;
   /** Empty: no image set. */
   setMax: string;
@@ -65,7 +78,35 @@ export const SIZE_PRESETS = [
 
 export const DEFAULT_MODEL = "seedream-5.0-lite";
 
+export const ENGINE_LABELS: Record<LabEngine, string> = {
+  qwen: "Qwen-Image-2.1 (your GPU server)",
+  seedream: "Seedream (Bitdeer)",
+};
+
+export const QWEN_MODE_LABELS: Record<QwenMode, string> = {
+  quality: "Quality (base model, 40 steps)",
+  fast: "Fast (Turbo model, 8 steps)",
+};
+
+export const QWEN_MODE_NOTE =
+  "Quality and fast are two different models, so the same seed gives a different picture in each.";
+
+/** The seven shapes Qwen-Image-2.1 makes, at its native 2K size. */
+export const QWEN_SHAPES: { value: QwenShape; label: string }[] = [
+  { value: "9:16", label: "9:16 portrait, 1536 x 2752" },
+  { value: "2:3", label: "2:3 portrait, 1696 x 2528" },
+  { value: "3:4", label: "3:4 portrait, 1792 x 2400" },
+  { value: "1:1", label: "1:1 square, 2048 x 2048" },
+  { value: "4:3", label: "4:3 landscape, 2400 x 1792" },
+  { value: "3:2", label: "3:2 landscape, 2528 x 1696" },
+  { value: "16:9", label: "16:9 landscape, 2752 x 1536" },
+];
+
 export const DEFAULT_FORM: LabFormState = {
+  engine: "qwen",
+  qwenMode: "quality",
+  aspectRatio: "9:16",
+  steps: "",
   mode: "text_to_image",
   model: DEFAULT_MODEL,
   prompt: "",
@@ -116,6 +157,9 @@ export function blockedReason(state: LabFormState): string | null {
   if (state.prompt.trim() === "") {
     return "Write a prompt.";
   }
+  if (state.engine === "qwen") {
+    return qwenBlockedReason(state);
+  }
   if (state.model.trim() === "") {
     return "Enter a model.";
   }
@@ -147,6 +191,25 @@ export function blockedReason(state: LabFormState): string | null {
   return null;
 }
 
+function qwenBlockedReason(state: LabFormState): string | null {
+  if (state.prompt.length > 8000) {
+    return "The prompt must be at most 8,000 characters.";
+  }
+  if (state.seed.trim() !== "") {
+    const seed = wholeNumber(state.seed);
+    if (seed === null || seed < 0 || seed > 2147483647) {
+      return "The seed must be a whole number from 0 to 2147483647.";
+    }
+  }
+  if (state.qwenMode === "quality" && state.steps.trim() !== "") {
+    const steps = wholeNumber(state.steps);
+    if (steps === null || steps < 1 || steps > 100) {
+      return "The number of steps must be from 1 to 100.";
+    }
+  }
+  return null;
+}
+
 /** The images a run is expected to make: the image set's maximum, or one. */
 export function expectedImages(state: LabFormState): number {
   return wholeNumber(state.setMax) ?? 1;
@@ -161,6 +224,17 @@ export function costText(state: LabFormState): string {
   const images = expectedImages(state);
   const total = images * PRICE_PER_IMAGE_USD;
   return images > 1 ? `up to ${money(total)}` : `about ${money(total)}`;
+}
+
+/** The form as the request for Qwen-Image-2.1. Steps are sent in quality mode only. */
+export function toQwenRequest(state: LabFormState): QwenLabRunRequest {
+  return {
+    prompt: state.prompt,
+    mode: state.qwenMode,
+    aspect_ratio: state.aspectRatio,
+    seed: wholeNumber(state.seed),
+    steps: state.qwenMode === "quality" ? wholeNumber(state.steps) : null,
+  };
 }
 
 /** The form as the request the server takes. References are sent only in the modes that use them. */
@@ -244,11 +318,25 @@ function text(value: unknown): string {
 /** What a past run held, as form state, so it can be run again or varied. */
 export function stateFromRun(run: LabRun): LabFormState {
   const params = run.params;
+  if (run.engine === "qwen") {
+    const shape = QWEN_SHAPES.find((option) => option.value === params.aspect_ratio);
+    return {
+      ...DEFAULT_FORM,
+      engine: "qwen",
+      qwenMode: params.qwen_mode === "fast" ? "fast" : "quality",
+      aspectRatio: shape?.value ?? DEFAULT_FORM.aspectRatio,
+      steps: typeof params.steps === "number" ? String(params.steps) : "",
+      prompt: run.prompt,
+      seed: typeof params.seed === "number" ? String(params.seed) : "",
+    };
+  }
   const size = text(params.size);
   const preset = SIZE_PRESETS.some((option) => option.value === size && option.value !== "custom");
   const extra = params.extra;
   const hasExtra = typeof extra === "object" && extra !== null && Object.keys(extra).length > 0;
   return {
+    ...DEFAULT_FORM,
+    engine: "seedream",
     mode: run.mode,
     model: run.model,
     prompt: run.prompt,
@@ -284,6 +372,17 @@ export function stateFromRun(run: LabRun): LabFormState {
 /** "seed 42, watermark off, 1632x2880": the settings of a run on one line. */
 export function paramsLine(run: LabRun): string {
   const params = run.params;
+  if (run.engine === "qwen") {
+    const mode = params.qwen_mode === "fast" ? "fast" : "quality";
+    const parts = [`${text(params.aspect_ratio)} (${sizeLabel(params.expected_size)})`, mode];
+    if (typeof params.seed === "number") {
+      parts.push(`seed ${params.seed}`);
+    }
+    if (typeof params.steps === "number") {
+      parts.push(`${params.steps} steps`);
+    }
+    return parts.filter((part) => part !== "").join(" · ");
+  }
   const parts: string[] = [text(params.size)];
   parts.push(
     params.watermark === true
@@ -303,4 +402,32 @@ export function paramsLine(run: LabRun): string {
 
 export function costLine(run: LabRun): string | null {
   return run.estimated_cost_usd === null ? null : `about ${money(run.estimated_cost_usd)} (estimate)`;
+}
+
+function sizeLabel(size: unknown): string {
+  if (typeof size === "object" && size !== null) {
+    const { width, height } = size as { width?: unknown; height?: unknown };
+    if (typeof width === "number" && typeof height === "number") {
+      return `${width} x ${height}`;
+    }
+  }
+  return "";
+}
+
+/** "Qwen-Image-2.1, quality" or "Seedream, text to image": which model a run used and how. */
+export function engineText(run: LabRun): string {
+  if (run.engine === "qwen") {
+    return `Qwen-Image-2.1, ${run.params.qwen_mode === "fast" ? "fast" : "quality"}`;
+  }
+  return `Seedream, ${MODE_LABELS[run.mode].toLowerCase()}`;
+}
+
+/** What a history row shows as the size: Seedream's size, or Qwen's shape. */
+export function sizeText(run: LabRun): string {
+  const value = run.engine === "qwen" ? run.params.aspect_ratio : run.params.size;
+  return typeof value === "string" ? value : "";
+}
+
+export function runStatusColor(status: LabRun["status"]): string {
+  return status === "succeeded" ? "green" : status === "running" ? "blue" : "red";
 }

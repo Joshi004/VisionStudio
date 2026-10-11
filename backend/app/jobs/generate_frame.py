@@ -1,75 +1,74 @@
-"""The `generate_frame` job: one image from the image model for one scene's first frame
-(ANALYSIS.md Section 4.2 and 6.2; Phase 17).
+"""The `generate_frame` job: one first frame for one scene, made by Qwen-Image-2.1 on the GPU
+server (ANALYSIS.md Section 4.2 and 6.2; Phase 17).
 
-It is a scene job (`job.scene_id`) and a paid job, so the rules of the other paid jobs hold:
+It is a remote job, like `generate_clip`. The steps every Qwen image job shares (submit, poll,
+download, the failure rules) are `RemoteImageHandler`'s (`jobs/remote_image.py`). This module is
+what is particular to a scene's first frame:
 
-- It only starts from a click (`POST .../generate-first-frames` or `.../generate-first-frame`).
-- **One call, never retried, never cached.** Every image costs money and comes out different
-  (the Phase 13 rule), so there is no second attempt and no answer cache. A failed call is
-  shown, and the user decides whether to pay again.
-- Everything that can be checked for free is checked before the call: the blocks, the
-  manual-first rule (an uploaded frame is only replaced when the click confirmed it), and the
-  size. The exact request is saved on the job before the call.
-- The answer is saved on the job the moment it arrives, and the raw image is stored as an asset
-  before anything is done to it. A paid image is never lost to a later failure.
-- A restart never re-runs it (`never_rerun`): the dispatcher fails it with a message. A raw
-  image that was already stored stays, and is named in `job.output`.
+- `start`: check that a frame may be made, build the request (the first time only) and submit.
+- `store_image`: store the PNG as it came, fit it to the project's generation size and, if the
+  scene still allows it, make it the scene's first frame.
 
-What it makes (`services/frame_geometry.py`): the image model is asked for 1.5 times the
-generation size plus a band, because it stamps a label in the bottom-right corner. The band is
-cut off the bottom and the rest is shrunk by 2/3 to exactly the generation size
-(`services/frame_images.crop_bottom_and_fit`). **The crop is measured at the size asked for, so
-it is never applied to an image of another size**: the job fails instead, and keeps the raw
-image.
+**It only starts from a click** (`POST .../generate-first-frames` or `.../generate-first-frame`),
+and everything that can be checked for free is checked before anything is sent: the blocks, the
+manual-first rule (an uploaded frame is only replaced when the click confirmed it) and the
+approved GPU API (it must have the image endpoint).
+
+**The request is built once.** The first `start` stores it in `job.input`: the prompt, the mode
+(Settings, "Image mode"), the nearest of the model's seven shapes and a random seed. Every later
+attempt (after a pre-emption, an expired result or a server that could not be reached) sends the
+same stored request, because "the correct response to a pre-emption failure is to resubmit the
+exact same request unchanged" (the server's guide). A new seed comes only with a new job.
+
+**The server may keep a result for one download only** (it says so in its guide for version 0.9.0).
+So the raw image is stored as an asset before anything else is done with it, and a later failure
+keeps that asset and names it in the error.
+
+What it makes: Qwen-Image-2.1 answers in one of seven shapes at its native 2K size
+(`services/image_models.ASPECT_SIZES`), which are not the project's generation size. The nearest
+shape is asked for, and `frame_images.render_frame_png` scales it until it covers the generation
+size and cuts the overflow evenly from both sides. That is a few percent at most for the
+orientation defaults (1088 x 1920 from 1536 x 2752 loses about 1.5% of the height).
 
 The frame becomes the scene's first frame only if the scene's first frame is still the one the
-job started from and its cut is unchanged (`services/first_frames.attach_block`). Otherwise
-the frame is kept, listed among the scene's earlier frames, and the job still succeeds: the
-image is paid for and usable.
+job started from and its cut is unchanged (`services/first_frames.attach_block`). Otherwise the
+frame is kept, listed among the scene's earlier frames, and the job still succeeds.
 
-It is a local-style job: everything happens in `start`. There is no provider job id. Logs hold
-ids, sizes, seconds and usage, never the prompt.
+Logs hold ids, sizes and phases, never the prompt.
 """
 
 from __future__ import annotations
 
 import logging
-import time
+import secrets
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import outbound
 from app.core import settings as settings_service
-from app.core.urls import docker_mapped
-from app.db.models import Asset, Project, Scene
+from app.db.models import Asset, Job, Project, Scene
 from app.db.session import SessionLocal
 from app.jobs import phases, store
-from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
-from app.providers import image_api
+from app.jobs.generate_clip import GPU_URL_KEY, PARTITION_KEY
+from app.jobs.remote_image import RemoteImageHandler
+from app.providers import contract_guard, image_generator
+from app.services import api_contract, frame_images, image_models, scene_inputs
 from app.services import first_frames as frames_service
-from app.services import frame_images, scene_inputs
 from app.services import image_prompts as prompts_service
 from app.services import scenes as scenes_service
 from app.services.assets import add_asset
 from app.services.descriptions import DRAFT_JOB
-from app.services.frame_geometry import (
-    BOX_TOP_PER_10000,
-    CROP_MARGIN_PX,
-    GEOMETRY_VERSION,
-    RULE,
-    FrameGeometry,
-    frame_geometry,
-)
 from app.services.frame_images import FrameRejected
-from app.services.storage import StorageError, StoredFile, get_storage
+from app.services.storage import StorageError, StoredFile, TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = frames_service.FRAME_JOB
-IMAGE_MODEL_KEY: Final = "image_model"
+IMAGE_MODE_KEY: Final = "image_mode"
 MAX_PARALLEL_KEY: Final = "max_parallel_image_generations"
 
 _UPLOAD_ADDED = (
@@ -80,14 +79,27 @@ _UPLOAD_ADDED = (
 
 @dataclass
 class _Read:
-    """What `start` reads before the call. `block` is why no image may be made, if any."""
+    """What `start` reads before it submits. `block` is why no image may be made, if any."""
 
     job_input: dict[str, Any]
     project: Project | None
     scene: Scene | None
     block: str | None
     base_url: str
-    model: str
+    partition: str
+    mode: image_models.ImageMode
+    # The approved OpenAPI document, or None when none is recorded.
+    spec: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class _Plan:
+    """What a start submits: the request, and the job's input as stored (which a submission
+    extends).
+    """
+
+    request: dict[str, Any]
+    recorded: dict[str, Any]
 
 
 def _scene_record(scene: Scene) -> dict[str, Any]:
@@ -104,28 +116,15 @@ async def _one_chunk(data: bytes) -> AsyncIterator[bytes]:
     yield data
 
 
-def _geometry_record(geometry: FrameGeometry) -> dict[str, Any]:
-    return {
-        "rule": RULE,
-        "version": GEOMETRY_VERSION,
-        "gen_width": geometry.gen_width,
-        "gen_height": geometry.gen_height,
-        "request_width": geometry.request_width,
-        "request_height": geometry.request_height,
-        "crop_bottom": geometry.crop_bottom,
-    }
-
-
-class GenerateFrameHandler(JobHandler):
+class GenerateFrameHandler(RemoteImageHandler):
     job_type = JOB_TYPE
-    provider = "image"
-    restart_rule = "never_rerun"
 
     async def concurrency_limit(self, session: AsyncSession) -> int:
         return await settings_service.get_int(session, MAX_PARALLEL_KEY)
 
+    # --- start: check, prepare (once), submit ------------------------------------------
+
     async def start(self, job_id: int) -> None:
-        started = time.monotonic()
         read = await self._read(job_id)
         if read is None:
             return
@@ -135,180 +134,75 @@ class GenerateFrameHandler(JobHandler):
         if read.block is not None:
             await self._fail(job_id, read.block)
             return
-        project, scene = read.project, read.scene
 
+        plan = self._stored_plan(read.job_input)
+        if plan is None:
+            plan = await self._prepare(job_id, read, read.project, read.scene)
+            if plan is None:
+                return  # the job was failed, or cancelled, in there
+        await self.submit(job_id, read.base_url, plan.request, plan.recorded)
+
+    @staticmethod
+    def _stored_plan(job_input: dict[str, Any]) -> _Plan | None:
+        """The plan of an earlier attempt, read back from the job's input. None the first time."""
+        request = job_input.get("request")
+        if (
+            not isinstance(request, dict)
+            or job_input.get("endpoint") != image_generator.GENERATE_PATH
+            or not isinstance(job_input.get("scene_sent"), dict)
+        ):
+            return None
+        return _Plan(request=request, recorded=job_input)
+
+    async def _prepare(
+        self, job_id: int, read: _Read, project: Project, scene: Scene
+    ) -> _Plan | None:
+        """Works out the request and stores it on the job, before anything is sent. Runs on the
+        first attempt only. Fails the job (returns None) when the approved GPU API has no image
+        endpoint, or the request would be refused.
+        """
         await self._phase(job_id, phases.PREPARING_IMAGE_REQUEST)
+        prompt = (scene.image_prompt or "").strip()
         try:
-            geometry = frame_geometry(project.gen_width, project.gen_height)
+            image_generator.check_endpoint(read.spec)
+            aspect_ratio = image_models.pick_aspect_ratio(project.gen_width, project.gen_height)
+            request = image_generator.build_request(
+                prompt=prompt,
+                mode=read.mode,
+                seed=secrets.randbelow(image_models.SEED_LIMIT),
+                aspect_ratio=aspect_ratio,
+                partition=read.partition,
+            )
         except ValueError as exc:
             await self._fail(job_id, str(exc))
-            return
-        prompt = (scene.image_prompt or "").strip()
-        body = {
-            "model": read.model,
-            "prompt": prompt,
-            "size": geometry.request_size,
-            "response_format": "b64_json",
-        }
-        scene_sent = _scene_record(scene)
-        replacing_asset_id = scene.first_frame_asset_id
-        job_input = {
+            return None
+
+        expected_width, expected_height = image_models.ASPECT_SIZES[aspect_ratio]
+        recorded: dict[str, Any] = {
             **read.job_input,
-            "scene_sent": scene_sent,
+            "scene_sent": _scene_record(scene),
             "image_prompt": prompt,
             "image_prompt_source": scene.image_prompt_source,
             "image_prompt_job_id": scene.image_prompt_job_id,
-            "replacing_asset_id": replacing_asset_id,
-            "geometry": _geometry_record(geometry),
-            "server_url": docker_mapped(read.base_url),
-            "endpoint": image_api.GENERATIONS_PATH,
-            "request": body,
+            "replacing_asset_id": scene.first_frame_asset_id,
+            "frame_size": {"width": project.gen_width, "height": project.gen_height},
+            "image_model": image_models.MODEL_ID,
+            "image_mode": read.mode,
+            "aspect_ratio": aspect_ratio,
+            "expected_size": {"width": expected_width, "height": expected_height},
+            "endpoint": image_generator.GENERATE_PATH,
+            "request": request,
         }
         async with SessionLocal() as session:
-            if not await store.update_input(session, job_id, job_input):
-                return  # cancelled while preparing: nothing was paid for
-
-        # The one paid call. No transaction is open, and nothing here retries it.
-        await self._phase(job_id, phases.GENERATING_IMAGE)
-        result = await image_api.generate(read.base_url, body)
-        output: dict[str, Any] = {
-            "http_status": result.http_status,
-            "seconds": round(result.seconds, 1),
-            "usage": result.usage,
-            "response": result.response,
-            "error": result.error,
-            "raw_asset_id": None,
-            "returned_size": None,
-        }
-        await self._record(job_id, output)
-        if not result.ok:
-            reason = (result.error or "No explanation was given.").rstrip()
-            if not reason.endswith((".", "!", "?")):
-                reason += "."
-            await self._fail(
-                job_id,
-                f"The image could not be made: {reason} It was not retried automatically.",
-            )
-            return
-        _logger.info(
-            "job %d: image answered: http=%s %.1f s usage=%s",
-            job_id,
-            result.http_status,
-            result.seconds,
-            result.usage,
-        )
-
-        # The raw image first, exactly as it came: it is what was paid for.
-        await self._phase(job_id, phases.SAVING_IMAGE)
-        storage = get_storage()
-        image_bytes = result.images[0]
-        try:
-            temp = await storage.receive(_one_chunk(image_bytes), max_bytes=len(image_bytes))
-            try:
-                info = await frame_images.run_pillow(frame_images.inspect_image, temp.path)
-                raw_stored = await storage.save(temp, project.id, info.ext)
-            except BaseException:
-                storage.discard(temp)
-                raise
-        except FrameRejected as exc:
-            await self._fail(job_id, f"The image could not be used: {exc.message}")
-            return
-        except StorageError as exc:
-            await self._fail(job_id, f"The image could not be stored: {exc}")
-            return
-
-        raw_provenance = {
-            "role": "seedream_raw",
-            "provider": "bitdeer",
-            "model": read.model,
-            "job_id": job_id,
-            "scene_id": scene.id,
-            "prompt": prompt,
-            "requested_size": {"width": geometry.request_width, "height": geometry.request_height},
-            "usage": result.usage,
-            "seconds": round(result.seconds, 1),
-        }
-        async with SessionLocal() as session:
-            try:
-                raw = await add_asset(
-                    session,
-                    project_id=project.id,
-                    kind="frame",
-                    stored=raw_stored,
-                    mime=info.mime,
-                    size_bytes=temp.size_bytes,
-                    sha256=temp.sha256,
-                    source="ai",
-                    width=info.width,
-                    height=info.height,
-                    provenance=raw_provenance,
-                )
-                await session.commit()
-            except BaseException:
-                # Stored files are never deleted, so this leaves an unreferenced file behind.
-                _logger.warning(
-                    "job %d: image stored but not recorded: %s", job_id, raw_stored.relative_path
-                )
-                raise
-        output["raw_asset_id"] = raw.id
-        output["returned_size"] = {"width": info.width, "height": info.height}
-        await self._record(job_id, output)
-
-        if (info.width, info.height) != (geometry.request_width, geometry.request_height):
-            await self._fail(
-                job_id,
-                f"The image model returned {info.width} x {info.height}, not the "
-                f"{geometry.request_width} x {geometry.request_height} asked for. The crop is "
-                f"measured at the size asked for, so no frame was made. The image is kept as "
-                f"asset {raw.id}.",
-            )
-            return
-
-        await self._phase(job_id, phases.CROPPING_FRAME)
-        try:
-            png = await frame_images.run_pillow(
-                frame_images.crop_bottom_and_fit,
-                raw_stored.path,
-                geometry.crop_bottom,
-                geometry.gen_width,
-                geometry.gen_height,
-            )
-            frame_temp = await storage.receive(_one_chunk(png), max_bytes=len(png))
-            try:
-                frame_stored = await storage.save(frame_temp, project.id, "png")
-            except BaseException:
-                storage.discard(frame_temp)
-                raise
-        except (ValueError, OSError, StorageError) as exc:
-            await self._fail(
-                job_id,
-                f"The frame could not be made from the image: {exc} The image is kept as "
-                f"asset {raw.id}.",
-            )
-            return
-
-        await self._save(
-            job_id,
-            project=project,
-            scene_sent=scene_sent,
-            replacing_asset_id=replacing_asset_id,
-            geometry=geometry,
-            prompt=prompt,
-            scene=scene,
-            read=read,
-            raw=raw,
-            result=result,
-            frame_stored=frame_stored,
-            frame_size=(frame_temp.size_bytes, frame_temp.sha256),
-            output=output,
-            started=started,
-        )
+            if not await store.update_input(session, job_id, recorded):
+                return None  # cancelled while preparing: nothing was sent
+        return _Plan(request=request, recorded=recorded)
 
     # --- Reading ----------------------------------------------------------------------
 
     async def _read(self, job_id: int) -> _Read | None:
         """Everything `start` needs, in one short read. None when there is nothing to run. The
-        reasons an image may not be made are worked out here, before any call.
+        reasons an image may not be made are worked out here, before anything is sent.
         """
         async with SessionLocal() as session:
             job = await store.get_job(session, job_id)
@@ -353,68 +247,197 @@ class GenerateFrameHandler(JobHandler):
                     )
                     if not confirmed:
                         block = _UPLOAD_ADDED
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, IMAGE_MODEL_KEY)
+            base_url = await settings_service.get_str(session, GPU_URL_KEY)
+            partition = await settings_service.get_str(session, PARTITION_KEY)
+            mode = image_models.resolve_mode(
+                await settings_service.get_str(session, IMAGE_MODE_KEY)
+            )
+            bodies = await contract_guard.approved_bodies(session)
             await session.commit()
+        spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
         return _Read(
             job_input=job_input,
             project=project,
             scene=scene,
             block=block,
             base_url=base_url,
-            model=model,
+            partition=partition,
+            mode=mode,
+            spec=spec,
         )
+
+    async def store_image(
+        self, job: Job, base_url: str, result: outbound.DownloadResult, dest: Path
+    ) -> None:
+        """The image is downloaded. Stores it exactly as it came, then makes the frame from it.
+
+        The raw image is stored and recorded first, and the job's output names it, so a
+        failure in any later step keeps it.
+        """
+        recorded = job.input if isinstance(job.input, dict) else {}
+        request = recorded.get("request") if isinstance(recorded.get("request"), dict) else {}
+        async with SessionLocal() as session:
+            project = await session.get(Project, job.project_id) if job.project_id else None
+            scene = await session.get(Scene, job.scene_id) if job.scene_id else None
+            await session.commit()
+        if project is None or scene is None:
+            await self._fail_and_purge(
+                job, base_url, "The project or the scene no longer exists, so no frame was made."
+            )
+            return
+
+        storage = get_storage()
+        output: dict[str, Any] = dict(job.output) if isinstance(job.output, dict) else {}
+        try:
+            info = await frame_images.run_pillow(frame_images.inspect_image, dest)
+        except FrameRejected as exc:
+            await self._fail_and_purge(job, base_url, f"The image could not be used: {exc.message}")
+            return
+
+        await self._phase(job.id, phases.SAVING_IMAGE)
+        remote = output.get("remote") if isinstance(output.get("remote"), dict) else None
+        raw_provenance = {
+            "role": "image_raw",
+            "provider": "gpu_server",
+            "model": recorded.get("image_model") or image_models.MODEL_ID,
+            "mode": request.get("mode"),
+            "seed": request.get("seed"),
+            "aspect_ratio": request.get("aspect_ratio"),
+            "endpoint": recorded.get("endpoint"),
+            "pipeline": remote.get("pipeline") if remote else None,
+            "server_url": recorded.get("server_url"),
+            "provider_job_id": job.provider_job_id,
+            "job_id": job.id,
+            "scene_id": scene.id,
+            "prompt": recorded.get("image_prompt"),
+            "expected_size": recorded.get("expected_size"),
+        }
+        try:
+            temp = TempFile(path=dest, size_bytes=result.size_bytes, sha256=result.sha256)
+            raw_stored = await storage.save(temp, project.id, info.ext)
+        except StorageError as exc:
+            await self._fail_and_purge(job, base_url, f"The image could not be stored: {exc}")
+            return
+        async with SessionLocal() as session:
+            try:
+                raw = await add_asset(
+                    session,
+                    project_id=project.id,
+                    kind="frame",
+                    stored=raw_stored,
+                    mime=info.mime,
+                    size_bytes=result.size_bytes,
+                    sha256=result.sha256,
+                    source="ai",
+                    width=info.width,
+                    height=info.height,
+                    provenance=raw_provenance,
+                )
+                await session.commit()
+            except BaseException:
+                # Stored files are never deleted, so this leaves an unreferenced file behind.
+                _logger.warning(
+                    "job %d: image stored but not recorded: %s", job.id, raw_stored.relative_path
+                )
+                raise
+        output["raw_asset_id"] = raw.id
+        output["returned_size"] = {"width": info.width, "height": info.height}
+        async with SessionLocal() as session:
+            await store.record_output(session, job.id, dict(output))
+
+        frame_size = (
+            recorded.get("frame_size") if isinstance(recorded.get("frame_size"), dict) else {}
+        )
+        gen_width = _whole(frame_size.get("width")) or project.gen_width
+        gen_height = _whole(frame_size.get("height")) or project.gen_height
+
+        await self._phase(job.id, phases.FITTING_FRAME)
+        try:
+            png = await frame_images.run_pillow(
+                frame_images.render_frame_png, raw_stored.path, gen_width, gen_height
+            )
+            frame_temp = await storage.receive(_one_chunk(png), max_bytes=len(png))
+            try:
+                frame_stored = await storage.save(frame_temp, project.id, "png")
+            except BaseException:
+                storage.discard(frame_temp)
+                raise
+        except (ValueError, OSError, StorageError) as exc:
+            await self._fail_and_purge(
+                job,
+                base_url,
+                f"The frame could not be made from the image: {exc} The image is kept as "
+                f"asset {raw.id}.",
+            )
+            return
+
+        saved = await self._save(
+            job,
+            project=project,
+            scene=scene,
+            recorded=recorded,
+            gen_size=(gen_width, gen_height),
+            raw=raw,
+            frame_stored=frame_stored,
+            frame_size=(frame_temp.size_bytes, frame_temp.sha256),
+            output=output,
+        )
+        if saved:
+            # Best effort: a failure here is recorded and never fails the frame.
+            purge = await self._purge(base_url, job.provider_job_id)
+            async with SessionLocal() as session:
+                await store.merge_output(session, job.id, {"purge": purge})
 
     # --- Saving the frame -----------------------------------------------------------------
 
     async def _save(
         self,
-        job_id: int,
+        job: Job,
         *,
         project: Project,
         scene: Scene,
-        scene_sent: dict[str, Any],
-        replacing_asset_id: int | None,
-        geometry: FrameGeometry,
-        prompt: str,
-        read: _Read,
+        recorded: dict[str, Any],
+        gen_size: tuple[int, int],
         raw: Asset,
-        result: image_api.ImageCallResult,
         frame_stored: StoredFile,
         frame_size: tuple[int, str],
         output: dict[str, Any],
-        started: float,
-    ) -> None:
+    ) -> bool:
         """Stores the frame and, if the scene still allows it, makes it the first frame, and
-        finishes the job: all in one transaction.
+        finishes the job: all in one transaction. False when the job could not be finished
+        (the scene is gone, or the job is no longer running).
         """
-        await self._phase(job_id, phases.SAVING_FRAME)
+        await self._phase(job.id, phases.SAVING_FRAME)
+        gen_width, gen_height = gen_size
+        scene_sent = (
+            recorded.get("scene_sent") if isinstance(recorded.get("scene_sent"), dict) else {}
+        )
+        replacing = recorded.get("replacing_asset_id")
+        replacing_asset_id = replacing if isinstance(replacing, int) else None
+        request = recorded.get("request") if isinstance(recorded.get("request"), dict) else {}
+        remote = output.get("remote") if isinstance(output.get("remote"), dict) else None
         provenance: dict[str, Any] = {
             "role": "first_frame",
-            "provider": "bitdeer",
-            "model": read.model,
-            "endpoint": image_api.GENERATIONS_PATH,
-            "server_url": docker_mapped(read.base_url),
-            "job_id": job_id,
+            "provider": "gpu_server",
+            "model": recorded.get("image_model") or image_models.MODEL_ID,
+            "mode": request.get("mode"),
+            "seed": request.get("seed"),
+            "aspect_ratio": request.get("aspect_ratio"),
+            "endpoint": recorded.get("endpoint"),
+            "pipeline": remote.get("pipeline") if remote else None,
+            "server_url": recorded.get("server_url"),
+            "provider_job_id": job.provider_job_id,
+            "job_id": job.id,
             "scene_id": scene.id,
             "scene_start_s": scene.start_s,
             "scene_end_s": scene.end_s,
-            "prompt": prompt,
-            "image_prompt_source": scene.image_prompt_source,
-            "image_prompt_job_id": scene.image_prompt_job_id,
-            "requested_size": {"width": geometry.request_width, "height": geometry.request_height},
-            "returned_size": output["returned_size"],
-            "crop_bottom": geometry.crop_bottom,
-            "geometry": {
-                "rule": RULE,
-                "version": GEOMETRY_VERSION,
-                "box_top_per_10000": BOX_TOP_PER_10000,
-                "margin_px": CROP_MARGIN_PX,
-            },
-            "resized_to": {"width": geometry.gen_width, "height": geometry.gen_height},
+            "prompt": recorded.get("image_prompt"),
+            "image_prompt_source": recorded.get("image_prompt_source"),
+            "image_prompt_job_id": recorded.get("image_prompt_job_id"),
+            "expected_size": recorded.get("expected_size"),
+            "returned_size": output.get("returned_size"),
+            "resized_to": {"width": gen_width, "height": gen_height},
             "raw_asset_id": raw.id,
-            "usage": result.usage,
-            "seconds": round(result.seconds, 1),
         }
         size_bytes, sha256 = frame_size
         async with SessionLocal() as session:
@@ -427,11 +450,11 @@ class GenerateFrameHandler(JobHandler):
                 await session.rollback()
                 _logger.warning(
                     "job %d: scene %d is gone; frame stored but not recorded: %s",
-                    job_id,
+                    job.id,
                     scene.id,
                     frame_stored.relative_path,
                 )
-                return
+                return False
             frame = await add_asset(
                 session,
                 project_id=project.id,
@@ -441,8 +464,8 @@ class GenerateFrameHandler(JobHandler):
                 size_bytes=size_bytes,
                 sha256=sha256,
                 source="ai",
-                width=geometry.gen_width,
-                height=geometry.gen_height,
+                width=gen_width,
+                height=gen_height,
                 provenance=provenance,
             )
             reason = frames_service.attach_block(current, scene_sent, replacing_asset_id)
@@ -455,49 +478,31 @@ class GenerateFrameHandler(JobHandler):
                 "attached": attached,
                 "not_attached_reason": reason,
                 "replaced_asset_id": replacing_asset_id if attached else None,
-                "crop_bottom": geometry.crop_bottom,
-                "total_seconds": round(time.monotonic() - started, 1),
             }
-            if not await store.finish_job(session, job_id, final, result_asset_id=frame.id):
+            if not await store.finish_job(session, job.id, final, result_asset_id=frame.id):
                 await session.rollback()
                 _logger.warning(
                     "job %d: frame stored but the job is no longer running: %s",
-                    job_id,
+                    job.id,
                     frame_stored.relative_path,
                 )
-                return
+                return False
             await session.commit()
 
+        returned = output.get("returned_size")
         _logger.info(
-            "job %d: first frame made: scene=%d raw=%d frame=%d %dx%d from %dx%d crop=%d "
-            "attached=%s %.1f s usage=%s",
-            job_id,
+            "job %d: first frame made: scene=%d raw=%d frame=%d %dx%d from %s attached=%s",
+            job.id,
             scene.id,
             raw.id,
             frame.id,
-            geometry.gen_width,
-            geometry.gen_height,
-            geometry.request_width,
-            geometry.request_height,
-            geometry.crop_bottom,
+            gen_width,
+            gen_height,
+            f"{returned['width']}x{returned['height']}" if isinstance(returned, dict) else "?",
             attached,
-            final["total_seconds"],
-            result.usage,
         )
+        return True
 
-    # --- Small helpers ----------------------------------------------------------------------
 
-    @staticmethod
-    async def _record(job_id: int, output: dict[str, Any]) -> None:
-        async with SessionLocal() as session:
-            await store.record_output(session, job_id, dict(output))
-
-    @staticmethod
-    async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
-
-    @staticmethod
-    async def _fail(job_id: int, message: str) -> None:
-        async with SessionLocal() as session:
-            await store.fail_job(session, job_id, message)
+def _whole(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None

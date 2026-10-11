@@ -6,13 +6,11 @@ import { useGenerateFirstFrames } from "../../api/firstFrames";
 import type { ProjectDetail } from "../../api/projects";
 import type { ScenesState } from "../../api/scenes";
 import {
-  estimatedCost,
   firstFrameCounts,
   firstFrameCountsLine,
   hasActiveFrameJob,
   hasAiFrame,
 } from "./firstFrameView";
-import { llmHost } from "./sceneView";
 
 type FirstFramesPanelProps = {
   project: ProjectDetail;
@@ -20,11 +18,11 @@ type FirstFramesPanelProps = {
 };
 
 /**
- * "Generate first frames": one paid image from the image model for every scene that has a
- * current image prompt and no first frame, or an AI first frame that is out of date. Frames the
- * user uploaded are kept. It follows the same rules as the other paid steps: only from a click,
- * with a confirmation that shows the number of images and the estimated cost. Progress shows
- * by itself. Each scene's job and status are in the scenes table and in the scene's drawer.
+ * "Generate first frames": one image from the image model, made on the GPU server, for every
+ * scene that has a current image prompt and no first frame, or an AI first frame that is out of
+ * date. Frames the user uploaded are kept. It only starts from a click, with a confirmation that
+ * shows the number of images. Progress shows by itself. Each scene's job and status are in the
+ * scenes table and in the scene's drawer.
  */
 export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
   const generate = useGenerateFirstFrames(project.id);
@@ -32,10 +30,8 @@ export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
 
   const blockedReason = data.frames_blocked_reason;
   const count = data.frame_candidate_count;
-  const model = data.image_llm.model;
-  const price = data.price_per_image_usd;
+  const model = data.image_model_label;
   const counts = firstFrameCounts(data.scenes);
-  const cost = estimatedCost(count, price);
   // AI frames that are out of date and would be replaced (they stay in the list of earlier
   // frames).
   const replacing = data.scenes.filter(
@@ -66,10 +62,10 @@ export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
         )}
       </Group>
       <Text size="xs" c="dimmed">
-        Makes the first frame of {count} {count === 1 ? "scene" : "scenes"} with {model} at{" "}
-        {llmHost(data.image_llm.will_call)}: one paid image for each scene, from its image prompt,
-        about ${price} each. Frames you uploaded are kept. Every frame made is kept, and you can go
-        back to an earlier one in a scene's inputs.
+        Makes the first frame of {count} {count === 1 ? "scene" : "scenes"} with {model} on your
+        GPU server: one image for each scene, from its image prompt. Each takes a few minutes.
+        Frames you uploaded are kept. Every frame made is kept, and you can go back to an earlier
+        one in a scene's inputs.
       </Text>
       <Text size="xs" c="dimmed">
         {firstFrameCountsLine(counts, data.scenes.length)}
@@ -92,14 +88,15 @@ export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
       <Modal
         opened={confirming}
         onClose={() => setConfirming(false)}
-        title="Before the image model is called"
+        title="Before the images are made"
         centered
       >
         <Stack gap="sm">
           <Text size="sm">
-            {count} {count === 1 ? "scene" : "scenes"} × about ${price} = about {cost}, model{" "}
-            {model}, 20 to 50 s each, at most {data.max_parallel_image_generations} at a time. Each
-            image is a new paid call: nothing is reused, and a failed call is not retried.
+            {count} {count === 1 ? "scene" : "scenes"}, {model}, a few minutes each, at most{" "}
+            {data.max_parallel_image_generations} at a time on your GPU server. Each image is a new
+            GPU job that loads the model first: nothing is reused, and a job that fails is not
+            tried again by itself.
           </Text>
           {replacing > 0 && (
             <Text size="sm">
@@ -108,8 +105,8 @@ export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
             </Text>
           )}
           <Text size="xs" c="dimmed">
-            The estimate is from Bitdeer's price per image. The usage the provider reports is kept
-            on each job.
+            There is no price per image. The exact request and the server's answer are kept on
+            each job.
           </Text>
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={() => setConfirming(false)}>

@@ -2,6 +2,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
+import { invalidateAfterJobAction } from "./jobs";
+import { ACTIVE_POLL_MS } from "./polling";
 import { isValidProjectId, uploadError } from "./projects";
 import type { components } from "./schema";
 
@@ -9,7 +11,10 @@ export type LabRun = components["schemas"]["LabRunOut"];
 export type LabImage = components["schemas"]["LabImageOut"];
 export type LabReferenceIn = components["schemas"]["LabReferenceIn"];
 export type LabRunRequest = components["schemas"]["LabRunRequest"];
+export type QwenLabRunRequest = components["schemas"]["QwenLabRunRequest"];
 export type LabMode = LabRun["mode"];
+/** Which model made a run: Bitdeer's Seedream, or Qwen-Image-2.1 on the GPU server. */
+export type LabEngine = LabRun["engine"];
 export type ProjectFrame = components["schemas"]["ProjectFrameOut"];
 
 /** The backend's own limit. The server stays the judge; this only avoids a pointless upload. */
@@ -37,22 +42,36 @@ async function fetchRuns(beforeId: number | undefined) {
   return data;
 }
 
-/** The history, newest first, a page at a time. Reads the database only. */
+/**
+ * The history, newest first, a page at a time. Reads the database only. It is loaded again every
+ * few seconds while any run on the GPU server is still running, so its image appears by itself.
+ */
 export function useLabRuns() {
   return useInfiniteQuery({
     queryKey: runsKey,
     queryFn: ({ pageParam }) => fetchRuns(pageParam),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => last.next_before_id ?? undefined,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) => page.runs.some((run) => run.status === "running"))
+        ? ACTIVE_POLL_MS
+        : false,
   });
 }
 
-/** One run with its request and its answer, for the drawer. */
+/**
+ * One run with its request and its answer, for the drawer and the result panel. It is loaded
+ * again every few seconds while the run is still running, and the history and the library are
+ * loaded again once it is not.
+ */
 export function useLabRun(runId: number | null) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: [...LAB_KEY, "run", runId],
     enabled: runId !== null,
+    refetchInterval: (query) => (query.state.data?.status === "running" ? ACTIVE_POLL_MS : false),
     queryFn: async () => {
+      const before = queryClient.getQueryData<LabRun>([...LAB_KEY, "run", runId]);
       const { data, error, response } = await api.GET("/api/lab/images/runs/{run_id}", {
         params: { path: { run_id: runId ?? 0 } },
       });
@@ -61,6 +80,10 @@ export function useLabRun(runId: number | null) {
           detailMessage(error, `Could not load the run (HTTP ${response.status}).`),
           response.status,
         );
+      }
+      if (before?.status === "running" && data.status !== "running") {
+        void queryClient.invalidateQueries({ queryKey: runsKey });
+        void queryClient.invalidateQueries({ queryKey: libraryKey });
       }
       return data;
     },
@@ -127,6 +150,33 @@ export function useRunLab() {
       void queryClient.invalidateQueries({ queryKey: runsKey });
       void queryClient.invalidateQueries({ queryKey: libraryKey });
     },
+  });
+}
+
+/**
+ * Starts one run of Qwen-Image-2.1 on the GPU server and returns at once with the run, which is
+ * still `running`. It takes minutes, so the page follows it with `useLabRun`. Only a form the
+ * server refuses (422), such as an API that was not approved yet, is an error here.
+ */
+export function useRunQwenLab() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: QwenLabRunRequest) => {
+      const { data, error, response } = await api.POST("/api/lab/images/qwen-runs", { body });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `The run was not started (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    // A new job: the history, the job lists and the banner's waiting count all change.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: runsKey }),
+        invalidateAfterJobAction(queryClient),
+      ]),
   });
 }
 

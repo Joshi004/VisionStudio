@@ -26,6 +26,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (Phase 21, 2026-10-10):** migration `0010`. Two things from the GPU API 0.5.0 to 0.7.0. (1) **LTX-2.5 first-and-last-frame**: `POST /v1/ltx25/videos/interpolate` replaces the fallback to LTX-2.3, so a scene with a last frame is made by the chosen model's own endpoint (`first_frame_asset_id` and `last_frame_asset_id` in the body, no `negative_prompt`), and the Video lab can take an optional last frame (`lab_video_run.last_frame`). (2) **Breeze TTS 2 text-to-speech** (`POST /v1/breeze-tts/synthesize`): `job.type` gains `lab_voice` and `generate_voiceover`; new tables `voice` (a saved voice: a recording and its exact transcript) and `lab_voice_run` (what the new Voice lab lists); `project.voice_id` names the saved voice that speaks the script when the app makes the voiceover (`asset.kind='voiceover'`, `asset.source='ai'`, with `provenance.script_sha256`). The automatic flow gains a first step, `voiceover`. Breeze TTS 2 is licensed for research and non-commercial use only. See Sections 3, 4.1, 4.5, 4.10, 4.11, 4.12, 5 and 7.
 
+**Update (Phase 22, 2026-10-11):** migration `0011`. The image model changes from Seedream (Bitdeer) to **Qwen-Image-2.1 on the GPU server** (`POST /v1/qwen-image21/images/generate`, added in GPU API 0.8.0). (1) `generate_frame` becomes a remote GPU job like `generate_clip` (`provider='gpu'`, restart rule `resume`, a `provider_job_id`, polled by the dispatcher) instead of one synchronous paid call. Its stored request holds the nearest of the model's seven picture shapes, a random seed and the mode (the new global setting `image_mode`, which replaces `image_model`). The label-band crop is gone: the frame is the model's picture scaled to cover the generation size and trimmed evenly. The `image` value stays in the `provider` CHECK, but no job uses it any more. (2) The Image lab gets Qwen next to Seedream. A Qwen run is a `lab_image` job (`job.type` gains `lab_image`), and `lab_run` gains a nullable `job_id` and the status `running`; Seedream runs are unchanged. (3) The prompt profile the language model writes image prompts with is now `qwen-image-2.1` (150 to 300 words, no "bottom tenth" rule). The model's weights are under the Qwen Research License (non-commercial use only). See Sections 4.5, 4.8, 5, 6 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -239,7 +241,7 @@ Any file on disk — uploaded or generated. Covers the voiceover, every frame, e
 | `height` | INTEGER | NULL | — | Image/video kinds only. Same rule as `width` |
 | `sha256` | TEXT | NOT NULL | — | Content hash |
 | `source` | TEXT | NOT NULL | — | `upload` \| `ai` \| `derived` |
-| `provenance` | JSON | NULL | empty | provider/model/prompt/seed — empty (NULL) for uploads, including the frames uploaded in Phase 8. A frame made by the image model (`source='ai'`, Phase 17) records the prompt, the sizes, the crop and the usage, and so does the raw image behind it (Section 5) |
+| `provenance` | JSON | NULL | empty | provider/model/prompt/seed — empty (NULL) for uploads, including the frames uploaded in Phase 8. A frame made by the image model (`source='ai'`, Phase 17) records the prompt, the mode, the seed and the sizes, and so does the raw image behind it (Section 5) |
 | `created_at` | DATETIME | NOT NULL | now | |
 
 ```sql
@@ -315,7 +317,7 @@ One cut = one clip (called "Segment" in Revision 1 of `ANALYSIS.md`). The centra
 | `first_frame_description_source` | TEXT | NULL | — | `manual` \| `ai`. Who wrote `first_frame_description`; NULL while it is blank (Phase 15, replaces the pair's `frame_descriptions_source`) |
 | `last_frame_description_source` | TEXT | NULL | — | `manual` \| `ai`. Who wrote `last_frame_description`; NULL while it is blank. `ai` only for a text an old (Phase 12) draft wrote, which the next draft that writes into the scene clears (Phase 15) |
 | `description_job_id` | INTEGER, FK → `job.id` | NULL | — | The `draft_descriptions` job that last wrote AI text into this scene (the video prompt or the first-frame description). Kept after the user edits a text, so the draft in `job.output.drafts` can be compared with what the user made of it. `ON DELETE SET NULL`. Lets a scene be traced to the exact request and answer (Phase 12) |
-| `image_prompt` | TEXT | NULL | — | The detailed prompt for the image model that makes the first frame: one paragraph, written by the AI (a `write_image_prompt` job) or by hand. Phase 17 sends it to Seedream. Whether it is out of date is computed, never stored (Section 5) (Phase 16) |
+| `image_prompt` | TEXT | NULL | — | The detailed prompt for the image model that makes the first frame: one paragraph, written by the AI (a `write_image_prompt` job) or by hand. Phase 17 sends it to the image model (Qwen-Image-2.1 on the GPU server since Phase 22, Seedream before). Whether it is out of date is computed, never stored (Section 5) (Phase 16) |
 | `image_prompt_source` | TEXT | NULL | — | `manual` \| `ai`. Who wrote `image_prompt`; NULL while it is blank. A prompt is the author's unless its source is `ai`, and the author's is never overwritten (Phase 16) |
 | `image_prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_image_prompt` job that last wrote AI text into `image_prompt`. A job that reused an earlier answer counts, and its `output.cache_hit_of_job_id` names the job that paid. Kept after the user edits the text, so the job's request and answer can be compared with what the user made of it. `ON DELETE SET NULL` (Phase 16) |
 | `first_frame_asset_id` | INTEGER, FK → `asset.id` | NULL | — | The scene's first frame. Required for a clip (Phase 14: a scene is ready with a description and a first frame) |
@@ -364,10 +366,10 @@ Every unit of background work: transcribe, plan scenes, generate a clip, render 
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL only for the Video lab's jobs (`lab_video`, `write_lab_video_prompt`) and the Voice lab's (`lab_voice`), which belong to no project; the Activity page shows them under "Video lab" and "Voice lab" (Phases 19 and 21) |
 | `scene_id` | INTEGER, FK → `scene.id` | NULL | — | Set only for per-scene jobs (`generate_clip`, and since Phase 16 `write_image_prompt`, and since Phase 17 `generate_frame`) |
-| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` \| `lab_video` \| `write_lab_video_prompt` \| `auto_pipeline` \| `lab_voice` \| `generate_voiceover` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `auto_pipeline`: Phase 20, the automatic flow; `lab_voice` and `generate_voiceover`: Phase 21, Breeze TTS) |
+| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` \| `lab_video` \| `write_lab_video_prompt` \| `auto_pipeline` \| `lab_voice` \| `generate_voiceover` \| `lab_image` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `auto_pipeline`: Phase 20, the automatic flow; `lab_voice` and `generate_voiceover`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server) |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
-| `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model, reached at the same Bitdeer address as `llm`) \| `local` |
+| `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, when `generate_frame` moved to `gpu`, and the CHECK keeps it) \| `local` |
 | `provider_job_id` | TEXT | NULL | — | The external server's job id, once submitted. An `auto_pipeline` run keeps the fixed marker `auto` here instead: it is not an id on any server, it only makes the dispatcher check the run at every tick |
 | `input` | JSON | NOT NULL | — | Exact request sent: prompt, seed, server URL, etc. |
 | `output` | JSON | NULL | — | Raw provider answer (LLM JSON, token usage, etc.) |
@@ -384,7 +386,7 @@ CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
     scene_id         INTEGER REFERENCES scene(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', 'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', 'generate_voiceover')),
+    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', 'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', 'generate_voiceover', 'lab_image')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -460,26 +462,27 @@ A changed source is stored once as a `pending` row per version: the guard insert
 
 ### 4.8 `lab_run`
 
-One manual test of the image API from the Image lab page (Phase 13). A run is one synchronous call and **not** a `job`: the lab is not tied to a project, and `job.project_id` is required. It keeps what is needed to compare runs later: the exact request, the raw response, the timing and the usage. Runs are never deleted in iteration 1.
+One manual test of an image model from the Image lab page (Phase 13, extended in Phase 22). A **Seedream** run is one synchronous call and **not** a `job` in the sense of the other labs: a call of 25 to 40 s that the page waits for. A **Qwen-Image-2.1** run (Phase 22) takes minutes, so it is a `lab_image` job (`job_id` set, `job.project_id` NULL) and its row is created `running`; the job's `finish` step stores the image, sets `status='succeeded'`, `seconds` and `response`, and adds the `lab_image`, in one transaction with the finished job. **A job that fails or is cancelled leaves the row `running`**, so the page reads the job's status as well (`api/image_lab.py`). Which model made a run is its `endpoint`: `/v1/qwen-image21/images/generate`, or a Bitdeer path. A row keeps what is needed to compare runs later: the exact request, the raw response, the timing and the usage. Runs are never deleted in iteration 1.
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `created_at` | DATETIME | NOT NULL | now | |
-| `mode` | TEXT | NOT NULL | — | `text_to_image` \| `image_to_image` (the `image` field on `/images/generations`) \| `edit` (`POST /images/edits`, multipart) |
+| `mode` | TEXT | NOT NULL | — | `text_to_image` \| `image_to_image` (the `image` field on `/images/generations`) \| `edit` (`POST /images/edits`, multipart). A Qwen run is always `text_to_image` |
 | `endpoint` | TEXT | NOT NULL | — | The path called, for example `/images/generations` |
 | `model` | TEXT | NOT NULL | — | The model sent, for example `seedream-5.0-lite` |
 | `prompt` | TEXT | NOT NULL | — | |
-| `params` | JSON | NOT NULL | — | What the form held besides the prompt: `size`, `watermark` (true, false or null for "not sent"), `seed`, `sequential_max_images`, `image_field_as`, `edit_field_name`, `extra` |
+| `params` | JSON | NOT NULL | — | What the form held besides the prompt: `size`, `watermark` (true, false or null for "not sent"), `seed`, `sequential_max_images`, `image_field_as`, `edit_field_name`, `extra`. A Qwen run holds `engine: "qwen"`, `qwen_mode` (`quality` or `fast`), `aspect_ratio`, `expected_size`, `seed` and `steps` instead |
 | `reference_images` | JSON | NOT NULL | — | `[{"source": "lab" \| "asset", "id": 7}]`, in the order they were sent. Not named `references`, which is an SQL keyword |
-| `status` | TEXT | NOT NULL | — | `succeeded` \| `failed` |
-| `http_status` | INTEGER | NULL | — | Absent when there was no answer at all (a timeout or a refused connection) |
+| `status` | TEXT | NOT NULL | — | `running` (Phase 22: a Qwen run whose job has not finished it) \| `succeeded` \| `failed` |
+| `http_status` | INTEGER | NULL | — | Absent when there was no answer at all (a timeout or a refused connection), and always absent for a Qwen run |
 | `error` | TEXT | NULL | — | A readable message, including the Cloudflare and Bitdeer cases |
 | `seconds` | REAL | NULL | — | How long the call took |
 | `request_bytes` | INTEGER | NULL | — | The size of the body that was sent |
 | `usage` | JSON | NULL | — | The `usage` block of the answer, as returned |
 | `request` | JSON | NOT NULL | — | The request as sent, with every image replaced by `<image: N bytes>` |
-| `response` | JSON | NULL | — | The answer, with every `b64_json` replaced by `<image: N bytes>` |
+| `response` | JSON | NULL | — | The answer, with every `b64_json` replaced by `<image: N bytes>`. For a Qwen run: the server's last status (`remote`), `expected_size` and `returned_size` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `lab_image` job that makes a run on the GPU server (Phase 22). NULL for a Seedream run. `ON DELETE SET NULL` |
 
 ```sql
 CREATE TABLE lab_run (
@@ -491,14 +494,15 @@ CREATE TABLE lab_run (
     prompt           TEXT NOT NULL,
     params           JSON NOT NULL,
     reference_images JSON NOT NULL,
-    status           TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+    status           TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
     http_status      INTEGER,
     error            TEXT,
     seconds          REAL,
     request_bytes    INTEGER,
     usage            JSON,
     request          JSON NOT NULL,
-    response         JSON
+    response         JSON,
+    job_id           INTEGER REFERENCES job(id) ON DELETE SET NULL
 );
 ```
 
@@ -666,6 +670,7 @@ CREATE INDEX idx_job_status          ON job (status);
 CREATE INDEX idx_job_type_status     ON job (type, status);
 CREATE INDEX idx_api_snapshot_source ON api_snapshot (source, fetched_at);
 CREATE INDEX idx_lab_run_created     ON lab_run (created_at);
+CREATE INDEX idx_lab_run_job         ON lab_run (job_id);
 CREATE INDEX idx_lab_image_run       ON lab_image (run_id);
 CREATE INDEX idx_lab_image_created   ON lab_image (created_at);
 CREATE INDEX idx_lab_video_run_created ON lab_video_run (created_at);
@@ -928,9 +933,9 @@ At creation, `input` records only the click:
 - `warnings` are the profile's word range (120 to 220) and wording rules (words about text, captions, logos or watermarks, and quality tags such as 8k). They never block saving.
 - A job fails, and writes nothing, when the scene's cut changed while it ran ("The scene's cut changed while the image prompt was being written..."), or when the author wrote a prompt meanwhile ("You wrote this image prompt while the AI was writing one, so yours was kept."). A paid answer already received stays in `output`, and the cache can reuse it.
 
-### `job.input` and `job.output` for a `generate_frame` job (Phase 17)
+### `job.input` and `job.output` for a `generate_frame` job (Phase 17, rewritten in Phase 22)
 
-A `generate_frame` job is one paid image from the image model (`ANALYSIS.md` Section 6.2), made for **one scene** (`job.scene_id` is set, so it is deleted with its scene; a cut edit, a proposal and the proposal's save refuse while one is active). `provider='image'`. There is no `provider_job_id`, and a restart never re-runs it. **It makes exactly one call, which is never retried, and nothing is cached**: every image costs money and comes out different (the Phase 13 rule), so there is no `input_hash` and no `attempts`.
+A `generate_frame` job is one first frame made by **Qwen-Image-2.1 on the GPU server** (`ANALYSIS.md` Section 6.2), for **one scene** (`job.scene_id` is set, so it is deleted with its scene; a cut edit, a proposal and the proposal's save refuse while one is active). `provider='gpu'`. It is a remote job like `generate_clip`: `start` submits and saves the server's job id (`provider_job_id`), the dispatcher polls it, and `finish` downloads the PNG. The restart rule is `resume`. Nothing is cached, and a new job always means a new random seed. There is no price per image. (Before Phase 22 it was one paid synchronous call to Bitdeer's Seedream, `provider='image'`, never re-run; jobs from then keep their old `input` and `output`: `geometry`, `usage`, `crop_bottom`.)
 
 At creation, `input` records only the click:
 
@@ -938,7 +943,7 @@ At creation, `input` records only the click:
 { "requested": "generate", "replace_upload": false, "first_frame_at_click": null }
 ```
 
-`requested` is `generate` (one scene) or `generate_all` (the "Generate first frames" button). `replace_upload` is true only when the click confirmed replacing a first frame the user uploaded, and `first_frame_at_click` is the asset id the scene's first frame was at the click (null for an empty slot). When the job starts, a first frame that is not the AI's is replaced only if `replace_upload` is true **and** it is still the asset in `first_frame_at_click`; otherwise the job fails, free, before any call. The handler adds the exact request, before the call is made:
+`requested` is `generate` (one scene) or `generate_all` (the "Generate first frames" button). `replace_upload` is true only when the click confirmed replacing a first frame the user uploaded, and `first_frame_at_click` is the asset id the scene's first frame was at the click (null for an empty slot). When the job starts, a first frame that is not the AI's is replaced only if `replace_upload` is true **and** it is still the asset in `first_frame_at_click`; otherwise the job fails, free, before anything is sent. The first `start` adds the exact request, before it is submitted, and **it is built once**: every later attempt (after a pre-emption, an expired result or a server that could not be reached) sends this same stored request with the same seed.
 
 ```json
 {
@@ -947,43 +952,65 @@ At creation, `input` records only the click:
   "image_prompt_source": "ai",
   "image_prompt_job_id": 109,
   "replacing_asset_id": null,
-  "geometry": { "rule": "1.5x", "version": 1, "gen_width": 1088, "gen_height": 1920,
-                "request_width": 1632, "request_height": 3072, "crop_bottom": 192 },
-  "server_url": "https://api-inference.bitdeer.ai/v1",
-  "endpoint": "/images/generations",
-  "request": { "model": "seedream-5.0-lite", "prompt": "A calm open sea stretches out...",
-               "size": "1632x3072", "response_format": "b64_json" }
+  "frame_size": { "width": 1088, "height": 1920 },
+  "image_model": "qwen-image-2.1",
+  "image_mode": "quality",
+  "aspect_ratio": "9:16",
+  "expected_size": { "width": 1536, "height": 2752 },
+  "endpoint": "/v1/qwen-image21/images/generate",
+  "request": { "prompt": "A calm open sea stretches out...", "mode": "quality",
+               "seed": 1734250911, "aspect_ratio": "9:16" },
+  "server_url": "http://host.docker.internal:8012"
 }
 ```
 
-- `geometry` is what `services/frame_geometry.frame_geometry` worked out from the project's generation size: the image is asked for at 1.5 times the generation size plus a band, `crop_bottom` pixels are cut off the bottom (where Bitdeer stamps its label, even with `watermark: false`), and the rest is shrunk by 2/3 to exactly `gen_width` x `gen_height`. The band is the smallest multiple of 16 that clears the label's top edge (0.0965 of the image's short side, measured) by 32 px: 192 for 1088x1920, 224 for 1920x1088, 208 for 1536x1024. `version` is raised if the rule or its constants change.
-- `request` has no `watermark` and no `seed` (Bitdeer ignores both) and holds no image data. `replacing_asset_id` is the scene's first frame when the job started (null for an empty slot): the frame is attached only if the scene still has that frame at the save.
+- `request` is what the server gets: `prompt`, `mode` (the global setting `image_mode`: `quality` is the base model at 40 steps, `fast` the Turbo model at 8), `seed` (random, 0 to 2147483647), `aspect_ratio` and, only when the setting `gpu_partition` is not blank, `partition`. There is no size field (the shape sets it), no negative prompt (the model has none) and no `num_inference_steps` (the server's own applies; it refuses a number in `fast` mode). `server_url` is added when the submit answers.
+- `aspect_ratio` is the nearest of the model's seven shapes (`1:1`, `4:3`, `3:4`, `3:2`, `2:3`, `16:9`, `9:16`) to the project's generation size, compared by the ratio of the sides (`image_models.pick_aspect_ratio`: 1088x1920 gives `9:16`, 1920x1088 gives `16:9`). `expected_size` is that shape's native 2K size. `frame_size` is the generation size the frame is fitted to, as it was when the job started.
+- The job fails, free, when the **approved GPU API has no `/v1/qwen-image21/images/generate` endpoint** (Settings: check the API and approve it). Like every GPU job it also waits while the API is changed or not approved.
+- `replacing_asset_id` is the scene's first frame when the job started (null for an empty slot): the frame is attached only if the scene still has that frame at the save.
 
-`output` is written right after the call (so a paid answer is never lost), updated after the raw image is stored, and replaced by the final value when the job succeeds:
+While it runs, `output` is the server's progress, saved at every poll; when the image is stored it also holds `raw_asset_id` and `returned_size`, and the final value replaces it when the job succeeds:
 
 ```json
 {
-  "http_status": 200,
-  "seconds": 26.5,
-  "usage": { "generated_images": 1, "output_tokens": 19584, "total_tokens": 19584 },
-  "response": { "created": 1791460376, "data": [ { "b64_json": "<image: 404,915 bytes>" } ],
-                "usage": { "generated_images": 1, "output_tokens": 19584, "total_tokens": 19584 } },
-  "error": null,
+  "remote": { "status": "succeeded", "pipeline": "qwen-image21:generate", "partition": "background",
+              "typical_run_seconds": 180.0, "typical_basis": "...", "created_at": "2026-10-11T00:31:00Z",
+              "started_at": "2026-10-11T00:31:20Z", "finished_at": "2026-10-11T00:34:12Z" },
   "raw_asset_id": 202,
-  "returned_size": { "width": 1632, "height": 3072 },
+  "returned_size": { "width": 1536, "height": 2752 },
   "frame_asset_id": 203,
   "attached": true,
   "not_attached_reason": null,
   "replaced_asset_id": null,
-  "crop_bottom": 192,
-  "total_seconds": 26.9
+  "purge": { "removed_asset_ids": [], "kept_asset_ids": [] }
 }
 ```
 
-- `response` is the answer with every image replaced by its size (`image_api.sanitise`). `usage.output_tokens` is the image's pixels divided by 256, so the larger request costs a little more if Bitdeer bills by token (1632x3072 is 19,584 tokens, 2880x1856 is 20,880, against Bitdeer's price of about $0.035 per image). `error` is the readable text of a failed call (`image_api.describe_failure`), and the job fails with it plus "It was not retried automatically."
-- `raw_asset_id` is the image exactly as the model returned it, stored before anything else is done to it. **If `returned_size` is not the size asked for, the job fails and keeps the raw image**: the crop is measured at the size asked for, so it is never applied to another size.
-- `frame_asset_id` (also `job.result_asset_id`) is the finished frame. `attached` says whether it became the scene's first frame. When the scene's cut or its first frame changed while the image was made, the frame is kept, `attached` is false, `not_attached_reason` says why, and **the job still succeeds**: the image is paid for and usable, and it is listed among the scene's earlier frames. `replaced_asset_id` is the frame the scene had, set only when the new frame was attached. The earlier frames of a scene are computed from these: the `result_asset_id` of its succeeded `generate_frame` jobs, plus each job's `replaced_asset_id`.
-- A failed job keeps what it has: after a failed call `output` holds the status and the error and `raw_asset_id` is null, and after a refused size or a failed crop `raw_asset_id` names the stored image.
+- **The server may keep a result for one download only** (its guide for version 0.9.0 says so), so `finish` downloads once and stores the raw image (`raw_asset_id`) as an asset **before anything else is done with it**. A later failure keeps that asset and names it in the error.
+- **The frame** is the raw PNG scaled until it covers `frame_size` and trimmed evenly from both sides (`frame_images.render_frame_png`, the same function that prepares a frame for a clip). For the orientation defaults that trims about 1.5% (1088x1920 from 1536x2752). There is no label to cut off, so there is no band and no geometry rule. A returned size other than `expected_size` is only recorded; it never fails the job.
+- `frame_asset_id` (also `job.result_asset_id`) is the finished frame. `attached` says whether it became the scene's first frame. When the scene's cut or its first frame changed while the image was made, the frame is kept, `attached` is false, `not_attached_reason` says why, and **the job still succeeds**: the image is usable, and it is listed among the scene's earlier frames. `replaced_asset_id` is the frame the scene had, set only when the new frame was attached. The earlier frames of a scene are computed from these: the `result_asset_id` of its succeeded `generate_frame` jobs, plus each job's `replaced_asset_id`.
+- Failures follow the clip job's rules (`jobs/remote_image.py`): a dropped connection never fails the job; a pre-emption is submitted again unchanged, up to 3 attempts; a result that answers 410 is waited for while the server still says it is ready, then submitted again (that costs only GPU time); anything else the server refuses (422...) fails the job with its message. A failed job keeps what it has: `raw_asset_id` names the image when it was already stored.
+- The job can be cancelled while it is queued or running on the server (`DELETE /v1/jobs/{id}`), but not while its result is being fetched and stored (`phases.FINISHING_PHASES`).
+
+### `job.input` and `job.output` for a `lab_image` job (Phase 22)
+
+A `lab_image` job is one run of the Image lab on Qwen-Image-2.1, with `project_id` NULL (so it is listed on the Activity page as "Image lab"). It is created together with its `lab_run` row (`lab_run.job_id`), with `dedupe=False`: each click is a GPU run of its own. The request is built and checked against the approved GPU API when the run is created, so `start` only submits it, and a later attempt sends the very same one:
+
+```json
+{
+  "requested": "lab_image",
+  "run_id": 14,
+  "image_model": "qwen-image-2.1",
+  "image_mode": "fast",
+  "aspect_ratio": "9:16",
+  "expected_size": { "width": 1536, "height": 2752 },
+  "endpoint": "/v1/qwen-image21/images/generate",
+  "request": { "prompt": "...", "mode": "fast", "seed": 91834, "aspect_ratio": "9:16" },
+  "server_url": "http://host.docker.internal:8012"
+}
+```
+
+`request` may also hold `num_inference_steps` (quality mode only, when the form set it) and `partition`. While it runs, `output` is the server's progress (`remote`). In one transaction at the end, the image goes into `media/lab/` as a `lab_image` (`origin='result'`, `output_index` 0, exactly as returned), the `lab_run` becomes `succeeded` (`seconds` is from the click, so it includes the wait for the GPU), and the job succeeds with `{"remote": {...}, "run_id": 14, "returned_size": {...}, "purge": {...}}`. At most 2 run at once (`jobs/generate_lab_image.CONCURRENCY_LIMIT`), in a pool of their own. The failure rules are those of `generate_frame`.
 
 ### `asset.provenance` — empty for uploads (Section 4.3)
 
@@ -994,10 +1021,15 @@ An uploaded asset (the voiceover, a frame) has no provenance. Two shapes are bui
 ```json
 {
   "role": "first_frame",
-  "provider": "bitdeer",
-  "model": "seedream-5.0-lite",
-  "endpoint": "/images/generations",
-  "server_url": "https://api-inference.bitdeer.ai/v1",
+  "provider": "gpu_server",
+  "model": "qwen-image-2.1",
+  "mode": "quality",
+  "seed": 1734250911,
+  "aspect_ratio": "9:16",
+  "endpoint": "/v1/qwen-image21/images/generate",
+  "pipeline": "qwen-image21:generate",
+  "server_url": "http://host.docker.internal:8012",
+  "provider_job_id": "7c1e0b9a...",
   "job_id": 120,
   "scene_id": 29,
   "scene_start_s": 0.0,
@@ -1005,25 +1037,22 @@ An uploaded asset (the voiceover, a frame) has no provenance. Two shapes are bui
   "prompt": "A calm open sea stretches out...",
   "image_prompt_source": "ai",
   "image_prompt_job_id": 109,
-  "requested_size": { "width": 1632, "height": 3072 },
-  "returned_size": { "width": 1632, "height": 3072 },
-  "crop_bottom": 192,
-  "geometry": { "rule": "1.5x", "version": 1, "box_top_per_10000": 965, "margin_px": 32 },
+  "expected_size": { "width": 1536, "height": 2752 },
+  "returned_size": { "width": 1536, "height": 2752 },
   "resized_to": { "width": 1088, "height": 1920 },
-  "raw_asset_id": 202,
-  "usage": { "generated_images": 1, "output_tokens": 19584, "total_tokens": 19584 },
-  "seconds": 26.5
+  "raw_asset_id": 202
 }
 ```
 
-`prompt` is the image prompt the frame was made from. **A frame is out of date when this differs from the scene's `image_prompt` now** (both trimmed; a cleared prompt counts as changed; a frame with no `prompt` counts as out of date). It is computed when the scenes are read and is never stored. An uploaded frame is never out of date.
+`prompt` is the image prompt the frame was made from. **A frame is out of date when this differs from the scene's `image_prompt` now** (both trimmed; a cleared prompt counts as changed; a frame with no `prompt` counts as out of date). It is computed when the scenes are read and is never stored. An uploaded frame is never out of date. A frame made before Phase 22 (by Seedream) has the older shape (`provider: "bitdeer"`, `requested_size`, `crop_bottom`, `geometry`, `usage`, `seconds`); only `prompt` is read back, so it is judged the same way.
 
-**The raw image** (`kind='frame'`, `source='ai'`, `mime='image/jpeg'`, the size the model returned, for example 1632x3072): the file exactly as Bitdeer sent it, with the label still in its corner. It is never attached to a scene. It allows cutting again with another band if the label ever moves.
+**The raw image** (`kind='frame'`, `source='ai'`, `mime='image/png'`, the size the model returned, for example 1536x2752): the PNG exactly as the server sent it. It is never attached to a scene. (A raw image from before Phase 22 is a JPEG with `role: "seedream_raw"` and a label in its corner.)
 
 ```json
-{ "role": "seedream_raw", "provider": "bitdeer", "model": "seedream-5.0-lite", "job_id": 120, "scene_id": 29,
-  "prompt": "A calm open sea stretches out...", "requested_size": { "width": 1632, "height": 3072 },
-  "usage": { "generated_images": 1, "output_tokens": 19584, "total_tokens": 19584 }, "seconds": 26.5 }
+{ "role": "image_raw", "provider": "gpu_server", "model": "qwen-image-2.1", "mode": "quality", "seed": 1734250911,
+  "aspect_ratio": "9:16", "endpoint": "/v1/qwen-image21/images/generate", "pipeline": "qwen-image21:generate",
+  "server_url": "http://host.docker.internal:8012", "provider_job_id": "7c1e0b9a...", "job_id": 120,
+  "scene_id": 29, "prompt": "A calm open sea stretches out...", "expected_size": { "width": 1536, "height": 2752 } }
 ```
 
 The clip job treats an AI frame like any other first frame: `derived_frames.frame_to_send` makes its derived PNG at the generation size (the same pixels, when the sizes match).
@@ -1399,11 +1428,11 @@ The eight steps (since Phase 21; seven before), in order, with what the run make
 | `llm_model` | `"zai-org/GLM-5.3-Flash"` | the model that proposes the scene cuts |
 | `description_llm_model` | `"zai-org/GLM-5.3"` | the model that drafts scene descriptions (Phase 12); uses `llm_base_url` |
 | `image_prompt_llm_model` | `"zai-org/GLM-5.3-Flash"` | the model that writes each scene's image prompt, one call per scene (Phase 16); uses `llm_base_url` |
-| `image_model` | `"seedream-5.0-lite"` | the image model that makes each scene's first frame, one paid image per scene (Phase 17); uses `llm_base_url` (the Image lab keeps its own model box) |
+| `image_mode` | `"quality"` | how Qwen-Image-2.1 makes each scene's first frame (Phase 22; it replaces `image_model`, which named a Bitdeer model): `quality` (the base model, 40 steps) or `fast` (the Turbo model, 8 steps). A fixed list of choices. The two are different models, so one seed gives a different picture in each. The Image lab chooses its own mode |
 | `default_video_model` | `"ltx-2.5"` | the video model that makes clips when neither the scene nor its project chooses one (Phase 19); one of `ltx-2.3` or `ltx-2.5` (a fixed set of choices: the page shows a choice list and any other value is refused). A project's `video_model` wins over it, and a scene's over the project's; Regenerate can pick a model for one take |
 | `default_negative_prompt` | `"background music, music, soundtrack, ... jump cut, scene change"` | the negative prompt sent to **LTX-2.3** when a project's own is blank, and the text a new project starts with (Phase 18); LTX-2.5 has no negative prompt and is never sent one (Phase 19); the built-in text is a comma-separated list of what to keep out (music, singing, speech, on-screen text, logos, common video artifacts); blank allowed (then the GPU server's own default applies) |
 | `max_parallel_generations` | `4` | no range enforced. Since Phase 19 it also limits the Video lab's clips: scene clips and lab clips share these slots |
-| `max_parallel_image_generations` | `2` | how many first frames are made at once (Phase 17); no range enforced |
+| `max_parallel_image_generations` | `2` | how many first frames are made at once (Phase 17). Since Phase 22 each is a GPU job that loads about 31 GB of model weights first, so the number should be one your GPU server can handle; no range enforced |
 | `poll_interval_seconds` | `15` | |
 | `max_parallel_ffmpeg` | `1` | no range enforced |
 | `api_contract_sources` | `[{"name": "guide", "base": "gpu", "path": "/v1/guide?format=json"}, {"name": "openapi", "base": "gpu", "path": "/openapi.json"}]` | the two sources shown, no environment variable (Phase 4) |
@@ -1434,13 +1463,13 @@ Mapping the flow in `ANALYSIS.md` Section 1 onto table writes, so the structure'
 | Review and adjust cuts (human checkpoint) | One edit, one transaction, and no `job` row (Phase 7). The transaction takes the write lock first (a no-op `UPDATE` of the project's scenes), then reads the scenes and rebuilds only the scenes next to the cut. A scene that continues keeps its `id`: `UPDATE` of `start_s`, `end_s`, `text`, `cut_source`, `cut_note`. **Add** a cut: the left part keeps the id, the right part is a new `INSERT`. **Remove** a cut: the earlier scene keeps its id, and the later one is `DELETE`d (its `job` rows go with it, `ON DELETE CASCADE`). **Move** a cut: both scenes keep their ids. A cut you add or move sets `cut_source='manual'`; the cut at the other end of a rebuilt scene keeps its source. A rebuilt scene's `cut_note` is cleared. The scenes after the edit are renumbered through temporary negative `index` values, because `UNIQUE (project_id, index)` is checked row by row (`index` stays 0 to n-1 with no gaps). When a rebuilt scene has inputs, the edit is refused (HTTP 409) until it is confirmed. Confirming sets `scene_description`, `scene_description_source`, `first_frame_description`, `last_frame_description`, `first_frame_description_source`, `last_frame_description_source`, `description_job_id`, `image_prompt`, `image_prompt_source`, `image_prompt_job_id`, `first_frame_asset_id`, `last_frame_asset_id` and `selected_clip_asset_id` to NULL on the rebuilt scenes only (`use_clip_sound` stays). Files and `asset` rows are never touched. |
 | AI drafts the scene descriptions | **Draft** (Phase 12, reworked in Phase 15): `INSERT job` (`type='draft_descriptions'`, `provider='llm'`, `input={"requested": "draft", "run_again": ...}`), only from a click and only when scenes exist, are not out of date, no proposal is running, and at most one job of this type is active. The handler builds the request from the active prompt profile, saves it to `job.input` before the call, saves the model's answer to `job.output` the moment it arrives, then writes the drafts in **one transaction**: it takes the write lock first (`lock_scenes`), and for each scene whose id, times and text still equal `input.scenes_sent` it `UPDATE`s `scene_description` + `scene_description_source='ai'` when the description is blank or was written by AI, and `first_frame_description` + `first_frame_description_source='ai'` when it is blank or was written by AI (each text is judged by its own source), and sets `description_job_id`; when the scene was written into and its `last_frame_description` was written by AI (an old draft), that text and its source are set to NULL, because the AI no longer writes last frames and the old text would not fit the new ones; then `UPDATE job` (`status='succeeded'`, `output`). A text the user wrote (`source='manual'`) is never overwritten. Editing a drafted text in the UI sets only that text's source to `manual` (a cleared text has no source), so an author's last-frame description never locks the first-frame description. An author's last-frame description is sent to the model as context (`FIXED last_frame`) and is never overwritten or cleared. |
 | AI writes the image prompts | **Write** (Phase 16): `INSERT job` (`type='write_image_prompt'`, `provider='llm'`, `scene_id=<scene>`, `input={"requested": "write" \| "write_all", "run_again": ...}`), only from a click. The endpoints take the write lock first (`lock_scenes`) and refuse (422) when there are no scenes, a proposal or a draft is running, the scenes are out of date, the scene has neither a first-frame description nor a video prompt, or its prompt was written by the user. "Write image prompts" creates one job for each scene that has text to work from, no job running, and no prompt or an AI prompt that is out of date, all in one transaction (`commit=False`); a scene's own button creates one, or returns the job already active for it. **Start**: the handler repeats the refusals, reads the scene's `world` and `continuity` from the draft job that wrote it (`description_job_id`, following a reused answer to the job that paid) or the project's newest successful draft, builds the request from the active image prompt profile, and `UPDATE job.input` with the request and both hashes before the call. It then looks for an earlier job of this scene with the same `input_hash` and a usable answer, unless the click was Write again, and otherwise asks the model (at most 2 attempts, `UPDATE job.output` after each). **Save**, in one transaction that takes the write lock first: when the scene's id, times and text still equal `input.scene_sent` and its prompt is blank or was written by AI, `UPDATE scene` sets `image_prompt`, `image_prompt_source='ai'` and `image_prompt_job_id`, and `UPDATE job` (`status='succeeded'`, `output`); otherwise nothing is written and the job fails with the reason. Editing the prompt in the UI sets `image_prompt_source='manual'` (a cleared prompt has no source), and the job id stays. **Out of date** is computed on every read (`services/image_prompts.prompt_states`): the hash of the scene's inputs now against `inputs_sha256` on the job `image_prompt_job_id` points at. A scene that has a job queued or running cannot have its cut changed, and the scenes cannot be proposed again, because deleting the scene would delete the job and its paid answer. |
-| AI makes the first frames | **Generate** (Phase 17): `INSERT job` (`type='generate_frame'`, `provider='image'`, `scene_id=<scene>`, `input={"requested": "generate" \| "generate_all", "replace_upload": ..., "first_frame_at_click": <asset id or null>}`), only from a click. The endpoints take the write lock first (`lock_scenes`) and refuse (422) for the project-level reasons of the image prompts (no scenes, a proposal or a draft running, out-of-date scenes) and, per scene, when the scene has no image prompt, its prompt is being written, or its AI prompt is out of date. "Generate first frames" creates one job for each scene with a current prompt, no job running, and no first frame or an AI first frame that is out of date, all in one transaction (`commit=False`); **an uploaded first frame is skipped**. A scene's own button creates one, or returns the job already active for it, and answers **409** when the scene's first frame is an upload and the request did not set `replace_upload`. At most `max_parallel_image_generations` jobs run at once. **Start**: the handler repeats the refusals and the manual-first rule (a free failure, before any call), works out the geometry, saves the exact request to `job.input`, makes **one** call (no transaction open, never retried, never cached) and saves the answer to `job.output` at once. Then: `INSERT asset` for the raw image (`kind='frame'`, `source='ai'`, exactly as returned), a size check (the returned size must equal the size asked for, else the job fails and keeps the raw asset), the bottom band cut and the rest resized by 2/3 to the generation size (a PNG), and, in **one transaction** that holds the write lock: `INSERT asset` for the frame (`source='ai'`, provenance in Section 5), `UPDATE scene.first_frame_asset_id` **only when** the scene's id, times and text still equal `input.scene_sent` and its first frame is still `input.replacing_asset_id`, and `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`). When the scene changed meanwhile the frame is kept but not attached (`output.attached=false`, with the reason) and the job still succeeds. A restart fails a running job (`never_rerun`) and a raw image already stored stays. Merging a scene away or replacing the scenes would delete its jobs and their paid answers, so `edit_cut`, `propose_scenes` and the proposal's save refuse while a frame job is active. |
+| AI makes the first frames | **Generate** (Phase 17, changed in Phase 22): `INSERT job` (`type='generate_frame'`, `provider='gpu'`, `scene_id=<scene>`, `input={"requested": "generate" \| "generate_all", "replace_upload": ..., "first_frame_at_click": <asset id or null>}`), only from a click. The endpoints take the write lock first (`lock_scenes`) and refuse (422) for the project-level reasons of the image prompts (no scenes, a proposal or a draft running, out-of-date scenes) and, per scene, when the scene has no image prompt, its prompt is being written, or its AI prompt is out of date. "Generate first frames" creates one job for each scene with a current prompt, no job running, and no first frame or an AI first frame that is out of date, all in one transaction (`commit=False`); **an uploaded first frame is skipped**. A scene's own button creates one, or returns the job already active for it, and answers **409** when the scene's first frame is an upload and the request did not set `replace_upload`. At most `max_parallel_image_generations` jobs run at once, and, like every GPU job, one starts only while the GPU API is approved. **Start**: the handler repeats the refusals and the manual-first rule (a free failure, before anything is sent), checks that the approved API has the image endpoint, works out the shape and a random seed, saves the exact request to `job.input` (once), submits it and saves the server's job id (`mark_submitted`). **Poll**: the dispatcher asks the server at every tick (`queued on cluster`, `running on cluster`). **Finish**, when the server says `succeeded`: download the PNG to a temporary file, `INSERT asset` for the raw image (`kind='frame'`, `source='ai'`, exactly as returned) **before anything else**, scale the picture to cover the generation size and trim it (a PNG), and, in **one transaction** that holds the write lock: `INSERT asset` for the frame (`source='ai'`, provenance in Section 5), `UPDATE scene.first_frame_asset_id` **only when** the scene's id, times and text still equal `input.scene_sent` and its first frame is still `input.replacing_asset_id`, and `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`). When the scene changed meanwhile the frame is kept but not attached (`output.attached=false`, with the reason) and the job still succeeds. Then the job is purged on the server (best effort). A job can be cancelled while it is queued or running on the server, not while its result is being fetched. A pre-emption is submitted again unchanged (up to 3 attempts), and a restart keeps polling a submitted job (`resume`). Merging a scene away or replacing the scenes would delete its jobs, so `edit_cut`, `propose_scenes` and the proposal's save refuse while a frame job is active. |
 | Go back to an earlier first frame | **Use this** (Phase 17): `UPDATE scene.first_frame_asset_id`, only to an asset that is one of the scene's earlier frames: the `result_asset_id` of one of its succeeded `generate_frame` jobs, or the `output.replaced_asset_id` of one (an upload that a frame was made over). Nothing is inserted or deleted, and the frame in use stays in the list. A frame uploaded and then replaced by hand (not by a frame job) is not listed: its file stays on disk. |
 | Per scene: description, first frame, optional last frame | **Description** (Phase 8): `UPDATE scene` sets `scene_description` (trimmed, at most 4,000 characters) and `scene_description_source='manual'`; a blank description sets both to NULL. **Frame**: `INSERT asset` (`kind='frame'`, `source='upload'`, the original file exactly as uploaded, `width` and `height` as displayed), then `UPDATE scene.first_frame_asset_id` or `last_frame_asset_id`, in one transaction. Remove sets the column to NULL, and the `asset` row and the file stay. Replacing a frame inserts a new asset and repoints the column. **Normalised frames are not stored in this phase**: the preview is rendered on request at the project's current generation size, because that size can change after an upload. Phase 9 normalises again at submission with the same function (`services/frame_images.normalise_frame`) and stores the exact file it sends as a `derived` frame asset. Readiness is computed (`services/scene_inputs.missing_inputs`: a description and a first frame, since Phase 14 the last frame is optional) and never stored, and so is the clip mode (`scene_inputs.clip_mode`: a last frame attached means keyframe interpolation, none means image-to-video). |
 | Generate one clip per scene | **Generate** (Phase 9): `INSERT job` (`type='generate_clip'`, `provider='gpu'`, `scene_id=<scene>`), only for a ready scene (a description and a first frame) that is not longer than the project's maximum and has no active clip job; "Generate all ready scenes" inserts one per scene that is ready and has no selected take, all in one transaction. The dispatcher starts the job while fewer than `max_parallel_generations` clip jobs are `running` (read every tick). **Start**: the first time, the clip mode is read from the scene (a last frame attached: keyframe interpolation, otherwise image-to-video from the first frame), then `INSERT asset` for each frame as sent (`kind='frame'`, `source='derived'`, a PNG at the generation size, unless an identical one exists; one frame, or two for keyframe interpolation) and `UPDATE job.input` with the `clip_mode`, the `endpoint` and the request, before anything is uploaded; then the frame or frames are uploaded, the job is submitted to the stored endpoint, and `UPDATE job` sets `provider_job_id` and the exact body (nothing in between). **Each tick** `UPDATE job` sets `phase`, `last_checked_at` and `output.remote`. **On success**, in one transaction: `INSERT asset` (`kind='clip'`, `source='ai'`, `provenance` as in Section 5), `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`) and `UPDATE scene.selected_clip_asset_id` (the new take is the selected one); then the server's job is purged and `job.output.purge` is merged in. A pre-emption is `UPDATE job SET status='queued', attempt=attempt+1, provider_job_id=NULL` (up to 3 attempts). A proposal replaces the scenes, which deletes their jobs (`ON DELETE CASCADE`), so it is refused while a clip job is active; a cut edit is refused for the scenes it would change while they have one. |
 | Preview clips, regenerate or mute (human checkpoint) | **Regenerate**: another `job` (new random seed) and `asset` row, which becomes the selected take. **Select take**: `UPDATE scene.selected_clip_asset_id`, only to the clip of a succeeded `generate_clip` job of that scene. **Clip sound**: `UPDATE scene.use_clip_sound`. **Cancel**: for a queued job, `status='cancelled'`; for a running one the server is asked first (`DELETE /v1/jobs/{id}`), and when it does not answer nothing changes; the server's answer is merged into `output.cancel`. Takes are never deleted. A take whose `provenance.scene_start_s` and `scene_end_s` no longer equal the scene's is shown as out of date. |
 | Trim, join, mix, render final video | **Render** (Phase 10): in one transaction that holds the write lock (`lock_scenes`, so a cut edit cannot change a scene halfway), the endpoint reads the scenes and the selected takes, refuses with 422 when `renders.render_block` gives a reason (no voiceover or scenes, a proposal active, the scenes out of date, a scene with no selected clip, or a selected clip with fewer frames than the scene now needs), builds the timeline and `INSERT job` (`type='render_final'`, `provider='local'`, `input={"requested": "render", "timeline": ...}`). A render that is already queued or running is returned instead. The dispatcher starts it while fewer than `max_parallel_ffmpeg` renders are `running`. **Each step** `UPDATE job.phase` (checking the clips, trimming clip i of n, joining the clips and mixing the sound, checking the video, saving the video). The temporary files live in `/data/tmp` and are removed afterwards. **On success**, in one transaction: `INSERT asset` (`kind='final'`, `source='derived'`, provenance as in Section 5) and `UPDATE job` (`status='succeeded'`, `result_asset_id`, `output`). A render never changes a `scene` row and never deletes anything; every earlier render stays as a succeeded job with its `final` asset. Only a queued render can be cancelled. A restart queues a running render again, and it renders the same timeline from the start. |
-| Test the image API by hand (Image lab) | **Run** (Phase 13): one synchronous call, not a `job` (a call of 25 to 40 s that the page waits for; the Video lab below, whose runs take minutes, does use jobs). The endpoint validates the form, reads each reference (a `lab_image` or a `kind='frame'` `asset`, as an upright RGB JPEG at quality 90, scaled down above 36 megapixels), and ends its read transaction before the call. The call runs in a task of its own, so a browser that goes away does not lose it. **After the call**, in one transaction: `INSERT lab_run` (the form, the request and the answer with every image replaced by its size, `http_status`, `seconds`, `usage`, `error`) and one `INSERT lab_image` (`origin='result'`) for each returned image, whose file was first checked with Pillow and moved to `media/lab/`. A call that failed, was refused or was ignored is a `lab_run` too (`status='failed'`, with `error`). **Upload**: `INSERT lab_image` (`origin='upload'`), the same checks as a scene's frame. Nothing is retried, cached or deleted, and no `scene`, `asset` or `job` row is read for writing: a project's frame is only read, by its `asset` id. |
+| Test an image model by hand (Image lab) | **Run on Seedream** (Phase 13): one synchronous call, not a `job` (a call of 25 to 40 s that the page waits for; the Video lab below, whose runs take minutes, does use jobs). The endpoint validates the form, reads each reference (a `lab_image` or a `kind='frame'` `asset`, as an upright RGB JPEG at quality 90, scaled down above 36 megapixels), and ends its read transaction before the call. The call runs in a task of its own, so a browser that goes away does not lose it. **After the call**, in one transaction: `INSERT lab_run` (the form, the request and the answer with every image replaced by its size, `http_status`, `seconds`, `usage`, `error`) and one `INSERT lab_image` (`origin='result'`) for each returned image, whose file was first checked with Pillow and moved to `media/lab/`. A call that failed, was refused or was ignored is a `lab_run` too (`status='failed'`, with `error`). **Upload**: `INSERT lab_image` (`origin='upload'`), the same checks as a scene's frame. Nothing is retried, cached or deleted, and no `scene` or `asset` row is read for writing: a project's frame is only read, by its `asset` id. **Run on Qwen-Image-2.1** (Phase 22): not a synchronous call, because it takes minutes. `POST /api/lab/images/qwen-runs` validates the form and checks that the approved GPU API has the image endpoint (422 otherwise), then, in one transaction: `INSERT lab_run` (`status='running'`, `endpoint='/v1/qwen-image21/images/generate'`, `params`, the request), `INSERT job` (`type='lab_image'`, `provider='gpu'`, `project_id` NULL, `dedupe=False`, `input.run_id`) and `UPDATE lab_run.job_id`. It answers 202 at once, and the page polls the run. The job submits, is polled, and its `finish` step, in one transaction, does `INSERT lab_image` (`origin='result'`, the file moved to `media/lab/`), `UPDATE lab_run` (`status='succeeded'`, `seconds`, `response`) and `UPDATE job` (`succeeded`). A job that fails or is cancelled leaves `lab_run.status='running'`; the API reports such a run as `failed` from the job's status and error. |
 | Choose the video model (app, project, scene, one take) | **Phase 19.** `UPDATE setting` for `default_video_model`; `UPDATE project.video_model` (through the project's settings, NULL means the app's default); `UPDATE scene.video_model` (its own endpoint, NULL means the project's); and **Regenerate**'s model, which is only `job.input.video_model` of the new job and is never saved on the scene. The model is resolved when a clip job first starts (Section 5, `generate_clip`), so none of these changes a job already prepared or a clip already made. A scene that has a last frame is made by LTX-2.3 whatever is chosen, until LTX-2.5 has a first-and-last-frame endpoint; the clip's provenance says so. |
 | Try prompts on both models, with cuts (Video lab) | **Run** (Phase 19): `INSERT lab_video_run` and `INSERT job` (`type='lab_video'`, `provider='gpu'`, `project_id` NULL) for each chosen model, in **one transaction**, only from a click. Every request is built and checked first, against the limits of the approved GPU API (a model the approved API has no endpoint for refuses the whole click), with the same seed, size, length, recipe, prompt and first frame for both, and `lab_video_run.job_id` is set. The dispatcher starts the jobs while fewer than `max_parallel_generations` clip jobs and lab jobs together are `running`. **Start**: the first frame (if any) is fitted to the run's size and uploaded, and the job is submitted to the stored endpoint, `UPDATE job` setting `provider_job_id` and the exact body. **On success**, in one transaction: the file moves to `media/lab/`, `UPDATE lab_video_run` (the file and what ffprobe read) and `UPDATE job` (`status='succeeded'`, `output`); then the server's job is purged. Nothing is retried beyond what a scene's clip is (pre-emption, an expired result), cached, merged or deleted, and no `scene` or `asset` row is written. **Write a multi-shot prompt**: `INSERT job` (`type='write_lab_video_prompt'`, `provider='llm'`, `project_id` NULL) with the idea in `input.inputs`; its answer is `job.output.prompt`, and nothing else is written. The Activity page lists both under "Video lab". |
 | Run every step automatically | **Start** (Phase 20): `INSERT job` (`type='auto_pipeline'`, `provider='local'`, `scene_id` NULL, `input={"accept_mismatch": ..., "discard_scenes_with_inputs": ...}`), only from a click, and only when the project has a script and a voiceover, or a saved voice to make one with (an AI voiceover made from an earlier script also needs the voice), and no other job waiting or running (422 otherwise); 409 until the recording-differs-from-the-script warning and the replacement of scenes that have inputs are confirmed, the same two questions as "Propose scenes" (and only when the run will propose scenes). A run that is already active is returned instead. **Start of the job**: `UPDATE job` sets `provider_job_id='auto'` (the marker) and the first `phase` and `output`. **Each tick** (`poll`): read-only when nothing needs making; otherwise one transaction that holds the write lock (`lock_scenes`) with `INSERT job` for each job the step needs (the same `type`, `provider`, `scene_id` and `input` as the manual button, plus `input.auto_run_id`, and `input.run_again=true` on a retry that asks the language model) and `UPDATE job` of the run (`phase`, `output`, `last_checked_at`). Each of those jobs then runs under its own handler's rules. **On success** (`finish`): `UPDATE job` (`status='succeeded'`, `output`). **On failure**: `UPDATE job` (`status='failed'`, `error`). **Cancel**: `status='cancelled'` for the run, and for each job it made that is still `queued`. The run changes no `scene`, `asset` or `transcript` row itself: every write to those is its jobs'. |

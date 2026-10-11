@@ -3,11 +3,12 @@ import { Alert, Badge, Button, Loader, Stack, Table, Text, Title } from "@mantin
 import { describeError } from "../../api/errors";
 import { useLabRuns } from "../../api/imageLab";
 import { formatDateTime } from "../../format";
-import { MODE_LABELS } from "./labView";
+import { engineText, runStatusColor, sizeText } from "./labView";
 
 /**
  * Every run, newest first, so results can be compared later. A run opens in a drawer. Reads
- * the database only, and refreshes after a run, on returning to the tab and on Refresh.
+ * the database only, and refreshes after a run, on returning to the tab and on Refresh. It also
+ * refreshes by itself while a run on the GPU server is still running.
  */
 export function LabHistory({ onOpen }: { onOpen: (runId: number) => void }) {
   const runs = useLabRuns();
@@ -29,7 +30,7 @@ export function LabHistory({ onOpen }: { onOpen: (runId: number) => void }) {
             <Table.Tr>
               <Table.Th>Result</Table.Th>
               <Table.Th>Run</Table.Th>
-              <Table.Th>Mode</Table.Th>
+              <Table.Th>Model</Table.Th>
               <Table.Th>Prompt</Table.Th>
               <Table.Th>Size</Table.Th>
               <Table.Th>Time</Table.Th>
@@ -63,7 +64,7 @@ export function LabHistory({ onOpen }: { onOpen: (runId: number) => void }) {
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    <Text size="sm">{MODE_LABELS[run.mode]}</Text>
+                    <Text size="sm">{engineText(run)}</Text>
                     {run.references.length > 0 && (
                       <Text size="xs" c="dimmed">
                         {run.references.length} {run.references.length === 1 ? "reference" : "references"}
@@ -76,13 +77,18 @@ export function LabHistory({ onOpen }: { onOpen: (runId: number) => void }) {
                     </Text>
                   </Table.Td>
                   <Table.Td style={{ whiteSpace: "nowrap" }}>
-                    <Text size="sm">{typeof run.params.size === "string" ? run.params.size : ""}</Text>
+                    <Text size="sm">{sizeText(run)}</Text>
                   </Table.Td>
                   <Table.Td style={{ whiteSpace: "nowrap" }}>
                     <Text size="sm">{run.seconds !== null ? `${run.seconds.toFixed(1)} s` : ""}</Text>
+                    {run.status === "running" && run.phase !== null && (
+                      <Text size="xs" c="dimmed">
+                        {run.phase}
+                      </Text>
+                    )}
                   </Table.Td>
                   <Table.Td>
-                    <Badge color={run.status === "succeeded" ? "green" : "red"} variant="light">
+                    <Badge color={runStatusColor(run.status)} variant="light">
                       {run.status}
                     </Badge>
                     {run.http_status !== null && run.status === "failed" && (

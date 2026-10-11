@@ -32,10 +32,8 @@ export function FirstFrameBadges({ frame }: { frame: Pick<Frame, "source" | "out
 type FirstFrameActionsProps = {
   project: ProjectDetail;
   scene: Scene;
-  /** The image model, for the confirmation. */
+  /** The image model and its mode, for the confirmation ("Qwen-Image-2.1, quality"). */
   model: string;
-  /** Bitdeer's price for one image, in US dollars, for the confirmation. */
-  pricePerImage: number;
   /**
    * The drawer holds changes that are not saved yet. The frame is made from the saved image
    * prompt, so they are saved first.
@@ -46,15 +44,14 @@ type FirstFrameActionsProps = {
 };
 
 /**
- * Generate first frame (or Regenerate) for one scene: one paid image from the image model, with a
- * confirmation, then the status of the newest job. Replacing a frame the user uploaded asks
+ * Generate first frame (or Regenerate) for one scene: one image from the image model, made on the
+ * GPU server, with a confirmation, then the status of the newest job. Replacing a frame the user uploaded asks
  * first, and the upload stays in the list of earlier frames, which can be used again here.
  */
 export function FirstFrameActions({
   project,
   scene,
   model,
-  pricePerImage,
   edited,
   now,
 }: FirstFrameActionsProps) {
@@ -127,9 +124,9 @@ export function FirstFrameActions({
         )}
       </Group>
       <Text size="xs" c="dimmed">
-        Made by the image model from the image prompt above: one paid image, about ${pricePerImage},
-        20 to 50 seconds. The bottom strip, where the model stamps its label, is cut off, and the
-        frame is exactly {project.gen_width} x {project.gen_height}.
+        Made by {model} on your GPU server from the image prompt above. It takes a few minutes.
+        The picture is fitted to exactly {project.gen_width} x {project.gen_height}, which trims
+        a little from its edges.
       </Text>
 
       {generate.isError && (
@@ -149,7 +146,7 @@ export function FirstFrameActions({
           </Group>
           {active && (
             <Text size="xs" c="dimmed">
-              An image takes 20 to 50 seconds. This updates by itself.
+              An image takes a few minutes. This updates by itself.
             </Text>
           )}
         </Stack>
@@ -242,14 +239,14 @@ export function FirstFrameActions({
       <Modal
         opened={confirming !== null}
         onClose={() => setConfirming(null)}
-        title="Before the image model is called"
+        title="Before the image is made"
         centered
       >
         <Stack gap="sm">
           <Text size="sm">
-            One paid image with {model}, about ${pricePerImage}, 20 to 50 s. It is made from the
-            saved image prompt of scene {scene.index + 1}, and nothing is reused: a failed call is
-            not retried.
+            One image with {model} on your GPU server, a few minutes. It is made from the saved
+            image prompt of scene {scene.index + 1}, and nothing is reused: a job that fails is not
+            tried again by itself.
           </Text>
           {confirming?.replaceUpload ? (
             <Text size="sm">

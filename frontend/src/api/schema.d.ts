@@ -583,11 +583,11 @@ export interface paths {
         put?: never;
         /**
          * Generate First Frames
-         * @description Starts one first frame job (a paid image from the image model) for every scene that has
+         * @description Starts one first frame job (an image made on the GPU server) for every scene that has
          *     a current image prompt, nothing running, and no first frame or an AI first frame that is
          *     out of date. Frames the user uploaded are skipped. All the jobs are created in one
          *     transaction. The page asks before calling this, and it shows how many it will start
-         *     (`ScenesOut.frame_candidate_count`) and the estimated cost.
+         *     (`ScenesOut.frame_candidate_count`).
          */
         post: operations["generate_first_frames_api_projects__project_id__generate_first_frames_post"];
         delete?: never;
@@ -607,7 +607,7 @@ export interface paths {
         put?: never;
         /**
          * Generate First Frame
-         * @description Starts the first frame of one scene (a paid image from the image model), or returns the
+         * @description Starts the first frame of one scene (an image made on the GPU server), or returns the
          *     job already active for it. A frame the user uploaded is replaced only when the request
          *     sets `replace_upload`: it stays among the scene's earlier frames.
          */
@@ -833,6 +833,29 @@ export interface paths {
          *     finishes and the run is kept.
          */
         post: operations["create_run_api_lab_images_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/images/qwen-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Qwen Run
+         * @description Starts one run of Qwen-Image-2.1 on the GPU server and answers at once with the run,
+         *     which is `running`. It takes minutes (the server loads the model for each image), so it is a
+         *     job: poll `GET /api/lab/images/runs/{id}` until the status is `succeeded` or `failed`. Each
+         *     click is a run of its own.
+         */
+        post: operations["create_qwen_run_api_lab_images_qwen_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1536,7 +1559,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image";
             /**
              * Status
              * @enum {string}
@@ -1593,7 +1616,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image";
             /**
              * Status
              * @enum {string}
@@ -1699,6 +1722,11 @@ export interface components {
              */
             created_at: string;
             /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "seedream" | "qwen";
+            /**
              * Mode
              * @enum {string}
              */
@@ -1717,7 +1745,11 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "succeeded" | "failed";
+            status: "running" | "succeeded" | "failed";
+            /** Job Id */
+            job_id: number | null;
+            /** Phase */
+            phase: string | null;
             /** Http Status */
             http_status: number | null;
             /** Error */
@@ -2189,6 +2221,30 @@ export interface components {
             discard_scenes_with_inputs: boolean;
         };
         /**
+         * QwenLabRunRequest
+         * @description The form for a run on the GPU server's Qwen-Image-2.1: text to image only.
+         */
+        QwenLabRunRequest: {
+            /** Prompt */
+            prompt: string;
+            /**
+             * Mode
+             * @default quality
+             * @enum {string}
+             */
+            mode: "quality" | "fast";
+            /**
+             * Aspect Ratio
+             * @default 9:16
+             * @enum {string}
+             */
+            aspect_ratio: "1:1" | "4:3" | "3:4" | "3:2" | "2:3" | "16:9" | "9:16";
+            /** Seed */
+            seed?: number | null;
+            /** Steps */
+            steps?: number | null;
+        };
+        /**
          * RenderOut
          * @description One finished render (a succeeded `render_final` job and its `final` asset).
          */
@@ -2387,15 +2443,14 @@ export interface components {
             image_prompts_blocked_reason: string | null;
             /** Image Prompt Candidate Count */
             image_prompt_candidate_count: number;
-            image_llm: components["schemas"]["LlmInfoOut"];
+            /** Image Model Label */
+            image_model_label: string;
             /** Frames Blocked Reason */
             frames_blocked_reason: string | null;
             /** Frame Candidate Count */
             frame_candidate_count: number;
             /** Max Parallel Image Generations */
             max_parallel_image_generations: number;
-            /** Price Per Image Usd */
-            price_per_image_usd: number;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -4636,6 +4691,39 @@ export interface operations {
                 };
             };
             /** @description The form is not acceptable: an empty prompt, too many or missing references, a reference that does not exist, or a bad extra JSON. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_qwen_run_api_lab_images_qwen_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QwenLabRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabRunOut"];
+                };
+            };
+            /** @description The form is not acceptable (an empty prompt, steps in fast mode, a seed out of range), or the approved GPU API has no image endpoint yet. */
             422: {
                 headers: {
                     [name: string]: unknown;

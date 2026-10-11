@@ -8,7 +8,7 @@ import type { components } from "./schema";
 export type GenerateFirstFramesResult = components["schemas"]["GenerateFirstFramesOut"];
 
 /**
- * Starts a first frame job (a paid image from the image model) for every scene that needs
+ * Starts a first frame job (an image made on the GPU server) for every scene that needs
  * one, and returns at once. The page follows its progress by itself. After a refusal the page may be
  * showing old data, so the scenes are loaded again.
  */
@@ -29,7 +29,7 @@ export function useGenerateFirstFrames(projectId: number) {
 }
 
 /**
- * Starts the first frame of one scene (a paid image), and returns at once. `replaceUpload`
+ * Starts the first frame of one scene (an image made on the GPU server), and returns at once. `replaceUpload`
  * confirms replacing a frame the user uploaded: it stays among the scene's earlier frames.
  */
 export function useGenerateFirstFrame(projectId: number) {

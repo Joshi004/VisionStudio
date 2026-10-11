@@ -73,9 +73,8 @@ type SceneInputsDrawerProps = {
   sceneId: number | null;
   /** The model that writes image prompts, for the confirmation of Write image prompt. */
   imagePromptModel: string;
-  /** The image model that makes first frames, and its price per image, for the confirmation. */
+  /** The image model and mode that make first frames, for the confirmation. */
   imageModel: string;
-  pricePerImage: number;
   /** The current time in milliseconds since 1970, for the clip job's elapsed time. */
   now: number;
   onSelect: (sceneId: number) => void;
@@ -94,7 +93,6 @@ export function SceneInputsDrawer({
   sceneId,
   imagePromptModel,
   imageModel,
-  pricePerImage,
   now,
   onSelect,
   onClose,
@@ -287,7 +285,7 @@ export function SceneInputsDrawer({
                   )}
                 </Group>
               }
-              description="A detailed prompt for the image model, written from the first frame description, the description, the narration and the project's style. Keep the main subject out of the bottom tenth: that strip is cut off later."
+              description="A detailed prompt for the image model, written from the first frame description, the description, the narration and the project's style. The picture is trimmed slightly to fit the frame, so the writer keeps the main subject clear of the edges."
               placeholder="Not written yet. Write it with the AI below, or type your own."
               value={draftOf("image_prompt")}
               onChange={(event) => type("image_prompt", event.currentTarget.value)}
@@ -301,7 +299,7 @@ export function SceneInputsDrawer({
               }
             />
             <Text size="xs" c="dimmed" ta="right">
-              {countWords(draftOf("image_prompt"))} words · 120 to 220 works best
+              {countWords(draftOf("image_prompt"))} words · 150 to 300 works best
             </Text>
             {scene.image_prompt_out_of_date && (
               <Text size="xs" c="orange.8">
@@ -433,7 +431,6 @@ export function SceneInputsDrawer({
               project={project}
               scene={scene}
               model={imageModel}
-              pricePerImage={pricePerImage}
               edited={dirty}
               now={now}
             />

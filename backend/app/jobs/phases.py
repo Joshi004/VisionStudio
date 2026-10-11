@@ -45,8 +45,9 @@ CHECKING_CLIP: Final = "checking the clip"
 RESULT_NOT_READY: Final = "the server has not released the clip yet, checking again"
 
 # While a job is in one of these, its result is being fetched and stored: it can no longer
-# be cancelled (the server has already finished it).
-FINISHING_PHASES: Final = frozenset({DOWNLOADING_CLIP, CHECKING_CLIP})
+# be cancelled (the server has already finished it). A first frame's phases are listed with
+# the other first-frame phases further down (`FRAME_FINISHING_PHASES`).
+CLIP_FINISHING_PHASES: Final = frozenset({DOWNLOADING_CLIP, CHECKING_CLIP})
 
 # --- Running: final render (Phase 10) --------------------------------------------------
 CHECKING_CLIPS: Final = "checking the clips"
@@ -94,11 +95,22 @@ def speech_part(label: str, part: int, parts: int) -> str:
 
 
 # --- Running: first frames (Phase 17) ---------------------------------------------------
+# The image is made on the GPU server, so a first frame also uses SUBMITTING and the cluster
+# phases above. Once the server has finished, the image is fetched and stored: the phases below
+# are in `FINISHING_PHASES`, so the job can no longer be cancelled.
 PREPARING_IMAGE_REQUEST: Final = "preparing the image request"
-GENERATING_IMAGE: Final = "generating the image"
+DOWNLOADING_IMAGE: Final = "downloading the image"
+IMAGE_NOT_READY: Final = "the server has not released the image yet, checking again"
 SAVING_IMAGE: Final = "saving the image"
-CROPPING_FRAME: Final = "cropping the frame"
+FITTING_FRAME: Final = "fitting the frame to the size"
 SAVING_FRAME: Final = "saving the frame"
+
+FRAME_FINISHING_PHASES: Final = frozenset(
+    {DOWNLOADING_IMAGE, SAVING_IMAGE, FITTING_FRAME, SAVING_FRAME}
+)
+
+# Every phase in which a remote job's result is being fetched and stored.
+FINISHING_PHASES: Final = CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES
 
 # --- Finished ---------------------------------------------------------------------
 DONE: Final = "done"

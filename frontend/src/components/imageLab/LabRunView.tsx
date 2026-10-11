@@ -7,14 +7,16 @@ import {
   Code,
   Collapse,
   Group,
+  Loader,
   SimpleGrid,
   Stack,
   Text,
 } from "@mantine/core";
+import { Link } from "react-router";
 
 import type { LabImage, LabRun } from "../../api/imageLab";
 import { formatBytes, formatDateTime } from "../../format";
-import { costLine, MODE_LABELS, paramsLine } from "./labView";
+import { costLine, engineText, paramsLine, runStatusColor } from "./labView";
 
 type LabRunViewProps = {
   run: LabRun;
@@ -53,11 +55,11 @@ export function LabRunView({ run, onUseAsReference, onLoad }: LabRunViewProps) {
   return (
     <Stack gap="sm">
       <Group gap="sm" align="center">
-        <Badge color={run.status === "succeeded" ? "green" : "red"} variant="light">
+        <Badge color={runStatusColor(run.status)} variant="light">
           {run.status}
         </Badge>
         <Text size="sm" fw={600}>
-          Run {run.id} · {MODE_LABELS[run.mode]}
+          Run {run.id} · {engineText(run)}
         </Text>
         <Text size="sm" c="dimmed">
           {formatDateTime(run.created_at)}
@@ -72,7 +74,11 @@ export function LabRunView({ run, onUseAsReference, onLoad }: LabRunViewProps) {
       <Text size="sm" c="dimmed">
         {[
           run.seconds !== null ? `${run.seconds.toFixed(1)} s` : null,
-          run.http_status !== null ? `HTTP ${run.http_status}` : "no answer",
+          run.http_status !== null
+            ? `HTTP ${run.http_status}`
+            : run.engine === "seedream"
+              ? "no answer"
+              : null,
           run.endpoint,
           run.model,
           run.request_bytes !== null ? `${formatBytes(run.request_bytes)} sent` : null,
@@ -85,8 +91,31 @@ export function LabRunView({ run, onUseAsReference, onLoad }: LabRunViewProps) {
         {paramsLine(run)}
       </Text>
 
+      {run.status === "running" && (
+        <Alert color="blue" title="Running on the GPU server">
+          <Group gap="sm" align="center">
+            <Loader size="xs" />
+            <Text size="sm">
+              {run.phase ?? "waiting to start"}. It takes a few minutes. This updates by itself,
+              and you can leave the page: the image stays in the history.
+            </Text>
+          </Group>
+          {run.job_id !== null && (
+            <Text size="xs" c="dimmed" mt={4}>
+              Job {run.job_id}: its status, and Cancel, are on the{" "}
+              <Anchor component={Link} to="/activity" size="xs">
+                Activity page
+              </Anchor>
+              .
+            </Text>
+          )}
+        </Alert>
+      )}
       {run.error && (
-        <Alert color="red" title="The call did not give an image">
+        <Alert
+          color="red"
+          title={run.engine === "qwen" ? "The image was not made" : "The call did not give an image"}
+        >
           <Text size="sm" style={{ wordBreak: "break-word" }}>
             {run.error}
           </Text>
@@ -194,7 +223,7 @@ export function LabRunView({ run, onUseAsReference, onLoad }: LabRunViewProps) {
       {run.response !== null && run.response !== undefined && (
         <Json label="the answer (images replaced by their sizes)" value={run.response} />
       )}
-      {run.status === "succeeded" && (
+      {run.status === "succeeded" && run.images.length > 0 && (
         <Text size="xs" c="dimmed">
           Images are stored exactly as returned.{" "}
           <Anchor href={run.images[0]?.url} target="_blank" rel="noreferrer" size="xs">

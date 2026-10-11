@@ -28,7 +28,7 @@ from app.core.config import env_value
 from app.core.urls import UrlError, docker_mapped, validate_base_url
 from app.db.models import Setting
 from app.db.types import utcnow
-from app.services import video_models
+from app.services import image_models, video_models
 
 _logger = logging.getLogger(__name__)
 
@@ -206,18 +206,20 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
-        key="image_model",
+        key="image_mode",
         group=GROUP_IMAGE,
-        label="Image model",
+        label="Image mode",
         help=(
-            "Model that makes each scene's first frame, one paid image per scene. It uses the "
-            "LLM URL above (Bitdeer). The Image lab has its own model box."
+            "How Qwen-Image-2.1 on your GPU server makes each scene's first frame. Quality uses "
+            "the base model (40 steps) and fast uses the Turbo model (8 steps). Either way an "
+            "image takes a few minutes, because the server loads the model for each one. The two "
+            "modes are different models, so the same seed gives a different picture in each. "
+            "The Image lab can try both, and Seedream, side by side."
         ),
         value_type="string",
-        default="seedream-5.0-lite",
-        pattern=TextPattern(
-            regex=r"[A-Za-z0-9._/:-]{1,200}",
-            message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
+        default=image_models.DEFAULT_MODE,
+        choices=tuple(
+            SettingChoice(mode, image_models.LABELS[mode]) for mode in image_models.MODE_IDS
         ),
     ),
     SettingSpec(
@@ -277,10 +279,10 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_LIMITS,
         label="Maximum parallel image generations",
         help=(
-            "How many first frames may be made by the image model at the same time. Each image "
-            "takes 20 to 50 seconds. It applies the next time the app looks for work, and "
-            "running jobs are not stopped. No range is enforced: you are trusted to pick a "
-            "number Bitdeer can actually handle."
+            "How many first frames may be made on the GPU server at the same time. Each one is "
+            "its own GPU job that loads about 31 GB of model weights first. It applies the next "
+            "time the app looks for work, and running jobs are not stopped. No range is "
+            "enforced: you are trusted to pick a number your GPU server can actually handle."
         ),
         value_type="integer",
         default=2,

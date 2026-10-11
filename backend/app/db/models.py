@@ -217,7 +217,7 @@ class Job(Base):
             "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
             "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
             "'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', "
-            "'generate_voiceover')",
+            "'generate_voiceover', 'lab_image')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -289,22 +289,30 @@ class ApiSnapshot(Base):
 
 
 class LabRun(Base):
-    """One manual test of the image API from the Image lab page (Phase 13).
+    """One manual test of an image model from the Image lab page (Phase 13).
 
-    A run is one synchronous call, not a `job`: the lab is not tied to a project. It keeps
-    the exact request and the raw response (image data replaced by sizes), so results can be
-    compared later. Never deleted in iteration 1.
+    A Seedream run is one synchronous call, not a `job`: the lab is not tied to a project. A run
+    on the GPU server's Qwen-Image-2.1 takes minutes, so it is a `lab_image` job (`job_id`) and
+    the row is `running` until the job ends. Either way the row keeps the exact request and
+    the raw response (image data replaced by sizes), so results can be compared later. Never
+    deleted in iteration 1.
     """
 
     __tablename__ = "lab_run"
     __table_args__ = (
         CheckConstraint("mode IN ('text_to_image', 'image_to_image', 'edit')", name="mode_valid"),
-        CheckConstraint("status IN ('succeeded', 'failed')", name="status_valid"),
+        CheckConstraint("status IN ('running', 'succeeded', 'failed')", name="status_valid"),
         Index("idx_lab_run_created", "created_at"),
+        Index("idx_lab_run_job", "job_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    # Added in Phase 22: the `lab_image` job that makes a run on the GPU server. NULL for a
+    # Seedream run.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
     mode: Mapped[str]
     endpoint: Mapped[str]
     model: Mapped[str]

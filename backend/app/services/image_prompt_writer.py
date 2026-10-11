@@ -3,7 +3,7 @@ functions, no I/O.
 
 One request is made for one scene. The model gets what is known about the scene (the
 *inputs*) and answers with one detailed prompt for the image model (`{"image_prompt": ...}`).
-Phase 17 sends that prompt to Seedream.
+Phase 17 sends that prompt to the image model (Qwen-Image-2.1 on the GPU server).
 
 The inputs are one plain dict (`prompt_inputs`), and the user message is rendered from it
 alone. That makes `inputs_sha256` a name for exactly what the model was told about the scene:

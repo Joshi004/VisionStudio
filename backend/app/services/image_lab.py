@@ -1,20 +1,26 @@
-"""The Image lab: manual tests of Bitdeer's image API (Phase 13).
+"""The Image lab: manual tests of two image models (Phase 13 and 22).
 
-The lab is for trying the API by hand and comparing what comes back, so it is built to show
-the API as it is: the request goes out as the form describes it, and the answer comes back
-as it was, including an answer that ignored a setting or a call that was refused.
+The lab is for trying a model by hand and comparing what comes back, so it is built to show the
+model as it is: the request goes out as the form describes it, and the answer comes back as it
+was, including an answer that ignored a setting or a call that was refused.
 
-A run is one synchronous call, not a `job`: the lab belongs to no project, and `job` needs
-one. It is a paid call, so it only starts from a click (`POST /api/lab/images/runs`), is
-never retried and never cached. At most 2 run at once.
+**Seedream (Bitdeer's image API).** A run is one synchronous call, not a `job`: the lab belongs
+to no project, and `job` needs one. It is a paid call, so it only starts from a click
+(`POST /api/lab/images/runs`), is never retried and never cached. At most 2 run at once.
 
 `start_run` does the whole run in a task of its own, and the request only waits for it. If
 the browser goes away while the call is in flight, the call still finishes and its images and
 record are kept: a paid answer is never thrown away.
 
-The pure parts (`validate_form`, `build_generation_body`, `build_edit_fields`) hold no I/O.
-Everything that touches the database opens its own session, because the task outlives the
-request.
+**Qwen-Image-2.1 (the GPU server).** A run takes minutes, so it is a `lab_image` job
+(`job.project_id` is NULL) and a `lab_run` row that is `running` until the job ends
+(`create_qwen_run`; `jobs/generate_lab_image.py` does the rest). The row's `status` is what the
+job last said: a job that failed or was cancelled leaves the row `running`, so the page reads
+the job as well (`api/image_lab.py`). Text to image only: the edit endpoint is not used.
+
+The pure parts (`validate_form`, `build_generation_body`, `build_edit_fields`,
+`validate_qwen_form`) hold no I/O. Everything that touches the database opens its own session,
+because a Seedream task outlives the request.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ import base64
 import json
 import logging
 import re
+import secrets
 from collections.abc import AsyncIterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
@@ -34,10 +41,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Asset, LabImage, LabRun, Scene
+from app.db.models import Asset, Job, LabImage, LabRun, Scene
 from app.db.session import SessionLocal
-from app.providers import image_api
-from app.services import frame_images
+from app.jobs import store
+from app.providers import contract_guard, image_api, image_generator
+from app.services import api_contract, frame_images, image_models
 from app.services.frame_images import FrameRejected
 from app.services.storage import StorageError, TooLargeError, get_storage
 
@@ -429,6 +437,125 @@ async def _save_run(
     return run.id
 
 
+# --- Qwen-Image-2.1 on the GPU server -----------------------------------------------------------
+
+RUN_JOB: Final = "lab_image"
+PARTITION_KEY: Final = "gpu_partition"
+
+
+@dataclass(frozen=True)
+class QwenLabForm:
+    prompt: str
+    mode: image_models.ImageMode
+    aspect_ratio: str
+    # Left out: a random seed.
+    seed: int | None
+    # The number of denoising steps. Left out: the server's own (40 in quality mode). Quality
+    # mode only: fast mode always runs its own 8.
+    steps: int | None
+
+
+def validate_qwen_form(form: QwenLabForm) -> None:
+    """Raises LabInputError for a form no Qwen run should be started with."""
+    if not form.prompt.strip():
+        raise LabInputError("Write a prompt first.")
+    if len(form.prompt) > image_generator.MAX_PROMPT_CHARS:
+        raise LabInputError(
+            f"The prompt must be at most {image_generator.MAX_PROMPT_CHARS:,} characters."
+        )
+    if not image_models.is_image_mode(form.mode):
+        raise LabInputError("Choose quality or fast.")
+    if form.aspect_ratio not in image_models.ASPECT_RATIOS:
+        raise LabInputError(f"Choose one of the shapes: {', '.join(image_models.ASPECT_RATIOS)}.")
+    if form.seed is not None and not 0 <= form.seed < image_models.SEED_LIMIT:
+        raise LabInputError(f"The seed must be from 0 to {image_models.SEED_LIMIT - 1}.")
+    if form.steps is not None:
+        if form.mode != "quality":
+            raise LabInputError("The number of steps can only be set in quality mode.")
+        if not image_generator.MIN_STEPS <= form.steps <= image_generator.MAX_STEPS:
+            raise LabInputError(
+                f"The number of steps must be from {image_generator.MIN_STEPS} to "
+                f"{image_generator.MAX_STEPS}."
+            )
+
+
+async def create_qwen_run(session: AsyncSession, form: QwenLabForm) -> tuple[LabRun, Job]:
+    """Checks the form and starts one run on the GPU server. Commits. Raises LabInputError.
+
+    The request is built and checked against the approved GPU API first (a request for an
+    endpoint the API has not been approved with would only wait), so a bad form starts nothing.
+    The run is a `lab_image` job of its own, never merged into an earlier one: each click is a
+    GPU run, and trying a prompt again with another seed is what the lab is for.
+    """
+    validate_qwen_form(form)
+    seed = form.seed if form.seed is not None else secrets.randbelow(image_models.SEED_LIMIT)
+    partition = await settings_service.get_str(session, PARTITION_KEY)
+    bodies = await contract_guard.approved_bodies(session)
+    spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
+    prompt = form.prompt.strip()
+    try:
+        image_generator.check_endpoint(spec)
+        request = image_generator.build_request(
+            prompt=prompt,
+            mode=form.mode,
+            seed=seed,
+            aspect_ratio=form.aspect_ratio,
+            partition=partition,
+            steps=form.steps,
+        )
+    except ValueError as exc:
+        raise LabInputError(str(exc)) from exc
+
+    width, height = image_models.ASPECT_SIZES[form.aspect_ratio]
+    run = LabRun(
+        mode="text_to_image",
+        endpoint=image_generator.GENERATE_PATH,
+        model=image_models.MODEL_ID,
+        prompt=prompt,
+        params={
+            "engine": "qwen",
+            "qwen_mode": form.mode,
+            "aspect_ratio": form.aspect_ratio,
+            "expected_size": {"width": width, "height": height},
+            "seed": seed,
+            "steps": form.steps,
+        },
+        reference_images=[],
+        status="running",
+        request={"method": "POST", "path": image_generator.GENERATE_PATH, "body": request},
+    )
+    session.add(run)
+    await session.flush()
+    job, _created = await store.create_job(
+        session,
+        project_id=None,
+        type=RUN_JOB,
+        provider="gpu",
+        input={
+            "requested": "lab_image",
+            "run_id": run.id,
+            "image_model": image_models.MODEL_ID,
+            "image_mode": form.mode,
+            "aspect_ratio": form.aspect_ratio,
+            "expected_size": {"width": width, "height": height},
+            "endpoint": image_generator.GENERATE_PATH,
+            "request": request,
+        },
+        commit=False,
+        dedupe=False,
+    )
+    run.job_id = job.id
+    await session.commit()
+    _logger.info(
+        "lab image run started: run=%d job=%d mode=%s shape=%s",
+        run.id,
+        job.id,
+        form.mode,
+        form.aspect_ratio,
+    )
+    return run, job
+
+
 # --- Uploads --------------------------------------------------------------------------------
 
 
@@ -496,6 +623,18 @@ async def list_runs(session: AsyncSession, before_id: int | None, limit: int) ->
 
 async def get_run(session: AsyncSession, run_id: int) -> LabRun | None:
     return await session.get(LabRun, run_id)
+
+
+async def jobs_for_runs(session: AsyncSession, runs: Sequence[LabRun]) -> dict[int, Job]:
+    """The `lab_image` job of each run that has one, by run id (a Seedream run has none)."""
+    job_ids = {run.job_id for run in runs if run.job_id is not None}
+    if not job_ids:
+        return {}
+    found = await session.execute(
+        select(Job).where(Job.id.in_(job_ids)).execution_options(populate_existing=True)
+    )
+    by_id = {job.id: job for job in found.scalars()}
+    return {run.id: by_id[run.job_id] for run in runs if run.job_id in by_id}
 
 
 async def images_by_run(session: AsyncSession, run_ids: Sequence[int]) -> dict[int, list[LabImage]]:

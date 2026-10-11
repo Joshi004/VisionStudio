@@ -33,7 +33,7 @@ from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.generate_clip import MAX_PARALLEL_KEY
-from app.jobs.generate_frame import IMAGE_MODEL_KEY
+from app.jobs.generate_frame import IMAGE_MODE_KEY
 from app.jobs.generate_frame import MAX_PARALLEL_KEY as MAX_PARALLEL_IMAGES_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
 from app.jobs.store import JobRow
@@ -44,7 +44,7 @@ from app.services import (
     cut_edits,
     description_writer,
     frame_images,
-    image_lab,
+    image_models,
     scene_cuts,
     scene_inputs,
     scene_planner,
@@ -359,9 +359,9 @@ class ScenesOut(BaseModel):
     # How many jobs "Write image prompts" would start: scenes with text to work from and no
     # prompt or an out-of-date AI prompt, and nothing running.
     image_prompt_candidate_count: int
-    # The model the next first frame will be made by (the Bitdeer image model), and the address
-    # after Docker mapping.
-    image_llm: LlmInfoOut
+    # The image model and mode the next first frame will be made with, in words for the page
+    # ("Qwen-Image-2.1, quality"). It runs on the GPU server.
+    image_model_label: str
     # Why "Generate first frames" cannot start any job now, or None when it can.
     frames_blocked_reason: str | None
     # How many jobs "Generate first frames" would start: scenes with a current image prompt and
@@ -369,8 +369,6 @@ class ScenesOut(BaseModel):
     frame_candidate_count: int
     # The setting, so the page can say how many images are made at once.
     max_parallel_image_generations: int
-    # Bitdeer's price for one image, in US dollars. An estimate: the page marks it so.
-    price_per_image_usd: float
 
 
 def _int(value: object) -> int | None:
@@ -676,7 +674,7 @@ async def propose_scenes(
             f"Image prompts are being written for {writing} {noun}. Wait for them to finish "
             "before proposing scenes.",
         )
-    # And for first frames (Phase 17): the paid image would be lost with its scene's job.
+    # And for first frames (Phase 17): the image would be lost with its scene's job.
     making = len(await first_frames_service.active_frame_jobs(session, project.id))
     if making:
         noun = "scene" if making == 1 else "scenes"
@@ -861,7 +859,8 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
 
     # First frames (Phase 17): the newest job of each scene, the frames each scene can go back
     # to, and why a frame cannot be made.
-    image_llm = await _llm_info(session, IMAGE_MODEL_KEY)
+    image_mode = image_models.resolve_mode(await settings_service.get_str(session, IMAGE_MODE_KEY))
+    image_model_label = f"{image_models.MODEL_LABEL}, {image_mode}"
     max_parallel_images = await settings_service.get_int(session, MAX_PARALLEL_IMAGES_KEY)
     frame_jobs = await store.latest_jobs_by_scene(
         session, project.id, first_frames_service.FRAME_JOB
@@ -959,12 +958,11 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
         image_prompts_blocked_reason=prompts_project_block
         or image_prompts_service.all_block(prompt_candidates, len(active_prompts)),
         image_prompt_candidate_count=prompt_candidates,
-        image_llm=image_llm,
+        image_model_label=image_model_label,
         frames_blocked_reason=prompts_project_block
         or first_frames_service.all_block(frame_candidates, len(active_frames)),
         frame_candidate_count=frame_candidates,
         max_parallel_image_generations=max_parallel_images,
-        price_per_image_usd=image_lab.PRICE_PER_IMAGE_USD,
     )
 
 

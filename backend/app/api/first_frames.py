@@ -3,9 +3,9 @@
 `POST .../generate-first-frames` creates one `generate_frame` job for every scene that has a
 current image prompt and no first frame, or an AI first frame that is out of date, and
 `POST .../scenes/{id}/generate-first-frame` creates one for a single scene. Each job is one
-paid image from the image model, so it only ever runs from one of these clicks, and the page
-shows the number of images and the estimated cost first. Both return at once with HTTP 202.
-The dispatcher does the work, at most "maximum parallel image generations" at a time.
+image made by Qwen-Image-2.1 on the GPU server, so it only ever runs from one of these clicks,
+and the page shows the number of images first. Both return at once with HTTP 202. The
+dispatcher does the work, at most "maximum parallel image generations" at a time.
 
 A frame the author uploaded is never replaced by "all". The one-scene endpoint replaces it only
 when the request says `replace_upload` (it answers 409 until then), and the upload stays
@@ -116,11 +116,11 @@ async def _locked_state(
     responses={**_NOT_FOUND, **_BLOCKED},
 )
 async def generate_first_frames(project_id: int, session: SessionDep) -> GenerateFirstFramesOut:
-    """Starts one first frame job (a paid image from the image model) for every scene that has
+    """Starts one first frame job (an image made on the GPU server) for every scene that has
     a current image prompt, nothing running, and no first frame or an AI first frame that is
     out of date. Frames the user uploaded are skipped. All the jobs are created in one
     transaction. The page asks before calling this, and it shows how many it will start
-    (`ScenesOut.frame_candidate_count`) and the estimated cost.
+    (`ScenesOut.frame_candidate_count`).
     """
     project = await load_project(session, project_id)
     state, block = await _locked_state(session, project)
@@ -152,7 +152,7 @@ async def generate_first_frames(project_id: int, session: SessionDep) -> Generat
             session,
             project_id=project.id,
             type=frames_service.FRAME_JOB,
-            provider="image",
+            provider="gpu",
             scene_id=scene.id,
             input={
                 "requested": "generate_all",
@@ -191,7 +191,7 @@ async def generate_first_frame(
     session: SessionDep,
     body: GenerateFirstFrameRequest | None = None,
 ) -> JobDetail:
-    """Starts the first frame of one scene (a paid image from the image model), or returns the
+    """Starts the first frame of one scene (an image made on the GPU server), or returns the
     job already active for it. A frame the user uploaded is replaced only when the request
     sets `replace_upload`: it stays among the scene's earlier frames.
     """
@@ -236,7 +236,7 @@ async def generate_first_frame(
         session,
         project_id=project.id,
         type=frames_service.FRAME_JOB,
-        provider="image",
+        provider="gpu",
         scene_id=scene.id,
         input={
             "requested": "generate",
