@@ -13,6 +13,12 @@ type FirstFramePickerProps = {
   role?: "first" | "last";
   /** The last frame can only be chosen after the first. */
   disabled?: boolean;
+  /** Replaces the heading ("First frame (optional)"), for a picker used for something else. */
+  title?: string;
+  /** Replaces the text shown while nothing is chosen. */
+  emptyText?: string;
+  /** Replaces the text shown under the chosen image. */
+  hint?: string;
 };
 
 /**
@@ -26,6 +32,9 @@ export function FirstFramePicker({
   onChange,
   role = "first",
   disabled = false,
+  title,
+  emptyText,
+  hint,
 }: FirstFramePickerProps) {
   const isLast = role === "last";
   const upload = useLabUpload();
@@ -45,7 +54,7 @@ export function FirstFramePicker({
     <Stack gap="xs">
       <Group justify="space-between" align="center">
         <Text size="sm" fw={600}>
-          {isLast ? "Last frame (optional)" : "First frame (optional)"}
+          {title ?? (isLast ? "Last frame (optional)" : "First frame (optional)")}
         </Text>
         <Group gap="xs">
           <Button
@@ -83,11 +92,12 @@ export function FirstFramePicker({
 
       {value === null ? (
         <Text size="sm" c="dimmed">
-          {isLast
-            ? disabled
-              ? "Choose a first frame before a last frame."
-              : "No last frame: the clip is free to end anywhere."
-            : "No first frame: the clip is made from the prompt alone (text-to-video)."}
+          {emptyText ??
+            (isLast
+              ? disabled
+                ? "Choose a first frame before a last frame."
+                : "No last frame: the clip is free to end anywhere."
+              : "No first frame: the clip is made from the prompt alone (text-to-video).")}
         </Text>
       ) : (
         <Group gap="sm" align="flex-start" wrap="nowrap">
@@ -97,9 +107,10 @@ export function FirstFramePicker({
           <Stack gap={2}>
             <Text size="sm">{value.label}</Text>
             <Text size="xs" c="dimmed">
-              {isLast
-                ? "The clip ends on this image. Use a frame of the same place, subject and light as the first one: very different frames cross-dissolve instead of moving."
-                : "The clip starts on this image, so describe only what moves, the camera and the sound. With LTX-2.5, write the cuts after that opening shot."}
+              {hint ??
+                (isLast
+                  ? "The clip ends on this image. Use a frame of the same place, subject and light as the first one: very different frames cross-dissolve instead of moving."
+                  : "The clip starts on this image, so describe only what moves, the camera and the sound. With LTX-2.5, write the cuts after that opening shot.")}
             </Text>
           </Stack>
         </Group>

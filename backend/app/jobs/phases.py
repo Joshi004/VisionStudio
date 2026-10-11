@@ -81,6 +81,11 @@ SAVING_LAST_FRAME_PROMPT: Final = "saving the last frame prompt"
 # The lab's clips use the clip phases above. Its prompt helper also uses PREPARING_PROMPT and
 # `asking_model`.
 CHECKING_VIDEO_PROMPT: Final = "checking the video prompt"
+# A lip-sync clip (Talking character lab) uploads the speech next to the frame. It also uses
+# the clip phases above.
+UPLOADING_AUDIO: Final = "uploading the speech"
+# The Talking character lab's prompt writer. It also uses PREPARING_PROMPT and `asking_model`.
+CHECKING_TALK_PROMPTS: Final = "checking the voice and video prompts"
 
 # --- Running: speech (Phase 21) ------------------------------------------------------------
 # A speech is made in one request per piece of the script. It also uses SUBMITTING and the

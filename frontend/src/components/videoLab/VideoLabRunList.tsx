@@ -44,6 +44,15 @@ function RunCard({ run, now }: { run: LabVideoRun; now: number }) {
             <Badge variant="filled" color={run.video_model === "ltx-2.5" ? "blue" : "gray"}>
               {videoModelLabel(run.video_model)}
             </Badge>
+            {run.audio_input !== null && (
+              <Badge
+                variant="light"
+                color="grape"
+                title="Made to match a recorded speech: the character's lips follow it, and the speech is the clip's sound."
+              >
+                lip-sync
+              </Badge>
+            )}
             {job !== null && <JobStatusBadge job={job} />}
           </Group>
           {job !== null && <JobActions job={job} />}
@@ -152,26 +161,35 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
                     </Text>
                     <Text size="xs" c="dimmed">
                       {paramsLine(first)}
-                      {lastFrame !== null
-                        ? " · first to last frame"
-                        : frame !== null
-                          ? " · from a first frame"
-                          : " · text-to-video"}{" "}
+                      {first.audio_input !== null
+                        ? " · lip-sync to a speech"
+                        : lastFrame !== null
+                          ? " · first to last frame"
+                          : frame !== null
+                            ? " · from a first frame"
+                            : " · text-to-video"}{" "}
                       ·{" "}
                       {formatDateTime(first.created_at)}
                     </Text>
                   </Stack>
                 </Group>
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  onClick={() => {
-                    onLoad(group.runs);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                >
-                  Load into the form
-                </Button>
+                {first.audio_input !== null ? (
+                  // This form has no speech to give: a lip-synced clip is remade in its own tab.
+                  <Text size="xs" c="dimmed" ta="right">
+                    Made in the Talking character tab
+                  </Text>
+                ) : (
+                  <Button
+                    size="compact-xs"
+                    variant="default"
+                    onClick={() => {
+                      onLoad(group.runs);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                  >
+                    Load into the form
+                  </Button>
+                )}
               </Group>
               <SimpleGrid cols={{ base: 1, md: Math.min(group.runs.length, 2) }} spacing="sm">
                 {group.runs.map((run) => (

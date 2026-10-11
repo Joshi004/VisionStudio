@@ -9,7 +9,7 @@ import { useProjects } from "../api/projects";
 import { JobActions } from "../components/jobs/JobActions";
 import { JobDetailDrawer } from "../components/jobs/JobDetailDrawer";
 import { JobStatusBadge } from "../components/jobs/JobStatusBadge";
-import { elapsedText, jobTypeLabel } from "../components/jobs/jobFormat";
+import { elapsedText, jobTypeLabel, labPathFor } from "../components/jobs/jobFormat";
 import { formatDateTime } from "../format";
 import { useNow } from "../hooks/useNow";
 
@@ -86,10 +86,10 @@ export function ActivityPage() {
                   <Table.Td>{jobTypeLabel(job.type)}</Table.Td>
                   <Table.Td>
                     {job.project_id === null ? (
-                      // The Video lab's jobs belong to no project.
+                      // The Lab's jobs belong to no project.
                       <Anchor
                         component={Link}
-                        to="/video-lab"
+                        to={labPathFor(job.type)}
                         onClick={(event) => event.stopPropagation()}
                       >
                         {job.project_name}

@@ -1226,6 +1226,136 @@ export interface paths {
         patch: operations["update_voice_api_voices__voice_id__patch"];
         trace?: never;
     };
+    "/api/lab/characters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Characters
+         * @description The cast, newest first.
+         */
+        get: operations["list_characters_api_lab_characters_get"];
+        put?: never;
+        /**
+         * Create Character
+         * @description Saves a character.
+         */
+        post: operations["create_character_api_lab_characters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Character
+         * @description Changes the fields that are sent. The picture's file is never touched.
+         */
+        patch: operations["update_character_api_lab_characters__character_id__patch"];
+        trace?: never;
+    };
+    "/api/lab/talk/prompt-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Prompt Draft
+         * @description Starts the job that writes the voice instruction and the video prompt from a line of
+         *     dialogue (a paid call to the language model). Follow it with `GET /api/jobs/{id}`: when it
+         *     has succeeded, `output.voice_instruction` and `output.video_prompt` are the texts and
+         *     `output.warnings` is what to look at.
+         */
+        post: operations["create_prompt_draft_api_lab_talk_prompt_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/talk/takes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Takes
+         * @description The newest takes first. Pass the last id you have as `before_id` for the next page.
+         */
+        get: operations["list_takes_api_lab_talk_takes_get"];
+        put?: never;
+        /**
+         * Create Take
+         * @description Saves a take and starts its first step. Each step is a paid call: the prompts a model
+         *     call, the speech a GPU job of one to three minutes, the clip one of 5 to 10 minutes.
+         */
+        post: operations["create_take_api_lab_talk_takes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/talk/takes/{take_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Take */
+        get: operations["get_take_api_lab_talk_takes__take_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/talk/takes/{take_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Take
+         * @description Starts the next step of a take (one step). Refused while a step is still running, and
+         *     when the take is finished.
+         */
+        post: operations["continue_take_api_lab_talk_takes__take_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/voiceover/generate": {
         parameters: {
             query?: never;
@@ -1308,6 +1438,16 @@ export interface components {
             /** Tags */
             tags: components["schemas"]["TagGroupOut"][];
         };
+        /** AudioInputOut */
+        AudioInputOut: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "voice_run" | "voice";
+            /** Id */
+            id: number;
+        };
         /** AutoGenerateOut */
         AutoGenerateOut: {
             job: components["schemas"]["JobSummary"] | null;
@@ -1336,6 +1476,61 @@ export interface components {
              * @default false
              */
             discard_scenes_with_inputs: boolean;
+        };
+        /** CharacterBrief */
+        CharacterBrief: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /** CharacterCreate */
+        CharacterCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            image: components["schemas"]["FirstFrameIn"];
+            /** Voice Id */
+            voice_id?: number | null;
+            /** Voice Instruction */
+            voice_instruction?: string | null;
+        };
+        /** CharacterOut */
+        CharacterOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            image: components["schemas"]["FirstFrameOut"] | null;
+            voice: components["schemas"]["VoiceBrief"] | null;
+            /** Voice Instruction */
+            voice_instruction: string | null;
+        };
+        /**
+         * CharacterUpdate
+         * @description Only the fields that are sent change. `voice_id` and `voice_instruction` may be null.
+         */
+        CharacterUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            image?: components["schemas"]["FirstFrameIn"] | null;
+            /** Voice Id */
+            voice_id?: number | null;
+            /** Voice Instruction */
+            voice_instruction?: string | null;
         };
         /** ChecksOut */
         ChecksOut: {
@@ -1690,7 +1885,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts";
             /**
              * Status
              * @enum {string}
@@ -1747,7 +1942,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts";
             /**
              * Status
              * @enum {string}
@@ -2011,6 +2206,7 @@ export interface components {
             };
             first_frame: components["schemas"]["FirstFrameOut"] | null;
             last_frame: components["schemas"]["FirstFrameOut"] | null;
+            audio_input: components["schemas"]["AudioInputOut"] | null;
             job: components["schemas"]["JobSummary"] | null;
             /** Url */
             url: string | null;
@@ -2850,6 +3046,102 @@ export interface components {
             out_of_date: boolean;
             /** Too Short */
             too_short: boolean;
+        };
+        /** TalkPromptDraftCreate */
+        TalkPromptDraftCreate: {
+            /** Dialogue */
+            dialogue: string;
+            /** Character Id */
+            character_id?: number | null;
+            /** Character Note */
+            character_note?: string | null;
+            image?: components["schemas"]["FirstFrameIn"] | null;
+            /** Delivery Note */
+            delivery_note?: string | null;
+            /** Voice Mode */
+            voice_mode?: ("design" | "clone" | "direction") | null;
+        };
+        /** TalkTakeCreate */
+        TalkTakeCreate: {
+            /**
+             * Run
+             * @enum {string}
+             */
+            run: "all" | "voice" | "video";
+            /** Dialogue */
+            dialogue: string;
+            image: components["schemas"]["FirstFrameIn"];
+            /** Character Id */
+            character_id?: number | null;
+            /** Character Note */
+            character_note?: string | null;
+            /** Delivery Note */
+            delivery_note?: string | null;
+            /** Voice Mode */
+            voice_mode?: ("design" | "clone" | "direction") | null;
+            /** Voice Id */
+            voice_id?: number | null;
+            /** Reuse Voice Run Id */
+            reuse_voice_run_id?: number | null;
+            /** Voice Instruction */
+            voice_instruction?: string | null;
+            /** Video Prompt */
+            video_prompt?: string | null;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Video Seed */
+            video_seed?: number | null;
+            /** Negative Prompt */
+            negative_prompt?: string | null;
+        };
+        /** TalkTakeOut */
+        TalkTakeOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dialogue */
+            dialogue: string;
+            character: components["schemas"]["CharacterBrief"] | null;
+            image: components["schemas"]["FirstFrameOut"] | null;
+            /** Character Note */
+            character_note: string | null;
+            /** Delivery Note */
+            delivery_note: string | null;
+            /** Voice Mode */
+            voice_mode: ("design" | "clone" | "direction") | null;
+            /** Voice Id */
+            voice_id: number | null;
+            /** Voice Instruction */
+            voice_instruction: string | null;
+            /** Video Prompt */
+            video_prompt: string | null;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Video Seed */
+            video_seed: number | null;
+            /** Negative Prompt */
+            negative_prompt: string | null;
+            /** Auto Continue */
+            auto_continue: boolean;
+            /** Last Error */
+            last_error: string | null;
+            prompt_job: components["schemas"]["JobSummary"] | null;
+            voice_run: components["schemas"]["LabVoiceRunOut"] | null;
+            video_run: components["schemas"]["LabVideoRunOut"] | null;
+            /** Running Step */
+            running_step: ("prompts" | "voice" | "video") | null;
+            /** Next Step */
+            next_step: ("prompts" | "voice" | "video") | null;
         };
         /** ToolStatus */
         ToolStatus: {
@@ -5690,6 +5982,281 @@ export interface operations {
                 };
             };
             /** @description There is no such run or voice. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_characters_api_lab_characters_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterOut"][];
+                };
+            };
+        };
+    };
+    create_character_api_lab_characters_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterOut"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_character_api_lab_characters__character_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CharacterUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterOut"];
+                };
+            };
+            /** @description There is no such character. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_prompt_draft_api_lab_talk_prompt_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TalkPromptDraftCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_takes_api_lab_talk_takes_get: {
+        parameters: {
+            query?: {
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TalkTakeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_take_api_lab_talk_takes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TalkTakeCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TalkTakeOut"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_take_api_lab_talk_takes__take_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TalkTakeOut"];
+                };
+            };
+            /** @description No take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_take_api_lab_talk_takes__take_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TalkTakeOut"];
+                };
+            };
+            /** @description No take has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;

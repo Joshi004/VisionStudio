@@ -16,10 +16,25 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   lab_image: "Image lab image",
   write_last_frame_prompt: "Last frame prompt",
   generate_last_frame: "Last frame",
+  write_talk_prompts: "Talking character prompts",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
   return TYPE_LABELS[type];
+}
+
+/** The Lab tab a job that belongs to no project is shown in. */
+export function labPathFor(type: JobSummary["type"]): string {
+  switch (type) {
+    case "lab_image":
+      return "/lab/image";
+    case "lab_voice":
+      return "/lab/voice";
+    case "write_talk_prompts":
+      return "/lab/talk";
+    default:
+      return "/lab/video";
+  }
 }
 
 const STATUS_COLORS: Record<JobSummary["status"], string> = {

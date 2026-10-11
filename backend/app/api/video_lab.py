@@ -15,6 +15,7 @@ The first frame is picked from what the Image lab holds (`/api/lab/images/librar
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Annotated, Any, Final, Literal
 
@@ -87,6 +88,12 @@ class FirstFrameOut(BaseModel):
     url: str | None
 
 
+class AudioInputOut(BaseModel):
+    # "voice_run": a Voice lab speech. "voice": a saved voice's recording.
+    source: Literal["voice_run", "voice"]
+    id: int
+
+
 class LabVideoRunOut(BaseModel):
     id: int
     created_at: datetime
@@ -100,6 +107,8 @@ class LabVideoRunOut(BaseModel):
     params: dict[str, Any]
     first_frame: FirstFrameOut | None
     last_frame: FirstFrameOut | None
+    # The speech a lip-synced clip matches (the Talking character lab), else None.
+    audio_input: AudioInputOut | None
     # The run's job: its status, phase and error, with cancel and resubmit.
     job: JobSummary | None
     # The finished clip, from /media (with Range requests, so it seeks). None until then.
@@ -120,19 +129,19 @@ def _unprocessable(message: str) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, message)
 
 
-async def _frame_urls(
-    session: AsyncSession, rows: list[video_lab.RunRow]
+async def frame_urls_for(
+    session: AsyncSession, frames: Iterable[Any]
 ) -> dict[tuple[str, int], str]:
-    """The stored path of each first frame the runs use, keyed by (source, id). A frame that is
-    gone is simply missing.
+    """The media URL of each stored `{source, id}` picture in `frames`, keyed by (source, id).
+    Anything that is not such a picture is skipped, and a picture that is gone is simply
+    missing from the answer.
     """
     wanted: dict[str, set[int]] = {"lab": set(), "asset": set()}
-    for row in rows:
-        for frame in (row.run.first_frame, row.run.last_frame):
-            if isinstance(frame, dict) and frame.get("source") in wanted:
-                frame_id = frame.get("id")
-                if isinstance(frame_id, int):
-                    wanted[str(frame["source"])].add(frame_id)
+    for frame in frames:
+        if isinstance(frame, dict) and frame.get("source") in wanted:
+            frame_id = frame.get("id")
+            if isinstance(frame_id, int):
+                wanted[str(frame["source"])].add(frame_id)
 
     urls: dict[tuple[str, int], str] = {}
     if wanted["lab"]:
@@ -148,7 +157,7 @@ async def _frame_urls(
     return urls
 
 
-def _frame_out(frame: Any, frame_urls: dict[tuple[str, int], str]) -> FirstFrameOut | None:
+def frame_out(frame: Any, frame_urls: dict[tuple[str, int], str]) -> FirstFrameOut | None:
     if isinstance(frame, dict) and frame.get("source") in ("lab", "asset"):
         frame_id = frame.get("id")
         if isinstance(frame_id, int):
@@ -157,7 +166,18 @@ def _frame_out(frame: Any, frame_urls: dict[tuple[str, int], str]) -> FirstFrame
     return None
 
 
-def _run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> LabVideoRunOut:
+def _audio_input_out(value: Any) -> AudioInputOut | None:
+    if isinstance(value, dict) and value.get("source") in ("voice_run", "voice"):
+        audio_id = value.get("id")
+        if isinstance(audio_id, int) and not isinstance(audio_id, bool):
+            source: Literal["voice_run", "voice"] = (
+                "voice_run" if value["source"] == "voice_run" else "voice"
+            )
+            return AudioInputOut(source=source, id=audio_id)
+    return None
+
+
+def run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> LabVideoRunOut:
     run = row.run
     audio = run.audio
     codec = audio.get("codec") if isinstance(audio, dict) else None
@@ -170,8 +190,9 @@ def _run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> L
         endpoint=run.endpoint,
         prompt=run.prompt,
         params=run.params if isinstance(run.params, dict) else {},
-        first_frame=_frame_out(run.first_frame, frame_urls),
-        last_frame=_frame_out(run.last_frame, frame_urls),
+        first_frame=frame_out(run.first_frame, frame_urls),
+        last_frame=frame_out(run.last_frame, frame_urls),
+        audio_input=_audio_input_out(run.audio_input),
         job=(
             job_summary(JobRow(job=row.job, project_name=store.NO_PROJECT_NAME, scene_index=None))
             if row.job is not None
@@ -187,9 +208,11 @@ def _run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> L
     )
 
 
-async def _runs_out(session: AsyncSession, rows: list[video_lab.RunRow]) -> list[LabVideoRunOut]:
-    urls = await _frame_urls(session, rows)
-    return [_run_out(row, urls) for row in rows]
+async def runs_out(session: AsyncSession, rows: list[video_lab.RunRow]) -> list[LabVideoRunOut]:
+    urls = await frame_urls_for(
+        session, (frame for row in rows for frame in (row.run.first_frame, row.run.last_frame))
+    )
+    return [run_out(row, urls) for row in rows]
 
 
 @router.post(
@@ -224,7 +247,7 @@ async def create_runs(body: LabVideoRunCreate, session: SessionDep) -> LabVideoR
     except video_lab.LabVideoInputError as exc:
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
-    return LabVideoRunsOut(runs=await _runs_out(session, rows))
+    return LabVideoRunsOut(runs=await runs_out(session, rows))
 
 
 @router.get("/lab/videos/runs", response_model=list[LabVideoRunOut])
@@ -234,7 +257,7 @@ async def list_runs(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> list[LabVideoRunOut]:
     """The newest runs first. Pass the last id you have as `before_id` for the next page."""
-    return await _runs_out(session, await video_lab.list_runs(session, before_id, limit))
+    return await runs_out(session, await video_lab.list_runs(session, before_id, limit))
 
 
 @router.get("/lab/videos/runs/{run_id}", response_model=LabVideoRunOut, responses=_NOT_FOUND)
@@ -242,7 +265,7 @@ async def get_run(run_id: int, session: SessionDep) -> LabVideoRunOut:
     row = await video_lab.get_run(session, run_id) if 1 <= run_id <= _MAX_ID else None
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
-    return (await _runs_out(session, [row]))[0]
+    return (await runs_out(session, [row]))[0]
 
 
 @router.post(

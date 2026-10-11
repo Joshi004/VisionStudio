@@ -8,9 +8,7 @@ import { GpuBanner } from "./GpuBanner";
 const NAV_ITEMS = [
   { label: "Projects", to: "/projects" },
   { label: "Activity", to: "/activity" },
-  { label: "Image lab", to: "/image-lab" },
-  { label: "Video lab", to: "/video-lab" },
-  { label: "Voice lab", to: "/voice-lab" },
+  { label: "Lab", to: "/lab" },
   { label: "Settings", to: "/settings" },
 ];
 

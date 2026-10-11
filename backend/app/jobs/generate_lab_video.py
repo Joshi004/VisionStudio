@@ -8,7 +8,8 @@ the server, cancelling, the shared slots of `max_parallel_generations`):
   (`services/video_lab.create_runs`) and is stored in `job.input`, together with the endpoint,
   so nothing is worked out here. The first frame and the last frame, if the run has them, are
   fitted to the run's size and uploaded. A run without a first frame is text-to-video: the
-  same endpoint, no `images`.
+  same endpoint, no `images`. A lip-synced clip (the Talking character lab) also has `audio`,
+  the speech it matches: it is uploaded after the frame and named in the body (`with_audio`).
   Every attempt (after pre-emption, an expired result) sends the same stored request, with the
   same seed, because "the correct response to a pre-emption failure is to resubmit the exact
   same request unchanged" (the server's guide).
@@ -53,6 +54,35 @@ class _LabPlan:
     request: dict[str, Any]
     first_frame: video_lab.FirstFrameRef | None
     last_frame: video_lab.FirstFrameRef | None
+    # Only a lip-synced clip (audio-to-video) has one.
+    audio: _AudioInput | None = None
+
+
+@dataclass(frozen=True)
+class _AudioInput:
+    """The speech a lip-synced clip matches, as the run stored it on the job."""
+
+    source: str
+    id: int
+    path: str
+    mime: str
+
+
+def _audio_input(value: object) -> _AudioInput | None:
+    """The speech stored on the job's input, or None when there is none or it is malformed."""
+    if not isinstance(value, dict):
+        return None
+    source, audio_id = value.get("source"), value.get("id")
+    path, mime = value.get("path"), value.get("mime")
+    if (
+        source in ("voice_run", "voice")
+        and isinstance(audio_id, int)
+        and not isinstance(audio_id, bool)
+        and isinstance(path, str)
+        and isinstance(mime, str)
+    ):
+        return _AudioInput(source=str(source), id=audio_id, path=path, mime=mime)
+    return None
 
 
 def _frame_ref(frame: object) -> video_lab.FirstFrameRef | None:
@@ -81,7 +111,12 @@ def _plan(recorded: object) -> _LabPlan | None:
         return None
     if last is not None and first is None:
         return None
-    return _LabPlan(endpoint=endpoint, request=request, first_frame=first, last_frame=last)
+    audio = _audio_input(recorded.get("audio"))
+    if recorded.get("audio") is not None and audio is None:
+        return None
+    return _LabPlan(
+        endpoint=endpoint, request=request, first_frame=first, last_frame=last, audio=audio
+    )
 
 
 def _write_new_file(path: Path, data: bytes) -> None:
@@ -92,6 +127,10 @@ def _write_new_file(path: Path, data: bytes) -> None:
 
 class FrameUnavailable(Exception):
     """The first frame cannot be read. The message is meant to be shown to the user."""
+
+
+class AudioUnavailable(Exception):
+    """The speech of a lip-synced clip cannot be found. The message is for the user."""
 
 
 class GenerateLabVideoHandler(GenerateClipHandler):
@@ -143,6 +182,20 @@ class GenerateLabVideoHandler(GenerateClipHandler):
         await anyio.to_thread.run_sync(_write_new_file, temp, png)
         return temp
 
+    @staticmethod
+    async def _upload_audio(base_url: str, audio: _AudioInput) -> tuple[str, str]:
+        """Uploads the speech of a lip-synced clip. Returns the file name sent and the server's
+        asset id. Raises AudioUnavailable when the file is gone, and GpuCallError.
+        """
+        try:
+            path = get_storage().get_path(audio.path)
+        except StorageError:
+            raise AudioUnavailable("The speech's file could not be found on disk.") from None
+        extension = path.suffix.lstrip(".").lower() or "wav"
+        filename = f"lab-speech-{audio.source}-{audio.id}.{extension}"
+        remote_id = await video_generator.upload_audio(base_url, path, filename, audio.mime)
+        return filename, remote_id
+
     async def _upload_and_submit_run(self, job: Job, base_url: str, plan: _LabPlan) -> None:
         """Uploads the first frame (when there is one) and submits. The server's job id is
         saved the moment the submit answers, with nothing that can fail in between.
@@ -177,12 +230,17 @@ class GenerateLabVideoHandler(GenerateClipHandler):
                         uploads[0]["remote_asset_id"],
                         uploads[1]["remote_asset_id"] if len(uploads) > 1 else None,
                     )
+                if plan.audio is not None:
+                    await self._phase(job.id, phases.UPLOADING_AUDIO)
+                    filename, audio_remote_id = await self._upload_audio(base_url, plan.audio)
+                    uploads.append({"filename": filename, "remote_asset_id": audio_remote_id})
+                    body = video_generator.with_audio(body, audio_remote_id)
                 if not await self._is_running(job.id):
                     return  # cancelled while uploading: nothing was submitted
                 await self._phase(job.id, phases.SUBMITTING)
                 provider_job_id = await video_generator.submit(base_url, plan.endpoint, body)
                 break
-            except FrameUnavailable as exc:
+            except (FrameUnavailable, AudioUnavailable) as exc:
                 await self._fail(job.id, str(exc))
                 return
             except StorageError:

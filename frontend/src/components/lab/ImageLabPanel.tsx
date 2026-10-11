@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { Alert, Drawer, Loader, Paper, Stack, Text, Title } from "@mantine/core";
 
-import { describeError } from "../api/errors";
+import { describeError } from "../../api/errors";
 import {
   useLabRun,
   useRunLab,
@@ -9,29 +9,33 @@ import {
   type LabEngine,
   type LabImage,
   type LabRun,
-} from "../api/imageLab";
-import { LabForm } from "../components/imageLab/LabForm";
-import { LabHistory } from "../components/imageLab/LabHistory";
-import { LabRunView } from "../components/imageLab/LabRunView";
+} from "../../api/imageLab";
+import { LabForm } from "../imageLab/LabForm";
+import { LabHistory } from "../imageLab/LabHistory";
+import { LabRunView } from "../imageLab/LabRunView";
 import {
   addReferences,
-  DEFAULT_FORM,
   referenceFromImage,
   stateFromRun,
   toQwenRequest,
   toRequest,
   type LabFormState,
-} from "../components/imageLab/labView";
+} from "../imageLab/labView";
+
+type ImageLabPanelProps = {
+  /** The form lives in the Lab page, so the library drawer can fill it from any tab. */
+  form: LabFormState;
+  onFormChange: Dispatch<SetStateAction<LabFormState>>;
+};
 
 /**
- * A page for testing two image models by hand and comparing what they make. Qwen-Image-2.1 runs
- * on your GPU server (text to image, a few minutes, no price). Seedream is Bitdeer's paid API
- * (text to image, image to image and an edit, with references from an upload, an earlier result
- * or a project's frames). Every run is kept with its exact request and answer, so results can be
- * compared later. It belongs to no project and changes none.
+ * The Image lab tab: testing two image models by hand and comparing what they make.
+ * Qwen-Image-2.1 runs on your GPU server (text to image, a few minutes, no price). Seedream is
+ * Bitdeer's paid API (text to image, image to image and an edit, with references from an upload,
+ * an earlier result or a project's frames). Every run is kept with its exact request and answer,
+ * so results can be compared later. It belongs to no project and changes none.
  */
-export function ImageLabPage() {
-  const [form, setForm] = useState<LabFormState>(DEFAULT_FORM);
+export function ImageLabPanel({ form, onFormChange: setForm }: ImageLabPanelProps) {
   const [openRunId, setOpenRunId] = useState<number | null>(null);
   // The model of the run the Result panel shows, and the Qwen run it follows.
   const [shown, setShown] = useState<LabEngine | null>(null);
@@ -71,7 +75,6 @@ export function ImageLabPage() {
   return (
     <Stack gap="lg" maw={1100}>
       <Stack gap={4}>
-        <Title order={2}>Image lab</Title>
         <Text size="sm" c="dimmed">
           Try an image model by hand and compare what comes back: Qwen-Image-2.1 on your GPU server
           (the model that makes the first frames) or Seedream on Bitdeer. Each setting is sent as

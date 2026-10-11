@@ -131,7 +131,7 @@ def _voice_out(voice: Voice) -> VoiceOut:
     )
 
 
-def _run_out(row: voice_lab.RunRow) -> LabVoiceRunOut:
+def run_out(row: voice_lab.RunRow) -> LabVoiceRunOut:
     run = row.run
     mode: Literal["design", "clone", "direction"] = (
         "clone" if run.mode == "clone" else "direction" if run.mode == "direction" else "design"
@@ -189,7 +189,7 @@ async def create_run(body: LabVoiceRunCreate, session: SessionDep) -> LabVoiceRu
     except voice_lab.VoiceLabInputError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
-    return _run_out(row)
+    return run_out(row)
 
 
 @router.get("/lab/voices/runs", response_model=list[LabVoiceRunOut])
@@ -200,7 +200,7 @@ async def list_runs(
 ) -> list[LabVoiceRunOut]:
     """The newest runs first. Pass the last id you have as `before_id` for the next page."""
     rows = await voice_lab.list_runs(session, before_id, limit)
-    return [_run_out(row) for row in rows]
+    return [run_out(row) for row in rows]
 
 
 @router.get("/lab/voices/runs/{run_id}", response_model=LabVoiceRunOut, responses=_NOT_FOUND)
@@ -208,7 +208,7 @@ async def get_run(run_id: RunId, session: SessionDep) -> LabVoiceRunOut:
     row = await voice_lab.get_run(session, run_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
-    return _run_out(row)
+    return run_out(row)
 
 
 @router.post(

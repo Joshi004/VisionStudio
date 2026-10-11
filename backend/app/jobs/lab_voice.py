@@ -3,6 +3,9 @@
 It is `SpeechHandler` with one piece of text, and `store_result` stores the WAV under
 `media/lab/` and writes it on the `lab_voice_run` row, in one transaction with the finished
 job. The job belongs to no project (`job.project_id` is NULL).
+
+A speech made for a take of the Talking character lab (Phase 24) that is set to continue by
+itself starts the take's video when it has been stored (`talk_lab.on_voice_finished`).
 """
 
 from __future__ import annotations
@@ -12,9 +15,9 @@ from typing import Any, Final
 
 from app.db.models import Job, LabVoiceRun
 from app.db.session import SessionLocal
-from app.jobs import store
+from app.jobs import dispatcher, store
 from app.jobs.synthesize_speech import SpeechFile, SpeechHandler
-from app.services import voice_lab
+from app.services import talk_lab, voice_lab
 from app.services.storage import get_storage
 
 _logger = logging.getLogger(__name__)
@@ -59,4 +62,21 @@ class LabVoiceHandler(SpeechHandler):
                 )
                 return False
             await session.commit()
+
+        if isinstance(run_id, int):
+            await self._continue_take(job.id, run_id)
         return True
+
+    @staticmethod
+    async def _continue_take(job_id: int, run_id: int) -> None:
+        """Starts the video of the take this speech was made for, if there is one set to continue
+        by itself. Best effort: a failure here never fails the speech (it is stored), and the
+        take's next step can be started by hand.
+        """
+        try:
+            started = await talk_lab.on_voice_finished(run_id)
+        except Exception:
+            _logger.exception("job %d: the take could not continue after its speech", job_id)
+            return
+        if started:
+            dispatcher.nudge()

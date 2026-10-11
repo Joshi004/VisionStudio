@@ -7,7 +7,7 @@ import { useJob, type JobDetail } from "../../api/jobs";
 import { isJobActive } from "../../api/polling";
 import { formatDateTime } from "../../format";
 import { useNow } from "../../hooks/useNow";
-import { elapsedText, jobTypeLabel } from "./jobFormat";
+import { elapsedText, jobTypeLabel, labPathFor } from "./jobFormat";
 import { JobActions } from "./JobActions";
 import { JobStatusBadge } from "./JobStatusBadge";
 
@@ -56,7 +56,7 @@ function JobDetails({ job, now }: { job: JobDetail; now: number }) {
       <Field label="Project">
         <Anchor
           component={Link}
-          to={job.project_id === null ? "/video-lab" : `/projects/${job.project_id}`}
+          to={job.project_id === null ? labPathFor(job.type) : `/projects/${job.project_id}`}
         >
           {job.project_name}
         </Anchor>

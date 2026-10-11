@@ -231,7 +231,7 @@ class Job(Base):
             "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
             "'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', "
             "'generate_voiceover', 'lab_image', 'write_last_frame_prompt', "
-            "'generate_last_frame')",
+            "'generate_last_frame', 'write_talk_prompts')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -409,6 +409,9 @@ class LabVideoRun(Base):
     first_frame: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # Same shape as `first_frame`, only on a run that moves from a first to a last frame.
     last_frame: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # Added in Phase 24 (Talking character lab): {source: "voice_run" | "voice", id} when the
+    # clip is lip-synced to a recorded speech (audio-to-video), else NULL.
+    audio_input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # The result, NULL until the job has finished and the clip was stored.
     path: Mapped[str | None] = mapped_column(default=None)
     size_bytes: Mapped[int | None] = mapped_column(default=None)
@@ -484,3 +487,89 @@ class LabVoiceRun(Base):
     size_bytes: Mapped[int | None] = mapped_column(default=None)
     sha256: Mapped[str | None] = mapped_column(default=None)
     duration_s: Mapped[float | None] = mapped_column(default=None)
+
+
+class LabCharacter(Base):
+    """A character of the Talking character lab's cast (Phase 24): a name, the picture that
+    pins how it looks, and what to say about it to the AI that writes prompts.
+
+    The picture is referred to by `{source: "lab" | "asset", id}` like a Video lab frame, and is
+    never copied. A character may have a default voice (a saved voice that clones or is directed)
+    or a default description of its voice (for a voice made from a description). Never deleted
+    in iteration 1.
+    """
+
+    __tablename__ = "lab_character"
+    __table_args__ = (Index("idx_lab_character_created", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    name: Mapped[str]
+    # Who the character is and what they look like, in words. The language model cannot see the
+    # picture, so this is all it knows of the character.
+    description: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    image: Mapped[Any] = mapped_column(JSON)
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    voice_instruction: Mapped[str | None] = mapped_column(default=None)
+
+
+class LabTalkRun(Base):
+    """One take of the Talking character lab (Phase 24): a line of dialogue spoken by a
+    character picture, made in up to three steps, each a job of its own.
+
+    1. `prompt_job_id`: a `write_talk_prompts` job writes `voice_instruction` and
+       `video_prompt` (or the author writes them).
+    2. `voice_run_id`: a `lab_voice_run` makes the speech (or an earlier run is reused).
+    3. `video_run_id`: a `lab_video_run` on the audio-to-video endpoint makes the clip.
+
+    With `auto_continue` the backend starts the next step by itself when one finishes.
+    """
+
+    __tablename__ = "lab_talk_run"
+    __table_args__ = (
+        CheckConstraint(
+            "voice_mode IS NULL OR voice_mode IN ('design', 'clone', 'direction')",
+            name="voice_mode_valid",
+        ),
+        CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
+        Index("idx_lab_talk_run_created", "created_at"),
+        Index("idx_lab_talk_run_voice_run", "voice_run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    dialogue: Mapped[str]
+    character_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_character.id", ondelete="SET NULL"), default=None
+    )
+    # {source: "lab" | "asset", id}: the picture the speaker is made from.
+    image: Mapped[Any] = mapped_column(JSON)
+    # What the author said about the character, word for word. Blank: the cast character's
+    # description or the prompt that made the picture is used.
+    character_note: Mapped[str | None] = mapped_column(default=None)
+    delivery_note: Mapped[str | None] = mapped_column(default=None)
+    # design | clone | direction when the take makes a new speech. NULL when it reuses one.
+    voice_mode: Mapped[str | None] = mapped_column(default=None)
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    voice_instruction: Mapped[str | None] = mapped_column(default=None)
+    video_prompt: Mapped[str | None] = mapped_column(default=None)
+    orientation: Mapped[str]
+    video_seed: Mapped[int | None] = mapped_column(default=None)
+    negative_prompt: Mapped[str | None] = mapped_column(default=None)
+    auto_continue: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Why the take could not start its next step by itself (for example, the GPU API was not
+    # approved for the endpoint). NULL when there is nothing to say.
+    last_error: Mapped[str | None] = mapped_column(default=None)
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    voice_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_voice_run.id", ondelete="SET NULL"), default=None
+    )
+    video_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_video_run.id", ondelete="SET NULL"), default=None
+    )

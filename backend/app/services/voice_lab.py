@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -108,8 +109,11 @@ def validate_form(form: VoiceLabForm) -> None:
         )
 
 
-async def create_run(session: AsyncSession, form: VoiceLabForm) -> RunRow:
-    """Checks the form and starts one run. Commits. Raises VoiceLabInputError."""
+async def create_run(session: AsyncSession, form: VoiceLabForm, *, commit: bool = True) -> RunRow:
+    """Checks the form and starts one run. Commits, unless `commit` is False: the run and its
+    job are then only flushed, so a caller (a take of the Talking character lab) can link them
+    and commit everything together. Raises VoiceLabInputError.
+    """
     validate_form(form)
     voice: Voice | None = None
     if form.voice_id is not None:
@@ -166,7 +170,10 @@ async def create_run(session: AsyncSession, form: VoiceLabForm) -> RunRow:
         dedupe=False,
     )
     run.job_id = job.id
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     _logger.info("lab voice run started: run=%d mode=%s chars=%d", run.id, form.mode, len(text))
     return RunRow(run=run, job=job, voice=voice)
 
@@ -189,6 +196,16 @@ async def list_runs(session: AsyncSession, before_id: int | None, limit: int) ->
     if before_id is not None:
         statement = statement.where(LabVoiceRun.id < before_id)
     return _rows(await session.execute(statement.execution_options(populate_existing=True)))
+
+
+async def get_runs(session: AsyncSession, run_ids: Collection[int]) -> dict[int, RunRow]:
+    """The runs with these ids, keyed by id. An id that is gone is simply missing."""
+    if not run_ids:
+        return {}
+    statement = (
+        _select().where(LabVoiceRun.id.in_(run_ids)).execution_options(populate_existing=True)
+    )
+    return {row.run.id: row for row in _rows(await session.execute(statement))}
 
 
 async def get_run(session: AsyncSession, run_id: int) -> RunRow | None:

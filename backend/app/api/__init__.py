@@ -13,6 +13,7 @@ from app.api import (
     image_lab,
     image_prompts,
     jobs,
+    lab_characters,
     last_frame_prompts,
     last_frames,
     projects,
@@ -20,6 +21,7 @@ from app.api import (
     scene_inputs,
     scenes,
     settings,
+    talk_lab,
     transcription,
     video_lab,
     voice_lab,
@@ -45,4 +47,6 @@ api_router.include_router(auto_pipeline.router, tags=["auto-generate"])
 api_router.include_router(image_lab.router, tags=["image-lab"])
 api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
+api_router.include_router(lab_characters.router, tags=["talk-lab"])
+api_router.include_router(talk_lab.router, tags=["talk-lab"])
 api_router.include_router(voiceover_generation.router, tags=["voiceover"])

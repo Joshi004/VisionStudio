@@ -19,8 +19,9 @@ This module builds and checks the requests and reads the runs. It never calls th
 from __future__ import annotations
 
 import logging
+import math
 import secrets
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -28,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Asset, Job, LabImage, LabVideoRun
+from app.db.models import Asset, Job, LabImage, LabVideoRun, LabVoiceRun, Voice
 from app.jobs import store
 from app.providers import contract_guard, video_generator
 from app.services import api_contract, frame_counts, projects, video_models
@@ -45,6 +46,8 @@ PARTITION_KEY: Final = "gpu_partition"
 Mode = Literal["quality", "fast"]
 Orientation = Literal["landscape", "portrait"]
 FrameSource = Literal["lab", "asset"]
+# The speech a lip-synced clip matches: a Voice lab run, or a saved voice's recording.
+AudioSource = Literal["voice_run", "voice"]
 
 MAX_PROMPT_CHARS: Final = 8000
 NEGATIVE_PROMPT_MAX_CHARS: Final = 2000
@@ -84,6 +87,39 @@ class LabVideoForm:
 
 
 @dataclass(frozen=True)
+class AudioRef:
+    """The speech a lip-synced clip is made to match."""
+
+    source: AudioSource
+    id: int
+
+
+@dataclass(frozen=True)
+class LipSyncForm:
+    """A clip of a character speaking a recorded speech (audio-to-video on LTX-2.3).
+
+    The length is not asked for: it follows the speech. The first frame is needed, because it
+    is what pins how the speaker looks.
+    """
+
+    prompt: str
+    orientation: Orientation
+    seed: int | None
+    negative_prompt: str | None
+    first_frame: FirstFrameRef
+    audio: AudioRef
+
+
+@dataclass(frozen=True)
+class ResolvedAudio:
+    """A speech's stored file, as the run needs it."""
+
+    path: str
+    mime: str
+    duration_s: float
+
+
+@dataclass(frozen=True)
 class RunRow:
     """A run with its job (None only if the job row was deleted)."""
 
@@ -118,6 +154,20 @@ def validate_form(form: LabVideoForm) -> None:
         )
     if form.last_frame is not None and form.first_frame is None:
         raise LabVideoInputError("A last frame needs a first frame too.")
+
+
+def validate_lip_sync_form(form: LipSyncForm) -> None:
+    """Raises LabVideoInputError for a lip-sync form no run should be started with."""
+    if not form.prompt.strip():
+        raise LabVideoInputError("Write the video prompt first.")
+    if len(form.prompt) > MAX_PROMPT_CHARS:
+        raise LabVideoInputError(f"The prompt must be at most {MAX_PROMPT_CHARS:,} characters.")
+    if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
+        raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
+    if form.negative_prompt is not None and len(form.negative_prompt) > NEGATIVE_PROMPT_MAX_CHARS:
+        raise LabVideoInputError(
+            f"The negative prompt must be at most {NEGATIVE_PROMPT_MAX_CHARS:,} characters."
+        )
 
 
 def validate_prompt_draft(idea: str, shots: int, duration_s: float, note: str | None) -> None:
@@ -157,6 +207,30 @@ async def first_frame_path(session: AsyncSession, ref: FirstFrameRef) -> str:
     if asset is None or asset.kind != "frame":
         raise LabVideoInputError(f"There is no project frame {ref.id}.")
     return asset.path
+
+
+# --- The speech of a lip-synced clip -----------------------------------------------------------
+
+
+async def audio_file(session: AsyncSession, ref: AudioRef) -> ResolvedAudio:
+    """The stored file of the speech, or LabVideoInputError when there is none to use.
+
+    A Voice lab run only has a file once its job has finished. A Voice lab speech is a WAV; a
+    saved voice keeps the type it was uploaded with.
+    """
+    if ref.source == "voice_run":
+        run = await session.get(LabVoiceRun, ref.id)
+        if run is None:
+            raise LabVideoInputError(f"There is no Voice lab speech {ref.id}.")
+        if run.path is None or run.duration_s is None:
+            raise LabVideoInputError(
+                f"Voice lab speech {ref.id} is not made yet. Wait for it to finish."
+            )
+        return ResolvedAudio(path=run.path, mime="audio/wav", duration_s=run.duration_s)
+    voice = await session.get(Voice, ref.id)
+    if voice is None:
+        raise LabVideoInputError(f"There is no saved voice {ref.id}.")
+    return ResolvedAudio(path=voice.path, mime=voice.mime, duration_s=voice.duration_s)
 
 
 # --- Starting runs ---------------------------------------------------------------------------
@@ -276,6 +350,126 @@ async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]
     return rows
 
 
+async def create_audio_run(
+    session: AsyncSession, form: LipSyncForm, *, commit: bool = True
+) -> RunRow:
+    """Checks the form and starts one lip-synced clip. Commits, unless `commit` is False: the
+    run and its job are then only flushed, so a caller (a take of the Talking character lab)
+    can link them and commit everything together.
+
+    The clip is made by LTX-2.3's audio-to-video endpoint, in the quality recipe only, from the
+    first frame (how the speaker looks) and the speech. Its length follows the speech: the frame
+    count is the smallest `8k + 1` that is at least as long, so the speech is never cut. The
+    request is checked against the approved GPU API like every other run, so a GPU API that was
+    approved before the endpoint existed refuses the run until it is approved again.
+
+    Raises LabVideoInputError.
+    """
+    validate_lip_sync_form(form)
+    await first_frame_path(session, form.first_frame)  # only checks that it exists
+    audio = await audio_file(session, form.audio)
+    if not audio.duration_s > 0:  # written so that NaN is rejected too
+        raise LabVideoInputError("The speech has no length, so no clip can be made to match it.")
+    if audio.duration_s > DURATION_MAX_S:
+        raise LabVideoInputError(
+            f"The speech lasts {audio.duration_s:.1f} seconds and a clip can be at most "
+            f"{DURATION_MAX_S:g} seconds. Shorten the dialogue."
+        )
+
+    sizes = projects.ORIENTATION_DEFAULTS[form.orientation]
+    fps = projects.DEFAULT_FPS
+    num_frames = frame_counts.request_num_frames(math.ceil(audio.duration_s * fps))
+    seed = form.seed if form.seed is not None else secrets.randbelow(SEED_LIMIT)
+    partition = await settings_service.get_str(session, PARTITION_KEY)
+    bodies = await contract_guard.approved_bodies(session)
+    spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
+
+    endpoint = video_generator.AUDIO_TO_VIDEO_PATH
+    try:
+        if spec is None:
+            raise ValueError(video_generator.no_endpoint_message(endpoint))
+        video_generator.check_frames(num_frames, video_generator.frame_limits(spec, endpoint))
+        video_generator.check_size(sizes.gen_width, sizes.gen_height)
+    except ValueError as exc:
+        raise LabVideoInputError(
+            f"Lip-sync: {exc} If the GPU server has this endpoint, test the connection in "
+            "Settings and approve its API again."
+        ) from exc
+    request = video_generator.build_request(
+        endpoint=endpoint,
+        prompt=form.prompt.strip(),
+        negative_prompt=(form.negative_prompt or "").strip() or None,
+        width=sizes.gen_width,
+        height=sizes.gen_height,
+        num_frames=num_frames,
+        fps=fps,
+        seed=seed,
+        partition=partition,
+    )
+    model: VideoModel = "ltx-2.3"
+    params: dict[str, Any] = {
+        "mode": "quality",
+        "orientation": form.orientation,
+        "width": sizes.gen_width,
+        "height": sizes.gen_height,
+        "fps": fps,
+        # The clip is as long as the speech, rounded up to the frames the model makes.
+        "duration_s": round(num_frames / fps, 3),
+        "audio_duration_s": audio.duration_s,
+        "num_frames": num_frames,
+        "seed": seed,
+        "negative_prompt": request.get("negative_prompt"),
+    }
+    frame_json = _frame_json(form.first_frame)
+    audio_json = {"source": form.audio.source, "id": form.audio.id}
+
+    run = LabVideoRun(
+        group_key=secrets.token_hex(8),
+        video_model=model,
+        endpoint=endpoint,
+        prompt=form.prompt.strip(),
+        params=params,
+        first_frame=frame_json,
+        last_frame=None,
+        audio_input=audio_json,
+    )
+    session.add(run)
+    await session.flush()
+    job, _created = await store.create_job(
+        session,
+        project_id=None,
+        type=RUN_JOB,
+        provider="gpu",
+        input={
+            "requested": "lab_video",
+            "run_id": run.id,
+            "video_model": model,
+            "endpoint": endpoint,
+            "request": request,
+            "first_frame": frame_json,
+            "last_frame": None,
+            # What the job needs of the speech, copied now like a voice's recording is for a
+            # speech: a later change to the run changes nothing for this clip.
+            "audio": {**audio_json, "path": audio.path, "mime": audio.mime},
+        },
+        commit=False,
+        dedupe=False,
+    )
+    run.job_id = job.id
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
+    _logger.info(
+        "lab lip-sync run started: run=%d audio=%s:%d frames=%d",
+        run.id,
+        form.audio.source,
+        form.audio.id,
+        num_frames,
+    )
+    return RunRow(run=run, job=job)
+
+
 async def create_prompt_draft(
     session: AsyncSession, idea: str, shots: int, duration_s: float, first_frame_note: str | None
 ) -> Job:
@@ -317,6 +511,19 @@ async def list_runs(session: AsyncSession, before_id: int | None, limit: int) ->
     if before_id is not None:
         statement = statement.where(LabVideoRun.id < before_id)
     return _rows(await session.execute(statement.execution_options(populate_existing=True)))
+
+
+async def get_runs(session: AsyncSession, run_ids: Collection[int]) -> dict[int, RunRow]:
+    """The runs with these ids, keyed by id. An id that is gone is simply missing."""
+    if not run_ids:
+        return {}
+    statement = (
+        select(LabVideoRun, Job)
+        .outerjoin(Job, Job.id == LabVideoRun.job_id)
+        .where(LabVideoRun.id.in_(run_ids))
+        .execution_options(populate_existing=True)
+    )
+    return {row.run.id: row for row in _rows(await session.execute(statement))}
 
 
 async def get_run(session: AsyncSession, run_id: int) -> RunRow | None:

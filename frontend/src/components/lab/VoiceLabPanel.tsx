@@ -1,38 +1,37 @@
-import { useState } from "react";
-import { Alert, Paper, Stack, Text, Title } from "@mantine/core";
+import type { Dispatch, SetStateAction } from "react";
+import { Alert, Paper, Stack, Text } from "@mantine/core";
 
-import { describeError } from "../api/errors";
-import { useCreateVoiceLabRun, useVoices, type VoiceLabRun } from "../api/voiceLab";
-import { LicenseNotice } from "../components/voiceLab/LicenseNotice";
-import { VoiceLabForm } from "../components/voiceLab/VoiceLabForm";
-import { VoiceLabRunList } from "../components/voiceLab/VoiceLabRunList";
-import { VoiceLibrary } from "../components/voiceLab/VoiceLibrary";
-import {
-  DEFAULT_FORM,
-  stateFromRun,
-  toRequest,
-  type VoiceLabFormState,
-} from "../components/voiceLab/voiceLabView";
+import { describeError } from "../../api/errors";
+import { useCreateVoiceLabRun, useVoices, type VoiceLabRun } from "../../api/voiceLab";
+import { LicenseNotice } from "../voiceLab/LicenseNotice";
+import { VoiceLabForm } from "../voiceLab/VoiceLabForm";
+import { VoiceLabRunList } from "../voiceLab/VoiceLabRunList";
+import { VoiceLibrary } from "../voiceLab/VoiceLibrary";
+import { stateFromRun, toRequest, type VoiceLabFormState } from "../voiceLab/voiceLabView";
+
+type VoiceLabPanelProps = {
+  /** The form lives in the Lab page, so the library drawer can fill it from any tab. */
+  form: VoiceLabFormState;
+  onFormChange: Dispatch<SetStateAction<VoiceLabFormState>>;
+};
 
 /**
- * A page for trying Breeze TTS: a voice made from a description, a saved voice reading a text,
- * or a saved voice steered by an instruction. Each run is a paid GPU job of one to three
- * minutes. A speech can be saved as a voice, and a saved voice can speak a project's script.
- * It belongs to no project and changes none.
+ * The Voice lab tab: trying Breeze TTS: a voice made from a description, a saved voice reading
+ * a text, or a saved voice steered by an instruction. Each run is a paid GPU job of one to three
+ * minutes. A speech can be saved as a voice, and a saved voice can speak a project's script. It
+ * belongs to no project and changes none.
  */
-export function VoiceLabPage() {
-  const [form, setForm] = useState<VoiceLabFormState>(DEFAULT_FORM);
+export function VoiceLabPanel({ form, onFormChange }: VoiceLabPanelProps) {
   const create = useCreateVoiceLabRun();
   const voices = useVoices();
 
   function loadIntoForm(run: VoiceLabRun) {
-    setForm(stateFromRun(run));
+    onFormChange(stateFromRun(run));
   }
 
   return (
     <Stack gap="lg" maw={1100}>
       <Stack gap={4}>
-        <Title order={2}>Voice lab</Title>
         <Text size="sm" c="dimmed">
           Try Breeze TTS 2, the speech model on the GPU server, in English or Chinese. Describe a
           voice and the model invents it, or choose a saved voice (a clean recording and its exact
@@ -45,7 +44,7 @@ export function VoiceLabPage() {
       <Paper withBorder p="md" radius="md">
         <VoiceLabForm
           state={form}
-          onChange={setForm}
+          onChange={onFormChange}
           onRun={() => create.mutate(toRequest(form))}
           running={create.isPending}
           voices={voices.data ?? []}

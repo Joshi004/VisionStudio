@@ -8,7 +8,7 @@
   `write_image_prompt.py`, `generate_frame.py`, `generate_clip.py`, `render_final.py`,
   `generate_lab_video.py`, `write_lab_video_prompt.py`, `auto_pipeline.py`,
   `lab_voice.py`, `generate_voiceover.py`, `generate_lab_image.py`,
-  `write_last_frame_prompt.py`, `generate_last_frame.py`).
+  `write_last_frame_prompt.py`, `generate_last_frame.py`, `write_talk_prompts.py`).
 - `remote_image.py`: the remote steps the Qwen image jobs (`generate_frame`,
   `generate_last_frame` and `lab_image`) share. `scene_frame.py`: what the two scene frame jobs
   do with the image once it is made.
@@ -42,6 +42,7 @@ def register_handlers() -> None:
     from app.jobs.write_image_prompt import WriteImagePromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
     from app.jobs.write_last_frame_prompt import WriteLastFramePromptHandler
+    from app.jobs.write_talk_prompts import WriteTalkPromptsHandler
 
     handlers.register(TranscribeHandler())
     handlers.register(PlanScenesHandler())
@@ -58,3 +59,4 @@ def register_handlers() -> None:
     handlers.register(GenerateLabImageHandler())
     handlers.register(WriteLastFramePromptHandler())
     handlers.register(GenerateLastFrameHandler())
+    handlers.register(WriteTalkPromptsHandler())
