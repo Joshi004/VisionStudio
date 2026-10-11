@@ -36,6 +36,7 @@ from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.services import first_frames as frames_service
 from app.services import image_prompts as prompts_service
+from app.services import last_frames as last_frames_service
 from app.services import scene_inputs
 from app.services import scenes as scenes_service
 from app.services.descriptions import DRAFT_JOB
@@ -131,6 +132,8 @@ async def generate_first_frames(project_id: int, session: SessionDep) -> Generat
     active_frames = await frames_service.active_frame_jobs(session, project.id)
     active_prompts = await prompts_service.active_prompt_jobs(session, project.id)
     prompt_states = await prompts_service.prompt_states(session, project, state.scenes)
+    # A scene that continues the previous scene's action starts on its last frame (Phase 23).
+    chained = await last_frames_service.chain_sources(session, project.id, state.scenes)
     candidates: list[Scene] = [
         scene
         for scene in state.scenes
@@ -140,6 +143,7 @@ async def generate_first_frames(project_id: int, session: SessionDep) -> Generat
             prompt_out_of_date=scene.id in prompt_states and prompt_states[scene.id].out_of_date,
             prompt_job_active=scene.id in active_prompts,
             frame_job_active=scene.id in active_frames,
+            chained=scene.id in chained,
         )
     ]
     nothing = frames_service.all_block(len(candidates), len(active_frames))

@@ -176,7 +176,8 @@ export function ProjectSettingsForm({
             />
             <Text size="xs" c="dimmed">
               LTX-2.5 has no negative prompt, so the Negative prompt below is used by LTX-2.3 only.
-              A scene that has a last frame is always made by LTX-2.3 for now.
+              A scene that has a last frame is made by the chosen model's own first-and-last-frame
+              endpoint.
             </Text>
           </Stack>
         </Paper>

@@ -14,6 +14,8 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   lab_voice: "Voice lab speech",
   generate_voiceover: "Voiceover from the script",
   lab_image: "Image lab image",
+  write_last_frame_prompt: "Last frame prompt",
+  generate_last_frame: "Last frame",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

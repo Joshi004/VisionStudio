@@ -151,7 +151,7 @@ def is_candidate(scene: Scene, *, out_of_date: bool, active: Job | None) -> bool
 # --- Where the world and the continuity come from ---------------------------------------
 
 
-async def _jobs_by_id(session: AsyncSession, ids: Collection[int]) -> dict[int, Job]:
+async def jobs_by_id(session: AsyncSession, ids: Collection[int]) -> dict[int, Job]:
     if not ids:
         return {}
     statement = select(Job).where(Job.id.in_(ids)).execution_options(populate_existing=True)
@@ -191,7 +191,7 @@ async def load_sources(
     draft that reused an earlier answer holds no `answer`, so the world is read from the job
     that paid for it. Three queries at most, however many scenes there are.
     """
-    jobs = await _jobs_by_id(
+    jobs = await jobs_by_id(
         session, {s.description_job_id for s in scenes if s.description_job_id is not None}
     )
     newest: Job | None = None
@@ -204,7 +204,7 @@ async def load_sources(
         for job in drafts
         if _answer_of(job) is None and (paid := _reused_from(job)) is not None
     }
-    payers = await _jobs_by_id(session, payer_ids)
+    payers = await jobs_by_id(session, payer_ids)
 
     def world_of(job: Job) -> tuple[int | None, dict[str, list[dict[str, str]]] | None]:
         if isinstance(_answer_of(job), dict):
@@ -245,7 +245,7 @@ async def prompt_states(
     if not holding:
         return {}
     sources = await load_sources(session, project.id, holding)
-    prompt_jobs = await _jobs_by_id(
+    prompt_jobs = await jobs_by_id(
         session,
         {s.image_prompt_job_id for s in holding if s.image_prompt_job_id is not None},
     )

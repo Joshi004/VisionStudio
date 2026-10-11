@@ -100,15 +100,24 @@ def _blank(value: str | None) -> bool:
 @dataclass(frozen=True)
 class SceneWrite:
     """The columns a draft sets on a scene, which of its texts they carry, and which old AI
-    text the draft cleared.
+    text the draft cleared. `detached_last_frame_asset_id` is the AI-made last frame the draft
+    took off the scene, because it decided the scene has no last frame (the file stays).
     """
 
     values: dict[str, Any] = field(default_factory=dict)
     written: list[str] = field(default_factory=list)
     cleared: list[str] = field(default_factory=list)
+    detached_last_frame_asset_id: int | None = None
 
 
-def plan_write(scene: Scene, draft: SceneDraft, job_id: int) -> SceneWrite:
+def plan_write(
+    scene: Scene,
+    draft: SceneDraft,
+    job_id: int,
+    *,
+    writes_last_frame: bool = False,
+    last_frame_is_ai: bool = False,
+) -> SceneWrite:
     """What this draft may write into the scene as it is now.
 
     A text is written only if the scene's own is blank or was written by the AI. So a
@@ -116,13 +125,18 @@ def plan_write(scene: Scene, draft: SceneDraft, job_id: int) -> SceneWrite:
     its own source (Phase 15), so the author's first-frame description does not lock the
     video prompt, and the other way round.
 
-    The AI never writes a last-frame description. One that an earlier AI draft wrote (the
-    old keyframe profile) is cleared, but only in a scene this draft writes into: it would
-    no longer fit the new texts. The author's last-frame description is never touched.
+    The last-frame description is written like the other two when the profile writes last
+    frames (`writes_last_frame`, Phase 23) and the model gave one. A scene this draft writes
+    into whose AI last-frame description the model did not repeat (it decided the scene has
+    no last frame, or the profile never writes them) loses it, because it would no longer fit
+    the new texts. That also clears the AI-written edit prompt, and takes an AI-made last
+    frame (`last_frame_is_ai`: the asset's source is `ai`) off the scene, so the clip mode
+    matches the new video prompt. What the author wrote or uploaded is never touched.
     """
     values: dict[str, Any] = {}
     written: list[str] = []
     cleared: list[str] = []
+    detached: int | None = None
 
     description_is_ai = scene.scene_description_source == "ai"
     if draft.video_prompt is not None and (_blank(scene.scene_description) or description_is_ai):
@@ -136,13 +150,29 @@ def plan_write(scene: Scene, draft: SceneDraft, job_id: int) -> SceneWrite:
         values["first_frame_description_source"] = "ai"
         written.append(FIRST_FRAME)
 
+    last_is_ai_text = (
+        not _blank(scene.last_frame_description) and scene.last_frame_description_source == "ai"
+    )
+    last_is_writable = _blank(scene.last_frame_description) or last_is_ai_text
+    scene_written_into = bool(written)
+    if writes_last_frame and draft.last_frame is not None and last_is_writable:
+        values["last_frame_description"] = draft.last_frame
+        values["last_frame_description_source"] = "ai"
+        written.append(LAST_FRAME)
+    elif scene_written_into and last_is_ai_text:
+        values["last_frame_description"] = None
+        values["last_frame_description_source"] = None
+        cleared.append(LAST_FRAME)
+        if scene.last_frame_prompt_source == "ai":
+            values["last_frame_prompt"] = None
+            values["last_frame_prompt_source"] = None
+            values["last_frame_prompt_job_id"] = None
+        if last_frame_is_ai and scene.last_frame_asset_id is not None:
+            detached = scene.last_frame_asset_id
+            values["last_frame_asset_id"] = None
+
     if written:
-        last_is_ai_text = (
-            not _blank(scene.last_frame_description) and scene.last_frame_description_source == "ai"
-        )
-        if last_is_ai_text:
-            values["last_frame_description"] = None
-            values["last_frame_description_source"] = None
-            cleared.append(LAST_FRAME)
         values["description_job_id"] = job_id
-    return SceneWrite(values=values, written=written, cleared=cleared)
+    return SceneWrite(
+        values=values, written=written, cleared=cleared, detached_last_frame_asset_id=detached
+    )

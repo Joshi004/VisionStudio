@@ -1,9 +1,11 @@
-"""The remote steps every Qwen-Image-2.1 job shares: a scene's first frame (`generate_frame`) and
-an Image lab run (`lab_image`). Both submit one request to the GPU server, wait for it, download
-one PNG and store it. What differs is only how the request is made and what the PNG becomes, so
-a subclass writes `start` and `store_image`, and everything between is here:
+"""The remote steps every Qwen-Image-2.1 job shares: a scene's first frame (`generate_frame`), its
+last frame (`generate_last_frame`) and an Image lab run (`lab_image`). All submit one request to
+the GPU server, wait for it, download one PNG and store it. What differs is only how the request
+is made and what the PNG becomes, so a subclass writes `start` and `store_image`, and everything
+between is here:
 
-- `submit`: send the request and save the server's job id at once.
+- `submit`: send the request and save the server's job id at once. An edit (which refers to
+  reference images) passes `build_body`, which uploads them and makes the body.
 - `poll`: ask the server about the job once per tick.
 - `finish`: download the PNG into a temporary file and hand it to `store_image`.
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import abstractmethod
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -39,9 +42,13 @@ from app.jobs.handlers import JobHandler
 from app.jobs.transcribe import is_preemption, phase_for_poll_error
 from app.providers import image_generator
 from app.providers.gpu_server import GpuCallError
-from app.services.storage import get_storage
+from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
+
+# Uploads what an edit refers to, and returns the body to send with a record of what was
+# uploaded. Raises `GpuCallError` (an upload failed) or `StorageError` (a file is missing).
+BuildBody = Callable[[], Awaitable[tuple[dict[str, Any], dict[str, Any]]]]
 
 
 class RemoteImageHandler(JobHandler):
@@ -59,32 +66,63 @@ class RemoteImageHandler(JobHandler):
     # --- submit ------------------------------------------------------------------------
 
     async def submit(
-        self, job_id: int, base_url: str, request: dict[str, Any], recorded: dict[str, Any]
+        self,
+        job_id: int,
+        base_url: str,
+        request: dict[str, Any],
+        recorded: dict[str, Any],
+        *,
+        endpoint: str = image_generator.GENERATE_PATH,
+        build_body: BuildBody | None = None,
     ) -> None:
-        """Submits the request. The server's job id is saved the moment the submit answers,
-        with nothing that can fail in between (ANALYSIS.md Section 3.3). `recorded` is the
-        job's input, which the submission extends with the server's address.
+        """Submits the request to `endpoint`. The server's job id is saved the moment the submit
+        answers, with nothing that can fail in between (ANALYSIS.md Section 3.3). `recorded` is
+        the job's input, which the submission extends with the server's address.
+
+        An edit passes `build_body` instead of a finished request: it uploads the reference
+        images and returns the body to send, with a record of what was uploaded (which joins
+        the job's input as `uploads`). It runs at every start, because the server deletes the
+        inputs of a job when it ends, so a job that is submitted again needs them again.
 
         - 502 at submit: retried once after a pause.
         - No answer, or 429: the job goes back to the queue and waits.
+        - 400 for an unknown asset id (an edit only): the references are uploaded again, once.
         - 422 and any other refusal: the job fails with the server's message and is not
           retried, because the request we built is what is wrong.
         """
         retried_server_error = False
+        retried_asset = False
+        body = request
+        uploads: dict[str, Any] = {}
         while True:
             try:
+                if build_body is not None:
+                    await self._phase(job_id, phases.UPLOADING_REFERENCE)
+                    body, uploads = await build_body()
+                    if not await self._is_running(job_id):
+                        return  # cancelled while uploading: nothing was submitted
                 await self._phase(job_id, phases.SUBMITTING)
-                provider_job_id = await image_generator.submit(base_url, request)
+                provider_job_id = await image_generator.submit(base_url, body, endpoint)
                 break
+            except StorageError:
+                await self._fail(job_id, "A reference image's file could not be found on disk.")
+                return
             except GpuCallError as exc:
                 if exc.kind == "server_error" and not retried_server_error:
                     retried_server_error = True
                     await asyncio.sleep(SERVER_RETRY_DELAY_S)
                     continue
+                unknown_asset = (
+                    exc.status_code == 400 and "invalid asset reference" in exc.message.lower()
+                )
+                if build_body is not None and exc.kind == "rejected" and unknown_asset:
+                    if not retried_asset:
+                        retried_asset = True  # the server lost an upload: send them again
+                        continue
                 await self._give_up_starting(job_id, exc)
                 return
 
-        submitted = {**recorded, "server_url": docker_mapped(base_url)}
+        submitted = {**recorded, **uploads, "server_url": docker_mapped(base_url)}
         async with SessionLocal() as session:
             saved = await store.mark_submitted(session, job_id, provider_job_id, submitted)
         if not saved:
@@ -265,6 +303,13 @@ class RemoteImageHandler(JobHandler):
     async def _phase(job_id: int, phase: str) -> None:
         async with SessionLocal() as session:
             await store.set_phase(session, job_id, phase, status="running")
+
+    @staticmethod
+    async def _is_running(job_id: int) -> bool:
+        async with SessionLocal() as session:
+            job = await store.get_job(session, job_id)
+            await session.commit()
+        return job is not None and job.status == "running"
 
     @staticmethod
     async def _record_poll(job_id: int, phase: str, output: dict[str, Any] | None = None) -> None:

@@ -1,11 +1,11 @@
 """The `auto_pipeline` job: one run of the automatic flow of a project.
 
 The run goes through the steps of `services/auto_pipeline.STEPS` (make the voiceover when
-there is none, transcribe, propose scenes, descriptions, image prompts, first frames, clips,
-final render). It makes the same jobs the manual buttons make, and starts the next step only
-when every scene has finished the current one. A scene (or the project) whose job fails is
-tried again, up to `MAX_TRIES` jobs in one step; after that the run stops and says what is
-wrong.
+there is none, transcribe, propose scenes, descriptions, image prompts, first frames, last frame
+prompts, last frames, clips, final render). It makes the same jobs the manual buttons make, and
+starts the next step only when every scene has finished the current one. A scene (or the
+project) whose job fails is tried again, up to `MAX_TRIES` jobs in one step; after that the run
+stops and says what is wrong.
 
 How it fits the dispatcher (the loop itself is not touched):
 
@@ -41,6 +41,7 @@ from app.db.session import SessionLocal
 from app.jobs import dispatcher, phases, store
 from app.jobs.handlers import JobHandler
 from app.services import auto_pipeline as auto
+from app.services import last_frames as last_frames_service
 from app.services import scenes as scenes_service
 
 _logger = logging.getLogger(__name__)
@@ -135,6 +136,8 @@ class AutoPipelineHandler(JobHandler):
                 await session.commit()
                 return False
 
+            await self._apply_chains(session, run)
+
             locked = False
             while True:
                 project = await _load_project(session, run.project_id)
@@ -152,6 +155,23 @@ class AutoPipelineHandler(JobHandler):
                 locked = True
 
             return await self._apply(session, run, project, result)
+
+    @staticmethod
+    async def _apply_chains(session: AsyncSession, run: Job) -> None:
+        """Gives a scene that continues the previous scene's action the last frame that scene
+        ends on, when that frame was made before this run: no job of this run will attach it, so
+        nothing else would. Reading is free; the write lock is taken (like the buttons do) only
+        when there is something to move, and the check is made again under it.
+        """
+        if run.project_id is None:
+            return
+        if not await last_frames_service.pending_chains(session, run.project_id):
+            return
+        await scenes_service.lock_scenes(session, run.project_id)
+        moved = await last_frames_service.apply_chains(session, run.project_id)
+        await session.commit()
+        if moved:
+            _logger.info("job %d: last frames used as the first frame of scenes %s", run.id, moved)
 
     @staticmethod
     async def _evaluate(session: AsyncSession, run: Job, project: Project) -> _Evaluation:

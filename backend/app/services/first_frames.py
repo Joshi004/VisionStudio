@@ -13,7 +13,8 @@ The request and the steps of the job are `jobs/generate_frame.py`'s, the call is
   replaced only after the author confirmed it. The upload stays among the earlier frames.
 - `frame_out_of_date`: **computed**. An AI frame records the image prompt it was made from in
   its provenance, and the page compares it with the scene's prompt now. Nothing is stored as
-  a flag.
+  a flag. A first frame that is the previous scene's last frame (a scene that continues the
+  action, Phase 23) is current for as long as it still is that frame.
 - `frame_choices`, `select_first_frame`: the earlier frames of a scene and switching back to
   one. There is no table for them: they are the result frames of the scene's succeeded
   `generate_frame` jobs, plus the first frame each of those jobs replaced.
@@ -103,14 +104,24 @@ def scene_block(scene: Scene, *, prompt_out_of_date: bool, prompt_job_active: bo
     return None
 
 
-def frame_out_of_date(scene: Scene, asset: Asset | None) -> bool:
+def frame_out_of_date(
+    scene: Scene, asset: Asset | None, *, chain_source_id: int | None = None
+) -> bool:
     """Whether an AI frame was made from an image prompt that differs from the scene's now
     (both trimmed). A cleared prompt counts as changed, and so does a frame that recorded no
     prompt, because nothing says what it was made from. An upload is never out of date.
+
+    A frame that was made as a *last frame* (Phase 23) and now serves as this scene's first
+    frame, because the scene continues the previous scene's action, was not made from this
+    scene's image prompt. It is current while it is the previous scene's last frame
+    (`chain_source_id`, from `last_frames.chain_sources`), and out of date once it is not, or
+    once the scene no longer continues that scene (`chain_source_id` is None).
     """
     if not is_ai_frame(asset):
         return False
     provenance: Any = asset.provenance if asset is not None else None
+    if isinstance(provenance, dict) and provenance.get("role") == "last_frame":
+        return asset is None or asset.id != chain_source_id
     made_from = provenance.get("prompt") if isinstance(provenance, dict) else None
     if not isinstance(made_from, str):
         return True
@@ -124,12 +135,17 @@ def is_candidate(
     prompt_out_of_date: bool,
     prompt_job_active: bool,
     frame_job_active: bool,
+    chained: bool = False,
 ) -> bool:
     """ "Generate first frames" covers a scene with a current image prompt and nothing running
     that has no first frame, or an AI first frame that is out of date. An uploaded first
     frame is never replaced by it.
+
+    A `chained` scene (it continues the previous scene's action, and that scene has a last
+    frame) is not covered: its first frame is the previous scene's last frame, which the app
+    puts there once it is made (`last_frames.apply_chains`).
     """
-    if frame_job_active:
+    if frame_job_active or chained:
         return False
     if (
         scene_block(
@@ -210,11 +226,16 @@ def _replaced_asset_id(job: Job) -> int | None:
 
 
 async def frame_choices(
-    session: AsyncSession, project_id: int, scene_id: int | None = None
+    session: AsyncSession,
+    project_id: int,
+    scene_id: int | None = None,
+    *,
+    job_type: str = FRAME_JOB,
 ) -> dict[int, list[Asset]]:
     """The frames a scene can go back to, by scene id, newest first: the result frames of its
-    succeeded `generate_frame` jobs, and the first frame each of them replaced (an upload, say).
-    The frame the scene uses now is among them when it came from one of these jobs.
+    succeeded jobs of `job_type` (`generate_frame` for first frames, `generate_last_frame` for
+    last frames), and the frame each of them replaced (an upload, say). The frame the scene
+    uses now is among them when it came from one of these jobs.
 
     One query for the jobs and their frames, and one for the replaced frames.
     """
@@ -223,7 +244,7 @@ async def frame_choices(
         .join(Asset, Asset.id == Job.result_asset_id)
         .where(
             Job.project_id == project_id,
-            Job.type == FRAME_JOB,
+            Job.type == job_type,
             Job.status == "succeeded",
             Job.scene_id.is_not(None),
             Asset.kind == "frame",
@@ -267,10 +288,17 @@ def _was_updated(result: object) -> bool:
     return cast(CursorResult[Any], result).rowcount == 1
 
 
-async def select_first_frame(
-    session: AsyncSession, project_id: int, scene_id: int, asset_id: int
+async def select_frame(
+    session: AsyncSession,
+    project_id: int,
+    scene_id: int,
+    asset_id: int,
+    *,
+    job_type: str,
+    column: str,
 ) -> None:
-    """Makes one of the scene's earlier frames its first frame again. Commits.
+    """Makes one of the scene's earlier frames (from the jobs of `job_type`) the frame in
+    `column` (`first_frame_asset_id` or `last_frame_asset_id`) again. Commits.
 
     Raises SceneGone, or FrameNotChoosable when the asset is not one of the scene's frames.
     """
@@ -279,7 +307,7 @@ async def select_first_frame(
         await session.commit()
         raise SceneGone
 
-    choices = await frame_choices(session, project_id, scene_id)
+    choices = await frame_choices(session, project_id, scene_id, job_type=job_type)
     if asset_id not in {asset.id for asset in choices.get(scene_id, [])}:
         await session.commit()
         raise FrameNotChoosable
@@ -287,11 +315,23 @@ async def select_first_frame(
     result = await session.execute(
         update(Scene)
         .where(Scene.id == scene_id, Scene.project_id == project_id)
-        .values(first_frame_asset_id=asset_id)
+        .values({column: asset_id})
         .execution_options(synchronize_session=False)
     )
     if not _was_updated(result):
         await session.rollback()
         raise SceneGone
     await session.commit()
-    _logger.info("scene %d: first frame %d selected", scene_id, asset_id)
+    _logger.info("scene %d: %s %d selected", scene_id, column, asset_id)
+
+
+async def select_first_frame(
+    session: AsyncSession, project_id: int, scene_id: int, asset_id: int
+) -> None:
+    """Makes one of the scene's earlier frames its first frame again. Commits.
+
+    Raises SceneGone, or FrameNotChoosable when the asset is not one of the scene's frames.
+    """
+    await select_frame(
+        session, project_id, scene_id, asset_id, job_type=FRAME_JOB, column="first_frame_asset_id"
+    )

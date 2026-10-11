@@ -38,7 +38,9 @@ IMAGE_LAB_NAME = "Image lab"
 
 # Job types that can be cancelled while they run, because the server has a cancel for them
 # (Phase 9). A transcription cannot yet: its cancel is not built.
-REMOTE_CANCEL_TYPES = frozenset({"generate_clip", "lab_video", "generate_frame", "lab_image"})
+REMOTE_CANCEL_TYPES = frozenset(
+    {"generate_clip", "lab_video", "generate_frame", "generate_last_frame", "lab_image"}
+)
 
 # An automatic run does nothing itself: it only makes other jobs. Stopping it at any time just
 # stops it making more (the jobs it made that have not started are cancelled with it).

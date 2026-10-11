@@ -1,7 +1,8 @@
 """The `draft_descriptions` job: a language model writes, for every scene of a project in one
 request, the video prompt and the first frame description (ANALYSIS.md Section 4.2 and 6.2;
-Phase 12, reworked for first-frame clips in Phase 15). It never writes a last frame
-description.
+Phase 12, reworked for first-frame clips in Phase 15). Since Phase 23 the active profile also
+lets the model decide which scenes get a last frame and write its description; the
+profiles before it never wrote one.
 
 It is a paid job (Section 6.2), so the rules of the scene proposal hold here too:
 
@@ -49,7 +50,7 @@ from app.providers import llm
 from app.providers.llm import LlmCallError
 from app.services import description_writer as writer
 from app.services import descriptions as descriptions_service
-from app.services import scene_planner
+from app.services import scene_inputs, scene_planner
 from app.services import scenes as scenes_service
 from app.services.description_profiles import ACTIVE_PROFILE, PromptProfile
 from app.services.description_writer import CheckedDrafts, SceneToDraft
@@ -219,7 +220,7 @@ class DraftDescriptionsHandler(JobHandler):
             )
             return
 
-        await self._save(job_id, project.id, sent, outcome, checked, started)
+        await self._save(job_id, project.id, sent, outcome, checked, profile, started)
 
     # --- Asking the model (or reusing an earlier answer) ----------------------------
 
@@ -364,6 +365,7 @@ class DraftDescriptionsHandler(JobHandler):
         sent: list[SceneToDraft],
         outcome: _Outcome,
         checked: CheckedDrafts,
+        profile: PromptProfile,
         started: float,
     ) -> None:
         """Writes the drafts into the scenes and finishes the job in one transaction."""
@@ -372,6 +374,7 @@ class DraftDescriptionsHandler(JobHandler):
         drafts = {draft.scene_id: draft for draft in checked.drafts}
         written_by_scene: dict[int, list[str]] = {}
         cleared_by_scene: dict[int, list[str]] = {}
+        detached_by_scene: dict[int, int] = {}
         skipped = {"all_fixed": 0, "changed_while_drafting": 0, "missing_in_answer": 0}
 
         async with SessionLocal() as session:
@@ -381,6 +384,9 @@ class DraftDescriptionsHandler(JobHandler):
             current = {
                 scene.id: scene for scene in await scenes_service.list_scenes(session, project_id)
             }
+            # Which last frames are the AI's: a draft that decides a scene has none takes only
+            # those off it. An uploaded last frame stays.
+            frames = await scene_inputs.load_frames(session, list(current.values()))
             for scene_sent in sent:
                 scene = current.get(scene_sent.scene_id)
                 if scene is None or not descriptions_service.unchanged(scene, scene_sent):
@@ -391,11 +397,20 @@ class DraftDescriptionsHandler(JobHandler):
                     skipped["missing_in_answer"] += 1
                 else:
                     draft = drafts[scene_sent.scene_id]
-                    plan = descriptions_service.plan_write(scene, draft, job_id)
+                    last_asset = frames.get(scene.last_frame_asset_id or 0)
+                    plan = descriptions_service.plan_write(
+                        scene,
+                        draft,
+                        job_id,
+                        writes_last_frame=profile.writes_last_frame,
+                        last_frame_is_ai=last_asset is not None and last_asset.source == "ai",
+                    )
                     for column, value in plan.values.items():
                         setattr(scene, column, value)
                     written_by_scene[scene.id] = plan.written
                     cleared_by_scene[scene.id] = plan.cleared
+                    if plan.detached_last_frame_asset_id is not None:
+                        detached_by_scene[scene.id] = plan.detached_last_frame_asset_id
 
             output: dict[str, Any] = {
                 "answer": outcome.answer,
@@ -411,9 +426,11 @@ class DraftDescriptionsHandler(JobHandler):
                         "continuity": draft.continuity,
                         writer.VIDEO_PROMPT: draft.video_prompt,
                         writer.FIRST_FRAME: draft.first_frame,
+                        writer.LAST_FRAME: draft.last_frame,
                         "warnings": list(draft.warnings),
                         "written": written_by_scene.get(draft.scene_id, []),
                         "cleared": cleared_by_scene.get(draft.scene_id, []),
+                        "detached_last_frame_asset_id": detached_by_scene.get(draft.scene_id),
                     }
                     for draft in checked.drafts
                 ],

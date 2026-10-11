@@ -7,9 +7,11 @@
 - one module per job type (`transcribe.py`, `plan_scenes.py`, `draft_descriptions.py`,
   `write_image_prompt.py`, `generate_frame.py`, `generate_clip.py`, `render_final.py`,
   `generate_lab_video.py`, `write_lab_video_prompt.py`, `auto_pipeline.py`,
-  `lab_voice.py`, `generate_voiceover.py`, `generate_lab_image.py`).
-- `remote_image.py`: the remote steps the two Qwen image jobs (`generate_frame` and
-  `lab_image`) share.
+  `lab_voice.py`, `generate_voiceover.py`, `generate_lab_image.py`,
+  `write_last_frame_prompt.py`, `generate_last_frame.py`).
+- `remote_image.py`: the remote steps the Qwen image jobs (`generate_frame`,
+  `generate_last_frame` and `lab_image`) share. `scene_frame.py`: what the two scene frame jobs
+  do with the image once it is made.
 
 A new job type is a new handler module plus one line in `register_handlers` below. The
 dispatcher loop is not touched.
@@ -31,6 +33,7 @@ def register_handlers() -> None:
     from app.jobs.generate_frame import GenerateFrameHandler
     from app.jobs.generate_lab_image import GenerateLabImageHandler
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
+    from app.jobs.generate_last_frame import GenerateLastFrameHandler
     from app.jobs.generate_voiceover import GenerateVoiceoverHandler
     from app.jobs.lab_voice import LabVoiceHandler
     from app.jobs.plan_scenes import PlanScenesHandler
@@ -38,6 +41,7 @@ def register_handlers() -> None:
     from app.jobs.transcribe import TranscribeHandler
     from app.jobs.write_image_prompt import WriteImagePromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
+    from app.jobs.write_last_frame_prompt import WriteLastFramePromptHandler
 
     handlers.register(TranscribeHandler())
     handlers.register(PlanScenesHandler())
@@ -52,3 +56,5 @@ def register_handlers() -> None:
     handlers.register(LabVoiceHandler())
     handlers.register(GenerateVoiceoverHandler())
     handlers.register(GenerateLabImageHandler())
+    handlers.register(WriteLastFramePromptHandler())
+    handlers.register(GenerateLastFrameHandler())

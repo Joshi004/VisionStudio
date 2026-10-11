@@ -39,7 +39,7 @@ async function fetchScenes(projectId: number) {
 
 /**
  * True while any job the scenes carry is waiting or running: the proposal, the description
- * draft, or a scene's clip, first frame or image prompt.
+ * draft, or a scene's clip, first frame, last frame or the prompts that make them.
  */
 export function scenesHaveActiveJob(data: ScenesState | undefined): boolean {
   if (data === undefined) {
@@ -52,7 +52,9 @@ export function scenesHaveActiveJob(data: ScenesState | undefined): boolean {
       (scene) =>
         isJobActive(scene.clip_job) ||
         isJobActive(scene.frame_job) ||
-        isJobActive(scene.image_prompt_job),
+        isJobActive(scene.image_prompt_job) ||
+        isJobActive(scene.last_frame_job) ||
+        isJobActive(scene.last_frame_prompt_job),
     )
   );
 }

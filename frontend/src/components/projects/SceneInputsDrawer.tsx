@@ -28,6 +28,8 @@ import { FirstFrameActions, FirstFrameBadges } from "./FirstFrameActions";
 import { FrameSlot } from "./FrameSlot";
 import { clipModeText } from "./clipView";
 import { ImagePromptActions } from "./ImagePromptActions";
+import { LastFramePromptActions } from "./LastFramePromptActions";
+import { wantsLastFrame } from "./lastFrameView";
 import { countWords, missingText, promptHints } from "./promptHints";
 import { SceneClipSection } from "./SceneClipSection";
 import { seconds } from "./sceneView";
@@ -38,6 +40,7 @@ const TEXT_KEYS: TextKey[] = [
   "first_frame_description",
   "last_frame_description",
   "image_prompt",
+  "last_frame_prompt",
 ];
 
 /** Who wrote a text, and whether the box holds changes that are not saved yet. */
@@ -111,6 +114,7 @@ export function SceneInputsDrawer({
     first_frame_description: scene?.first_frame_description ?? "",
     last_frame_description: scene?.last_frame_description ?? "",
     image_prompt: scene?.image_prompt ?? "",
+    last_frame_prompt: scene?.last_frame_prompt ?? "",
   };
   const typed = scene !== undefined && edit?.sceneId === scene.id ? edit.texts : {};
   const draftOf = (key: TextKey) => typed[key] ?? saved[key];
@@ -119,6 +123,12 @@ export function SceneInputsDrawer({
   const tooLong = TEXT_KEYS.some((key) => draftOf(key).length > DESCRIPTION_MAX_CHARS);
   const draft = draftOf("scene_description");
   const hints = promptHints(draft);
+  // The last frame's prompt and actions show for a scene that gets a last frame: it has a
+  // description of one, a prompt or a frame (or the user is typing a description now). Most
+  // scenes get none, and have nothing to show.
+  const showLast =
+    scene !== undefined &&
+    (wantsLastFrame(scene) || draftOf("last_frame_description").trim() !== "");
 
   function type(key: TextKey, text: string) {
     if (scene !== undefined) {
@@ -324,7 +334,7 @@ export function SceneInputsDrawer({
                   />
                 </Group>
               }
-              description="Only for a last frame you add yourself: what it shows. The AI never writes this."
+              description="What the last frame shows: the same shot as the first frame, a moment later, where the motion ends. The AI writes one when it drafts the descriptions, only for scenes where pinning the end of the clip helps. Leave it empty for a clip made from the first frame alone."
               value={draftOf("last_frame_description")}
               onChange={(event) => type("last_frame_description", event.currentTarget.value)}
               autosize
@@ -336,6 +346,54 @@ export function SceneInputsDrawer({
                   : undefined
               }
             />
+            {showLast && (
+              <>
+                <Textarea
+                  label={
+                    <Group gap="xs">
+                      <span>Last frame prompt</span>
+                      <SourceBadge
+                        source={scene.last_frame_prompt_source}
+                        edited={changed.includes("last_frame_prompt")}
+                      />
+                      {scene.last_frame_prompt_out_of_date &&
+                        !changed.includes("last_frame_prompt") && (
+                          <Badge color="orange" variant="light">
+                            Out of date
+                          </Badge>
+                        )}
+                    </Group>
+                  }
+                  description="The instruction for the image model that edits the first frame into the last frame: what changes, and that everything else stays as it is. The model sees the first frame, so this does not describe the whole scene again."
+                  placeholder="Not written yet. Write it with the AI below, or type your own."
+                  value={draftOf("last_frame_prompt")}
+                  onChange={(event) => type("last_frame_prompt", event.currentTarget.value)}
+                  autosize
+                  minRows={3}
+                  maxRows={10}
+                  error={
+                    draftOf("last_frame_prompt").length > DESCRIPTION_MAX_CHARS
+                      ? `At most ${DESCRIPTION_MAX_CHARS.toLocaleString()} characters.`
+                      : undefined
+                  }
+                />
+                <Text size="xs" c="dimmed" ta="right">
+                  {countWords(draftOf("last_frame_prompt"))} words · 40 to 120 works best
+                </Text>
+                {scene.last_frame_prompt_out_of_date && (
+                  <Text size="xs" c="orange.8">
+                    The descriptions, narration or style changed after this prompt was written.
+                  </Text>
+                )}
+                <LastFramePromptActions
+                  project={project}
+                  scene={scene}
+                  model={imagePromptModel}
+                  edited={dirty}
+                  now={now}
+                />
+              </>
+            )}
 
             <Group gap="sm">
               <Button onClick={saveTexts} disabled={!dirty || tooLong} loading={save.isPending}>
@@ -413,6 +471,11 @@ export function SceneInputsDrawer({
                 slot="first"
                 frame={scene.first_frame}
                 label="First frame"
+                description={
+                  scene.first_frame_chained
+                    ? `Follows the last frame of scene ${scene.index}.`
+                    : undefined
+                }
                 badge={
                   scene.first_frame !== null ? <FirstFrameBadges frame={scene.first_frame} /> : undefined
                 }
@@ -425,15 +488,29 @@ export function SceneInputsDrawer({
                 frame={scene.last_frame}
                 label="Last frame (optional)"
                 description="When set, the clip is made to end on this frame."
+                badge={
+                  scene.last_frame !== null ? <FirstFrameBadges frame={scene.last_frame} /> : undefined
+                }
               />
             </SimpleGrid>
             <FirstFrameActions
               project={project}
               scene={scene}
+              slot="first"
               model={imageModel}
               edited={dirty}
               now={now}
             />
+            {showLast && (
+              <FirstFrameActions
+                project={project}
+                scene={scene}
+                slot="last"
+                model={imageModel}
+                edited={dirty}
+                now={now}
+              />
+            )}
           </Stack>
 
           <Divider />

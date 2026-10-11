@@ -1,7 +1,8 @@
 """Scene inputs (Phase 8): the description, the first and last frame, and the frame preview.
 
 `PATCH .../scenes/{id}` saves the description, the two frame descriptions (Phase 12 added
-the frame descriptions) and the first frame's image prompt (Phase 16). `POST` and `DELETE`
+the frame descriptions), the first frame's image prompt (Phase 16) and the last frame's edit
+prompt (Phase 23). `POST` and `DELETE`
 `.../scenes/{id}/frames/{slot}` set and remove a frame. Each answers with the scenes as they
 are afterwards (`ScenesOut`), so the page shows the change without another request.
 
@@ -27,6 +28,8 @@ from app.api.scenes import ScenesOut, scenes_out
 from app.db.models import Asset
 from app.db.session import SessionDep
 from app.services import frame_images, scene_inputs
+from app.services import last_frames as last_frames_service
+from app.services import scenes as scenes_service
 from app.services.scene_inputs import FrameSlot
 from app.services.storage import StorageError, get_storage
 
@@ -64,6 +67,8 @@ class SceneUpdate(BaseModel):
     last_frame_description: StrictStr | None = None
     # The detailed prompt for the image model that makes the first frame (Phase 16).
     image_prompt: StrictStr | None = None
+    # The instruction that edits the first frame into the last frame (Phase 23).
+    last_frame_prompt: StrictStr | None = None
 
 
 def _scene_missing(scene_id: int) -> HTTPException:
@@ -91,8 +96,8 @@ async def _require_scene(session: AsyncSession, project_id: int, scene_id: int) 
 async def update_scene(
     project_id: int, scene_id: int, body: SceneUpdate, session: SessionDep
 ) -> ScenesOut:
-    """Saves the scene's description, frame descriptions and image prompt that are sent. Each
-    one that changes is marked as written by the author (`manual`).
+    """Saves the scene's description, frame descriptions, image prompt and last frame prompt
+    that are sent. Each one that changes is marked as written by the author (`manual`).
     """
     project = await load_project(session, project_id)
     await _require_scene(session, project.id, scene_id)
@@ -142,6 +147,11 @@ async def upload_frame(
         raise HTTPException(exc.status_code, exc.message) from exc
     except scene_inputs.SceneGone:
         raise _scene_missing(scene_id) from None
+    if slot == "last":
+        # A scene that continues this scene's action starts on this frame (Phase 23).
+        await scenes_service.lock_scenes(session, project.id)
+        await last_frames_service.apply_chains(session, project.id)
+        await session.commit()
     return await scenes_out(session, project)
 
 

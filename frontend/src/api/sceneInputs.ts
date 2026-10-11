@@ -44,14 +44,15 @@ export function useSceneInputsMutation<TVariables>(
 }
 
 /**
- * The texts of a scene: the description (the video prompt), the two frame descriptions and the
- * first frame's image prompt.
+ * The texts of a scene: the description (the video prompt), the two frame descriptions, the
+ * first frame's image prompt and the last frame's edit prompt.
  */
 export type SceneTexts = {
   scene_description?: string;
   first_frame_description?: string;
   last_frame_description?: string;
   image_prompt?: string;
+  last_frame_prompt?: string;
 };
 
 /**

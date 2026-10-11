@@ -474,8 +474,8 @@ export interface paths {
         head?: never;
         /**
          * Update Scene
-         * @description Saves the scene's description, frame descriptions and image prompt that are sent. Each
-         *     one that changes is marked as written by the author (`manual`).
+         * @description Saves the scene's description, frame descriptions, image prompt and last frame prompt
+         *     that are sent. Each one that changes is marked as written by the author (`manual`).
          */
         patch: operations["update_scene_api_projects__project_id__scenes__scene_id__patch"];
         trace?: never;
@@ -632,6 +632,119 @@ export interface paths {
          * @description Makes one of the scene's earlier frames its first frame again.
          */
         post: operations["select_first_frame_api_projects__project_id__scenes__scene_id__select_first_frame_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/write-last-frame-prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Last Frame Prompts
+         * @description Starts one last frame prompt job (a paid call to the language model) for every scene that
+         *     has a last frame description and no prompt, or an AI prompt that is out of date, and no job
+         *     running. Prompts the user wrote are skipped. All the jobs are created in one transaction.
+         *     The page asks before calling this, and it shows how many it will start
+         *     (`ScenesOut.last_frame_prompt_candidate_count`).
+         */
+        post: operations["write_last_frame_prompts_api_projects__project_id__write_last_frame_prompts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/write-last-frame-prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Last Frame Prompt
+         * @description Starts writing the last frame prompt of one scene (a paid call to the language model), or
+         *     returns the job already active for it. The same request as an earlier one reuses its stored
+         *     answer unless `run_again` is sent. A prompt the user wrote is refused: clear it first.
+         */
+        post: operations["write_last_frame_prompt_api_projects__project_id__scenes__scene_id__write_last_frame_prompt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/generate-last-frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Last Frames
+         * @description Starts one last frame job (an image made on the GPU server) for every scene that has a
+         *     current last frame prompt and a first frame, nothing running, and no last frame or an AI
+         *     last frame that is out of date. Frames the user uploaded are skipped. All the jobs are
+         *     created in one transaction. The page asks before calling this, and it shows how many it
+         *     will start (`ScenesOut.last_frame_candidate_count`).
+         */
+        post: operations["generate_last_frames_api_projects__project_id__generate_last_frames_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/generate-last-frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Last Frame
+         * @description Starts the last frame of one scene (an image made on the GPU server by editing its first
+         *     frame), or returns the job already active for it. A frame the user uploaded is replaced only
+         *     when the request sets `replace_upload`: it stays among the scene's earlier last frames.
+         */
+        post: operations["generate_last_frame_api_projects__project_id__scenes__scene_id__generate_last_frame_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/select-last-frame": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select Last Frame
+         * @description Makes one of the scene's earlier last frames its last frame again. A scene that continues
+         *     this scene's action then starts on it.
+         */
+        post: operations["select_last_frame_api_projects__project_id__scenes__scene_id__select_last_frame_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1508,6 +1621,24 @@ export interface components {
             /** Created */
             created: number;
         };
+        /**
+         * GenerateLastFrameRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        GenerateLastFrameRequest: {
+            /**
+             * Replace Upload
+             * @default false
+             */
+            replace_upload: boolean;
+        };
+        /** GenerateLastFramesOut */
+        GenerateLastFramesOut: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
+            /** Created */
+            created: number;
+        };
         /** GenerateReadyOut */
         GenerateReadyOut: {
             /** Jobs */
@@ -1559,7 +1690,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame";
             /**
              * Status
              * @enum {string}
@@ -1616,7 +1747,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame";
             /**
              * Status
              * @enum {string}
@@ -2331,12 +2462,34 @@ export interface components {
             image_prompt_job: components["schemas"]["JobSummary"] | null;
             /** Image Prompt Blocked Reason */
             image_prompt_blocked_reason: string | null;
+            /** Last Frame Prompt */
+            last_frame_prompt: string | null;
+            /** Last Frame Prompt Source */
+            last_frame_prompt_source: ("manual" | "ai") | null;
+            /** Last Frame Prompt Job Id */
+            last_frame_prompt_job_id: number | null;
+            /** Last Frame Prompt Out Of Date */
+            last_frame_prompt_out_of_date: boolean;
+            last_frame_prompt_job: components["schemas"]["JobSummary"] | null;
+            /** Last Frame Prompt Blocked Reason */
+            last_frame_prompt_blocked_reason: string | null;
             /** Prompt */
             prompt: string | null;
             first_frame: components["schemas"]["FrameOut"] | null;
             last_frame: components["schemas"]["FrameOut"] | null;
             /** First Frame Out Of Date */
             first_frame_out_of_date: boolean;
+            /** First Frame Chained */
+            first_frame_chained: boolean;
+            /** Last Frame Out Of Date */
+            last_frame_out_of_date: boolean;
+            last_frame_job: components["schemas"]["JobSummary"] | null;
+            /** Last Frame Job Note */
+            last_frame_job_note: string | null;
+            /** Last Frame Blocked Reason */
+            last_frame_blocked_reason: string | null;
+            /** Last Frame Choices */
+            last_frame_choices: components["schemas"]["FrameOut"][];
             frame_job: components["schemas"]["JobSummary"] | null;
             /** Frame Job Note */
             frame_job_note: string | null;
@@ -2398,6 +2551,8 @@ export interface components {
             last_frame_description?: string | null;
             /** Image Prompt */
             image_prompt?: string | null;
+            /** Last Frame Prompt */
+            last_frame_prompt?: string | null;
         };
         /**
          * SceneWordOut
@@ -2451,6 +2606,14 @@ export interface components {
             frame_candidate_count: number;
             /** Max Parallel Image Generations */
             max_parallel_image_generations: number;
+            /** Last Frame Prompts Blocked Reason */
+            last_frame_prompts_blocked_reason: string | null;
+            /** Last Frame Prompt Candidate Count */
+            last_frame_prompt_candidate_count: number;
+            /** Last Frames Blocked Reason */
+            last_frames_blocked_reason: string | null;
+            /** Last Frame Candidate Count */
+            last_frame_candidate_count: number;
         };
         /** ScriptWordOut */
         ScriptWordOut: {
@@ -2478,6 +2641,11 @@ export interface components {
         };
         /** SelectFirstFrameRequest */
         SelectFirstFrameRequest: {
+            /** Asset Id */
+            asset_id: number;
+        };
+        /** SelectLastFrameRequest */
+        SelectLastFrameRequest: {
             /** Asset Id */
             asset_id: number;
         };
@@ -2856,6 +3024,24 @@ export interface components {
         };
         /** WriteImagePromptsOut */
         WriteImagePromptsOut: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
+            /** Created */
+            created: number;
+        };
+        /**
+         * WriteLastFramePromptRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        WriteLastFramePromptRequest: {
+            /**
+             * Run Again
+             * @default false
+             */
+            run_again: boolean;
+        };
+        /** WriteLastFramePromptsOut */
+        WriteLastFramePromptsOut: {
             /** Jobs */
             jobs: components["schemas"]["JobSummary"][];
             /** Created */
@@ -4224,6 +4410,230 @@ export interface operations {
                 };
             };
             /** @description No project or scene has this id, or the asset is not one of the scene's earlier frames. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_last_frame_prompts_api_projects__project_id__write_last_frame_prompts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WriteLastFramePromptsOut"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Last frame prompts cannot be written now: there are no scenes, a proposal or a draft is running, the scenes are out of date, the scene has no last frame description, or the prompt was written by the user. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    write_last_frame_prompt_api_projects__project_id__scenes__scene_id__write_last_frame_prompt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WriteLastFramePromptRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Last frame prompts cannot be written now: there are no scenes, a proposal or a draft is running, the scenes are out of date, the scene has no last frame description, or the prompt was written by the user. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_last_frames_api_projects__project_id__generate_last_frames_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateLastFramesOut"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A last frame cannot be made now: there are no scenes, a proposal or a draft is running, the scenes are out of date, or the scene has no current last frame prompt (none, out of date, or being written) or no first frame (none, or being made). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_last_frame_api_projects__project_id__scenes__scene_id__generate_last_frame_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GenerateLastFrameRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene's last frame is one the user uploaded, and the request did not confirm replacing it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A last frame cannot be made now: there are no scenes, a proposal or a draft is running, the scenes are out of date, or the scene has no current last frame prompt (none, out of date, or being written) or no first frame (none, or being made). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    select_last_frame_api_projects__project_id__scenes__scene_id__select_last_frame_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelectLastFrameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project or scene has this id, or the asset is not one of the scene's earlier last frames. */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -13,6 +13,8 @@ from app.api import (
     image_lab,
     image_prompts,
     jobs,
+    last_frame_prompts,
+    last_frames,
     projects,
     renders,
     scene_inputs,
@@ -35,6 +37,8 @@ api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(scene_inputs.router, tags=["scenes"])
 api_router.include_router(image_prompts.router, tags=["scenes"])
 api_router.include_router(first_frames.router, tags=["scenes"])
+api_router.include_router(last_frame_prompts.router, tags=["scenes"])
+api_router.include_router(last_frames.router, tags=["scenes"])
 api_router.include_router(clips.router, tags=["scenes"])
 api_router.include_router(renders.router, tags=["renders"])
 api_router.include_router(auto_pipeline.router, tags=["auto-generate"])

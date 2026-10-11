@@ -72,6 +72,11 @@ SAVING_DESCRIPTIONS: Final = "saving the descriptions"
 CHECKING_IMAGE_PROMPT: Final = "checking the image prompt"
 SAVING_IMAGE_PROMPT: Final = "saving the image prompt"
 
+# --- Running: last frame prompts (Phase 23) ---------------------------------------------
+# It also uses PREPARING_PROMPT, REUSING_ANSWER and `asking_model` from above.
+CHECKING_LAST_FRAME_PROMPT: Final = "checking the last frame prompt"
+SAVING_LAST_FRAME_PROMPT: Final = "saving the last frame prompt"
+
 # --- Running: the Video lab (Phase 19) ---------------------------------------------------
 # The lab's clips use the clip phases above. Its prompt helper also uses PREPARING_PROMPT and
 # `asking_model`.
@@ -99,6 +104,8 @@ def speech_part(label: str, part: int, parts: int) -> str:
 # phases above. Once the server has finished, the image is fetched and stored: the phases below
 # are in `FINISHING_PHASES`, so the job can no longer be cancelled.
 PREPARING_IMAGE_REQUEST: Final = "preparing the image request"
+# An edit (a last frame, Phase 23) uploads the picture it edits first.
+UPLOADING_REFERENCE: Final = "uploading the reference image"
 DOWNLOADING_IMAGE: Final = "downloading the image"
 IMAGE_NOT_READY: Final = "the server has not released the image yet, checking again"
 SAVING_IMAGE: Final = "saving the image"

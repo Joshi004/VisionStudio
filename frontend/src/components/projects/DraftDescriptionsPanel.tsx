@@ -17,9 +17,9 @@ type DraftDescriptionsPanelProps = {
 };
 
 /**
- * "Draft descriptions with AI": one paid call that writes every scene's video prompt (for a clip
- * made from its first frame) and its first frame description. It never writes a last frame
- * description. Text the user wrote is kept. It follows the same rules as the scene proposal:
+ * "Draft descriptions with AI": one paid call that writes every scene's video prompt and its first
+ * frame description, and, for the scenes where pinning the end of the clip helps, a last frame
+ * description (the other scenes get none). Text the user wrote is kept. It follows the same rules as the scene proposal:
  * only from a click, with a confirmation. Progress shows by itself.
  */
 export function DraftDescriptionsPanel({ project, data, now }: DraftDescriptionsPanelProps) {
@@ -36,8 +36,9 @@ export function DraftDescriptionsPanel({ project, data, now }: DraftDescriptions
   const scenesWithFrames = data.scenes.filter(
     (scene) => scene.first_frame !== null || scene.last_frame !== null,
   ).length;
-  // A last frame description an earlier AI draft wrote. A new draft clears it in each scene it
-  // writes into (the AI no longer writes last frame descriptions). The user's own stay.
+  // A last frame description an earlier AI draft wrote. A new draft writes it again where the
+  // model still wants a last frame, and clears it (with its prompt and its AI frame) where it
+  // does not. The user's own stay.
   const scenesWithAiLastFrameText = data.scenes.filter(
     (scene) =>
       scene.last_frame_description_source === "ai" && scene.last_frame_description !== null,
@@ -81,7 +82,8 @@ export function DraftDescriptionsPanel({ project, data, now }: DraftDescriptions
         )}
       </Group>
       <Text size="xs" c="dimmed">
-        Writes the video prompt and the first frame description of{" "}
+        Writes the video prompt, the first frame description and, where an end frame helps, the
+        last frame description of{" "}
         {data.draftable_count} {data.draftable_count === 1 ? "scene" : "scenes"} with {model} at{" "}
         {llmHost(data.description_llm.will_call)}: a paid call that sends your script. Text you
         wrote is kept. Draft descriptions reuses the stored answer when nothing has changed. Draft

@@ -10,13 +10,16 @@ Everything else about drafting (the task, the consistency rules, the frame rules
 answer, the job, the API and the page) knows nothing about LTX. To use another video model,
 add a profile below and point `ACTIVE_PROFILE` at it.
 
-Three profiles exist. `ltx-2.3-keyframe` (Phase 12) was written for clips made from a first and
+Four profiles exist. `ltx-2.3-keyframe` (Phase 12) was written for clips made from a first and
 a last frame, and stays here unchanged because earlier drafting jobs name it. `ltx-2.3-first-frame`
 (Phase 15) was written for clips that start from a first frame alone, and stays unchanged for the
-same reason. `ltx-first-frame` (Phase 19) is the active one: it writes for LTX-2.3 and LTX-2.5
-alike, so a scene's prompt can be made with either model and the takes compared. Both models
-read a first-frame prompt the same way (the server's guide and Lightricks' prompting guide agree
-on it), so only the request differs between them, never the prompt.
+same reason. `ltx-first-frame` (Phase 19) writes for LTX-2.3 and LTX-2.5 alike, so a scene's
+prompt can be made with either model and the takes compared, and also stays unchanged. Both
+models read a first-frame prompt the same way (the server's guide and Lightricks' prompting
+guide agree on it), so only the request differs between them, never the prompt.
+`ltx-first-last` (Phase 23) is the active one. It writes for the same two models, and the model
+also decides which scenes get a last frame, and writes it (`writes_last_frame`). A scene with a
+last frame gets the keyframe rules for its video prompt, one without keeps the first-frame rules.
 
 The text here is the lever for better prompts, so a change to it is a change to every future
 draft. Raise `version` whenever any text in a profile changes: the job stores the profile's
@@ -62,6 +65,21 @@ class PromptProfile:
     example: str
     max_video_words: int
     rules: tuple[TextRule, ...]
+    # --- Phase 23: a profile whose model also decides on, and writes, a last frame ----------
+    # False for the three profiles that came before: their instructions are unchanged, and
+    # they never ask for a last frame. When True, `video_prompt_rules` is for a scene WITHOUT a
+    # last frame and `video_prompt_rules_with_last_frame` for one with it.
+    writes_last_frame: bool = False
+    # When to write a last frame, and how (what the system message says about the field).
+    last_frame_rules: str = ""
+    video_prompt_rules_with_last_frame: str = ""
+    # A second worked scene, one that has a last frame (`example` has none).
+    example_with_last_frame: str = ""
+    # Checks on the written last frame (a warning, never an error), and about how long it is.
+    last_frame_checks: tuple[TextRule, ...] = ()
+    max_last_frame_words: int = 0
+    # Extra checks on the video prompt of a scene that has a last frame.
+    rules_with_last_frame: tuple[TextRule, ...] = ()
 
 
 _LTX_EXAMPLE: Final = json.dumps(
@@ -358,6 +376,193 @@ LTX_FIRST_FRAME: Final = PromptProfile(
     ),
 )
 
-# The video adapter the job asks for. `LTX_23_KEYFRAME` and `LTX_23_FIRST_FRAME` stay above,
-# unchanged, because jobs from Phase 12 and Phase 15 name them.
-ACTIVE_PROFILE: Final = LTX_FIRST_FRAME
+# --- LTX-2.3 and LTX-2.5 from a first frame, or from a first and a last frame (Phase 23) -----
+
+# What differs from `ltx-first-frame`:
+# - the model also decides, scene by scene, whether the clip gets a last frame, and writes it. The
+#   image model makes that frame later by EDITING the first frame, so it is written as "the same
+#   shot, one moment later";
+# - a scene with a last frame gets the keyframe rules (describe only the motion between the two
+#   frames, and a camera that does not change the framing), a scene without one keeps the
+#   first-frame rules of `ltx-first-frame`;
+# - a scene whose next scene "continues_action" ends on the picture that scene starts from.
+_FIRST_FRAME_ONLY: Final = json.loads(_LTX_FIRST_FRAME_EXAMPLE)
+# The paper boat is followed by a pan, so it is a scene that has no last frame.
+_LTX_FIRST_LAST_EXAMPLE_NONE: Final = json.dumps(
+    {
+        "scene": _FIRST_FRAME_ONLY["scene"],
+        "continuity": _FIRST_FRAME_ONLY["continuity"],
+        "first_frame": _FIRST_FRAME_ONLY["first_frame"],
+        "last_frame": None,
+        "video_prompt": _FIRST_FRAME_ONLY["video_prompt"],
+    },
+    ensure_ascii=False,
+)
+_LTX_FIRST_LAST_EXAMPLE_WITH: Final = json.dumps(
+    {
+        "scene": 2,
+        "continuity": "new_place",
+        "first_frame": (
+            "Close-up at moss level, a 35 mm look with shallow depth of field. A small brown "
+            "garden snail with a pale spiral shell sits at the left edge of a flat grey stone "
+            "covered in soft green moss, its antennae raised towards the right. Dull overcast "
+            "light, a muted palette of grey, moss green and brown. Portrait frame, the snail "
+            "in the lower left, the stone filling the lower half and soft blurred ferns behind "
+            "it."
+        ),
+        "last_frame": (
+            "The same shot, the same light and framing. The snail has crossed the stone and "
+            "now sits at its centre, its antennae raised and bent towards the ferns. The moss, "
+            "the stone and the blurred ferns are unchanged."
+        ),
+        "video_prompt": (
+            "The snail glides slowly across the mossy stone, its antennae swaying, and climbs "
+            "a small ridge with a faint wet slide against the moss. It pauses for a beat, "
+            "antennae turning towards the ferns, then moves on until it rests at the centre "
+            "of the stone with its antennae raised. Static camera. A distant bird calls "
+            "once. No music, no voices."
+        ),
+    },
+    ensure_ascii=False,
+)
+
+# "The same shot..." is how a written last frame begins. A text that does not is warned about.
+_NOT_THE_SAME_SHOT: Final = re.compile(r"^(?!\s*the same\b)", re.IGNORECASE)
+# A last frame is a still: no motion in progress.
+_MOTION_UNDER_WAY: Final = re.compile(
+    r"\b(starts? to|begins? to|about to|in the middle of|is (?:moving|walking|turning|rising))\b",
+    re.IGNORECASE,
+)
+# A move that changes the framing between the first and the last frame.
+_FRAMING_MOVE: Final = re.compile(
+    r"\b(pan(?:s|ning)? (?:left|right|up|down|across)|pulls? back|pull-back|tracking shot|"
+    r"zooms?|dolly|crane shot|orbits?)\b",
+    re.IGNORECASE,
+)
+
+LTX_FIRST_LAST: Final = PromptProfile(
+    id="ltx-first-last",
+    version=1,
+    video_model=(
+        "LTX-2.3 or LTX-2.5, from a first frame alone or from a first and a last frame "
+        "(one continuous shot)"
+    ),
+    # For a scene WITHOUT a last frame: the same rules as `ltx-first-frame`.
+    video_prompt_rules=LTX_FIRST_FRAME.video_prompt_rules.replace(
+        'Rules for "video_prompt", the motion prompt for LTX.',
+        'Rules for "video_prompt" in a scene WITHOUT a last frame, the motion prompt for LTX.',
+    ),
+    example=_LTX_FIRST_LAST_EXAMPLE_NONE,
+    max_video_words=200,
+    rules=LTX_FIRST_FRAME.rules,
+    writes_last_frame=True,
+    last_frame_rules="\n".join(
+        [
+            "When to write a last frame",
+            "- A last frame is made later by EDITING the first frame's picture, so it can only "
+            "show the SAME shot a moment later: the same place, light, framing and camera "
+            "position, with the subject changed. Each one costs extra picture-making time, so "
+            "write one only where it makes the clip clearly more controlled. Not every scene "
+            "needs one.",
+            "- Write one when the scene's ending is a visible change of the subject inside the "
+            "same shot and where the clip ends matters: a thing opens, fills, lands, lights up "
+            "or moves to a new spot; a subject turns or looks somewhere new; a hand reaches "
+            "for something and takes it.",
+            '- Write one when the next scene is "continues_action" and this scene\'s motion can '
+            "end inside the same shot. The app uses this scene's last frame as the next "
+            "scene's first frame, so the cut is seamless.",
+            "- Write one when a recurring subject must look exactly the same at the end as at "
+            "the start through a clear movement (a close-up of a face or of an object that "
+            "moves).",
+            '- Answer null for "last_frame" when the scene is ambient or atmospheric with no '
+            "clear end state (rain, drifting fog, a still landscape, light slowly changing); "
+            "when the camera makes a large move (a pan that reveals a new place, a change from "
+            "wide to close); when the scene is shorter than 3 seconds; or when the end would "
+            "show a different place, different light or a different time.",
+            "",
+            'Rules for "last_frame" (a still picture made by editing the first frame)',
+            "- It is the SAME shot as the first frame, one moment after the scene's motion "
+            "ends: the same place, light, framing, camera position and lens look. Only the "
+            "subject changes (its position, state, pose or gaze), or something small enters or "
+            "leaves the frame.",
+            '- 30 to 70 words. Begin with "The same shot", say what is different in concrete '
+            "terms (positions, states, gaze, objects), and end by saying what is unchanged.",
+            "- Name a subject by its world name and keep its identifying details from the "
+            "world description. Never give it another look.",
+            "- It shows where the video prompt's motion ENDS, as a still: the subject in place, "
+            'at rest or in a pause. No motion words ("starts to", "is moving") and no sound.',
+            "- Never change the camera: no zoom, no new angle, no wider or tighter view. If "
+            'the end needs a different framing, answer null for "last_frame" instead.',
+            "- No text, captions, logos or watermarks in the picture.",
+            "",
+            "Scenes that follow each other",
+            '- When scene N has a last frame and scene N+1 is "continues_action", the '
+            "first_frame of scene N+1 must describe exactly the picture of scene N's "
+            "last_frame (word for word where you can, written as a whole picture again), "
+            "because that last frame becomes scene N+1's first frame. Scene N+1's video prompt "
+            "starts from that picture.",
+        ]
+    ),
+    # For a scene WITH a last frame: only the motion between the two frames.
+    video_prompt_rules_with_last_frame="\n".join(
+        [
+            'Rules for "video_prompt" in a scene WITH a last frame, the motion prompt for LTX. '
+            "LTX makes the clip as one continuous shot from the first frame, the last frame and "
+            "this prompt:",
+            "1. The two frames already show how everything looks. Describe only the MOTION that "
+            "carries the first frame to the last frame. Never describe again what the frames "
+            "show (faces, clothes, colours, materials, rooms): that pulls the video away from "
+            "them.",
+            "2. One flowing paragraph in the present tense, 4 to 8 short sentences in all "
+            "(action, camera and sound count), at most 200 words. About one action for every "
+            "2 to 3 seconds, so a short scene gets a short prompt.",
+            "3. The main action first, in one clear sentence. Then the specific movements and "
+            "gestures, as literal, chronological verbs (lifts, turns, drifts). Every sentence "
+            "has a verb that does something. Show feeling through physical cues, never with a "
+            'label such as "sad".',
+            "4. Write the pace in. The video model adds no pause you do not ask for, so put "
+            'the beats into the action ("it pauses for a beat").',
+            "5. The motion ends in the state the last frame shows: say so in plain words taken "
+            "from the last frame. Never describe anything that would happen after it.",
+            '6. Camera: name one move. The two frames are framed alike, so use "static camera" '
+            'or at most "a very slight push-in". Never a pan, a pull-back, a tracking move or '
+            "any other change of framing: it makes the whole picture slide between the frames.",
+            "7. Light: the light is the same in both frames, so do not describe a change of light.",
+            "8. Sound: write it where it happens, inside the sentence of the action it belongs "
+            "to, concrete and specific. By default there is no music, no speech and no "
+            'singing, and you say so once, briefly, at the very end ("No music, no voices."). '
+            "The author's instructions can change this.",
+            '9. Never use: double quotes (they make people speak), "cut to" or any scene '
+            "change or named transition (hard cut, match cut, dissolve), times or seconds, "
+            '"the video starts with", on-screen text.',
+            "10. Plain film language and restrained adjectives. No technical specs: no focal "
+            "lengths, f-stops, resolutions or camera model names. The frames already set the "
+            "look.",
+        ]
+    ),
+    example_with_last_frame=_LTX_FIRST_LAST_EXAMPLE_WITH,
+    last_frame_checks=(
+        TextRule(
+            _NOT_THE_SAME_SHOT,
+            "The last frame does not begin with \u201cThe same shot\u201d. It is made by "
+            "editing the first frame, so it should say what changes in that same shot.",
+        ),
+        TextRule(
+            _MOTION_UNDER_WAY,
+            "The last frame describes a motion under way. A last frame is a still: show where "
+            "the motion ends.",
+        ),
+    ),
+    max_last_frame_words=70,
+    rules_with_last_frame=(
+        TextRule(
+            _FRAMING_MOVE,
+            "A camera move that changes the framing found (a pan, a pull-back, a zoom). With a "
+            "last frame both frames are framed alike: use a static camera.",
+        ),
+    ),
+)
+
+# The video adapter the job asks for. `LTX_23_KEYFRAME`, `LTX_23_FIRST_FRAME` and
+# `LTX_FIRST_FRAME` stay above, unchanged, because jobs from Phase 12, 15 and 19 name them.
+ACTIVE_PROFILE: Final = LTX_FIRST_LAST

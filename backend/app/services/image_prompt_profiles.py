@@ -255,5 +255,138 @@ QWEN_IMAGE_21: Final = ImagePromptProfile(
     rules=SEEDREAM_50_LITE.rules,
 )
 
+# --- The edit that turns a first frame into a last frame (Phase 23) ----------------------------
+
+# Words that rule something out. The image model has no negative prompt, and naming a thing,
+# even to rule it out, can make it appear.
+_NEGATIVE_WORDS: Final = re.compile(
+    r"\b(no|not|without|never|nothing|don't|doesn't|isn't|aren't)\b", re.IGNORECASE
+)
+# Wording that changes the shot instead of the subject: the last frame must be the same shot.
+_FRAMING_CHANGE: Final = re.compile(
+    r"\b(zoom(?:ed|s)?|close-up|wide shot|wider|tighter|new angle|different angle|"
+    r"from above|from below|camera (?:moves?|pans?|tilts?))\b",
+    re.IGNORECASE,
+)
+
+# The inputs the edit prompt is written from (`last_frame_prompt_writer.prompt_inputs`): the
+# first frame is never described again to the image model, which sees the picture, so what the
+# writer needs is what the picture shows and what the last frame should show.
+_EDIT_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "style_prefix": "quiet natural photography",
+    "description_instructions": None,
+    "world": {
+        "subjects": [
+            {
+                "name": "the snail",
+                "description": "A small brown garden snail with a pale spiral shell.",
+            }
+        ],
+        "places": [
+            {
+                "name": "the mossy stone",
+                "description": "A flat grey stone covered in soft green moss.",
+            }
+        ],
+    },
+    "narration": "It took its time, as it always did.",
+    "continuity": "new_place",
+    "first_frame_description": (
+        "Close-up at moss level, a 35 mm look with shallow depth of field. A small brown "
+        "garden snail with a pale spiral shell sits at the left edge of a flat grey stone "
+        "covered in soft green moss, its antennae raised towards the right. Dull overcast "
+        "light, a muted palette of grey, moss green and brown. Portrait frame, the snail in "
+        "the lower left, the stone filling the lower half and soft blurred ferns behind it."
+    ),
+    "image_prompt": (
+        "A quiet, natural photograph of a small brown garden snail with a pale spiral shell, "
+        "resting at the left edge of a flat grey stone covered in soft green moss, its "
+        "antennae raised towards the right. In the tall portrait frame the snail sits in the "
+        "lower left, the stone fills the lower half and soft blurred ferns rise behind it. The "
+        "camera is close and low, at moss level, with a 35 mm look and shallow depth of field. "
+        "The light is dull, even overcast daylight. The palette is muted grey, moss green and "
+        "brown."
+    ),
+    "last_frame_description": (
+        "The same shot, the same light and framing. The snail has crossed the stone and now "
+        "sits at its centre, its antennae raised and bent towards the ferns. The moss, the "
+        "stone and the blurred ferns are unchanged."
+    ),
+    "video_prompt": (
+        "The snail glides slowly across the mossy stone, its antennae swaying, and climbs a "
+        "small ridge with a faint wet slide against the moss. It pauses for a beat, antennae "
+        "turning towards the ferns, then moves on until it rests at the centre of the stone "
+        "with its antennae raised. Static camera. A distant bird calls once. No music, no "
+        "voices."
+    ),
+}
+
+_QWEN_EDIT_EXAMPLE_PROMPT: Final = (
+    "Move the snail from the left edge of the mossy stone to the centre of the stone, with "
+    "its pale spiral shell and its body now pointing towards the right, and keep its antennae "
+    "raised and bent slightly towards the blurred ferns behind the stone. Keep the camera "
+    "position, the framing, the 35 mm look with shallow depth of field, the dull overcast "
+    "light, the muted grey, moss green and brown palette, the green moss on the stone and "
+    "the blurred ferns exactly as they are."
+)
+
+# Written from Qwen's published guidance for image editing and the server's guide for the edit
+# endpoint (read on 2026-10-11), not from tests of this model's output here. The edit endpoint
+# sees the first frame as its reference picture, keeps identity well, and has no mask: a local
+# change is put in words. Check these rules against real frames and raise `version` when they
+# change.
+QWEN_IMAGE_21_EDIT: Final = ImagePromptProfile(
+    id="qwen-image-2.1-edit",
+    version=1,
+    image_model="Qwen-Image-2.1 (edit)",
+    prompt_rules="\n".join(
+        [
+            'Rules for "edit_prompt", the instruction for the image-editing model. It is given '
+            "the first frame's picture and your instruction, and returns the last frame: the "
+            "same shot a moment later.",
+            "1. 40 to 120 words of plain instruction sentences in English. The model SEES the "
+            "picture, so never describe the whole scene again: say what changes.",
+            "2. Open with the changes, concretely: where the subject moves to, its pose or "
+            "state, where it looks, what appears or disappears. Name each subject by its "
+            "world name with its identifying details, so the model finds it in the picture. "
+            "Take the end state from the last frame description, and keep to it.",
+            "3. End with one sentence that keeps everything else, naming it: the camera "
+            "position, the framing, the lens look, the light, the colour palette, the "
+            "background and the subject's looks, exactly as they are.",
+            "4. Only changes that fit one continuous shot from the first frame: no new place, "
+            "no change of angle, zoom or framing, no jump in time. One still moment, not a "
+            "process.",
+            "5. Say what is there, not what is not: the model has no negative prompt, and "
+            "naming a thing, even to rule it out ('no', 'without'), can make it appear. "
+            "Nothing is written in the picture: no text, captions, letters, numbers, signs "
+            "with words, logos or watermarks, and describe any surface that could carry words "
+            "(a wall, a sign, a screen, a book cover) as plain or blank.",
+            "6. A person appears only if the first frame has one. Never change a face, and "
+            "never name a person.",
+            "7. Concrete nouns and plain adjectives. No quality tags (such as 8k or "
+            "masterpiece), and no words about the style: the picture already has its style.",
+        ]
+    ),
+    example_inputs=_EDIT_EXAMPLE_INPUTS,
+    example_answer=json.dumps({"edit_prompt": _QWEN_EDIT_EXAMPLE_PROMPT}, ensure_ascii=False),
+    min_words=40,
+    max_words=120,
+    rules=(
+        *SEEDREAM_50_LITE.rules,
+        TextRule(
+            _NEGATIVE_WORDS,
+            "A negative found (no, not, without, nothing). The image model has no negative "
+            "prompt, and naming a thing can make it appear: say what is there instead.",
+        ),
+        TextRule(
+            _FRAMING_CHANGE,
+            "Wording that changes the shot found (a zoom, a new angle, a camera move). The last "
+            "frame is the same shot: change the subject, not the framing.",
+        ),
+    ),
+)
+
 # The image adapter the job asks for.
 ACTIVE_IMAGE_PROFILE: Final = QWEN_IMAGE_21
+# The image adapter that edits the first frame into the last frame.
+ACTIVE_EDIT_PROFILE: Final = QWEN_IMAGE_21_EDIT

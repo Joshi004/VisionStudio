@@ -4,14 +4,14 @@ import { Link } from "react-router";
 
 import { describeError } from "../../api/errors";
 import { useGenerateFirstFrame, useSelectFirstFrame } from "../../api/firstFrames";
+import { useGenerateLastFrame, useSelectLastFrame } from "../../api/lastFrames";
 import type { ProjectDetail } from "../../api/projects";
-import type { Frame } from "../../api/sceneInputs";
+import type { Frame, FrameSlotName } from "../../api/sceneInputs";
 import type { Scene } from "../../api/scenes";
 import { formatDateTime } from "../../format";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
-import { hasActiveFrameJob, hasAiFrame } from "./firstFrameView";
 
 /** Who made a frame, and whether it is out of date: "Uploaded" or "AI", and "Out of date". */
 export function FirstFrameBadges({ frame }: { frame: Pick<Frame, "source" | "out_of_date"> }) {
@@ -32,11 +32,13 @@ export function FirstFrameBadges({ frame }: { frame: Pick<Frame, "source" | "out
 type FirstFrameActionsProps = {
   project: ProjectDetail;
   scene: Scene;
+  /** Which frame of the scene: the first (made from the image prompt) or the last (made by editing the first). */
+  slot?: FrameSlotName;
   /** The image model and its mode, for the confirmation ("Qwen-Image-2.1, quality"). */
   model: string;
   /**
-   * The drawer holds changes that are not saved yet. The frame is made from the saved image
-   * prompt, so they are saved first.
+   * The drawer holds changes that are not saved yet. The frame is made from the saved prompt, so
+   * they are saved first.
    */
   edited: boolean;
   /** The current time in milliseconds since 1970, for the elapsed time. */
@@ -44,36 +46,47 @@ type FirstFrameActionsProps = {
 };
 
 /**
- * Generate first frame (or Regenerate) for one scene: one image from the image model, made on the
- * GPU server, with a confirmation, then the status of the newest job. Replacing a frame the user uploaded asks
- * first, and the upload stays in the list of earlier frames, which can be used again here.
+ * Generate (or Regenerate) the first or the last frame of one scene: one image from the image
+ * model, made on the GPU server, with a confirmation, then the status of the newest job. The
+ * first frame is made from the image prompt, the last frame by editing the first frame with the
+ * last frame prompt. Replacing a frame the user uploaded asks first, and the upload stays in the
+ * list of earlier frames, which can be used again here.
  */
 export function FirstFrameActions({
   project,
   scene,
+  slot = "first",
   model,
   edited,
   now,
 }: FirstFrameActionsProps) {
-  const generate = useGenerateFirstFrame(project.id);
-  const select = useSelectFirstFrame(project.id);
+  const last = slot === "last";
+  const generateFirst = useGenerateFirstFrame(project.id);
+  const generateLast = useGenerateLastFrame(project.id);
+  const selectFirst = useSelectFirstFrame(project.id);
+  const selectLast = useSelectLastFrame(project.id);
+  const generate = last ? generateLast : generateFirst;
+  const select = last ? selectLast : selectFirst;
   // Set while the confirmation of Generate is open. `replaceUpload` says the frame in the slot
   // is an upload that this click replaces.
   const [confirming, setConfirming] = useState<{ replaceUpload: boolean } | null>(null);
   // Set while the confirmation of "Use this" is open (the frame in use would no longer be listed).
   const [choosing, setChoosing] = useState<Frame | null>(null);
 
-  const current = scene.first_frame;
-  const job = scene.frame_job;
-  const active = hasActiveFrameJob(scene);
-  const isAi = hasAiFrame(scene);
+  const noun = last ? "last frame" : "first frame";
+  const current = last ? scene.last_frame : scene.first_frame;
+  const job = last ? scene.last_frame_job : scene.frame_job;
+  const active = job !== null && (job.status === "queued" || job.status === "running");
+  const isAi = current?.source === "ai";
   const isUpload = current !== null && !isAi;
-  const choices = scene.first_frame_choices;
+  const choices = last ? scene.last_frame_choices : scene.first_frame_choices;
+  const outOfDate = last ? scene.last_frame_out_of_date : scene.first_frame_out_of_date;
+  const jobNote = last ? scene.last_frame_job_note : scene.frame_job_note;
   const currentListed = current !== null && choices.some((frame) => frame.asset_id === current.asset_id);
-  // The server's reason first (no current image prompt, or none at all), then the two the page
-  // knows about itself.
+  // The server's reason first (no current prompt, or none at all), then the two the page knows
+  // about itself.
   const blocked =
-    scene.frame_blocked_reason ??
+    (last ? scene.last_frame_blocked_reason : scene.frame_blocked_reason) ??
     (active ? "An image is already being made." : null) ??
     (edited ? "Save your changes first." : null);
 
@@ -104,6 +117,16 @@ export function FirstFrameActions({
 
   return (
     <Stack gap={8}>
+      <Text size="sm" fw={600}>
+        {last ? "Last frame" : "First frame"}
+      </Text>
+      {!last && scene.first_frame_chained && (
+        <Text size="xs" c="dimmed">
+          This scene continues the action of scene {scene.index}, so it starts on that scene's last
+          frame. The app puts it here once it is made, and "Generate first frames" skips this
+          scene. A frame made here is replaced when that last frame is made again.
+        </Text>
+      )}
       <Group gap="sm" align="center">
         <Button
           size="xs"
@@ -115,7 +138,7 @@ export function FirstFrameActions({
             setConfirming({ replaceUpload: isUpload });
           }}
         >
-          {isAi ? "Regenerate first frame" : "Generate first frame"}
+          {isAi ? `Regenerate ${noun}` : `Generate ${noun}`}
         </Button>
         {blocked !== null && (
           <Text size="xs" c="dimmed" style={{ flex: 1 }}>
@@ -124,13 +147,15 @@ export function FirstFrameActions({
         )}
       </Group>
       <Text size="xs" c="dimmed">
-        Made by {model} on your GPU server from the image prompt above. It takes a few minutes.
-        The picture is fitted to exactly {project.gen_width} x {project.gen_height}, which trims
-        a little from its edges.
+        {last
+          ? `Made by ${model} on your GPU server, by editing the first frame with the last frame prompt above. `
+          : `Made by ${model} on your GPU server from the image prompt above. `}
+        It takes a few minutes. The picture is fitted to exactly {project.gen_width} x{" "}
+        {project.gen_height}, which trims a little from its edges.
       </Text>
 
       {generate.isError && (
-        <Alert color="red" title="The first frame was not started">
+        <Alert color="red" title={`The ${noun} was not started`}>
           {describeError(generate.error)}
         </Alert>
       )}
@@ -152,15 +177,15 @@ export function FirstFrameActions({
         </Stack>
       )}
       {job?.status === "failed" && job.error && (
-        <Alert color="red" title="The first frame was not made">
+        <Alert color="red" title={`The ${noun} was not made`}>
           <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
             {job.error}
           </Text>
         </Alert>
       )}
-      {scene.frame_job_note !== null && (
+      {jobNote !== null && (
         <Text size="xs" c="orange.8">
-          {scene.frame_job_note}
+          {jobNote}
         </Text>
       )}
       {current !== null && current.job_id !== null && (
@@ -173,14 +198,16 @@ export function FirstFrameActions({
           .
         </Text>
       )}
-      {scene.first_frame_out_of_date && (
+      {outOfDate && (
         <Text size="xs" c="orange.8">
-          The image prompt changed after this frame was made. Regenerate it, or keep it.
+          {last
+            ? "The last frame prompt, or the first frame this was made from, changed after this frame was made. Regenerate it, or keep it."
+            : "The image prompt changed after this frame was made. Regenerate it, or keep it."}
         </Text>
       )}
 
       <Text size="sm" fw={600}>
-        Earlier frames
+        {last ? "Earlier last frames" : "Earlier frames"}
       </Text>
       {choices.length === 0 ? (
         <Text size="xs" c="dimmed">
@@ -244,9 +271,11 @@ export function FirstFrameActions({
       >
         <Stack gap="sm">
           <Text size="sm">
-            One image with {model} on your GPU server, a few minutes. It is made from the saved
-            image prompt of scene {scene.index + 1}, and nothing is reused: a job that fails is not
-            tried again by itself.
+            One image with {model} on your GPU server, a few minutes.{" "}
+            {last
+              ? `It is made by editing the first frame of scene ${scene.index + 1} with the saved last frame prompt`
+              : `It is made from the saved image prompt of scene ${scene.index + 1}`}
+            , and nothing is reused: a job that fails is not tried again by itself.
           </Text>
           {confirming?.replaceUpload ? (
             <Text size="sm">
@@ -257,6 +286,11 @@ export function FirstFrameActions({
             current !== null && (
               <Text size="sm">The current frame stays in the list of earlier frames.</Text>
             )
+          )}
+          {last && (
+            <Text size="sm">
+              A scene that continues this scene's action then starts on the new frame.
+            </Text>
           )}
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={() => setConfirming(null)}>

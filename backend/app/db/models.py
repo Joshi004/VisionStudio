@@ -152,6 +152,10 @@ class Scene(Base):
             "image_prompt_source IN ('manual', 'ai')", name="image_prompt_source_valid"
         ),
         CheckConstraint(
+            "last_frame_prompt_source IN ('manual', 'ai')",
+            name="last_frame_prompt_source_valid",
+        ),
+        CheckConstraint(
             "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')",
             name="video_model_valid",
         ),
@@ -193,6 +197,15 @@ class Scene(Base):
     image_prompt_job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
     )
+    # Added in Phase 23: the instruction for the image model's edit that turns the first frame
+    # into the last frame, written by the AI (one `write_last_frame_prompt` job per scene) or
+    # by hand. Same rules as `image_prompt`: whether it is out of date is worked out when it is
+    # read, never stored.
+    last_frame_prompt: Mapped[str | None] = mapped_column(default=None)
+    last_frame_prompt_source: Mapped[str | None] = mapped_column(default=None)
+    last_frame_prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
+    )
     first_frame_asset_id: Mapped[int | None] = mapped_column(
         ForeignKey("asset.id", ondelete="SET NULL"), default=None
     )
@@ -217,7 +230,8 @@ class Job(Base):
             "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
             "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
             "'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', "
-            "'generate_voiceover', 'lab_image')",
+            "'generate_voiceover', 'lab_image', 'write_last_frame_prompt', "
+            "'generate_last_frame')",
             name="type_valid",
         ),
         CheckConstraint(

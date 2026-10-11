@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable, Coroutine, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Final, Literal, cast
 
 from sqlalchemy import select
@@ -35,6 +35,8 @@ from app.jobs import store
 from app.services import clips as clips_service
 from app.services import first_frames as frames_service
 from app.services import image_prompts as prompts_service
+from app.services import last_frame_prompts as last_prompts_service
+from app.services import last_frames as last_frames_service
 from app.services import renders as renders_service
 from app.services import (
     scene_cuts,
@@ -141,6 +143,23 @@ STEPS: Final[tuple[Step, ...]] = (
         "a first frame",
     ),
     Step(
+        "last_frame_prompts",
+        "Write last frame prompts",
+        last_prompts_service.LAST_FRAME_PROMPT_JOB,
+        "llm",
+        True,
+        "a last frame prompt",
+        asks_model=True,
+    ),
+    Step(
+        "last_frames",
+        "Make last frames",
+        last_frames_service.LAST_FRAME_JOB,
+        "gpu",
+        True,
+        "a last frame",
+    ),
+    Step(
         "clips",
         "Generate clips",
         clips_service.GENERATE_JOB,
@@ -209,6 +228,11 @@ class Target:
     block: str | None = None
     # What the job is created with (the run adds its own keys).
     job_input: dict[str, Any] = field(default_factory=dict)
+    # The key of the target of this step that this one waits for (a scene that continues the
+    # previous scene's action waits for that scene's last frame, which becomes its first frame).
+    # It waits only while that target can still go on: if that one cannot, this one does not
+    # wait forever, and the run stops with the reason that target gave.
+    after: str | None = None
 
 
 @dataclass(frozen=True)
@@ -290,13 +314,23 @@ def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]])
     waiting = 0
     creates: list[Create] = []
     problems: list[Problem] = []
+    # A target that waits for another (`Target.after`) is decided last, in the order of the
+    # view, because the one it waits for may itself be waiting for an earlier one. It waits only
+    # for a target that is not done: a target that is done has nothing left to wait for.
+    pending_keys = {target.key for target in pending}
+    following: list[Target] = []
+    # The targets that have a job in progress or are about to get one.
+    progressing: set[str] = set()
 
     for target in pending:
         tried = run_jobs.get(target.key, [])
         if target.active is not None or any(job.status in store.ACTIVE_STATUSES for job in tried):
             waiting += 1
+            progressing.add(target.key)
         elif view.block is not None:
             continue  # reported once, below
+        elif target.after is not None and target.after in pending_keys:
+            following.append(target)
         elif target.block is not None:
             problems.append(Problem(target.scene_id, target.scene_number, len(tried), target.block))
         elif len(tried) >= MAX_TRIES:
@@ -310,6 +344,14 @@ def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]])
             )
         else:
             creates.append(Create(target, retry=bool(tried)))
+            progressing.add(target.key)
+
+    for target in following:
+        # What it waits for has a job in progress or will get one: wait. Otherwise that target
+        # cannot go on and is reported (or the whole step is blocked), so nothing is added here.
+        if target.after in progressing:
+            waiting += 1
+            progressing.add(target.key)
 
     if view.block is not None and pending:
         problems.append(Problem(None, None, 0, view.block))
@@ -660,6 +702,8 @@ async def _scenes(session: AsyncSession, ctx: RunContext) -> StepView:
         *(await clips_service.active_clip_jobs(session, project.id)).values(),
         *(await prompts_service.active_prompt_jobs(session, project.id)).values(),
         *(await frames_service.active_frame_jobs(session, project.id)).values(),
+        *(await last_prompts_service.active_prompt_jobs(session, project.id)).values(),
+        *(await last_frames_service.active_last_frame_jobs(session, project.id)).values(),
     ]
     active = next((job for job in blocking if job is not None), None)
 
@@ -775,14 +819,18 @@ async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
     active_prompts = await prompts_service.active_prompt_jobs(session, project.id)
     states = await prompts_service.prompt_states(session, project, state.scenes)
     frames = await scene_inputs.load_frames(session, state.scenes)
+    chained = await last_frames_service.chain_sources(session, project.id, state.scenes)
 
     targets: list[Target] = []
     for scene in state.scenes:
         asset = frames.get(scene.first_frame_asset_id or 0)
         out_of_date = frames_service.is_ai_frame(asset) and frames_service.frame_out_of_date(
-            scene, asset
+            scene, asset, chain_source_id=chained.get(scene.id)
         )
-        done = scene.first_frame_asset_id is not None and not out_of_date
+        # A scene that continues the previous scene's action starts on that scene's last frame.
+        # It is made in a later step (`last_frames`), and the app puts it here, so this step has
+        # no job for the scene.
+        done = scene.id in chained or (scene.first_frame_asset_id is not None and not out_of_date)
         prompt_out_of_date = scene.id in states and states[scene.id].out_of_date
         targets.append(
             _scene_target(
@@ -801,6 +849,119 @@ async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
                 },
             )
         )
+    return StepView(targets, block=block)
+
+
+async def _last_frame_prompts(session: AsyncSession, ctx: RunContext) -> StepView:
+    project = ctx.project
+    state = await scenes_service.scenes_state(session, project)
+    block = await _prompts_block(session, project, state)
+    active = await last_prompts_service.active_prompt_jobs(session, project.id)
+    states = await last_prompts_service.prompt_states(session, project, state.scenes)
+    frames = await scene_inputs.load_frames(session, state.scenes)
+
+    targets: list[Target] = []
+    for scene in state.scenes:
+        if _blank(scene.last_frame_description):
+            continue  # this scene gets no last frame, so there is nothing to write for it
+        out_of_date = scene.id in states and states[scene.id].out_of_date
+        # A scene whose last frame the author uploaded needs no prompt: nothing makes a frame.
+        has_own_frame = last_frames_service.needs_upload_confirmation(
+            scene, frames.get(scene.last_frame_asset_id or 0)
+        )
+        done = has_own_frame or (not _blank(scene.last_frame_prompt) and not out_of_date)
+        targets.append(
+            _scene_target(
+                scene,
+                done=done,
+                active=active.get(scene.id),
+                block=last_prompts_service.scene_block(scene),
+                job_input={"requested": "write_all"},
+            )
+        )
+    return StepView(targets, block=block)
+
+
+async def _last_frames(session: AsyncSession, ctx: RunContext) -> StepView:
+    """The scenes that get a last frame, and the scenes that continue the previous scene's action.
+
+    The second kind has nothing to make: its first frame is the previous scene's last frame, which
+    the app puts there when that frame is attached (`last_frames.apply_chains`). So it *waits* for
+    that scene (`Target.after`). Its own last frame, if it gets one, is edited from that first
+    frame, so it waits too.
+    """
+    project = ctx.project
+    state = await scenes_service.scenes_state(session, project)
+    block = await _prompts_block(session, project, state)
+    active_last = await last_frames_service.active_last_frame_jobs(session, project.id)
+    active_firsts = await frames_service.active_frame_jobs(session, project.id)
+    active_prompts = await last_prompts_service.active_prompt_jobs(session, project.id)
+    states = await last_prompts_service.prompt_states(session, project, state.scenes)
+    frames = await scene_inputs.load_frames(session, state.scenes)
+    chained = await last_frames_service.chain_sources(session, project.id, state.scenes)
+
+    # Pass 1: for each scene, whether it gets a target and whether the target is done.
+    done_by_scene: dict[int, bool] = {}
+    chain_pending: dict[int, bool] = {}
+    for scene in state.scenes:
+        first = frames.get(scene.first_frame_asset_id or 0)
+        last = frames.get(scene.last_frame_asset_id or 0)
+        wants_last = not _blank(scene.last_frame_description)
+        last_ok = scene.last_frame_asset_id is not None and not (
+            frames_service.is_ai_frame(last) and last_frames_service.frame_out_of_date(scene, last)
+        )
+        # The first frame is replaced by the chain unless the author uploaded it.
+        own_first = scene.first_frame_asset_id is not None and not frames_service.is_ai_frame(first)
+        source_id = chained.get(scene.id)
+        pending = (
+            scene.id in chained
+            and not own_first
+            and (source_id is None or scene.first_frame_asset_id != source_id)
+        )
+        chain_pending[scene.id] = pending
+        if wants_last or pending:
+            done_by_scene[scene.id] = (last_ok or not wants_last) and not pending
+
+    targets: list[Target] = []
+    previous: Scene | None = None
+    for scene in state.scenes:
+        before, previous = previous, scene
+        if scene.id not in done_by_scene:
+            continue
+        done = done_by_scene[scene.id]
+        wants_last = not _blank(scene.last_frame_description)
+        waits_for = before if chain_pending[scene.id] and before is not None else None
+        # Waiting is only for a scene that has not finished: one that is done has delivered.
+        after = (
+            str(waits_for.id)
+            if waits_for is not None and not done_by_scene.get(waits_for.id, True)
+            else None
+        )
+        block_reason: str | None = None
+        if chain_pending[scene.id] and after is None:
+            block_reason = (
+                "The previous scene's last frame could not be used as this scene's first frame."
+            )
+        elif wants_last:
+            block_reason = last_frames_service.scene_block(
+                scene,
+                frames.get(scene.first_frame_asset_id or 0),
+                prompt_out_of_date=scene.id in states and states[scene.id].out_of_date,
+                prompt_job_active=scene.id in active_prompts,
+                first_frame_job_active=scene.id in active_firsts,
+            )
+        target = _scene_target(
+            scene,
+            done=done,
+            active=active_last.get(scene.id),
+            block=block_reason,
+            job_input={
+                "requested": "generate_all",
+                "replace_upload": False,
+                "last_frame_at_click": scene.last_frame_asset_id,
+            },
+        )
+        targets.append(replace(target, after=after))
     return StepView(targets, block=block)
 
 
@@ -870,6 +1031,8 @@ _EVALUATORS: Final[dict[str, _Evaluator]] = {
     "descriptions": _descriptions,
     "image_prompts": _image_prompts,
     "first_frames": _first_frames,
+    "last_frame_prompts": _last_frame_prompts,
+    "last_frames": _last_frames,
     "clips": _clips,
     "render": _render,
 }

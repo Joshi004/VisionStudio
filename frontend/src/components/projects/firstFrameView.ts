@@ -1,6 +1,9 @@
 import type { Scene, ScenesState } from "../../api/scenes";
 
-type FrameFields = Pick<Scene, "first_frame" | "first_frame_out_of_date" | "frame_job">;
+type FrameFields = Pick<
+  Scene,
+  "index" | "first_frame" | "first_frame_out_of_date" | "first_frame_chained" | "frame_job"
+>;
 
 /** True while the newest job that makes the scene's first frame is waiting or running. */
 export function hasActiveFrameJob(scene: Pick<Scene, "frame_job">): boolean {
@@ -20,11 +23,21 @@ export function hasAiFrame(scene: Pick<Scene, "first_frame">): boolean {
 
 /**
  * What the scenes table says about a scene's first frame: "First frame: none", "uploaded", "AI",
- * "AI, out of date" or "being made".
+ * "AI, out of date" or "being made". A scene that continues the previous scene's action starts on
+ * that scene's last frame, and says so.
  */
 export function firstFrameText(scene: FrameFields): string {
   if (hasActiveFrameJob(scene)) {
     return "First frame: being made";
+  }
+  const follows = `scene ${scene.index}'s last frame`;
+  if (scene.first_frame_chained && scene.first_frame === null) {
+    return `First frame: waits for ${follows}`;
+  }
+  if (scene.first_frame_chained && scene.first_frame?.source === "ai") {
+    return scene.first_frame_out_of_date
+      ? `First frame: follows ${follows}, out of date`
+      : `First frame: follows ${follows}`;
   }
   if (scene.first_frame === null) {
     return "First frame: none";

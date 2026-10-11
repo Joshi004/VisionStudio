@@ -33,6 +33,16 @@ import { DraftDescriptionsPanel } from "./DraftDescriptionsPanel";
 import { FirstFramesPanel } from "./FirstFramesPanel";
 import { firstFrameText, frameFailed, hasActiveFrameJob } from "./firstFrameView";
 import { ImagePromptsPanel } from "./ImagePromptsPanel";
+import { LastFramesPanel } from "./LastFramesPanel";
+import {
+  hasActiveLastFrameJob,
+  hasActiveLastFramePromptJob,
+  lastFrameFailed,
+  lastFramePromptFailed,
+  lastFramePromptText,
+  lastFrameText,
+  wantsLastFrame,
+} from "./lastFrameView";
 import {
   hasActiveImagePromptJob,
   imagePromptFailed,
@@ -278,6 +288,7 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
             <DraftDescriptionsPanel project={project} data={data} now={now} />
             <ImagePromptsPanel project={project} data={data} />
             <FirstFramesPanel project={project} data={data} />
+            <LastFramesPanel project={project} data={data} />
             <Stack gap={4}>
               <Group gap="sm" align="center">
                 <Text size="sm" fw={600}>
@@ -486,6 +497,52 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                                   first frame failed
                                 </Badge>
                               </Tooltip>
+                            )}
+                            {wantsLastFrame(scene) && (
+                              <>
+                                <Text size="xs" c="dimmed">
+                                  {lastFramePromptText(scene)}
+                                </Text>
+                                {scene.last_frame_prompt_job !== null &&
+                                  hasActiveLastFramePromptJob(scene) && (
+                                    <Text size="xs" c="dimmed">
+                                      {scene.last_frame_prompt_job.phase}
+                                    </Text>
+                                  )}
+                                {lastFramePromptFailed(scene) && (
+                                  <Tooltip
+                                    label={
+                                      scene.last_frame_prompt_job?.error ??
+                                      "The last frame prompt failed."
+                                    }
+                                    multiline
+                                    w={260}
+                                  >
+                                    <Badge color="red" variant="light">
+                                      last frame prompt failed
+                                    </Badge>
+                                  </Tooltip>
+                                )}
+                                <Text size="xs" c="dimmed">
+                                  {lastFrameText(scene)}
+                                </Text>
+                                {scene.last_frame_job !== null && hasActiveLastFrameJob(scene) && (
+                                  <Text size="xs" c="dimmed">
+                                    {scene.last_frame_job.phase}
+                                  </Text>
+                                )}
+                                {lastFrameFailed(scene) && (
+                                  <Tooltip
+                                    label={scene.last_frame_job?.error ?? "The last frame failed."}
+                                    multiline
+                                    w={260}
+                                  >
+                                    <Badge color="red" variant="light">
+                                      last frame failed
+                                    </Badge>
+                                  </Tooltip>
+                                )}
+                              </>
                             )}
                             <Button
                               size="compact-xs"

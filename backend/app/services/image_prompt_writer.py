@@ -46,8 +46,9 @@ FIELD_MAX_CHARS: Final = 4000
 IMAGE_PROMPT: Final = "image_prompt"
 
 # What each value of a draft's `continuity` means. `continues_shot` is the value the old
-# keyframe profile wrote (Phase 12 to 14), so earlier drafts still read.
-_CONTINUITY_MEANINGS: Final = {
+# keyframe profile wrote (Phase 12 to 14), so earlier drafts still read. Public, because the
+# last frame's prompt writer (`last_frame_prompt_writer.py`) words it the same way.
+CONTINUITY_MEANINGS: Final = {
     "new_place": "a new place or time",
     "same_place_new_angle": "the previous scene's place and subjects, seen from a new angle "
     "or distance",
@@ -126,7 +127,7 @@ def continuity_from_drafts(drafts: object, scene_id: int) -> str | None:
     for draft in drafts if isinstance(drafts, list) else []:
         if isinstance(draft, dict) and draft.get("scene_id") == scene_id:
             value = draft.get("continuity")
-            return value if value in _CONTINUITY_MEANINGS else None
+            return value if value in CONTINUITY_MEANINGS else None
     return None
 
 
@@ -192,10 +193,8 @@ def _render_inputs(inputs: dict[str, Any]) -> str:
         lines.append("none given")
     lines += ["", f"Narration of this scene: {inputs['narration']}"]
     continuity = inputs["continuity"]
-    if continuity in _CONTINUITY_MEANINGS:
-        lines.append(
-            f"How this scene follows the previous one: {_CONTINUITY_MEANINGS[continuity]}."
-        )
+    if continuity in CONTINUITY_MEANINGS:
+        lines.append(f"How this scene follows the previous one: {CONTINUITY_MEANINGS[continuity]}.")
     else:
         lines.append("How this scene follows the previous one: not given.")
     first_frame = inputs["first_frame_description"]

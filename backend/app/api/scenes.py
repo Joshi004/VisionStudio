@@ -34,8 +34,8 @@ from app.jobs import dispatcher, store
 from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.generate_clip import MAX_PARALLEL_KEY
 from app.jobs.generate_frame import IMAGE_MODE_KEY
-from app.jobs.generate_frame import MAX_PARALLEL_KEY as MAX_PARALLEL_IMAGES_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
+from app.jobs.scene_frame import MAX_PARALLEL_KEY as MAX_PARALLEL_IMAGES_KEY
 from app.jobs.store import JobRow
 from app.jobs.write_image_prompt import IMAGE_PROMPT_MODEL_KEY
 from app.providers import video_generator
@@ -55,6 +55,8 @@ from app.services import (
 from app.services import descriptions as descriptions_service
 from app.services import first_frames as first_frames_service
 from app.services import image_prompts as image_prompts_service
+from app.services import last_frame_prompts as last_frame_prompts_service
+from app.services import last_frames as last_frames_service
 from app.services import projects as projects_service
 from app.services import renders as renders_service
 from app.services import scenes as scenes_service
@@ -144,7 +146,7 @@ class FrameOut(BaseModel):
     # Who made the file: the user (an upload), or the image model (`ai`). `derived` frames are
     # the copies sent to the video model and are never a scene's frame.
     source: Literal["upload", "ai", "derived"]
-    # The `generate_frame` job that made an AI frame. None for an upload.
+    # The `generate_frame` or `generate_last_frame` job that made an AI frame. None for an upload.
     job_id: int | None
     # An AI frame made from an image prompt that differs from the scene's now (computed, never
     # stored). False for an upload.
@@ -223,6 +225,17 @@ class SceneOut(BaseModel):
     image_prompt_job: JobSummary | None
     # Why an image prompt cannot be written for this scene now, or None when it can.
     image_prompt_blocked_reason: str | None
+    # The instruction that edits the first frame into the last frame (Phase 23), who wrote it,
+    # and the `write_last_frame_prompt` job that last wrote AI text into it. Like the image prompt,
+    # an AI one is out of date when it was written from inputs that differ from the scene's now
+    # (computed, never stored), and the newest job and the reason it cannot be written now are
+    # given.
+    last_frame_prompt: str | None
+    last_frame_prompt_source: TextSource | None
+    last_frame_prompt_job_id: int | None
+    last_frame_prompt_out_of_date: bool
+    last_frame_prompt_job: JobSummary | None
+    last_frame_prompt_blocked_reason: str | None
     # What will be sent to the video model: the project's style prefix, the saved description
     # and the prompt suffix. None while there is no description.
     prompt: str | None
@@ -230,6 +243,23 @@ class SceneOut(BaseModel):
     last_frame: FrameOut | None
     # The first frame is an AI frame made from an image prompt that differs from the scene's now.
     first_frame_out_of_date: bool
+    # The first frame follows the previous scene's last frame (Phase 23): this scene continues
+    # that scene's action, and that scene has a last frame. The app puts that frame here when it
+    # is made, so "Generate first frames" skips the scene. The previous scene's number is this
+    # scene's `index` (they count from 0 and 1).
+    first_frame_chained: bool
+    # The last frame is an AI frame made from a prompt that differs from the scene's now, or by
+    # editing a first frame that is not the scene's first frame now (computed, never stored).
+    last_frame_out_of_date: bool
+    # The newest job that makes this scene's last frame, whatever its status, and why its frame
+    # was not attached (it was kept among the earlier last frames), or None.
+    last_frame_job: JobSummary | None
+    last_frame_job_note: str | None
+    # Why a last frame cannot be made for this scene now, or None when it can. Replacing an
+    # upload is not a reason: the page asks first.
+    last_frame_blocked_reason: str | None
+    # The last frames the scene can go back to, newest first.
+    last_frame_choices: list[FrameOut]
     # The newest job that makes this scene's first frame, whatever its status (Phase 17).
     frame_job: JobSummary | None
     # Why that job's frame was not attached to the scene (it was kept among the earlier frames),
@@ -369,6 +399,15 @@ class ScenesOut(BaseModel):
     frame_candidate_count: int
     # The setting, so the page can say how many images are made at once.
     max_parallel_image_generations: int
+    # Last frames (Phase 23). Why "Write last frame prompts" cannot start any job now, or None
+    # when it can, and how many jobs it would start.
+    last_frame_prompts_blocked_reason: str | None
+    last_frame_prompt_candidate_count: int
+    # Why "Generate last frames" cannot start any job now, or None when it can, and how many
+    # jobs it would start: scenes with a current last frame prompt and a first frame, and no
+    # last frame or an out-of-date AI one, and nothing running. Uploads are skipped.
+    last_frames_blocked_reason: str | None
+    last_frame_candidate_count: int
 
 
 def _int(value: object) -> int | None:
@@ -539,6 +578,14 @@ def _scene_out(
     frame_job: Job | None,
     frame_blocked: str | None,
     frame_choices: list[Asset],
+    chained: bool,
+    chain_source_id: int | None,
+    last_prompt_out_of_date: bool,
+    last_prompt_job: Job | None,
+    last_prompt_blocked: str | None,
+    last_frame_job: Job | None,
+    last_frame_blocked: str | None,
+    last_frame_choices: list[Asset],
     default_video_model: VideoModel,
 ) -> SceneOut:
     missing = scene_inputs.missing_inputs(scene)
@@ -547,7 +594,11 @@ def _scene_out(
         None, scene.video_model, project.video_model, default_video_model
     )
     first_asset = frames.get(scene.first_frame_asset_id or 0)
-    first_out_of_date = first_frames_service.frame_out_of_date(scene, first_asset)
+    first_out_of_date = first_frames_service.frame_out_of_date(
+        scene, first_asset, chain_source_id=chain_source_id
+    )
+    last_asset = frames.get(scene.last_frame_asset_id or 0)
+    last_out_of_date = last_frames_service.frame_out_of_date(scene, last_asset)
     return SceneOut(
         id=scene.id,
         index=scene.index,
@@ -580,12 +631,47 @@ def _scene_out(
             else None
         ),
         image_prompt_blocked_reason=prompt_blocked,
+        last_frame_prompt=scene.last_frame_prompt,
+        last_frame_prompt_source=cast(TextSource | None, scene.last_frame_prompt_source),
+        last_frame_prompt_job_id=scene.last_frame_prompt_job_id,
+        last_frame_prompt_out_of_date=last_prompt_out_of_date,
+        last_frame_prompt_job=(
+            job_summary(
+                JobRow(job=last_prompt_job, project_name=project.name, scene_index=scene.index)
+            )
+            if last_prompt_job is not None
+            else None
+        ),
+        last_frame_prompt_blocked_reason=last_prompt_blocked,
         prompt=scene_prompt.assemble_prompt(
             project.style_prefix, scene.scene_description, project.prompt_suffix
         ),
         first_frame=_frame_out(project, first_asset, out_of_date=first_out_of_date),
-        last_frame=_frame_out(project, frames.get(scene.last_frame_asset_id or 0)),
+        last_frame=_frame_out(project, last_asset, out_of_date=last_out_of_date),
         first_frame_out_of_date=first_out_of_date,
+        first_frame_chained=chained,
+        last_frame_out_of_date=last_out_of_date,
+        last_frame_job=(
+            job_summary(
+                JobRow(job=last_frame_job, project_name=project.name, scene_index=scene.index)
+            )
+            if last_frame_job is not None
+            else None
+        ),
+        last_frame_job_note=first_frames_service.not_attached_note(last_frame_job),
+        last_frame_blocked_reason=last_frame_blocked,
+        last_frame_choices=[
+            out
+            for asset in last_frame_choices
+            if (
+                out := _frame_out(
+                    project,
+                    asset,
+                    out_of_date=last_frames_service.frame_out_of_date(scene, asset),
+                )
+            )
+            is not None
+        ],
         frame_job=(
             job_summary(JobRow(job=frame_job, project_name=project.name, scene_index=scene.index))
             if frame_job is not None
@@ -600,7 +686,9 @@ def _scene_out(
                 out := _frame_out(
                     project,
                     asset,
-                    out_of_date=first_frames_service.frame_out_of_date(scene, asset),
+                    out_of_date=first_frames_service.frame_out_of_date(
+                        scene, asset, chain_source_id=chain_source_id
+                    ),
                 )
             )
             is not None
@@ -667,6 +755,7 @@ async def propose_scenes(
     # The same for image prompts (Phase 16): deleting a scene deletes the job that is writing
     # its prompt, and the paid answer with it.
     writing = len(await image_prompts_service.active_prompt_jobs(session, project.id))
+    writing += len(await last_frame_prompts_service.active_prompt_jobs(session, project.id))
     if writing:
         noun = "scene" if writing == 1 else "scenes"
         raise HTTPException(
@@ -674,13 +763,15 @@ async def propose_scenes(
             f"Image prompts are being written for {writing} {noun}. Wait for them to finish "
             "before proposing scenes.",
         )
-    # And for first frames (Phase 17): the image would be lost with its scene's job.
+    # And for first frames (Phase 17) and last frames (Phase 23): the image would be lost with
+    # its scene's job.
     making = len(await first_frames_service.active_frame_jobs(session, project.id))
+    making += len(await last_frames_service.active_last_frame_jobs(session, project.id))
     if making:
         noun = "scene" if making == 1 else "scenes"
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"First frames are being made for {making} {noun}. Wait for them to finish "
+            f"Frames are being made for {making} {noun}. Wait for them to finish "
             "before proposing scenes.",
         )
 
@@ -875,6 +966,34 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             prompt_job_active=scene.id in active_prompts,
         )
 
+    # Last frames (Phase 23): the edit prompts, the last frames and the scenes whose first frame
+    # is the previous scene's last frame (a scene that continues the previous scene's action).
+    chained = await last_frames_service.chain_sources(session, project.id, state.scenes)
+    last_prompt_jobs = await store.latest_jobs_by_scene(
+        session, project.id, last_frame_prompts_service.LAST_FRAME_PROMPT_JOB
+    )
+    active_last_prompts = await last_frame_prompts_service.active_prompt_jobs(session, project.id)
+    last_prompt_states = await last_frame_prompts_service.prompt_states(
+        session, project, state.scenes
+    )
+    last_frame_jobs = await store.latest_jobs_by_scene(
+        session, project.id, last_frames_service.LAST_FRAME_JOB
+    )
+    active_last_frames = await last_frames_service.active_last_frame_jobs(session, project.id)
+    last_choices = await last_frames_service.last_frame_choices(session, project.id)
+
+    def last_prompt_out_of_date(scene: Scene) -> bool:
+        return scene.id in last_prompt_states and last_prompt_states[scene.id].out_of_date
+
+    def last_frame_blocked(scene: Scene) -> str | None:
+        return prompts_project_block or last_frames_service.scene_block(
+            scene,
+            frames.get(scene.first_frame_asset_id or 0),
+            prompt_out_of_date=last_prompt_out_of_date(scene),
+            prompt_job_active=scene.id in active_last_prompts,
+            first_frame_job_active=scene.id in active_frames,
+        )
+
     scene_outs = [
         _scene_out(
             scene,
@@ -892,6 +1011,15 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             frame_job=frame_jobs.get(scene.id),
             frame_blocked=frame_blocked(scene),
             frame_choices=choices.get(scene.id, []),
+            chained=scene.id in chained,
+            chain_source_id=chained.get(scene.id),
+            last_prompt_out_of_date=last_prompt_out_of_date(scene),
+            last_prompt_job=last_prompt_jobs.get(scene.id),
+            last_prompt_blocked=prompts_project_block
+            or last_frame_prompts_service.scene_block(scene),
+            last_frame_job=last_frame_jobs.get(scene.id),
+            last_frame_blocked=last_frame_blocked(scene),
+            last_frame_choices=last_choices.get(scene.id, []),
             default_video_model=default_video_model,
         )
         for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
@@ -905,6 +1033,29 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             prompt_out_of_date=prompt_out_of_date(scene),
             prompt_job_active=scene.id in active_prompts,
             frame_job_active=scene.id in active_frames,
+            chained=scene.id in chained,
+        )
+    )
+    last_prompt_candidates = sum(
+        1
+        for scene in state.scenes
+        if last_frame_prompts_service.is_candidate(
+            scene,
+            out_of_date=last_prompt_out_of_date(scene),
+            active=active_last_prompts.get(scene.id),
+        )
+    )
+    last_frame_candidates = sum(
+        1
+        for scene in state.scenes
+        if last_frames_service.is_candidate(
+            scene,
+            frames.get(scene.first_frame_asset_id or 0),
+            frames.get(scene.last_frame_asset_id or 0),
+            prompt_out_of_date=last_prompt_out_of_date(scene),
+            prompt_job_active=scene.id in active_last_prompts,
+            first_frame_job_active=scene.id in active_frames,
+            last_frame_job_active=scene.id in active_last_frames,
         )
     )
     prompt_candidates = sum(
@@ -963,6 +1114,12 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
         or first_frames_service.all_block(frame_candidates, len(active_frames)),
         frame_candidate_count=frame_candidates,
         max_parallel_image_generations=max_parallel_images,
+        last_frame_prompts_blocked_reason=prompts_project_block
+        or last_frame_prompts_service.all_block(last_prompt_candidates, len(active_last_prompts)),
+        last_frame_prompt_candidate_count=last_prompt_candidates,
+        last_frames_blocked_reason=prompts_project_block
+        or last_frames_service.all_block(last_frame_candidates, len(active_last_frames)),
+        last_frame_candidate_count=last_frame_candidates,
     )
 
 
@@ -1056,6 +1213,7 @@ async def edit_cut(project_id: int, body: CutEditRequest, session: SessionDep) -
         )
     # An image prompt being written is lost with its scene's jobs, paid answer included.
     active_prompts = await image_prompts_service.active_prompt_jobs(session, project.id)
+    active_prompts |= await last_frame_prompts_service.active_prompt_jobs(session, project.id)
     writing = [scene for scene in affected if scene.id in active_prompts]
     if writing:
         verb = "has" if len(writing) == 1 else "have"
@@ -1066,12 +1224,13 @@ async def edit_cut(project_id: int, body: CutEditRequest, session: SessionDep) -
         )
     # A first frame being made is lost the same way (Phase 17).
     active_frames = await first_frames_service.active_frame_jobs(session, project.id)
+    active_frames |= await last_frames_service.active_last_frame_jobs(session, project.id)
     making = [scene for scene in affected if scene.id in active_frames]
     if making:
         verb = "has" if len(making) == 1 else "have"
         pronoun = "it" if len(making) == 1 else "them"
         raise _unprocessable(
-            f"{_scene_numbers(making)} {verb} a first frame being made. Wait for {pronoun} "
+            f"{_scene_numbers(making)} {verb} a frame being made. Wait for {pronoun} "
             "to finish before changing this cut."
         )
     with_inputs = [scene for scene in affected if scene_cuts.has_inputs(scene)]

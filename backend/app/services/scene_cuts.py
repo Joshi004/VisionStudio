@@ -42,6 +42,9 @@ NO_INPUTS: Final[dict[str, None]] = {
     "image_prompt": None,
     "image_prompt_source": None,
     "image_prompt_job_id": None,
+    "last_frame_prompt": None,
+    "last_frame_prompt_source": None,
+    "last_frame_prompt_job_id": None,
     "first_frame_asset_id": None,
     "last_frame_asset_id": None,
     "selected_clip_asset_id": None,
@@ -232,6 +235,7 @@ def has_inputs(scene: Scene | Any) -> bool:
         or _has_text(scene.first_frame_description)
         or _has_text(scene.last_frame_description)
         or _has_text(scene.image_prompt)
+        or _has_text(scene.last_frame_prompt)
         or scene.first_frame_asset_id is not None
         or scene.last_frame_asset_id is not None
         or scene.selected_clip_asset_id is not None

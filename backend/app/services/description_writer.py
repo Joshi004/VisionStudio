@@ -8,10 +8,13 @@ subjects and places of the video (`world`) and, for each scene, two texts:
 - `first_frame`: what the frame the clip starts on should show, to guide making it by hand
   now and with an image model later.
 
-A clip is made from its first frame alone, so the model never writes a last frame. A last
-frame is optional and added by the author. If the author wrote a description of one, it is
-sent as context (`SceneToDraft.fixed_last_frame`), so the video prompt can end on it, and it
-is never written.
+A clip is made from its first frame alone, or (Phase 23) from a first and a last frame. A
+profile whose `writes_last_frame` is False (the three before Phase 23) never asks for a last
+frame: one the author wrote is sent as context (`SceneToDraft.fixed_last_frame`), so the video
+prompt can end on it, and is never written. A profile whose `writes_last_frame` is True
+(`ltx-first-last`) also asks the model, scene by scene, whether the clip gets a last frame and
+for its description (`"last_frame": null` when it gets none). The author's own is then FIXED:
+sent, never overwritten, and answered with null.
 
 The steps are the same as for the scene proposal (`scene_planner.py`):
 
@@ -51,12 +54,106 @@ FIELD_MAX_CHARS: Final = 4000
 
 CONTINUITY_VALUES: Final = ("new_place", "same_place_new_angle", "continues_action")
 
-# The two texts the model writes for a scene.
+# The two texts every profile has the model write for a scene.
 VIDEO_PROMPT: Final = "video_prompt"
 FIRST_FRAME: Final = "first_frame"
 FIELDS: Final = (VIDEO_PROMPT, FIRST_FRAME)
-# Never written by the model. The author's own text for it is sent as context only.
+# Written by the model only for a profile with `writes_last_frame` (Phase 23, and then only for a
+# scene it decides to give one). Otherwise the author's own text for it is sent as context only.
 LAST_FRAME: Final = "last_frame"
+ALL_FIELDS: Final = (VIDEO_PROMPT, FIRST_FRAME, LAST_FRAME)
+
+
+def fields_for(profile: PromptProfile) -> tuple[str, ...]:
+    """The texts the model is asked to write under `profile`."""
+    return ALL_FIELDS if profile.writes_last_frame else FIELDS
+
+
+def _clip_line(profile: PromptProfile) -> str:
+    """The sentence that says what is written for a clip, and how the video model uses it."""
+    if profile.writes_last_frame:
+        return (
+            "- The script is cut into scenes. Each scene becomes one short clip, made with "
+            f"{profile.video_model}. You write for each clip a first frame (a still image), "
+            "a motion prompt and, for some scenes, a last frame (a second still image). "
+            "Without a last frame, the video model starts from the first frame and invents "
+            "the movement from the prompt. With one, it makes the clip move from the first "
+            "frame to the last, so the last frame fixes how the clip ends."
+        )
+    return (
+        "- The script is cut into scenes. Each scene becomes one short clip, made with "
+        f"{profile.video_model}. You write two things for each clip: a first frame (a "
+        "still image) and a motion prompt. The video model starts from the first frame "
+        "and invents the movement from the prompt."
+    )
+
+
+def _last_frame_field_lines(profile: PromptProfile) -> list[str]:
+    if not profile.writes_last_frame:
+        return []
+    return [
+        '- "last_frame": the still image the clip ends on, or null when the scene gets no '
+        'last frame (see "When to write a last frame").'
+    ]
+
+
+def _last_frame_rule_lines(profile: PromptProfile) -> list[str]:
+    return [profile.last_frame_rules, ""] if profile.writes_last_frame else []
+
+
+def _video_prompt_rule_lines(profile: PromptProfile) -> list[str]:
+    if not profile.writes_last_frame:
+        return [profile.video_prompt_rules]
+    return [profile.video_prompt_rules, "", profile.video_prompt_rules_with_last_frame]
+
+
+def _example_lines(profile: PromptProfile) -> list[str]:
+    if not profile.writes_last_frame:
+        return [
+            "Example of one scene (from an unrelated video; do not reuse its content):",
+            profile.example,
+        ]
+    return [
+        "Examples of two scenes (from an unrelated video; do not reuse their content):",
+        "A scene without a last frame:",
+        profile.example,
+        "A scene with a last frame:",
+        profile.example_with_last_frame,
+    ]
+
+
+def _fixed_field_lines(profile: PromptProfile) -> list[str]:
+    lines = [
+        "Fixed fields",
+        "- In the scene list, a field marked FIXED was written by the author. Do not "
+        "change it and do not write it again: answer null for that field.",
+    ]
+    if profile.writes_last_frame:
+        lines += [
+            '- Answer null only for the fields marked FIXED, and for "last_frame" in a scene '
+            "that gets no last frame. Every other field of that scene must still be written, "
+            "and must fit the fixed ones.",
+            "- A FIXED video_prompt was written by the author: write a last frame only if "
+            "that prompt clearly ends in a visible change that a last frame can show, and "
+            "make the last frame show exactly where it ends.",
+        ]
+    else:
+        lines.append(
+            "- Answer null only for the fields marked FIXED. Every other field of that scene "
+            "must still be written, and must fit the fixed ones."
+        )
+    return lines
+
+
+def _answer_shape_lines(profile: PromptProfile) -> list[str]:
+    last = '"last_frame": null, ' if profile.writes_last_frame else ""
+    return [
+        "Answer with one JSON object only, in exactly this form:",
+        '{"world": {"subjects": [{"name": "...", "description": "..."}], '
+        '"places": [{"name": "...", "description": "..."}]}, '
+        '"scenes": [{"scene": 1, "continuity": "new_place", "first_frame": "...", '
+        f'{last}"video_prompt": "..."}}]}}',
+    ]
 
 
 def _system_prompt(profile: PromptProfile) -> str:
@@ -68,10 +165,7 @@ def _system_prompt(profile: PromptProfile) -> str:
             "- A voiceover reads a script. The video shows pictures that illustrate the "
             "narration. Nobody on screen speaks, the narrator is never seen, and there is no "
             "on-screen text.",
-            "- The script is cut into scenes. Each scene becomes one short clip, made with "
-            f"{profile.video_model}. You write two things for each clip: a first frame (a "
-            "still image) and a motion prompt. The video model starts from the first frame "
-            "and invents the movement from the prompt.",
+            _clip_line(profile),
             "- Scenes are joined with hard cuts. Each scene must work on its own, and all "
             "scenes together must look like one film.",
             "",
@@ -79,6 +173,7 @@ def _system_prompt(profile: PromptProfile) -> str:
             '- "first_frame": the still image the clip starts on: the instant just before the '
             "motion begins.",
             '- "video_prompt": the motion prompt.',
+            *_last_frame_field_lines(profile),
             '- "continuity": "new_place" (a new place or time), "same_place_new_angle" (the '
             "previous scene's place and subjects, seen from a new angle or distance) or "
             '"continues_action" (the same place, subject and framing as the previous scene, '
@@ -126,22 +221,14 @@ def _system_prompt(profile: PromptProfile) -> str:
             "- Apply the author's style to the frame in words, because an image model does "
             "not get it any other way.",
             "",
-            profile.video_prompt_rules,
+            *_last_frame_rule_lines(profile),
+            *_video_prompt_rule_lines(profile),
             "",
-            "Example of one scene (from an unrelated video; do not reuse its content):",
-            profile.example,
+            *_example_lines(profile),
             "",
-            "Fixed fields",
-            "- In the scene list, a field marked FIXED was written by the author. Do not "
-            "change it and do not write it again: answer null for that field.",
-            "- Answer null only for the fields marked FIXED. Every other field of that scene "
-            "must still be written, and must fit the fixed ones.",
+            *_fixed_field_lines(profile),
             "",
-            "Answer with one JSON object only, in exactly this form:",
-            '{"world": {"subjects": [{"name": "...", "description": "..."}], '
-            '"places": [{"name": "...", "description": "..."}]}, '
-            '"scenes": [{"scene": 1, "continuity": "new_place", "first_frame": "...", '
-            '"video_prompt": "..."}]}',
+            *_answer_shape_lines(profile),
             '- "scenes" has exactly one entry for each scene in the scene list, in order, '
             "numbered as in the list.",
             '- "world" lists only the subjects and places that appear in more than one '
@@ -162,9 +249,10 @@ class SceneToDraft:
     """A scene as the request was built from it, and which of its texts the author wrote.
 
     A text the author wrote is carried here (`fixed_*`), sent to the model as context, and
-    never overwritten. Text the AI wrote earlier, or none, may be written again. The model
-    never writes a last frame, so `fixed_last_frame` is context only: the author's own
-    description of a last frame the author adds by hand.
+    never overwritten. Text the AI wrote earlier, or none, may be written again. Under a
+    profile that does not write last frames, `fixed_last_frame` is context only: the author's
+    own description of a last frame the author adds by hand. Under one that does
+    (`writes_last_frame`) it is FIXED like the other two.
     """
 
     scene_id: int
@@ -246,7 +334,10 @@ def _quoted(value: str | None, none: str) -> str:
 
 
 def _user_message(
-    project: Project, scenes: Sequence[SceneToDraft], paragraphs: Sequence[str]
+    project: Project,
+    scenes: Sequence[SceneToDraft],
+    paragraphs: Sequence[str],
+    profile: PromptProfile,
 ) -> str:
     style = _quoted(project.style_prefix, "")
     lines = [
@@ -295,10 +386,13 @@ def _user_message(
             if fixed is not None:
                 lines.append(f"FIXED {field}: {fixed}")
         if scene.fixed_last_frame is not None:
-            # Context for the video prompt only. The model is never asked for a last frame.
+            # The author added a last frame. It is never overwritten and never written again.
+            # Without a profile that writes last frames it is context for the video prompt
+            # only, and the model is never asked for one.
+            answer = "answer null for it" if profile.writes_last_frame else "do not write one"
             lines.append(
                 f"FIXED {LAST_FRAME} (the author added a last frame: the clip ends on it, so "
-                f"the video prompt must end exactly here; do not write one): "
+                f"the video prompt must end exactly here; {answer}): "
                 f"{scene.fixed_last_frame}"
             )
         lines.append("")
@@ -321,7 +415,7 @@ def build_request(
         "model": model,
         "messages": [
             {"role": "system", "content": _system_prompt(profile)},
-            {"role": "user", "content": _user_message(project, scenes, paragraphs)},
+            {"role": "user", "content": _user_message(project, scenes, paragraphs, profile)},
         ],
         "max_tokens": MAX_TOKENS,
         "stream": True,
@@ -367,17 +461,21 @@ class SceneDraft:
     continuity: str | None
     video_prompt: str | None
     first_frame: str | None
+    # None when the model gave none: it decided the scene has no last frame, the field is
+    # fixed, the text was unusable, or the profile does not write last frames.
+    last_frame: str | None
     warnings: tuple[str, ...]
 
     def text(self, field: str) -> str | None:
         return {
             VIDEO_PROMPT: self.video_prompt,
             FIRST_FRAME: self.first_frame,
+            LAST_FRAME: self.last_frame,
         }[field]
 
     @property
     def has_text(self) -> bool:
-        return any(self.text(field) is not None for field in FIELDS)
+        return any(self.text(field) is not None for field in ALL_FIELDS)
 
 
 @dataclass(frozen=True)
@@ -427,10 +525,13 @@ def check_drafts(
     - An entry must name a scene of the request, by its number from 1, and only the first
       entry for a scene counts.
     - A text that is empty, not text, or over the limit is dropped. A text for a field that
-      is fixed is dropped too: the author's own text is never replaced. Only the fields in
-      `FIELDS` are read, so a last frame the model writes anyway is ignored.
-    - The video prompt is checked against the profile's wording rules and word limit. That
-      gives warnings, which never stop a draft from being saved.
+      is fixed is dropped too: the author's own text is never replaced. Only the fields of
+      `fields_for(profile)` are read, so a last frame is ignored under a profile that does
+      not write them, even if the model writes one anyway.
+    - The video prompt is checked against the profile's wording rules and word limit, and,
+      when the scene has a last frame (the author's, or the one just written), against the
+      extra rules for that. The last frame is checked against the profile's rules for it.
+      That gives warnings, which never stop a draft from being saved.
     """
     by_number = {scene.number: scene for scene in scenes}
     entries = answer.get("scenes")
@@ -445,12 +546,25 @@ def check_drafts(
             continue
 
         warnings: list[str] = []
-        texts: dict[str, str | None] = {}
-        for field in FIELDS:
-            if scene.fixed_text(field) is not None:
-                texts[field] = None
-            else:
+        texts: dict[str, str | None] = {field: None for field in ALL_FIELDS}
+        for field in fields_for(profile):
+            if scene.fixed_text(field) is None:
                 texts[field] = _clean_text(entry.get(field), field, warnings)
+
+        last_frame = texts[LAST_FRAME]
+        if last_frame is not None:
+            last_words = len(last_frame.split())
+            if profile.max_last_frame_words and last_words > profile.max_last_frame_words:
+                warnings.append(
+                    f"The last frame has {last_words} words. About "
+                    f"{profile.max_last_frame_words} or fewer works best."
+                )
+            warnings += [
+                f"Last frame: {rule.message}"
+                for rule in profile.last_frame_checks
+                if rule.pattern.search(last_frame)
+            ]
+        scene_has_last_frame = last_frame is not None or scene.fixed_last_frame is not None
 
         video_prompt = texts[VIDEO_PROMPT]
         if video_prompt is not None:
@@ -460,9 +574,10 @@ def check_drafts(
                     f"The video prompt has {words} words. About {profile.max_video_words} or "
                     "fewer works best."
                 )
-            warnings += [
-                rule.message for rule in profile.rules if rule.pattern.search(video_prompt)
-            ]
+            video_rules = profile.rules + (
+                profile.rules_with_last_frame if scene_has_last_frame else ()
+            )
+            warnings += [rule.message for rule in video_rules if rule.pattern.search(video_prompt)]
 
         continuity = entry.get("continuity")
         drafts[scene.number] = SceneDraft(
@@ -471,6 +586,7 @@ def check_drafts(
             continuity=continuity if continuity in CONTINUITY_VALUES else None,
             video_prompt=video_prompt,
             first_frame=texts[FIRST_FRAME],
+            last_frame=last_frame,
             warnings=tuple(warnings),
         )
 
