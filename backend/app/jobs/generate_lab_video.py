@@ -38,12 +38,15 @@ from app.jobs import phases, store
 from app.jobs.generate_clip import GPU_URL_KEY, SERVER_RETRY_DELAY_S, GenerateClipHandler
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import ffmpeg, frame_images, video_lab
+from app.services import ffmpeg, frame_images, speech_audio, video_lab
 from app.services.storage import StorageError, TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = video_lab.RUN_JOB
+# Silence added past the clip's end, so the speech covers the model's last audio latent frame
+# (about 25 a second) whatever way it rounds. The server reads only the clip's length of it.
+AUDIO_PAD_MARGIN_S: Final = 0.2
 
 
 @dataclass(frozen=True)
@@ -183,17 +186,31 @@ class GenerateLabVideoHandler(GenerateClipHandler):
         return temp
 
     @staticmethod
-    async def _upload_audio(base_url: str, audio: _AudioInput) -> tuple[str, str]:
-        """Uploads the speech of a lip-synced clip. Returns the file name sent and the server's
-        asset id. Raises AudioUnavailable when the file is gone, and GpuCallError.
+    async def _upload_audio(
+        base_url: str, audio: _AudioInput, request: dict[str, Any], temps: list[Path]
+    ) -> tuple[str, str]:
+        """Uploads the speech of a lip-synced clip, padded with silence to the clip's length.
+        Returns the file name sent and the server's asset id. The padded WAV is added to `temps`
+        for the caller to remove. Raises AudioUnavailable and GpuCallError.
+
+        The model needs audio for the whole clip: a speech shorter than the clip fails on the
+        GPU with "Latent shape ... does not match target shape". The clip is rounded up to the
+        next `8k + 1` frames, so it is up to about 0.3 s longer than the speech.
         """
+        storage = get_storage()
         try:
-            path = get_storage().get_path(audio.path)
+            source = storage.get_path(audio.path)
         except StorageError:
             raise AudioUnavailable("The speech's file could not be found on disk.") from None
-        extension = path.suffix.lstrip(".").lower() or "wav"
-        filename = f"lab-speech-{audio.source}-{audio.id}.{extension}"
-        remote_id = await video_generator.upload_audio(base_url, path, filename, audio.mime)
+        clip_s = float(request["num_frames"]) / float(request["frame_rate"])
+        padded = storage.new_temp_path("wav")
+        temps.append(padded)
+        try:
+            await speech_audio.pad_to(source, padded, clip_s + AUDIO_PAD_MARGIN_S)
+        except speech_audio.PadError as exc:
+            raise AudioUnavailable(str(exc)) from exc
+        filename = f"lab-speech-{audio.source}-{audio.id}.wav"
+        remote_id = await video_generator.upload_audio(base_url, padded, filename, "audio/wav")
         return filename, remote_id
 
     async def _upload_and_submit_run(self, job: Job, base_url: str, plan: _LabPlan) -> None:
@@ -232,7 +249,9 @@ class GenerateLabVideoHandler(GenerateClipHandler):
                     )
                 if plan.audio is not None:
                     await self._phase(job.id, phases.UPLOADING_AUDIO)
-                    filename, audio_remote_id = await self._upload_audio(base_url, plan.audio)
+                    filename, audio_remote_id = await self._upload_audio(
+                        base_url, plan.audio, plan.request, temps
+                    )
                     uploads.append({"filename": filename, "remote_asset_id": audio_remote_id})
                     body = video_generator.with_audio(body, audio_remote_id)
                 if not await self._is_running(job.id):
