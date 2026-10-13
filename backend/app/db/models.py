@@ -225,12 +225,10 @@ class Scene(Base):
     # Added in Phase 19: the video model that makes this scene's clips. NULL means "use the
     # project's" (and, when that is NULL too, the app's default).
     video_model: Mapped[str | None] = mapped_column(default=None)
-    # Added with the project's cast: the one character and the one place this scene shows (both
-    # optional), chosen by the AI (`assign_cast` job) or by hand. A scene never shows two
-    # characters. Only a scene that names one of them is made from its reference picture.
-    character_id: Mapped[int | None] = mapped_column(
-        ForeignKey("character.id", ondelete="SET NULL"), default=None
-    )
+    # Added with the project's cast: the place this scene shows (optional), chosen by the AI
+    # (`assign_cast` job) or by hand. The characters it shows are rows of `scene_character`
+    # (none, one or several). Only a scene that names a character or a place is made from their
+    # reference pictures.
     location_id: Mapped[int | None] = mapped_column(
         ForeignKey("location.id", ondelete="SET NULL"), default=None
     )
@@ -268,7 +266,8 @@ class Character(Base):
     personality_description: Mapped[str | None] = mapped_column(default=None)
     voice_description: Mapped[str | None] = mapped_column(default=None)
     reference_prompt: Mapped[str | None] = mapped_column(default=None)
-    # `use_alter`: `job.scene_id` -> `scene.character_id` -> here -> `job` would be a cycle.
+    # `use_alter`, written the same way as a place's: `job.scene_id` -> `scene.location_id` ->
+    # `location` -> `job` is a cycle, and the two tables are kept alike.
     reference_prompt_job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
     )
@@ -305,6 +304,26 @@ class Location(Base):
     )
     status: Mapped[str] = mapped_column(default="pending", server_default=text("'pending'"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SceneCharacter(Base):
+    """A character a scene shows. A scene shows none, one or several, so the characters are rows
+    here instead of a column of `scene`. `position` is the order of the characters' reference
+    pictures when the scene's first frame is made (0 is image 1), and it is part of what the
+    scene's image prompt is written from. The rows go with the scene or the character
+    (`ON DELETE CASCADE`).
+    """
+
+    __tablename__ = "scene_character"
+    __table_args__ = (Index("idx_scene_character_character", "character_id"),)
+
+    scene_id: Mapped[int] = mapped_column(
+        ForeignKey("scene.id", ondelete="CASCADE"), primary_key=True
+    )
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("character.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[int]
 
 
 class Job(Base):

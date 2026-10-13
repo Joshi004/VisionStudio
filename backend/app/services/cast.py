@@ -4,9 +4,10 @@ pictures need (project cast and character consistency).
 The cast is found by one language model job (`extract_cast`, `services/cast_extraction.py`),
 edited by hand, and given one reference picture per member: a language model job writes the
 prompt (`write_character_reference_prompt`) and the image model makes the picture
-(`generate_character_reference`). A scene then names the one character and the one place it
-shows (`scene.character_id`, `scene.location_id`, written by the `assign_cast` job or by hand),
-and its first frame is made from those pictures instead of from words alone.
+(`generate_character_reference`). A scene then names the characters it shows (none, one or
+several: the rows of `scene_character`) and the place it shows (`scene.location_id`), written by
+the `assign_cast` job or by hand, and its first frame is made from those pictures instead of from
+words alone.
 
 A *member* is a `Character` or a `Location`. The two tables share what the pictures need (a
 name, an appearance, a prompt, a picture, a status), so most code here takes either, together
@@ -21,11 +22,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Character, Job, Location, Scene
+from app.db.models import Character, Job, Location, Scene, SceneCharacter
 from app.jobs import store
+from app.providers import image_generator
 from app.services.cast_extraction import CastList
 
 EXTRACT_JOB: Final = "extract_cast"
@@ -40,6 +42,12 @@ KINDS: Final = (CHARACTER, LOCATION)
 # What a reference picture's job has in its input, to say whose picture it makes.
 KIND_KEY: Final = "cast_kind"
 ID_KEY: Final = "cast_id"
+
+# The image model's edit takes this many reference pictures, and a scene's first frame is made
+# from the picture of each of its characters and of its place. So that the place always fits, a
+# scene shows at most one picture less than that in characters. This is a limit of the image
+# model, kept in code: no prompt asks for any number of characters.
+MAX_SCENE_CHARACTERS: Final = image_generator.MAX_REFERENCES - 1
 
 Member = Character | Location
 
@@ -129,10 +137,14 @@ async def replace_cast(session: AsyncSession, project_id: int, found: CastList) 
     picture stays on disk (stored files are never deleted) but belongs to no member any more.
     """
     await session.execute(
+        delete(SceneCharacter)
+        .where(SceneCharacter.scene_id.in_(select(Scene.id).where(Scene.project_id == project_id)))
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(
         update(Scene)
         .where(Scene.project_id == project_id)
         .values(
-            character_id=None,
             location_id=None,
             cast_assignment_source=None,
             cast_assignment_job_id=None,
@@ -201,22 +213,23 @@ def mark_ready(member: Member, asset_id: int) -> None:
 
 @dataclass(frozen=True)
 class SceneCast:
-    """The one character and the one place a scene shows. Either may be None."""
+    """The characters and the place a scene shows. It may show none, one or several characters,
+    and no place.
+    """
 
-    character: Character | None = None
+    characters: tuple[Character, ...] = ()
     location: Location | None = None
 
     @property
     def is_empty(self) -> bool:
-        return self.character is None and self.location is None
+        return not self.characters and self.location is None
 
     def references(self) -> list[tuple[str, Member]]:
         """The members whose pictures the scene's first frame is made from, in the order they
-        are sent to the image model: the character is image 1, the place the next.
+        are sent to the image model: the characters are images 1, 2 and so on, in the order
+        the scene lists them, and the place is the next.
         """
-        found: list[tuple[str, Member]] = []
-        if self.character is not None:
-            found.append((CHARACTER, self.character))
+        found: list[tuple[str, Member]] = [(CHARACTER, member) for member in self.characters]
         if self.location is not None:
             found.append((LOCATION, self.location))
         return found
@@ -249,18 +262,60 @@ async def reference_blocks(
     }
 
 
+async def load_character_ids(
+    session: AsyncSession, scene_ids: Sequence[int]
+) -> dict[int, list[int]]:
+    """For each scene id, the ids of the characters it shows, in the order of their pictures
+    (empty for a scene that shows none). One query, however many scenes.
+    """
+    found: dict[int, list[int]] = {scene_id: [] for scene_id in scene_ids}
+    if not found:
+        return found
+    statement = (
+        select(SceneCharacter.scene_id, SceneCharacter.character_id)
+        .where(SceneCharacter.scene_id.in_(list(found)))
+        .order_by(SceneCharacter.scene_id, SceneCharacter.position)
+    )
+    for scene_id, character_id in await session.execute(statement):
+        found[scene_id].append(character_id)
+    return found
+
+
+async def set_scene_characters(
+    session: AsyncSession, scene_id: int, character_ids: Sequence[int]
+) -> None:
+    """Makes these characters, in this order, the ones the scene shows (none for an empty list).
+    The caller has checked that they belong to the scene's project, that none is repeated and
+    that there are at most `MAX_SCENE_CHARACTERS`. Flushes, does not commit.
+    """
+    await session.execute(delete(SceneCharacter).where(SceneCharacter.scene_id == scene_id))
+    if character_ids:
+        await session.execute(
+            insert(SceneCharacter),
+            [
+                {"scene_id": scene_id, "character_id": character_id, "position": position}
+                for position, character_id in enumerate(character_ids)
+            ],
+        )
+
+
 async def load_scene_casts(
     session: AsyncSession, project_id: int, scenes: Sequence[Scene]
 ) -> dict[int, SceneCast]:
-    """For each scene, who and what it shows. Two queries at most, however many scenes."""
-    if not any(s.character_id is not None or s.location_id is not None for s in scenes):
+    """For each scene, who and what it shows. Three queries at most, however many scenes."""
+    character_ids = await load_character_ids(session, [scene.id for scene in scenes])
+    if not any(character_ids.values()) and all(s.location_id is None for s in scenes):
         return {scene.id: NO_CAST for scene in scenes}
     cast = await load_cast(session, project_id)
     characters = {member.id: member for member in cast.characters}
     locations = {member.id: member for member in cast.locations}
     return {
         scene.id: SceneCast(
-            character=characters.get(scene.character_id or 0),
+            characters=tuple(
+                characters[character_id]
+                for character_id in character_ids[scene.id]
+                if character_id in characters
+            ),
             location=locations.get(scene.location_id or 0),
         )
         for scene in scenes

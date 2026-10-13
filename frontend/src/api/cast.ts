@@ -109,7 +109,7 @@ export function useExtractCast(projectId: number) {
 }
 
 /**
- * Chooses the character and the place of every scene (a paid call to the language model) and
+ * Chooses the characters and the place of every scene (a paid call to the language model) and
  * returns at once. A choice the user made by hand is kept.
  */
 export function useAssignCast(projectId: number) {
@@ -221,26 +221,27 @@ export function useEditCastMember(projectId: number) {
 }
 
 /**
- * Chooses the character and the place one scene shows (null for none). The choice is the
- * user's: the AI never overwrites it. The answer holds the scenes afterwards.
+ * Chooses the characters (in the order of their pictures; an empty list for none) and the place
+ * (null for none) one scene shows. The choice is the user's: the AI never overwrites it. The
+ * answer holds the scenes afterwards.
  */
 export function useSetSceneCast(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
       sceneId,
-      characterId,
+      characterIds,
       locationId,
     }: {
       sceneId: number;
-      characterId: number | null;
+      characterIds: number[];
       locationId: number | null;
     }) => {
       const { data, error, response } = await api.PATCH(
         "/api/projects/{project_id}/scenes/{scene_id}/cast",
         {
           params: { path: { project_id: projectId, scene_id: sceneId } },
-          body: { character_id: characterId, location_id: locationId },
+          body: { character_ids: characterIds, location_id: locationId },
         },
       );
       if (!data) {

@@ -584,6 +584,7 @@ _CHARACTER_EDIT_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
             {
                 "image": 1,
                 "kind": "character",
+                "name": "Tomas",
                 "appearance": _CHARACTER_SHEET_EXAMPLE_INPUTS["appearance"],
             },
             {
@@ -625,11 +626,13 @@ _CHARACTER_EDIT_EXAMPLE_PROMPT: Final = (
     "watercolour washes, like a quiet storybook illustration."
 )
 
-# A scene that shows a character or a place of the cast: its first frame is made by the image
-# model's edit, from the picture of each (image 1 is the character, the next is the place).
+# A scene that shows characters or a place of the cast: its first frame is made by the image
+# model's edit, from the picture of each (the characters are images 1, 2 and so on, in the
+# scene's order, and the place is the next). A scene may show any number of characters: nothing
+# here asks for more than the narration puts in it.
 QWEN_IMAGE_21_CHARACTER_EDIT: Final = ImagePromptProfile(
     id="qwen-image-2.1-character-edit",
-    version=1,
+    version=2,
     image_model="Qwen-Image-2.1 (edit, with reference pictures)",
     prompt_rules="\n".join(
         [
@@ -637,16 +640,17 @@ QWEN_IMAGE_21_CHARACTER_EDIT: Final = ImagePromptProfile(
             "reference pictures listed under 'References', numbered in that order, and makes a "
             "new picture of this scene from them.",
             "1. One paragraph of plain English prose, in complete sentences and the present "
-            "tense, 80 to 260 words. No lists, no headings, no labels and no piles of "
+            "tense, 80 to 320 words. No lists, no headings, no labels and no piles of "
             "comma-separated keywords.",
             "2. Open with the kind of picture it is, taken from the style, and say which "
-            "reference pictures it is made from. Name each by its number: 'the character in "
-            "image 1', 'the place in image 2'.",
-            "3. Never describe the character's face, hair, build, skin or clothes: the picture "
+            "reference pictures it is made from. Name each by its number, a character by the "
+            "number of its own picture: 'the character in image 1', 'the place in image 2'.",
+            "3. Never describe a character's face, hair, build, skin or clothes: the picture "
             "shows them, and any words about them can change them. Say it once, in one "
-            "sentence: the character keeps the face, hair and clothes exactly as they are in "
-            "its image. Then say only what the character does, where it stands or sits, which "
-            "way it faces and what its expression is.",
+            "sentence: each character keeps the face, hair and clothes exactly as they are in "
+            "its own image. Then say only what each character does, where it stands or sits, "
+            "which way it faces and what its expression is, naming each by its image number so "
+            "that no two are mixed up.",
             "4. With a picture of the place, say where in that place the scene is and what part "
             "of it is seen, calling it 'the place in image 2' (use its number), and never "
             "describe the place again. With no picture of the place, describe the setting in "
@@ -658,12 +662,12 @@ QWEN_IMAGE_21_CHARACTER_EDIT: Final = ImagePromptProfile(
             "6. Keep everything the first frame description says, and add detail to it. Never "
             'change it. With no first frame description ("none"), picture the instant just '
             "before the motion in the video prompt begins. It is the instant just before the "
-            "motion begins: the character in place and ready to move, never in the middle of "
+            "motion begins: each character in place and ready to move, never in the middle of "
             "the action and never after it.",
             "7. A scene with a picture of a place and none of a character shows the place alone, "
-            "from the camera position the descriptions give. The only person who may be clearly "
-            "seen is the character of image 1. Anyone else the narration mentions is left out, "
-            "or is a small distant figure seen from behind.",
+            "from the camera position the descriptions give. The only people who may be clearly "
+            "seen are the characters of the reference pictures. Anyone else the narration "
+            "mentions is left out, or is a small distant figure seen from behind.",
             "8. Compose for the frame shape you are given, and use the whole frame. The picture "
             "is trimmed slightly to fit the exact size, so keep the main subject and every "
             "important detail clear of the outer edges.",
@@ -675,8 +679,9 @@ QWEN_IMAGE_21_CHARACTER_EDIT: Final = ImagePromptProfile(
             "10. Describe only what is visible. The model has no negative prompt, and naming a "
             "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
             "the space instead.",
-            "11. When the world lists the character or the place of a reference picture, ignore "
-            "its description and use the picture. Never write a character's name.",
+            "11. When the world lists a character or a place of a reference picture, ignore its "
+            "description and use the picture. Refer to a character by its image number, never "
+            "by its name.",
             "12. Concrete nouns and plain adjectives. No quality tags (such as 8k, masterpiece "
             "or highly detailed) and no camera brand names.",
         ]
@@ -684,7 +689,7 @@ QWEN_IMAGE_21_CHARACTER_EDIT: Final = ImagePromptProfile(
     example_inputs=_CHARACTER_EDIT_EXAMPLE_INPUTS,
     example_answer=json.dumps({"image_prompt": _CHARACTER_EDIT_EXAMPLE_PROMPT}, ensure_ascii=False),
     min_words=80,
-    max_words=260,
+    max_words=320,
     rules=(
         *SEEDREAM_50_LITE.rules,
         TextRule(

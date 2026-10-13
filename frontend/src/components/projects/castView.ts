@@ -36,12 +36,12 @@ export function pictureCountsLine(cast: Cast): string {
   return `${ready} of ${members.length} ${members.length === 1 ? "picture" : "pictures"} made`;
 }
 
-/** "3 of 8 scenes have a choice of character and place", or an empty text with no scenes. */
+/** "3 of 8 scenes have a choice of characters and place", or an empty text with no scenes. */
 export function assignedLine(cast: Cast): string {
   if (cast.scene_count === 0) {
     return "There are no scenes yet.";
   }
   return `${cast.scenes_assigned} of ${cast.scene_count} ${
     cast.scene_count === 1 ? "scene has" : "scenes have"
-  } a choice of character and place.`;
+  } a choice of characters and place.`;
 }

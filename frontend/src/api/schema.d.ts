@@ -912,9 +912,9 @@ export interface paths {
         put?: never;
         /**
          * Assign Cast
-         * @description Starts the job that chooses, for every scene, the one character and the one place it
-         *     shows (a paid call to the language model), or returns the one already active. A choice the
-         *     user made by hand is kept.
+         * @description Starts the job that chooses, for every scene, the characters and the one place it shows
+         *     (a paid call to the language model), or returns the one already active. A choice the user
+         *     made by hand is kept.
          */
         post: operations["assign_cast_api_projects__project_id__assign_cast_post"];
         delete?: never;
@@ -1001,8 +1001,8 @@ export interface paths {
         head?: never;
         /**
          * Set Scene Cast
-         * @description Chooses the character and the place one scene shows (null for none). The choice is the
-         *     user's: the AI never overwrites it. Answers with the scenes.
+         * @description Chooses the characters and the place one scene shows (an empty list or null for none).
+         *     The choice is the user's: the AI never overwrites it. Answers with the scenes.
          */
         patch: operations["set_scene_cast_api_projects__project_id__scenes__scene_id__cast_patch"];
         trace?: never;
@@ -2850,11 +2850,12 @@ export interface components {
         };
         /**
          * SceneCastRequest
-         * @description Both fields are always sent: null means the scene shows none.
+         * @description Both fields are always sent: an empty list means the scene shows no character, and null
+         *     that it shows no place. The characters are listed in the order of their pictures.
          */
         SceneCastRequest: {
-            /** Character Id */
-            character_id: number | null;
+            /** Character Ids */
+            character_ids: number[];
             /** Location Id */
             location_id: number | null;
         };
@@ -2897,8 +2898,8 @@ export interface components {
             last_frame_description_source: ("manual" | "ai") | null;
             /** Description Job Id */
             description_job_id: number | null;
-            /** Character Id */
-            character_id: number | null;
+            /** Character Ids */
+            character_ids: number[];
             /** Location Id */
             location_id: number | null;
             /** Cast Assignment Source */

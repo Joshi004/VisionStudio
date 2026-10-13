@@ -1,12 +1,13 @@
-"""Choosing which character and which place each scene shows, with a language model. Pure
+"""Choosing which characters and which place each scene shows, with a language model. Pure
 functions, no I/O.
 
 The model is given the project's cast (the closed list the characters and places were found
-in) and the narration of every scene. For each scene it names *one* character at most and *one*
-place at most, copying a name from the list, or says null. Code maps the names to the members and
-drops a name that is not on the list, so a scene can never show somebody who is not in the cast.
-
-A scene never shows two characters: the answer has one field for the character, not a list.
+in) and the narration of every scene. For each scene it names the characters the scene shows (a
+list: none, one or several, as it judges from the narration) and *one* place at most, copying
+the names from the lists. Code maps the names to the members and drops a name that is not on the
+list, so a scene can never show somebody who is not in the cast. The prompt never asks for a
+number of characters: the only limit is the image model's (`cast.MAX_SCENE_CHARACTERS`), which
+code applies to the answer.
 
 1. `build_request`: the rules, the cast, and the scenes, as an OpenAI-style chat request.
 2. `parse_answer`: the model's JSON, read defensively and mapped to the cast's ids.
@@ -24,7 +25,7 @@ from typing import Any, Final
 
 from app.db.models import Scene
 from app.providers import llm
-from app.services.cast import Cast
+from app.services.cast import MAX_SCENE_CHARACTERS, Cast
 
 # Hidden reasoning tokens are billed as output (ANALYSIS.md Section 6.2, rule 4). The answer is a
 # short line per scene.
@@ -35,27 +36,29 @@ _BRIEF_CHARS: Final = 220
 
 _SYSTEM_PROMPT: Final = "\n".join(
     [
-        "You decide which character and which place each scene of a narrated video shows. A "
+        "You decide which characters and which place each scene of a narrated video shows. A "
         "voiceover tells the story, and every scene is one picture made for a few seconds of the "
         "narration. Each character and place of the story has a reference picture, so a scene "
-        "that shows one looks the same every time.",
+        "that shows them looks the same every time.",
         "",
         "Rules:",
-        "1. For each scene choose at most one character and at most one place, only from the "
-        "lists you are given, copying the name exactly. Use null for none.",
-        "2. A scene shows at most ONE character: the one the narration is about at that moment, "
-        "or the one who does what the narration says. If the narration names two, choose the "
-        "one who acts or is looked at. Several people together are shown by their leader, or by "
-        "none. A scene about a landscape, an object, a feeling or an event with no main "
-        "character shows no character: use null.",
+        "1. For each scene choose the characters it shows and at most one place, only from the "
+        "lists you are given, copying each name exactly. A scene may show no character, one or "
+        "several: choose the characters the narration puts in the picture. Use an empty list "
+        "when there is none, and null when there is no place.",
+        "2. A character is in the scene when the narration is about them at that moment, or "
+        "they do what the narration says, or the narration says they are there. A scene about a "
+        "landscape, an object, a feeling or an event with no character in it shows no "
+        "character.",
         "3. The place is where the scene happens. When the narration names no place, the scene "
         "happens where the previous scene did, if the story is still there. Otherwise use null.",
         "4. When the narration of a scene goes on from the previous one (he, she, they, the same "
-        "action), keep the previous scene's character.",
+        "action), keep the characters the previous scene showed.",
         "5. Answer for every scene, in order, using the scene's number.",
         "",
-        "Answer with one JSON object only, in exactly this form:",
-        '{"scenes": [{"scene": 1, "character": "Name or null", "location": "Name or null"}]}',
+        'Answer with one JSON object only, in exactly this form. "characters" is a list of '
+        "names, an empty list for none:",
+        '{"scenes": [{"scene": 1, "characters": ["Name", ...], "location": "Name or null"}]}',
     ]
 )
 
@@ -108,10 +111,12 @@ def build_request(
 
 @dataclass(frozen=True)
 class Assignment:
-    """Who and what one scene shows. Both may be None: the scene shows neither."""
+    """Who and what one scene shows: its characters, in the order of their pictures (none, one
+    or several), and its place, which may be None. A scene may show neither.
+    """
 
     scene_id: int
-    character_id: int | None
+    character_ids: tuple[int, ...]
     location_id: int | None
 
 
@@ -130,6 +135,14 @@ def _name(value: object) -> str | None:
         return None
     cleaned = " ".join(value.split()).casefold()
     return None if cleaned in ("", "none", "null", "n/a") else cleaned
+
+
+def _names(value: object) -> list[str]:
+    """The names in a field that holds a list of them. A single name (a model that wrote one
+    instead of a list) counts as a list of one, and anything else as none.
+    """
+    items = value if isinstance(value, list) else [value]
+    return [name for item in items if (name := _name(item)) is not None]
 
 
 def parse_answer(content: str, scenes: Sequence[Scene], cast: Cast) -> Assignments:
@@ -159,15 +172,24 @@ def parse_answer(content: str, scenes: Sequence[Scene], cast: Cast) -> Assignmen
         entry = by_number.get(scene.index + 1)
         if entry is None:
             missing += 1
-            chosen.append(Assignment(scene.id, None, None))
+            chosen.append(Assignment(scene.id, (), None))
             continue
-        character_name, location_name = _name(entry.get("character")), _name(entry.get("location"))
-        character_id = characters.get(character_name) if character_name else None
+
+        # "character" is read too: it is what an answer in the old one-character form says.
+        character_ids: list[int] = []
+        for name in _names(entry.get("characters", entry.get("character"))):
+            character_id = characters.get(name)
+            if character_id is None:
+                unknown += 1
+            elif character_id not in character_ids:
+                character_ids.append(character_id)
+
+        location_name = _name(entry.get("location"))
         location_id = locations.get(location_name) if location_name else None
-        unknown += (character_name is not None and character_id is None) + (
-            location_name is not None and location_id is None
+        unknown += location_name is not None and location_id is None
+        chosen.append(
+            Assignment(scene.id, tuple(character_ids[:MAX_SCENE_CHARACTERS]), location_id)
         )
-        chosen.append(Assignment(scene.id, character_id, location_id))
 
     if scenes and missing * 2 > len(scenes):
         raise ValueError(
@@ -187,11 +209,13 @@ def choice_is_authors(scene: Scene) -> bool:
 def plan_write(scene: Scene, assignment: Assignment, job_id: int) -> dict[str, Any] | None:
     """The columns a job sets on the scene as it is now, or None when the author has chosen
     since: the author's choice is kept. A scene the AI chose for, or none, may be written.
+
+    The scene's characters are not columns: the job writes them (`cast.set_scene_characters`)
+    for every scene this does not answer None for.
     """
     if choice_is_authors(scene):
         return None
     return {
-        "character_id": assignment.character_id,
         "location_id": assignment.location_id,
         "cast_assignment_source": "ai",
         "cast_assignment_job_id": job_id,

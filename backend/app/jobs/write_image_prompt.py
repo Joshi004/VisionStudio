@@ -200,7 +200,7 @@ class WriteImagePromptHandler(JobHandler):
             return
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        # A scene that shows a character or a place of the cast is made from their reference
+        # A scene that shows characters or a place of the cast is made from their reference
         # pictures, and its prompt is written for that (`QWEN_IMAGE_21_CHARACTER_EDIT`).
         profile = scene_profile(has_references=not scene_cast.is_empty)
         inputs = writer.prompt_inputs(scene, project, source, scene_cast)

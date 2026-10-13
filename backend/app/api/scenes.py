@@ -214,10 +214,10 @@ class SceneOut(BaseModel):
     last_frame_description_source: TextSource | None
     # The job that last wrote AI text into this scene. Kept after the user edits the text.
     description_job_id: int | None
-    # The one character and the one place this scene shows (the project's cast), chosen by the
-    # AI or by the user. None: none. The source is None until somebody has chosen (a choice of
-    # nobody is still a choice).
-    character_id: int | None
+    # The characters this scene shows, in the order of their pictures (none, one or several),
+    # and the one place it shows (the project's cast), chosen by the AI or by the user. The
+    # source is None until somebody has chosen (a choice of nobody is still a choice).
+    character_ids: list[int]
     location_id: int | None
     cast_assignment_source: TextSource | None
     # The detailed prompt for the image model that makes the first frame (Phase 16), who wrote
@@ -594,6 +594,7 @@ def _scene_out(
     last_frame_blocked: str | None,
     last_frame_choices: list[Asset],
     default_video_model: VideoModel,
+    character_ids: list[int],
 ) -> SceneOut:
     missing = scene_inputs.missing_inputs(scene)
     clip_mode = scene_inputs.clip_mode(scene)
@@ -628,7 +629,7 @@ def _scene_out(
         ),
         last_frame_description_source=cast(TextSource | None, scene.last_frame_description_source),
         description_job_id=scene.description_job_id,
-        character_id=scene.character_id,
+        character_ids=character_ids,
         location_id=scene.location_id,
         cast_assignment_source=cast(TextSource | None, scene.cast_assignment_source),
         image_prompt=scene.image_prompt,
@@ -968,8 +969,11 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     )
     active_frames = await first_frames_service.active_frame_jobs(session, project.id)
     choices = await first_frames_service.frame_choices(session, project.id)
-    # A scene that shows a character or a place of the cast waits for their reference pictures.
+    # A scene that shows characters or a place of the cast waits for their reference pictures.
     reference_blocks = await cast_service.reference_blocks(session, project.id, state.scenes)
+    character_ids = await cast_service.load_character_ids(
+        session, [scene.id for scene in state.scenes]
+    )
 
     def frame_blocked(scene: Scene) -> str | None:
         return prompts_project_block or first_frames_service.scene_block(
@@ -1034,6 +1038,7 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             last_frame_blocked=last_frame_blocked(scene),
             last_frame_choices=last_choices.get(scene.id, []),
             default_video_model=default_video_model,
+            character_ids=character_ids[scene.id],
         )
         for scene, (first_word, last_word) in zip(state.scenes, ranges, strict=True)
     ]

@@ -34,7 +34,7 @@ from typing import Any, Final
 
 from app.db.models import Project, Scene
 from app.providers import llm
-from app.services.cast import SceneCast
+from app.services.cast import CHARACTER, SceneCast
 from app.services.image_prompt_profiles import ImagePromptProfile
 
 # Hidden reasoning is billed as output (ANALYSIS.md Section 6.2, rule 4). One paragraph of
@@ -142,10 +142,12 @@ def prompt_inputs(
 
     The scene's texts are the current ones, whoever wrote them. A text that is blank is None.
 
-    A scene that shows a character or a place of the project's cast also has `cast`: the
-    reference pictures the image model is shown, in the order it is shown them. A scene that
-    shows none has no such key, so its inputs (and its prompt's hash) are what they were before
-    the cast existed.
+    A scene that shows characters or a place of the project's cast also has `cast`: the
+    reference pictures the image model is shown, in the order it is shown them (the characters
+    first, in the scene's order, then the place). A character's reference also holds its `name`,
+    so the writer can tell whom the narration means when there are several. A scene that shows
+    none has no such key, so its inputs (and its prompt's hash) are what they were before the
+    cast existed.
     """
     inputs: dict[str, Any] = {
         "orientation": project.orientation,
@@ -160,16 +162,14 @@ def prompt_inputs(
         "video_prompt": _text(scene.scene_description),
     }
     if cast is not None and not cast.is_empty:
-        inputs["cast"] = {
-            "references": [
-                {
-                    "image": number,
-                    "kind": kind,
-                    "appearance": _one_line(member.appearance_description),
-                }
-                for number, (kind, member) in enumerate(cast.references(), start=1)
-            ]
-        }
+        references: list[dict[str, Any]] = []
+        for number, (kind, member) in enumerate(cast.references(), start=1):
+            reference: dict[str, Any] = {"image": number, "kind": kind}
+            if kind == CHARACTER:
+                reference["name"] = _one_line(member.name)
+            reference["appearance"] = _one_line(member.appearance_description)
+            references.append(reference)
+        inputs["cast"] = {"references": references}
     return inputs
 
 
@@ -219,7 +219,11 @@ def _render_inputs(inputs: dict[str, Any]) -> str:
             "picture shows what its description says: do not repeat the description):",
         ]
         for reference in cast["references"]:
-            label = "the character" if reference["kind"] == "character" else "the place"
+            if reference["kind"] == "character":
+                name = reference.get("name")
+                label = f"the character {name}" if name else "the character"
+            else:
+                label = "the place"
             lines.append(f"- Image {reference['image']}, {label}: {reference['appearance']}")
     lines += ["", f"Narration of this scene: {inputs['narration']}"]
     continuity = inputs["continuity"]
@@ -250,8 +254,9 @@ def _system_prompt(profile: ImagePromptProfile) -> str:
             "prompt."
         )
         references = [
-            "- The references: the pictures of the character and the place of this scene, "
-            "numbered in the order the image model sees them."
+            "- The references: the pictures of the characters and the place of this scene, "
+            "numbered in the order the image model sees them. A scene may have any number of "
+            "characters, and may have no place."
         ]
     else:
         opening = (

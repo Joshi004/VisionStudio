@@ -1,23 +1,26 @@
-import { Alert, Badge, Group, Select, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Group, MultiSelect, Select, Stack, Text } from "@mantine/core";
 
 import { useCast, useSetSceneCast, type CastMember } from "../../api/cast";
 import { describeError } from "../../api/errors";
 import type { ProjectDetail } from "../../api/projects";
 import type { Scene } from "../../api/scenes";
 
+/** The members as the choices of a MultiSelect (nothing chosen means none). */
+function memberChoices(members: CastMember[]) {
+  return members.map((member) => ({ value: String(member.id), label: member.name }));
+}
+
 /** The members as the choices of a Select, with "None" first. */
 function choices(members: CastMember[]) {
-  return [
-    { value: "", label: "None" },
-    ...members.map((member) => ({ value: String(member.id), label: member.name })),
-  ];
+  return [{ value: "", label: "None" }, ...memberChoices(members)];
 }
 
 /**
- * Which character and which place this scene shows, from the project's cast. The AI chooses
+ * Which characters and which place this scene shows, from the project's cast. The AI chooses
  * them (Choose who is in each scene), and a choice made here is the user's own: the AI never
- * replaces it. A scene shows at most one of each, and its first frame is made from their
- * pictures. Nothing is shown while the project has no cast.
+ * replaces it. A scene shows any characters (the order they are chosen in is the order of their
+ * pictures) and at most one place, and its first frame is made from their pictures. Nothing is
+ * shown while the project has no cast.
  */
 export function SceneCastPicker({ project, scene }: { project: ProjectDetail; scene: Scene }) {
   const { data: cast } = useCast(project.id);
@@ -27,8 +30,8 @@ export function SceneCastPicker({ project, scene }: { project: ProjectDetail; sc
     return null;
   }
 
-  function choose(characterId: number | null, locationId: number | null) {
-    save.mutate({ sceneId: scene.id, characterId, locationId });
+  function choose(characterIds: number[], locationId: number | null) {
+    save.mutate({ sceneId: scene.id, characterIds, locationId });
   }
 
   const source = scene.cast_assignment_source;
@@ -56,25 +59,25 @@ export function SceneCastPicker({ project, scene }: { project: ProjectDetail; sc
         )}
       </Group>
       <Group gap="sm" grow align="flex-start">
-        <Select
-          label="Character"
-          data={choices(cast.characters)}
-          value={scene.character_id === null ? "" : String(scene.character_id)}
-          onChange={(value) => choose(value ? Number(value) : null, scene.location_id)}
-          allowDeselect={false}
+        <MultiSelect
+          label="Characters"
+          placeholder="None"
+          data={memberChoices(cast.characters)}
+          value={scene.character_ids.map(String)}
+          onChange={(values) => choose(values.map(Number), scene.location_id)}
           disabled={save.isPending}
         />
         <Select
           label="Place"
           data={choices(cast.locations)}
           value={scene.location_id === null ? "" : String(scene.location_id)}
-          onChange={(value) => choose(scene.character_id, value ? Number(value) : null)}
+          onChange={(value) => choose(scene.character_ids, value ? Number(value) : null)}
           allowDeselect={false}
           disabled={save.isPending}
         />
       </Group>
       <Text size="xs" c="dimmed">
-        One character and one place at most. After a change, write the image prompt again: it is
+        Any characters, and one place at most. After a change, write the image prompt again: it is
         written for the pictures of the cast the scene shows.
       </Text>
       {save.isError && (

@@ -18,7 +18,7 @@ from typing import Any, Final, Literal
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Asset, Job, Project, Scene, Transcript
+from app.db.models import Asset, Job, Project, Scene, SceneCharacter, Transcript
 from app.jobs import store
 from app.services import scene_cuts, transcript_matching
 from app.services.cut_edits import CutEdit
@@ -268,7 +268,14 @@ async def apply_cut_edit(
             .execution_options(synchronize_session=False)
         )
 
-    # 3. The scenes that continue, rebuilt in place.
+    # 3. The scenes that continue, rebuilt in place. When their inputs go, so do the characters
+    # they showed (rows of `scene_character`, which `NO_INPUTS` cannot clear).
+    if clear_inputs and kept:
+        await session.execute(
+            delete(SceneCharacter)
+            .where(SceneCharacter.scene_id.in_([row.id for row in old_rows[:kept]]))
+            .execution_options(synchronize_session=False)
+        )
     for row, spec in zip(old_rows[:kept], specs[:kept], strict=True):
         row.start_s = spec.start_s
         row.end_s = spec.end_s

@@ -1,5 +1,6 @@
-"""The `assign_cast` job: a language model chooses, for every scene, the one character and the one
-place it shows, from the project's cast (ANALYSIS.md Section 6.2; project cast).
+"""The `assign_cast` job: a language model chooses, for every scene, the characters (none, one or
+several) and the one place it shows, from the project's cast (ANALYSIS.md Section 6.2; project
+cast).
 
 It is a project job: one request for all the scenes, one job. It is a paid job, so the rules of
 `write_image_prompt` hold here too (they are in `jobs/llm_call.py`): it only starts from a click
@@ -7,9 +8,10 @@ or from an automatic run, every answer is saved on the job the moment it arrives
 attempts, a refusal is never retried, and a restart never re-runs it (`never_rerun`).
 
 The model can only choose from the cast's lists (a name that is not on them counts as none), and
-a scene has room for one character and one place. A choice the author made by hand is never
+a scene has room for as many characters as the image model takes pictures
+(`cast.MAX_SCENE_CHARACTERS`) and one place. A choice the author made by hand is never
 overwritten (`cast_assignment.plan_write`). A scene the model chose *nobody* for is still a
-decision: its source is `ai` and both ids are empty.
+decision: its source is `ai`, it has no characters and its place is empty.
 
 The save writes nothing when the scenes changed while the model was working: it checks that every
 scene still has the words and the stretch of voiceover it was sent with, the same rule as the
@@ -183,20 +185,21 @@ class AssignCastHandler(JobHandler):
                 by_scene = {item.scene_id: item for item in assignments.scenes}
                 for scene in current:
                     item = by_scene[scene.id]
-                    values = cast_assignment.plan_write(
-                        scene,
-                        cast_assignment.Assignment(
-                            scene.id,
-                            item.character_id if item.character_id in characters else None,
-                            item.location_id if item.location_id in locations else None,
-                        ),
-                        job_id,
+                    # A member deleted in the meantime counts as none.
+                    present = cast_assignment.Assignment(
+                        scene.id,
+                        tuple(i for i in item.character_ids if i in characters),
+                        item.location_id if item.location_id in locations else None,
                     )
+                    values = cast_assignment.plan_write(scene, present, job_id)
                     if values is None:
                         kept += 1
                         continue
                     for column, value in values.items():
                         setattr(scene, column, value)
+                    await cast_service.set_scene_characters(
+                        session, scene.id, present.character_ids
+                    )
                 output["kept_manual"] = kept
                 if not await store.finish_job(session, job_id, output):
                     await session.rollback()

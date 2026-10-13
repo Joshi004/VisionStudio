@@ -55,7 +55,7 @@ function JobLine({ label, job, now }: { label: string; job: CastJob; now: number
  * The project's cast: the characters and the places of the story, each with one reference
  * picture, so every scene that shows one looks the same. Find characters and places (a paid call
  * to the language model that reads the script) and Choose who is in each scene (another) only
- * start from a click, with a confirmation. A scene shows at most one character and one place:
+ * start from a click, with a confirmation. A scene shows any characters and at most one place:
  * its first frame is made from their pictures. Progress shows by itself.
  */
 export function CastSection({ project }: { project: ProjectDetail }) {
@@ -89,7 +89,7 @@ export function CastSection({ project }: { project: ProjectDetail }) {
         <Title order={4}>Characters and places</Title>
         <Text size="sm" c="dimmed">
           Each character and place of the story gets one reference picture, so every scene that
-          shows it looks the same. A scene shows at most one character and one place, and its
+          shows it looks the same. A scene shows any characters and at most one place, and its
           first frame is made from their pictures. Nobody speaks: a narrator tells the story.
         </Text>
 
@@ -229,7 +229,7 @@ export function CastSection({ project }: { project: ProjectDetail }) {
       >
         <Stack gap="sm">
           <Text size="sm">
-            Chooses, for every scene, the one character and the one place it shows, from the cast
+            Chooses, for every scene, the characters and the one place it shows, from the cast
             above: one paid call that sends the narration of every scene and the cast. A choice you
             made yourself is kept.
           </Text>

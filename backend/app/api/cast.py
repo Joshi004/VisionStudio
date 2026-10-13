@@ -8,7 +8,7 @@ next step.
 lists the cast. It is a paid call, so it only runs from this click or from an automatic run, and
 it replaces the whole cast, so it answers 409 until the request confirms that when there is a
 cast already. `POST .../assign-cast` starts the `assign_cast` job (a paid call too), which
-chooses the one character and the one place each scene shows.
+chooses the characters and the one place each scene shows.
 
 A cast member is edited with `PATCH .../cast/{kind}/{id}` and gets its reference picture from
 `POST .../cast/{kind}/{id}/write-reference-prompt` (a paid call that writes the prompt for the
@@ -163,11 +163,13 @@ class CastMemberPatch(BaseModel):
 
 
 class SceneCastRequest(BaseModel):
-    """Both fields are always sent: null means the scene shows none."""
+    """Both fields are always sent: an empty list means the scene shows no character, and null
+    that it shows no place. The characters are listed in the order of their pictures.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    character_id: MemberId | None
+    character_ids: list[MemberId]
     location_id: MemberId | None
 
 
@@ -273,15 +275,17 @@ async def cast_out(session: AsyncSession, project: Project) -> CastOut:
     extract_job = await store.latest_job(session, project.id, cast_service.EXTRACT_JOB)
     assign_job = await store.latest_job(session, project.id, cast_service.ASSIGN_JOB)
 
+    character_ids = await cast_service.load_character_ids(
+        session, [scene.id for scene in state.scenes]
+    )
+
     shown: dict[str, list[CastMemberOut]] = {cast_service.CHARACTER: [], cast_service.LOCATION: []}
     for kind, member in cast.members():
         key = cast_service.member_key(kind, member.id)
-        count = sum(
-            1
-            for scene in state.scenes
-            if (scene.character_id if kind == cast_service.CHARACTER else scene.location_id)
-            == member.id
-        )
+        if kind == cast_service.CHARACTER:
+            count = sum(1 for scene in state.scenes if member.id in character_ids[scene.id])
+        else:
+            count = sum(1 for scene in state.scenes if scene.location_id == member.id)
         shown[kind].append(
             _member_out(
                 project,
@@ -398,9 +402,9 @@ async def extract_cast(
     responses={**_NOT_FOUND, **_BLOCKED},
 )
 async def assign_cast(project_id: int, session: SessionDep) -> JobDetail:
-    """Starts the job that chooses, for every scene, the one character and the one place it
-    shows (a paid call to the language model), or returns the one already active. A choice the
-    user made by hand is kept.
+    """Starts the job that chooses, for every scene, the characters and the one place it shows
+    (a paid call to the language model), or returns the one already active. A choice the user
+    made by hand is kept.
     """
     project = await load_project(session, project_id)
     await scenes_service.lock_scenes(session, project.id)
@@ -611,12 +615,19 @@ async def _start(
 async def set_scene_cast(
     project_id: int, scene_id: int, body: SceneCastRequest, session: SessionDep
 ) -> ScenesOut:
-    """Chooses the character and the place one scene shows (null for none). The choice is the
-    user's: the AI never overwrites it. Answers with the scenes.
+    """Chooses the characters and the place one scene shows (an empty list or null for none).
+    The choice is the user's: the AI never overwrites it. Answers with the scenes.
     """
     project = await load_project(session, project_id)
     if not 1 <= scene_id <= _MAX_ID:
         raise _missing(f"Scene {scene_id} does not exist in this project.")
+    if len(set(body.character_ids)) != len(body.character_ids):
+        raise _unprocessable("A character can be chosen only once for a scene.")
+    if len(body.character_ids) > cast_service.MAX_SCENE_CHARACTERS:
+        raise _unprocessable(
+            f"A scene shows at most {cast_service.MAX_SCENE_CHARACTERS} characters: the image "
+            "model takes a limited number of pictures."
+        )
     await scenes_service.lock_scenes(session, project.id)
     scene = await session.get(Scene, scene_id, populate_existing=True)
     if scene is None or scene.project_id != project.id:
@@ -624,17 +635,15 @@ async def set_scene_cast(
         raise _missing(f"Scene {scene_id} does not exist in this project.")
 
     cast = await cast_service.load_cast(session, project.id)
-    if (
-        body.character_id is not None
-        and cast.find(cast_service.CHARACTER, body.character_id) is None
-    ):
-        await session.rollback()
-        raise _unprocessable(f"Character {body.character_id} does not exist in this project.")
+    for character_id in body.character_ids:
+        if cast.find(cast_service.CHARACTER, character_id) is None:
+            await session.rollback()
+            raise _unprocessable(f"Character {character_id} does not exist in this project.")
     if body.location_id is not None and cast.find(cast_service.LOCATION, body.location_id) is None:
         await session.rollback()
         raise _unprocessable(f"Place {body.location_id} does not exist in this project.")
 
-    scene.character_id = body.character_id
+    await cast_service.set_scene_characters(session, scene.id, body.character_ids)
     scene.location_id = body.location_id
     scene.cast_assignment_source = "manual"
     scene.cast_assignment_job_id = None

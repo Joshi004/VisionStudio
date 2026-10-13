@@ -22,12 +22,13 @@ attempt (after a pre-emption, an expired result or a server that could not be re
 same stored request, because "the correct response to a pre-emption failure is to resubmit the
 exact same request unchanged" (the server's guide). A new seed comes only with a new job.
 
-**A scene of the cast is made by the image model's edit.** A scene that shows a character or a
-place of the project's cast (`scene.character_id`, `scene.location_id`) has an image prompt
-written for reference pictures (`QWEN_IMAGE_21_CHARACTER_EDIT`), so its frame is made by the edit
-endpoint, with the picture of the character (image 1) and of the place (the next) as references,
-uploaded at every start (`jobs/reference_upload.py`). It waits until those pictures exist
-(`cast.references_block`). A scene that shows neither is made from the prompt alone, as before.
+**A scene of the cast is made by the image model's edit.** A scene that shows characters or a
+place of the project's cast (`scene_character`, `scene.location_id`) has an image prompt written
+for reference pictures (`QWEN_IMAGE_21_CHARACTER_EDIT`), so its frame is made by the edit
+endpoint, with the picture of each character (images 1, 2 and so on, in the scene's order) and
+of the place (the next) as references, uploaded at every start (`jobs/reference_upload.py`). It
+waits until those pictures exist (`cast.references_block`). A scene that shows neither is made
+from the prompt alone, as before.
 
 What it makes: Qwen-Image-2.1 answers in one of seven shapes at its native 2K size
 (`services/image_models.ASPECT_SIZES`), which are not the project's generation size. The nearest
@@ -88,8 +89,8 @@ class _Read:
     mode: image_models.ImageMode
     # The approved OpenAPI document, or None when none is recorded.
     spec: dict[str, Any] | None
-    # The one character and the one place the scene shows (the project's cast). A scene that
-    # shows either is made by the image model's edit, from their reference pictures.
+    # The characters and the place the scene shows (the project's cast). A scene that shows any
+    # of them is made by the image model's edit, from their reference pictures.
     scene_cast: cast_service.SceneCast = cast_service.NO_CAST
 
 
@@ -175,8 +176,8 @@ class GenerateFrameHandler(SceneFrameHandler):
         """
         await self._phase(job_id, phases.PREPARING_IMAGE_REQUEST)
         prompt = (scene.image_prompt or "").strip()
-        # A scene that shows a character or a place of the cast is made by the image model's
-        # edit, from their pictures (the character first). Any other scene is text to image.
+        # A scene that shows characters or a place of the cast is made by the image model's
+        # edit, from their pictures (the characters first). Any other scene is text to image.
         references = [
             {"cast_kind": kind, "cast_id": member.id, "asset_id": member.reference_asset_id}
             for kind, member in read.scene_cast.references()

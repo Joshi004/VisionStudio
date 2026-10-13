@@ -1,5 +1,5 @@
 """Uploading the reference pictures of a scene's cast to the GPU server, for the image model's
-edit (project cast). Used by `generate_frame` for a scene that shows a character or a place.
+edit (project cast). Used by `generate_frame` for a scene that shows characters or a place.
 
 A character's picture is stored with a transparent backdrop (`services/background_removal.py`).
 It is sent on plain white instead: what a server does with transparent pixels is not known, and
@@ -30,8 +30,9 @@ async def upload_references(
     base_url: str, references: Sequence[tuple[str, int]]
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """Uploads the pictures, in order, and returns the server's asset ids with a record of what
-    was uploaded. `references` are `(kind, asset id)`: the character's picture first, then the
-    place's. Raises `GpuCallError` (an upload failed) or `StorageError` (a file is missing).
+    was uploaded. `references` are `(kind, asset id)`: the characters' pictures first, in the
+    scene's order, then the place's. Raises `GpuCallError` (an upload failed) or `StorageError`
+    (a file is missing).
     """
     storage = get_storage()
     remote_ids: list[str] = []

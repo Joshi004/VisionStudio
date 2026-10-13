@@ -49,8 +49,8 @@ NO_INPUTS: Final[dict[str, None]] = {
     "last_frame_asset_id": None,
     "selected_clip_asset_id": None,
     # Who and what the scene shows (the project's cast): a choice made for this stretch of the
-    # narration, so it goes when the stretch changes.
-    "character_id": None,
+    # narration, so it goes when the stretch changes. The scene's characters are rows of
+    # `scene_character`, not columns, so `apply_cut_edit` deletes them next to these.
     "location_id": None,
     "cast_assignment_source": None,
     "cast_assignment_job_id": None,
