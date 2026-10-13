@@ -222,9 +222,10 @@ export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
           </List>
           <Alert color="yellow" title="This makes paid calls">
             <Text size="sm">
-              The language model (scenes, descriptions, image prompts, last frame prompts) and your
-              GPU server (first frames, last frames, transcription, clips) are called. A scene that fails is
-              tried again, up to {maxTries} tries in a step, and each try can be paid. Stopping
+              The language model (scenes, the characters and places, who is in each scene,
+              descriptions, image prompts, last frame prompts) and your GPU server (the reference
+              pictures, first frames, last frames, transcription, clips) are called. A scene that
+              fails is tried again, up to {maxTries} tries in a step, and each try can be paid. Stopping
               the run does not take back a call that is already running.
             </Text>
           </Alert>

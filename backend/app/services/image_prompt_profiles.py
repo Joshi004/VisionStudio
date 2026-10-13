@@ -61,6 +61,9 @@ class ImagePromptProfile:
     min_words: int
     max_words: int
     rules: tuple[TextRule, ...]
+    # The image model is shown reference pictures next to the prompt (a scene that shows a cast
+    # member). The instructions then say so, and the inputs list the pictures in their order.
+    uses_references: bool = False
 
 
 _SEEDREAM_EXAMPLE_PROMPT: Final = (
@@ -386,7 +389,326 @@ QWEN_IMAGE_21_EDIT: Final = ImagePromptProfile(
     ),
 )
 
+# --- The project's cast: reference pictures, and scenes made from them ---------------------------
+#
+# These profiles are written from the same published Qwen guidance as the ones above (which they
+# follow in everything but their subject), not from tests of this model's output here. Check them
+# against real pictures and raise `version` when they change.
+
+# What the cast writer's inputs hold (`cast_reference_prompt_writer.prompt_inputs`): a character's
+# or a place's description, and the style of the video.
+_CHARACTER_SHEET_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "kind": "character",
+    "style_prefix": "soft watercolour illustration",
+    "description_instructions": None,
+    "appearance": (
+        "An elderly lighthouse keeper of about seventy, lean and weathered, with deeply tanned "
+        "skin, a short white beard, a lined, kind face and thinning white hair. He wears a thick "
+        "navy wool fisherman's jumper with a high collar and patched elbows, loose charcoal "
+        "trousers tucked into worn brown leather boots, and a brass-buttoned oilskin coat folded "
+        "over his left forearm. In his right hand he carries a small brass lantern."
+    ),
+    "personality": "Patient and watchful, with the calm of a man who has spent his life alone.",
+}
+
+_CHARACTER_SHEET_EXAMPLE_PROMPT: Final = (
+    "A soft watercolour illustration of an elderly lighthouse keeper standing alone and facing "
+    "the viewer. He is a lean, weathered man of about seventy with deeply tanned skin, a short "
+    "white beard, a lined, kind face and thinning white hair, and his expression is calm and "
+    "watchful. He wears a thick navy wool fisherman's jumper with a high collar and patched "
+    "elbows, loose charcoal trousers tucked into worn brown leather boots, and a brass-buttoned "
+    "oilskin coat folded over his left forearm; in his right hand he holds a small brass "
+    "lantern. He stands in a relaxed, neutral pose with his arms slightly away from his body, so "
+    "the jumper, the coat and his hands can be seen, and his whole figure from boots to hair "
+    "fills the tall frame, centred, with a little space around him. He is set against a plain, "
+    "seamless white studio backdrop and lit by soft, even light from the front, so the white "
+    "behind him stays clean and bright. The palette is muted navy, charcoal, brown and brass, "
+    "drawn in fine ink linework with gentle watercolour washes, like a quiet storybook "
+    "illustration."
+)
+
+# Written for a character who will be cut out of the picture afterwards (`background_removal`).
+# The backdrop is plain white, never a key colour: a segmentation model finds the subject whatever
+# its colours, while a green or blue key would cut into costumes and skin of that colour.
+QWEN_IMAGE_21_CHARACTER_SHEET: Final = ImagePromptProfile(
+    id="qwen-image-2.1-character-sheet",
+    version=1,
+    image_model="Qwen-Image-2.1",
+    prompt_rules="\n".join(
+        [
+            'Rules for "image_prompt", the prompt for the image model. The picture is the '
+            "reference of one character: a single figure on a plain white backdrop, which is "
+            "cut out afterwards.",
+            "1. One paragraph of plain English prose, in complete sentences and the present "
+            "tense, 120 to 220 words. No lists, no headings, no labels and no piles of "
+            "comma-separated keywords.",
+            "2. Open with the kind of picture it is, taken from the style (for example 'A soft "
+            "watercolour illustration of' or 'A natural studio photograph of'), and go straight "
+            "to the character standing alone and facing the viewer.",
+            "3. Then describe the character from the appearance you are given: apparent age, "
+            "build, skin tone, face, hair and expression, then the clothing from head to foot "
+            "with its colours and materials, the jewellery, and anything the character carries. "
+            "Keep the words of the appearance where you can, and add nothing that changes who "
+            "the character is. The personality only guides the bearing and the expression.",
+            "4. Then the pose and the framing: a relaxed, neutral standing pose with the arms "
+            "slightly away from the body so the clothes and the hands can be seen, the whole "
+            "figure from head to feet in the frame, centred, with a little space around it.",
+            "5. Then the backdrop and the light, in these words or close to them: the character "
+            "is set against a plain, seamless white studio backdrop and lit by soft, even light "
+            "from the front. The backdrop is the only thing around the character: say nothing "
+            "about scenery, furniture, a floor or any other object.",
+            "6. Put the author's style into words as the last sentence, in the style of the "
+            "whole video. With none given, use a natural, realistic look.",
+            "7. Nothing is written in the picture: no text, captions, letters, numbers, signs "
+            "with words, labels, logos, watermarks, borders or split panels. The model draws any "
+            "wording it is given, so do not name any of these, not even to say there are none.",
+            "8. Describe only what is visible. The model has no negative prompt, and naming a "
+            "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
+            "the space instead.",
+            "9. Never write the character's name, and never name a real person or a famous "
+            "figure: describe the looks only.",
+            "10. Concrete nouns and plain adjectives. No quality tags (such as 8k, masterpiece "
+            "or highly detailed) and no camera brand names.",
+        ]
+    ),
+    example_inputs=_CHARACTER_SHEET_EXAMPLE_INPUTS,
+    example_answer=json.dumps(
+        {"image_prompt": _CHARACTER_SHEET_EXAMPLE_PROMPT}, ensure_ascii=False
+    ),
+    min_words=120,
+    max_words=220,
+    rules=(
+        *SEEDREAM_50_LITE.rules,
+        TextRule(
+            _NEGATIVE_WORDS,
+            "A negative found (no, not, without, nothing). The image model has no negative "
+            "prompt, and naming a thing can make it appear: say what is there instead.",
+        ),
+    ),
+)
+
+_LOCATION_SHEET_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "kind": "location",
+    "style_prefix": "soft watercolour illustration",
+    "description_instructions": None,
+    "appearance": (
+        "A low wooden mountain tea house with a steep grey-slate roof and deep eaves, standing on "
+        "a terrace of flat stone slabs beside a gnarled pine. Its sliding paper doors are closed "
+        "and a row of round red paper lanterns hangs under the front eave. Pale blue mountain "
+        "ridges rise behind it into morning mist."
+    ),
+}
+
+_LOCATION_SHEET_EXAMPLE_PROMPT: Final = (
+    "A soft watercolour illustration of an empty mountain tea house at dawn, seen as a wide "
+    "establishing view. A low wooden building with a steep grey-slate roof and deep eaves "
+    "stands on a terrace of flat stone slabs, its sliding paper doors closed and a row of round "
+    "red paper lanterns hanging unlit under the front eave. In the foreground a stone path winds "
+    "up from the lower left between clipped green shrubs; in the middle of the picture the tea "
+    "house sits slightly right of centre beside a gnarled pine; behind it, pale blue mountain "
+    "ridges rise one beyond the other into soft mist, filling the upper part of the frame. The "
+    "camera is at eye level with a gentle 35 mm look and a calm, balanced composition. Cool, low "
+    "light from the left runs across the roof and the stones, and a thin mist hangs in the "
+    "valley. The palette is slate grey, soft green, pale blue and warm cedar brown, with the red "
+    "lanterns as the one bright accent. The finish is fine ink linework with gentle watercolour "
+    "washes, like a quiet storybook illustration."
+)
+
+# A place is kept whole: its picture is not cut out, because the place is the background.
+QWEN_IMAGE_21_LOCATION_SHEET: Final = ImagePromptProfile(
+    id="qwen-image-2.1-location-sheet",
+    version=1,
+    image_model="Qwen-Image-2.1",
+    prompt_rules="\n".join(
+        [
+            'Rules for "image_prompt", the prompt for the image model. The picture is the '
+            "reference of one place of the story: an empty establishing view that every scene "
+            "set there is made from.",
+            "1. One paragraph of plain English prose, in complete sentences and the present "
+            "tense, 120 to 220 words. No lists, no headings, no labels and no piles of "
+            "comma-separated keywords.",
+            "2. Open with the kind of picture it is, taken from the style (for example 'A soft "
+            "watercolour illustration of' or 'A natural photograph of'), and go straight to the "
+            "place and its main features.",
+            "3. Then describe the place from the description you are given: the buildings or "
+            "the landscape, their materials and colours, and the details that make it this "
+            "place and no other. Keep the words of the description where you can, and add "
+            "nothing that changes what the place is.",
+            "4. Then say where things sit in the frame (the foreground, the middle and the "
+            "background; left, centre and right; the upper and lower parts of the picture), "
+            "the angle (a wide establishing view at eye level) and the lens look (for example "
+            "'35 mm look').",
+            "5. Then the light (where it comes from, its direction and quality), the time of "
+            "day, the weather, the colour palette and the mood.",
+            "6. The place stands empty: put no person, animal or vehicle in it, and do not "
+            "mention any.",
+            "7. Put the author's style into words as the last sentence, in the style of the "
+            "whole video. With none given, use a natural, realistic look.",
+            "8. Nothing is written in the picture: no text, captions, letters, numbers, signs "
+            "with words, labels, posters, screens, pages, logos, watermarks, borders or split "
+            "panels. The model draws any wording it is given, so do not name any of these, not "
+            "even to say there are none, and describe any surface that could carry words as "
+            "plain or blank.",
+            "9. Describe only what is visible. The model has no negative prompt, and naming a "
+            "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
+            "the space instead.",
+            "10. Concrete nouns and plain adjectives. No quality tags (such as 8k, masterpiece "
+            "or highly detailed) and no camera brand names.",
+        ]
+    ),
+    example_inputs=_LOCATION_SHEET_EXAMPLE_INPUTS,
+    example_answer=json.dumps({"image_prompt": _LOCATION_SHEET_EXAMPLE_PROMPT}, ensure_ascii=False),
+    min_words=120,
+    max_words=220,
+    rules=(
+        *SEEDREAM_50_LITE.rules,
+        TextRule(
+            _NEGATIVE_WORDS,
+            "A negative found (no, not, without, nothing). The image model has no negative "
+            "prompt, and naming a thing can make it appear: say what is there instead.",
+        ),
+    ),
+)
+
+# The inputs of a scene made from reference pictures: the same as any scene's, plus the pictures
+# in the order they are sent (`image_prompt_writer.prompt_inputs`, key `cast`).
+_CHARACTER_EDIT_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "orientation": "portrait",
+    "width": 1088,
+    "height": 1920,
+    "style_prefix": "soft watercolour illustration",
+    "description_instructions": None,
+    "world": None,
+    "cast": {
+        "references": [
+            {
+                "image": 1,
+                "kind": "character",
+                "appearance": _CHARACTER_SHEET_EXAMPLE_INPUTS["appearance"],
+            },
+            {
+                "image": 2,
+                "kind": "location",
+                "appearance": (
+                    "The circular glass lamp room at the top of a lighthouse: a large brass lamp "
+                    "and lens at its centre, a narrow iron rail around it, and tall windows "
+                    "showing the sea."
+                ),
+            },
+        ]
+    },
+    "narration": "Every evening, he climbed the stairs to wake the lamp.",
+    "continuity": "new_place",
+    "first_frame_description": (
+        "Medium shot in the lamp room at dusk. The keeper stands beside the great brass lamp, "
+        "turned towards it, one hand on the iron rail, about to begin his evening work."
+    ),
+    "video_prompt": (
+        "The keeper reaches out and lays his hand on the lamp, and its glow slowly warms the "
+        "room. Slow push in. Distant waves, no music, no voices."
+    ),
+}
+
+_CHARACTER_EDIT_EXAMPLE_PROMPT: Final = (
+    "A soft watercolour illustration, made from the two reference pictures: the keeper in image "
+    "1 stands in the lamp room of image 2, keeping his face, his hair and his clothes exactly as "
+    "they are in image 1. He stands just left of the great brass lamp, turned three-quarters "
+    "towards it, one hand resting on the iron rail and the other raised as if about to reach for "
+    "the lamp, his expression calm and attentive. The lamp room of image 2 fills the picture "
+    "around him: the circular room of tall glass windows, the large brass lamp and lens at its "
+    "centre, and the dusk sea showing deep blue through the glass. In the tall portrait frame he "
+    "fills the left half from the lower third up to the upper third, the lamp rises in the right "
+    "half, and the windows behind them both reach the top edge. The camera is at chest height and "
+    "level, a medium shot with a gentle 35 mm look and soft depth of field. The light is the "
+    "warm amber of the brass lamp and the last cool blue of dusk through the windows. The "
+    "palette is navy, brass amber and deep blue, drawn in fine ink linework with gentle "
+    "watercolour washes, like a quiet storybook illustration."
+)
+
+# A scene that shows a character or a place of the cast: its first frame is made by the image
+# model's edit, from the picture of each (image 1 is the character, the next is the place).
+QWEN_IMAGE_21_CHARACTER_EDIT: Final = ImagePromptProfile(
+    id="qwen-image-2.1-character-edit",
+    version=1,
+    image_model="Qwen-Image-2.1 (edit, with reference pictures)",
+    prompt_rules="\n".join(
+        [
+            'Rules for "image_prompt", the prompt for the image model. The model is shown the '
+            "reference pictures listed under 'References', numbered in that order, and makes a "
+            "new picture of this scene from them.",
+            "1. One paragraph of plain English prose, in complete sentences and the present "
+            "tense, 80 to 260 words. No lists, no headings, no labels and no piles of "
+            "comma-separated keywords.",
+            "2. Open with the kind of picture it is, taken from the style, and say which "
+            "reference pictures it is made from. Name each by its number: 'the character in "
+            "image 1', 'the place in image 2'.",
+            "3. Never describe the character's face, hair, build, skin or clothes: the picture "
+            "shows them, and any words about them can change them. Say it once, in one "
+            "sentence: the character keeps the face, hair and clothes exactly as they are in "
+            "its image. Then say only what the character does, where it stands or sits, which "
+            "way it faces and what its expression is.",
+            "4. With a picture of the place, say where in that place the scene is and what part "
+            "of it is seen, calling it 'the place in image 2' (use its number), and never "
+            "describe the place again. With no picture of the place, describe the setting in "
+            "full.",
+            "5. Then say where things sit in the frame (the foreground, the middle and the "
+            "background; left, centre and right; the upper and lower parts of the picture), the "
+            "shot size and the angle, the lens look, the light, the colour palette and, last, "
+            "the style.",
+            "6. Keep everything the first frame description says, and add detail to it. Never "
+            'change it. With no first frame description ("none"), picture the instant just '
+            "before the motion in the video prompt begins. It is the instant just before the "
+            "motion begins: the character in place and ready to move, never in the middle of "
+            "the action and never after it.",
+            "7. A scene with a picture of a place and none of a character shows the place alone, "
+            "from the camera position the descriptions give. The only person who may be clearly "
+            "seen is the character of image 1. Anyone else the narration mentions is left out, "
+            "or is a small distant figure seen from behind.",
+            "8. Compose for the frame shape you are given, and use the whole frame. The picture "
+            "is trimmed slightly to fit the exact size, so keep the main subject and every "
+            "important detail clear of the outer edges.",
+            "9. Nothing is written in the picture: no text, captions, letters, numbers, signs "
+            "with words, labels, posters, screens, pages, logos, watermarks, borders or split "
+            "panels. The model draws any wording it is given, so do not name any of these, not "
+            "even to say there are none, and describe any surface that could carry words as "
+            "plain or blank.",
+            "10. Describe only what is visible. The model has no negative prompt, and naming a "
+            "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
+            "the space instead.",
+            "11. When the world lists the character or the place of a reference picture, ignore "
+            "its description and use the picture. Never write a character's name.",
+            "12. Concrete nouns and plain adjectives. No quality tags (such as 8k, masterpiece "
+            "or highly detailed) and no camera brand names.",
+        ]
+    ),
+    example_inputs=_CHARACTER_EDIT_EXAMPLE_INPUTS,
+    example_answer=json.dumps({"image_prompt": _CHARACTER_EDIT_EXAMPLE_PROMPT}, ensure_ascii=False),
+    min_words=80,
+    max_words=260,
+    rules=(
+        *SEEDREAM_50_LITE.rules,
+        TextRule(
+            _NEGATIVE_WORDS,
+            "A negative found (no, not, without, nothing). The image model has no negative "
+            "prompt, and naming a thing can make it appear: say what is there instead.",
+        ),
+    ),
+    uses_references=True,
+)
+
 # The image adapter the job asks for.
 ACTIVE_IMAGE_PROFILE: Final = QWEN_IMAGE_21
 # The image adapter that edits the first frame into the last frame.
 ACTIVE_EDIT_PROFILE: Final = QWEN_IMAGE_21_EDIT
+# The reference pictures of the cast: a character on a white backdrop, a place as it is.
+ACTIVE_CHARACTER_SHEET_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET
+ACTIVE_LOCATION_SHEET_PROFILE: Final = QWEN_IMAGE_21_LOCATION_SHEET
+# The image adapter that makes a first frame from the pictures of the scene's cast.
+ACTIVE_CAST_SCENE_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_EDIT
+
+
+def scene_profile(*, has_references: bool) -> ImagePromptProfile:
+    """The profile that writes a scene's first frame prompt: the one for reference pictures when
+    the scene shows a character or a place of the cast, else the ordinary one.
+    """
+    return ACTIVE_CAST_SCENE_PROFILE if has_references else ACTIVE_IMAGE_PROFILE

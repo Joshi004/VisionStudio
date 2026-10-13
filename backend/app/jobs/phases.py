@@ -121,8 +121,25 @@ FRAME_FINISHING_PHASES: Final = frozenset(
     {DOWNLOADING_IMAGE, SAVING_IMAGE, FITTING_FRAME, SAVING_FRAME}
 )
 
+# --- Running: the project's cast (characters and places) ---------------------------------
+# The three language model jobs also use PREPARING_PROMPT and `asking_model` from above. A
+# reference picture is made on the GPU server like a first frame, so it also uses SUBMITTING,
+# the cluster phases, DOWNLOADING_IMAGE and SAVING_IMAGE.
+SAVING_CAST: Final = "saving the cast"
+SAVING_REFERENCE_PROMPT: Final = "saving the reference prompt"
+SAVING_CAST_ASSIGNMENT: Final = "saving who is in each scene"
+# A character's picture has its backdrop removed after it is downloaded.
+REMOVING_BACKDROP: Final = "removing the backdrop"
+SAVING_REFERENCE: Final = "saving the reference picture"
+
+REFERENCE_FINISHING_PHASES: Final = frozenset(
+    {DOWNLOADING_IMAGE, SAVING_IMAGE, REMOVING_BACKDROP, SAVING_REFERENCE}
+)
+
 # Every phase in which a remote job's result is being fetched and stored.
-FINISHING_PHASES: Final = CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES
+FINISHING_PHASES: Final = (
+    CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES
+)
 
 # --- Finished ---------------------------------------------------------------------
 DONE: Final = "done"

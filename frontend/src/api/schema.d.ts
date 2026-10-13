@@ -859,6 +859,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/cast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cast
+         * @description The project's characters and places, and what can be done with them next.
+         */
+        get: operations["get_cast_api_projects__project_id__cast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/extract-cast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Extract Cast
+         * @description Starts the job that finds the characters and the places in the script (a paid call to the
+         *     language model), or returns the one already active. It replaces the whole cast when it
+         *     finishes, so it needs `confirm_replace` when there is one.
+         */
+        post: operations["extract_cast_api_projects__project_id__extract_cast_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/assign-cast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Cast
+         * @description Starts the job that chooses, for every scene, the one character and the one place it
+         *     shows (a paid call to the language model), or returns the one already active. A choice the
+         *     user made by hand is kept.
+         */
+        post: operations["assign_cast_api_projects__project_id__assign_cast_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/cast/{kind}/{member_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit Member
+         * @description Changes the text of one character or place. Answers with the whole cast.
+         */
+        patch: operations["edit_member_api_projects__project_id__cast__kind___member_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/cast/{kind}/{member_id}/write-reference-prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Reference Prompt
+         * @description Starts the job that writes the prompt for the member's reference picture (a paid call to
+         *     the language model), replacing the prompt it has, or returns the one already active.
+         */
+        post: operations["write_reference_prompt_api_projects__project_id__cast__kind___member_id__write_reference_prompt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/cast/{kind}/{member_id}/generate-reference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Reference
+         * @description Starts the member's reference picture (an image made on the GPU server), or returns the
+         *     job already active. A member with no prompt yet gets its prompt written first (a paid call
+         *     to the language model), and the picture is made as soon as it is.
+         */
+        post: operations["generate_reference_api_projects__project_id__cast__kind___member_id__generate_reference_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scenes/{scene_id}/cast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Scene Cast
+         * @description Chooses the character and the place one scene shows (null for none). The choice is the
+         *     user's: the AI never overwrites it. Answers with the scenes.
+         */
+        patch: operations["set_scene_cast_api_projects__project_id__scenes__scene_id__cast_patch"];
+        trace?: never;
+    };
     "/api/projects/{project_id}/render": {
         parameters: {
             query?: never;
@@ -1477,6 +1625,87 @@ export interface components {
              */
             discard_scenes_with_inputs: boolean;
         };
+        /** CastMemberOut */
+        CastMemberOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "character" | "location";
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Appearance Description */
+            appearance_description: string;
+            /** Personality Description */
+            personality_description: string | null;
+            /** Voice Description */
+            voice_description: string | null;
+            /** Reference Prompt */
+            reference_prompt: string | null;
+            /** Reference Prompt Source */
+            reference_prompt_source: ("manual" | "ai") | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "prompted" | "ready" | "failed";
+            /** Reference Url */
+            reference_url: string | null;
+            /** Reference Has Transparency */
+            reference_has_transparency: boolean;
+            /** Reference Width */
+            reference_width: number | null;
+            /** Reference Height */
+            reference_height: number | null;
+            prompt_job: components["schemas"]["JobSummary"] | null;
+            image_job: components["schemas"]["JobSummary"] | null;
+            /** Prompt Blocked Reason */
+            prompt_blocked_reason: string | null;
+            /** Image Blocked Reason */
+            image_blocked_reason: string | null;
+            /** Scene Count */
+            scene_count: number;
+        };
+        /**
+         * CastMemberPatch
+         * @description What to change in a member. Only the fields that are sent change. A blank personality,
+         *     voice or reference prompt clears it. A prompt written by hand is kept by every automatic run.
+         */
+        CastMemberPatch: {
+            /** Name */
+            name?: string | null;
+            /** Appearance Description */
+            appearance_description?: string | null;
+            /** Personality Description */
+            personality_description?: string | null;
+            /** Voice Description */
+            voice_description?: string | null;
+            /** Reference Prompt */
+            reference_prompt?: string | null;
+        };
+        /** CastOut */
+        CastOut: {
+            /** Characters */
+            characters: components["schemas"]["CastMemberOut"][];
+            /** Locations */
+            locations: components["schemas"]["CastMemberOut"][];
+            extract_job: components["schemas"]["JobSummary"] | null;
+            /** Extract Blocked Reason */
+            extract_blocked_reason: string | null;
+            /** Extract Needs Confirmation */
+            extract_needs_confirmation: boolean;
+            /** Script Changed */
+            script_changed: boolean;
+            assign_job: components["schemas"]["JobSummary"] | null;
+            /** Assign Blocked Reason */
+            assign_blocked_reason: string | null;
+            /** Scenes Assigned */
+            scenes_assigned: number;
+            /** Scene Count */
+            scene_count: number;
+        };
         /** CharacterBrief */
         CharacterBrief: {
             /** Id */
@@ -1740,6 +1969,17 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /**
+         * ExtractCastRequest
+         * @description What the user has confirmed. Every flag is off unless sent.
+         */
+        ExtractCastRequest: {
+            /**
+             * Confirm Replace
+             * @default false
+             */
+            confirm_replace: boolean;
+        };
         /** FirstFrameIn */
         FirstFrameIn: {
             /**
@@ -1885,7 +2125,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast";
             /**
              * Status
              * @enum {string}
@@ -1942,7 +2182,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast";
             /**
              * Status
              * @enum {string}
@@ -2608,6 +2848,16 @@ export interface components {
             /** Renders */
             renders: components["schemas"]["RenderOut"][];
         };
+        /**
+         * SceneCastRequest
+         * @description Both fields are always sent: null means the scene shows none.
+         */
+        SceneCastRequest: {
+            /** Character Id */
+            character_id: number | null;
+            /** Location Id */
+            location_id: number | null;
+        };
         /** SceneOut */
         SceneOut: {
             /** Id */
@@ -2647,6 +2897,12 @@ export interface components {
             last_frame_description_source: ("manual" | "ai") | null;
             /** Description Job Id */
             description_job_id: number | null;
+            /** Character Id */
+            character_id: number | null;
+            /** Location Id */
+            location_id: number | null;
+            /** Cast Assignment Source */
+            cast_assignment_source: ("manual" | "ai") | null;
             /** Image Prompt */
             image_prompt: string | null;
             /** Image Prompt Source */
@@ -3338,6 +3594,14 @@ export interface components {
             jobs: components["schemas"]["JobSummary"][];
             /** Created */
             created: number;
+        };
+        /** WriteReferencePromptRequest */
+        WriteReferencePromptRequest: {
+            /**
+             * Generate After
+             * @default false
+             */
+            generate_after: boolean;
         };
     };
     responses: never;
@@ -5161,6 +5425,318 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_cast_api_projects__project_id__cast_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CastOut"];
+                };
+            };
+            /** @description No project, character, place or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extract_cast_api_projects__project_id__extract_cast_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ExtractCastRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project, character, place or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project has a cast already, and the request did not confirm replacing it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The step cannot start now: the script is empty or too long, other cast jobs are running, there are no scenes or no cast, or the member has nothing to work from. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    assign_cast_api_projects__project_id__assign_cast_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project, character, place or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The step cannot start now: the script is empty or too long, other cast jobs are running, there are no scenes or no cast, or the member has nothing to work from. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    edit_member_api_projects__project_id__cast__kind___member_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                kind: "character" | "location";
+                member_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CastMemberPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CastOut"];
+                };
+            };
+            /** @description No project, character, place or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The step cannot start now: the script is empty or too long, other cast jobs are running, there are no scenes or no cast, or the member has nothing to work from. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    write_reference_prompt_api_projects__project_id__cast__kind___member_id__write_reference_prompt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                kind: "character" | "location";
+                member_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WriteReferencePromptRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project, character, place or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The step cannot start now: the script is empty or too long, other cast jobs are running, there are no scenes or no cast, or the member has nothing to work from. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    generate_reference_api_projects__project_id__cast__kind___member_id__generate_reference_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                kind: "character" | "location";
+                member_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description No project, character, place or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The step cannot start now: the script is empty or too long, other cast jobs are running, there are no scenes or no cast, or the member has nothing to work from. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_scene_cast_api_projects__project_id__scenes__scene_id__cast_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneCastRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenesOut"];
+                };
+            };
+            /** @description No project, character, place or scene has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The step cannot start now: the script is empty or too long, other cast jobs are running, there are no scenes or no cast, or the member has nothing to work from. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

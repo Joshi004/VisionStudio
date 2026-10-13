@@ -22,6 +22,13 @@ attempt (after a pre-emption, an expired result or a server that could not be re
 same stored request, because "the correct response to a pre-emption failure is to resubmit the
 exact same request unchanged" (the server's guide). A new seed comes only with a new job.
 
+**A scene of the cast is made by the image model's edit.** A scene that shows a character or a
+place of the project's cast (`scene.character_id`, `scene.location_id`) has an image prompt
+written for reference pictures (`QWEN_IMAGE_21_CHARACTER_EDIT`), so its frame is made by the edit
+endpoint, with the picture of the character (image 1) and of the place (the next) as references,
+uploaded at every start (`jobs/reference_upload.py`). It waits until those pictures exist
+(`cast.references_block`). A scene that shows neither is made from the prompt alone, as before.
+
 What it makes: Qwen-Image-2.1 answers in one of seven shapes at its native 2K size
 (`services/image_models.ASPECT_SIZES`), which are not the project's generation size. The nearest
 shape is asked for (`scene_frame.py` fits the image to the generation size).
@@ -47,9 +54,11 @@ from app.db.models import Asset, Project, Scene
 from app.db.session import SessionLocal
 from app.jobs import phases, store
 from app.jobs.generate_clip import GPU_URL_KEY, PARTITION_KEY
+from app.jobs.reference_upload import upload_references
 from app.jobs.scene_frame import SceneFrameHandler, scene_record
 from app.providers import contract_guard, image_generator
 from app.services import api_contract, image_models, scene_inputs
+from app.services import cast as cast_service
 from app.services import first_frames as frames_service
 from app.services import image_prompts as prompts_service
 from app.services import scenes as scenes_service
@@ -79,6 +88,9 @@ class _Read:
     mode: image_models.ImageMode
     # The approved OpenAPI document, or None when none is recorded.
     spec: dict[str, Any] | None
+    # The one character and the one place the scene shows (the project's cast). A scene that
+    # shows either is made by the image model's edit, from their reference pictures.
+    scene_cast: cast_service.SceneCast = cast_service.NO_CAST
 
 
 @dataclass(frozen=True)
@@ -114,7 +126,32 @@ class GenerateFrameHandler(SceneFrameHandler):
             plan = await self._prepare(job_id, read, read.project, read.scene)
             if plan is None:
                 return  # the job was failed, or cancelled, in there
-        await self.submit(job_id, read.base_url, plan.request, plan.recorded)
+
+        if plan.recorded.get("endpoint") != image_generator.EDIT_PATH:
+            await self.submit(job_id, read.base_url, plan.request, plan.recorded)
+            return
+
+        # A scene of the cast: the reference pictures are uploaded at every start, because the
+        # server deletes the inputs of a job when it ends.
+        base_url = read.base_url
+        references = [
+            (str(item["cast_kind"]), int(item["asset_id"]))
+            for item in plan.recorded.get("references", [])
+        ]
+
+        async def build_body() -> tuple[dict[str, Any], dict[str, Any]]:
+            remote_ids, uploads = await upload_references(base_url, references)
+            body = image_generator.with_references(plan.request, remote_ids)
+            return body, {"uploads": uploads, "body": body}
+
+        await self.submit(
+            job_id,
+            base_url,
+            plan.request,
+            plan.recorded,
+            endpoint=image_generator.EDIT_PATH,
+            build_body=build_body,
+        )
 
     @staticmethod
     def _stored_plan(job_input: dict[str, Any]) -> _Plan | None:
@@ -122,7 +159,8 @@ class GenerateFrameHandler(SceneFrameHandler):
         request = job_input.get("request")
         if (
             not isinstance(request, dict)
-            or job_input.get("endpoint") != image_generator.GENERATE_PATH
+            or job_input.get("endpoint")
+            not in (image_generator.GENERATE_PATH, image_generator.EDIT_PATH)
             or not isinstance(job_input.get("scene_sent"), dict)
         ):
             return None
@@ -137,16 +175,35 @@ class GenerateFrameHandler(SceneFrameHandler):
         """
         await self._phase(job_id, phases.PREPARING_IMAGE_REQUEST)
         prompt = (scene.image_prompt or "").strip()
+        # A scene that shows a character or a place of the cast is made by the image model's
+        # edit, from their pictures (the character first). Any other scene is text to image.
+        references = [
+            {"cast_kind": kind, "cast_id": member.id, "asset_id": member.reference_asset_id}
+            for kind, member in read.scene_cast.references()
+        ]
+        aspect_ratio = image_models.pick_aspect_ratio(project.gen_width, project.gen_height)
+        seed = secrets.randbelow(image_models.SEED_LIMIT)
         try:
-            image_generator.check_endpoint(read.spec)
-            aspect_ratio = image_models.pick_aspect_ratio(project.gen_width, project.gen_height)
-            request = image_generator.build_request(
-                prompt=prompt,
-                mode=read.mode,
-                seed=secrets.randbelow(image_models.SEED_LIMIT),
-                aspect_ratio=aspect_ratio,
-                partition=read.partition,
-            )
+            if references:
+                image_generator.check_edit_endpoint(read.spec)
+                request = image_generator.build_edit_request(
+                    prompt=prompt,
+                    mode=read.mode,
+                    seed=seed,
+                    aspect_ratio=aspect_ratio,
+                    partition=read.partition,
+                )
+                endpoint = image_generator.EDIT_PATH
+            else:
+                image_generator.check_endpoint(read.spec)
+                request = image_generator.build_request(
+                    prompt=prompt,
+                    mode=read.mode,
+                    seed=seed,
+                    aspect_ratio=aspect_ratio,
+                    partition=read.partition,
+                )
+                endpoint = image_generator.GENERATE_PATH
         except ValueError as exc:
             await self._fail(job_id, str(exc))
             return None
@@ -164,9 +221,11 @@ class GenerateFrameHandler(SceneFrameHandler):
             "image_mode": read.mode,
             "aspect_ratio": aspect_ratio,
             "expected_size": {"width": expected_width, "height": expected_height},
-            "endpoint": image_generator.GENERATE_PATH,
+            "endpoint": endpoint,
             "request": request,
         }
+        if references:
+            recorded["references"] = references
         async with SessionLocal() as session:
             if not await store.update_input(session, job_id, recorded):
                 return None  # cancelled while preparing: nothing was sent
@@ -192,6 +251,7 @@ class GenerateFrameHandler(SceneFrameHandler):
             project = await session.get(Project, job.project_id)
             scene = await session.get(Scene, job.scene_id, populate_existing=True)
             block: str | None = None
+            scene_cast = cast_service.NO_CAST
             if project is not None and scene is not None:
                 # The same refusals as the endpoints: things may have changed while the job
                 # waited for its turn.
@@ -201,6 +261,9 @@ class GenerateFrameHandler(SceneFrameHandler):
                 active_prompts = await prompts_service.active_prompt_jobs(session, project.id)
                 frames = await scene_inputs.load_frames(session, [scene])
                 first_frame: Asset | None = frames.get(scene.first_frame_asset_id or 0)
+                scene_cast = (await cast_service.load_scene_casts(session, project.id, [scene]))[
+                    scene.id
+                ]
                 block = prompts_service.project_block(
                     state.scenes,
                     plan_job=state.job,
@@ -211,6 +274,7 @@ class GenerateFrameHandler(SceneFrameHandler):
                     prompt_out_of_date=scene.id in prompt_states
                     and prompt_states[scene.id].out_of_date,
                     prompt_job_active=scene.id in active_prompts,
+                    references_block=cast_service.references_block(scene_cast),
                 )
                 # Manual-first: an uploaded frame is replaced only when the click confirmed
                 # that very frame.
@@ -238,6 +302,7 @@ class GenerateFrameHandler(SceneFrameHandler):
             partition=partition,
             mode=mode,
             spec=spec,
+            scene_cast=scene_cast,
         )
 
     # --- What a first frame does with the image (`SceneFrameHandler`'s hooks) ---------------
@@ -247,6 +312,9 @@ class GenerateFrameHandler(SceneFrameHandler):
             "prompt": recorded.get("image_prompt"),
             "image_prompt_source": recorded.get("image_prompt_source"),
             "image_prompt_job_id": recorded.get("image_prompt_job_id"),
+            # The cast pictures the frame was made from, in the order they were sent. None for
+            # a frame made from the prompt alone.
+            "references": recorded.get("references"),
         }
 
     def attach_reason(self, current: Scene, recorded: dict[str, Any]) -> str | None:

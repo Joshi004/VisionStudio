@@ -17,6 +17,10 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_last_frame_prompt: "Last frame prompt",
   generate_last_frame: "Last frame",
   write_talk_prompts: "Talking character prompts",
+  extract_cast: "Characters and places",
+  write_character_reference_prompt: "Reference prompt",
+  generate_character_reference: "Reference picture",
+  assign_cast: "Cast of each scene",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

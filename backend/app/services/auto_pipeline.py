@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Asset, Job, Project, Scene
 from app.jobs import store
+from app.services import cast as cast_service
 from app.services import clips as clips_service
 from app.services import first_frames as frames_service
 from app.services import image_prompts as prompts_service
@@ -82,7 +83,9 @@ class Step:
     # The job this step creates, and who it calls.
     job_type: str
     provider: str
-    # One job per scene, or one for the project.
+    # One job per scene, or one for the project. (The cast's steps are neither: a project-level
+    # step that finds the cast and chooses who is in each scene, and two steps with one job per
+    # character or place. They say False.)
     per_scene: bool
     # What is still missing when a job finished and its target is not done (for the report).
     missing: str
@@ -114,6 +117,43 @@ STEPS: Final[tuple[Step, ...]] = (
         "llm",
         False,
         "scenes that match the script",
+        asks_model=True,
+    ),
+    # The project's cast (characters and places): found once from the script, drawn once each,
+    # and chosen per scene. A project whose script has no cast passes through all four.
+    Step(
+        "cast",
+        "Find the characters and places",
+        cast_service.EXTRACT_JOB,
+        "llm",
+        False,
+        "a cast found in the script",
+        asks_model=True,
+    ),
+    Step(
+        "cast_prompts",
+        "Write reference prompts",
+        cast_service.REFERENCE_PROMPT_JOB,
+        "llm",
+        False,
+        "a reference prompt",
+        asks_model=True,
+    ),
+    Step(
+        "cast_images",
+        "Make reference pictures",
+        cast_service.REFERENCE_IMAGE_JOB,
+        "gpu",
+        False,
+        "a reference picture",
+    ),
+    Step(
+        "cast_assignment",
+        "Choose who is in each scene",
+        cast_service.ASSIGN_JOB,
+        "llm",
+        False,
+        "a choice of character and place for every scene",
         asks_model=True,
     ),
     Step(
@@ -233,6 +273,9 @@ class Target:
     # It waits only while that target can still go on: if that one cannot, this one does not
     # wait forever, and the run stops with the reason that target gave.
     after: str | None = None
+    # What a problem with this target is about, when it is neither a scene nor the project (a
+    # character or a place of the cast): its name.
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -292,6 +335,15 @@ def _short(text: str) -> str:
     return f"{one_line[: _ERROR_MAX_CHARS - 1]}…"
 
 
+def _named(target: Target, message: str) -> str:
+    """The message with the name of the character or place it is about in front of it, unless
+    the message names it already.
+    """
+    if target.label is None or target.label in message:
+        return message
+    return f"{target.label}: {message}"
+
+
 def exhausted_message(step: Step, tried: Sequence[Job]) -> str:
     """Why a target that was tried `MAX_TRIES` times is reported."""
     last = tried[-1]
@@ -332,14 +384,21 @@ def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]])
         elif target.after is not None and target.after in pending_keys:
             following.append(target)
         elif target.block is not None:
-            problems.append(Problem(target.scene_id, target.scene_number, len(tried), target.block))
+            problems.append(
+                Problem(
+                    target.scene_id,
+                    target.scene_number,
+                    len(tried),
+                    _named(target, target.block),
+                )
+            )
         elif len(tried) >= MAX_TRIES:
             problems.append(
                 Problem(
                     target.scene_id,
                     target.scene_number,
                     len(tried),
-                    exhausted_message(step, tried),
+                    _named(target, exhausted_message(step, tried)),
                 )
             )
         else:
@@ -555,6 +614,13 @@ async def create_child(
     job_input = {**create.target.job_input, "auto_run_id": run_id}
     if step.asks_model:
         job_input["run_again"] = create.retry
+    # A character's or a place's job has no scene: the member it names tells it from the jobs of
+    # the other members.
+    member = {
+        key: job_input[key]
+        for key in (cast_service.KIND_KEY, cast_service.ID_KEY)
+        if key in job_input
+    }
     return await store.create_job(
         session,
         project_id=project.id,
@@ -563,6 +629,7 @@ async def create_child(
         scene_id=create.target.scene_id,
         input=job_input,
         commit=False,
+        same_input=member or None,
     )
 
 
@@ -747,6 +814,142 @@ async def _scenes(session: AsyncSession, ctx: RunContext) -> StepView:
     return StepView([_project_target(done=False, active=active, block=block, job_input=job_input)])
 
 
+async def _cast(session: AsyncSession, ctx: RunContext) -> StepView:
+    """The cast is found once. A project that has one is done, whatever its script says now:
+    finding it again replaces the whole cast and the pictures made for it, so a run never does
+    that by itself. A script the model found no characters or places in is done too (the newest
+    job succeeded for this very script), or the run would ask again for ever.
+    """
+    project = ctx.project
+    cast = await cast_service.load_cast(session, project.id)
+    latest = await store.latest_job(session, project.id, cast_service.EXTRACT_JOB)
+    active = _active(latest)
+    recorded: Any = latest.input if latest is not None and isinstance(latest.input, dict) else {}
+    found_nothing = (
+        latest is not None
+        and latest.status == "succeeded"
+        and recorded.get("script_sha256")
+        == transcript_matching.script_sha256(project.script_text or "")
+    )
+    done = (not cast.is_empty or found_nothing) and active is None
+
+    block: str | None = None
+    script = project.script_text or ""
+    if _blank(script):
+        block = "Paste the script first."
+    elif len(script.split()) > scene_planner.MAX_SCRIPT_WORDS:
+        block = (
+            f"This script has {len(script.split()):,} words; finding the cast handles up to "
+            f"{scene_planner.MAX_SCRIPT_WORDS:,}."
+        )
+    return StepView(
+        [
+            _project_target(
+                done=done,
+                active=active,
+                block=block,
+                job_input={"requested": "auto_pipeline"},
+            )
+        ]
+    )
+
+
+async def _cast_prompts(session: AsyncSession, ctx: RunContext) -> StepView:
+    """One target for each character and place that has no reference prompt yet. A prompt the
+    author wrote counts: it is never replaced by a run.
+    """
+    project = ctx.project
+    cast = await cast_service.load_cast(session, project.id)
+    prompt_jobs = [cast_service.REFERENCE_PROMPT_JOB]
+    active = await cast_service.active_jobs(session, project.id, prompt_jobs)
+    active_by_member = {
+        cast_service.member_key(*member): job
+        for job in active
+        if (member := cast_service.member_of_job(job)) is not None
+    }
+    targets: list[Target] = []
+    for kind, member in cast.members():
+        key = cast_service.member_key(kind, member.id)
+        done = cast_service.has_prompt(member)
+        targets.append(
+            Target(
+                key=key,
+                scene_id=None,
+                scene_number=None,
+                done=done,
+                active=active_by_member.get(key),
+                block=None if done else cast_service.prompt_block(member),
+                job_input={
+                    "requested": "auto_pipeline",
+                    cast_service.KIND_KEY: kind,
+                    cast_service.ID_KEY: member.id,
+                },
+                label=member.name,
+            )
+        )
+    return StepView(targets)
+
+
+async def _cast_images(session: AsyncSession, ctx: RunContext) -> StepView:
+    """One target for each character and place that has no reference picture yet. A picture that
+    exists is never replaced by a run.
+    """
+    project = ctx.project
+    cast = await cast_service.load_cast(session, project.id)
+    active = await cast_service.active_reference_image_jobs(session, project.id)
+    targets: list[Target] = []
+    for kind, member in cast.members():
+        key = cast_service.member_key(kind, member.id)
+        done = member.reference_asset_id is not None
+        targets.append(
+            Target(
+                key=key,
+                scene_id=None,
+                scene_number=None,
+                done=done,
+                active=active.get(key),
+                block=None if done else cast_service.image_block(member),
+                job_input={
+                    "requested": "auto_pipeline",
+                    cast_service.KIND_KEY: kind,
+                    cast_service.ID_KEY: member.id,
+                },
+                label=member.name,
+            )
+        )
+    return StepView(targets)
+
+
+async def _cast_assignment(session: AsyncSession, ctx: RunContext) -> StepView:
+    """Every scene has a choice of character and place. A choice of nobody counts: it is a
+    choice. A project with no cast has nothing to choose from, so the step is done.
+    """
+    project = ctx.project
+    cast = await cast_service.load_cast(session, project.id)
+    state = await scenes_service.scenes_state(session, project)
+    active = _active(await store.latest_job(session, project.id, cast_service.ASSIGN_JOB))
+    chosen = bool(state.scenes) and all(
+        scene.cast_assignment_source is not None for scene in state.scenes
+    )
+    done = (cast.is_empty or chosen) and active is None
+
+    block: str | None = None
+    if not state.scenes:
+        block = "There are no scenes yet. Propose scenes first."
+    elif state.stale_reasons:
+        block = "The scenes are out of date. Propose scenes again first."
+    return StepView(
+        [
+            _project_target(
+                done=done,
+                active=active,
+                block=block,
+                job_input={"requested": "auto_pipeline"},
+            )
+        ]
+    )
+
+
 async def _descriptions(session: AsyncSession, ctx: RunContext) -> StepView:
     state = await scenes_service.scenes_state(session, ctx.project)
     active = _active(await store.latest_job(session, ctx.project.id, DRAFT_JOB))
@@ -820,6 +1023,7 @@ async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
     states = await prompts_service.prompt_states(session, project, state.scenes)
     frames = await scene_inputs.load_frames(session, state.scenes)
     chained = await last_frames_service.chain_sources(session, project.id, state.scenes)
+    reference_blocks = await cast_service.reference_blocks(session, project.id, state.scenes)
 
     targets: list[Target] = []
     for scene in state.scenes:
@@ -839,7 +1043,10 @@ async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
                 # A prompt being written for the scene is waited for, not reported.
                 active=active_frames.get(scene.id) or active_prompts.get(scene.id),
                 block=frames_service.scene_block(
-                    scene, prompt_out_of_date=prompt_out_of_date, prompt_job_active=False
+                    scene,
+                    prompt_out_of_date=prompt_out_of_date,
+                    prompt_job_active=False,
+                    references_block=reference_blocks.get(scene.id),
                 ),
                 # A frame the author uploaded counts as done above, so it is never replaced.
                 job_input={
@@ -1028,6 +1235,10 @@ _EVALUATORS: Final[dict[str, _Evaluator]] = {
     "voiceover": _voiceover,
     "transcribe": _transcribe,
     "scenes": _scenes,
+    "cast": _cast,
+    "cast_prompts": _cast_prompts,
+    "cast_images": _cast_images,
+    "cast_assignment": _cast_assignment,
     "descriptions": _descriptions,
     "image_prompts": _image_prompts,
     "first_frames": _first_frames,

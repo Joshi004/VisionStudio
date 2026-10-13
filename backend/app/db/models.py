@@ -88,7 +88,9 @@ class Asset(Base):
 
     __tablename__ = "asset"
     __table_args__ = (
-        CheckConstraint("kind IN ('voiceover', 'frame', 'clip', 'final')", name="kind_valid"),
+        CheckConstraint(
+            "kind IN ('voiceover', 'frame', 'clip', 'final', 'reference')", name="kind_valid"
+        ),
         CheckConstraint("source IN ('upload', 'ai', 'derived')", name="source_valid"),
         Index("idx_asset_project", "project_id"),
     )
@@ -156,6 +158,10 @@ class Scene(Base):
             name="last_frame_prompt_source_valid",
         ),
         CheckConstraint(
+            "cast_assignment_source IN ('manual', 'ai')",
+            name="cast_assignment_source_valid",
+        ),
+        CheckConstraint(
             "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')",
             name="video_model_valid",
         ),
@@ -219,6 +225,86 @@ class Scene(Base):
     # Added in Phase 19: the video model that makes this scene's clips. NULL means "use the
     # project's" (and, when that is NULL too, the app's default).
     video_model: Mapped[str | None] = mapped_column(default=None)
+    # Added with the project's cast: the one character and the one place this scene shows (both
+    # optional), chosen by the AI (`assign_cast` job) or by hand. A scene never shows two
+    # characters. Only a scene that names one of them is made from its reference picture.
+    character_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character.id", ondelete="SET NULL"), default=None
+    )
+    location_id: Mapped[int | None] = mapped_column(
+        ForeignKey("location.id", ondelete="SET NULL"), default=None
+    )
+    cast_assignment_source: Mapped[str | None] = mapped_column(default=None)
+    cast_assignment_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
+    )
+
+
+class Character(Base):
+    """A character of a project's story: who it is, what it looks like and the reference picture
+    that pins the look, so every scene that shows it is made from the same picture. The text is
+    written by the AI that reads the script (`extract_cast` job) and edited by hand. The
+    reference picture is a Qwen image on a plain white backdrop with the backdrop removed
+    (`reference_asset_id`, an asset of kind `reference`). `status` follows its steps: `pending`
+    (nothing yet), `prompted` (the prompt for the picture is written), `ready` (the picture is
+    made) and `failed` (the picture could not be made).
+
+    `voice_description` is only a note for the AI that writes prompts. Nothing speaks: a story is
+    told by its voiceover.
+    """
+
+    __tablename__ = "character"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'prompted', 'ready', 'failed')", name="status_valid"
+        ),
+        Index("idx_character_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    name: Mapped[str]
+    appearance_description: Mapped[str]
+    personality_description: Mapped[str | None] = mapped_column(default=None)
+    voice_description: Mapped[str | None] = mapped_column(default=None)
+    reference_prompt: Mapped[str | None] = mapped_column(default=None)
+    # `use_alter`: `job.scene_id` -> `scene.character_id` -> here -> `job` would be a cycle.
+    reference_prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
+    )
+    reference_asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("asset.id", ondelete="SET NULL"), default=None
+    )
+    status: Mapped[str] = mapped_column(default="pending", server_default=text("'pending'"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class Location(Base):
+    """A place of a project's story (a palace, a forest): the same as a `Character`, without a
+    personality or a voice.
+    """
+
+    __tablename__ = "location"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'prompted', 'ready', 'failed')", name="status_valid"
+        ),
+        Index("idx_location_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    name: Mapped[str]
+    appearance_description: Mapped[str]
+    reference_prompt: Mapped[str | None] = mapped_column(default=None)
+    reference_prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
+    )
+    reference_asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("asset.id", ondelete="SET NULL"), default=None
+    )
+    status: Mapped[str] = mapped_column(default="pending", server_default=text("'pending'"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
 class Job(Base):
@@ -231,7 +317,9 @@ class Job(Base):
             "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
             "'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', "
             "'generate_voiceover', 'lab_image', 'write_last_frame_prompt', "
-            "'generate_last_frame', 'write_talk_prompts')",
+            "'generate_last_frame', 'write_talk_prompts', 'extract_cast', "
+            "'write_character_reference_prompt', 'generate_character_reference', "
+            "'assign_cast')",
             name="type_valid",
         ),
         CheckConstraint(

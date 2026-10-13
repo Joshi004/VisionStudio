@@ -39,6 +39,7 @@ from app.jobs.scene_frame import MAX_PARALLEL_KEY as MAX_PARALLEL_IMAGES_KEY
 from app.jobs.store import JobRow
 from app.jobs.write_image_prompt import IMAGE_PROMPT_MODEL_KEY
 from app.providers import video_generator
+from app.services import cast as cast_service
 from app.services import clips as clips_service
 from app.services import (
     cut_edits,
@@ -213,6 +214,12 @@ class SceneOut(BaseModel):
     last_frame_description_source: TextSource | None
     # The job that last wrote AI text into this scene. Kept after the user edits the text.
     description_job_id: int | None
+    # The one character and the one place this scene shows (the project's cast), chosen by the
+    # AI or by the user. None: none. The source is None until somebody has chosen (a choice of
+    # nobody is still a choice).
+    character_id: int | None
+    location_id: int | None
+    cast_assignment_source: TextSource | None
     # The detailed prompt for the image model that makes the first frame (Phase 16), who wrote
     # it, and the `write_image_prompt` job that last wrote AI text into it.
     image_prompt: str | None
@@ -621,6 +628,9 @@ def _scene_out(
         ),
         last_frame_description_source=cast(TextSource | None, scene.last_frame_description_source),
         description_job_id=scene.description_job_id,
+        character_id=scene.character_id,
+        location_id=scene.location_id,
+        cast_assignment_source=cast(TextSource | None, scene.cast_assignment_source),
         image_prompt=scene.image_prompt,
         image_prompt_source=cast(TextSource | None, scene.image_prompt_source),
         image_prompt_job_id=scene.image_prompt_job_id,
@@ -958,12 +968,15 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     )
     active_frames = await first_frames_service.active_frame_jobs(session, project.id)
     choices = await first_frames_service.frame_choices(session, project.id)
+    # A scene that shows a character or a place of the cast waits for their reference pictures.
+    reference_blocks = await cast_service.reference_blocks(session, project.id, state.scenes)
 
     def frame_blocked(scene: Scene) -> str | None:
         return prompts_project_block or first_frames_service.scene_block(
             scene,
             prompt_out_of_date=prompt_out_of_date(scene),
             prompt_job_active=scene.id in active_prompts,
+            references_block=reference_blocks.get(scene.id),
         )
 
     # Last frames (Phase 23): the edit prompts, the last frames and the scenes whose first frame
@@ -1034,6 +1047,7 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
             prompt_job_active=scene.id in active_prompts,
             frame_job_active=scene.id in active_frames,
             chained=scene.id in chained,
+            references_block=reference_blocks.get(scene.id),
         )
     )
     last_prompt_candidates = sum(

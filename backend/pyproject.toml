@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.142.2",
     "httpx>=0.28.1",
     "pillow>=12.3.0",
+    "rembg[cpu]>=2.0.69",
     "sqlalchemy[aiosqlite]>=2.1.3",
     "uvicorn>=0.54.0",
 ]

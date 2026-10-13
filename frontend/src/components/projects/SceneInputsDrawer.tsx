@@ -31,6 +31,7 @@ import { ImagePromptActions } from "./ImagePromptActions";
 import { LastFramePromptActions } from "./LastFramePromptActions";
 import { wantsLastFrame } from "./lastFrameView";
 import { countWords, missingText, promptHints } from "./promptHints";
+import { SceneCastPicker } from "./SceneCastPicker";
 import { SceneClipSection } from "./SceneClipSection";
 import { seconds } from "./sceneView";
 
@@ -224,6 +225,8 @@ export function SceneInputsDrawer({
               Save your changes to move to another scene.
             </Text>
           )}
+
+          <SceneCastPicker project={project} scene={scene} />
 
           <Stack gap="xs">
             <Textarea

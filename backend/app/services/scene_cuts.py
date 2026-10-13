@@ -48,6 +48,12 @@ NO_INPUTS: Final[dict[str, None]] = {
     "first_frame_asset_id": None,
     "last_frame_asset_id": None,
     "selected_clip_asset_id": None,
+    # Who and what the scene shows (the project's cast): a choice made for this stretch of the
+    # narration, so it goes when the stretch changes.
+    "character_id": None,
+    "location_id": None,
+    "cast_assignment_source": None,
+    "cast_assignment_job_id": None,
 }
 
 
@@ -239,4 +245,5 @@ def has_inputs(scene: Scene | Any) -> bool:
         or scene.first_frame_asset_id is not None
         or scene.last_frame_asset_id is not None
         or scene.selected_clip_asset_id is not None
+        or scene.cast_assignment_source is not None
     )

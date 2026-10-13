@@ -40,7 +40,14 @@ TALK_LAB_NAME = "Talking character lab"
 # Job types that can be cancelled while they run, because the server has a cancel for them
 # (Phase 9). A transcription cannot yet: its cancel is not built.
 REMOTE_CANCEL_TYPES = frozenset(
-    {"generate_clip", "lab_video", "generate_frame", "generate_last_frame", "lab_image"}
+    {
+        "generate_clip",
+        "lab_video",
+        "generate_frame",
+        "generate_last_frame",
+        "lab_image",
+        "generate_character_reference",
+    }
 )
 
 # An automatic run does nothing itself: it only makes other jobs. Stopping it at any time just
@@ -120,6 +127,11 @@ async def _update(
     return result.rowcount == 1
 
 
+def _input_holds(job: Job, wanted: dict[str, Any]) -> bool:
+    recorded: Any = job.input if isinstance(job.input, dict) else {}
+    return all(recorded.get(key) == value for key, value in wanted.items())
+
+
 async def create_job(
     session: AsyncSession,
     *,
@@ -130,11 +142,16 @@ async def create_job(
     scene_id: int | None = None,
     commit: bool = True,
     dedupe: bool = True,
+    same_input: dict[str, Any] | None = None,
 ) -> tuple[Job, bool]:
     """Creates a queued job, unless one of this type is already active for the project
     (or for the scene). Returns `(job, created)`: the existing job when it was not created.
 
     This is what makes two quick clicks on one button create one job (Section 3.3).
+
+    A job type with one job per cast member (`generate_character_reference`) has no scene to
+    tell its jobs apart by. It passes `same_input`, the keys of its input that name the member,
+    and only an active job whose input holds those same values counts as "already active".
 
     `project_id` is None only for the Video lab's jobs, which belong to no project. They pass
     `dedupe=False`: each click is a paid run of its own (two runs of one prompt with another
@@ -159,10 +176,16 @@ async def create_job(
                     Job.scene_id.is_(None) if scene_id is None else Job.scene_id == scene_id,
                 )
                 .order_by(Job.id)
-                .limit(1)
                 .execution_options(populate_existing=True)
             )
-            existing = (await session.execute(statement)).scalars().first()
+            existing = next(
+                (
+                    job
+                    for job in (await session.execute(statement)).scalars()
+                    if same_input is None or _input_holds(job, same_input)
+                ),
+                None,
+            )
             if existing is not None:
                 if commit:
                     await session.commit()

@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api import (
     auto_pipeline,
+    cast,
     clips,
     first_frames,
     gpu,
@@ -42,6 +43,7 @@ api_router.include_router(first_frames.router, tags=["scenes"])
 api_router.include_router(last_frame_prompts.router, tags=["scenes"])
 api_router.include_router(last_frames.router, tags=["scenes"])
 api_router.include_router(clips.router, tags=["scenes"])
+api_router.include_router(cast.router, tags=["cast"])
 api_router.include_router(renders.router, tags=["renders"])
 api_router.include_router(auto_pipeline.router, tags=["auto-generate"])
 api_router.include_router(image_lab.router, tags=["image-lab"])

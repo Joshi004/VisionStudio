@@ -34,6 +34,7 @@ from typing import Any, Final
 
 from app.db.models import Project, Scene
 from app.providers import llm
+from app.services.cast import SceneCast
 from app.services.image_prompt_profiles import ImagePromptProfile
 
 # Hidden reasoning is billed as output (ANALYSIS.md Section 6.2, rule 4). One paragraph of
@@ -134,12 +135,19 @@ def continuity_from_drafts(drafts: object, scene_id: int) -> str | None:
 # --- The inputs ---------------------------------------------------------------------------
 
 
-def prompt_inputs(scene: Scene, project: Project, source: SourceDraft) -> dict[str, Any]:
+def prompt_inputs(
+    scene: Scene, project: Project, source: SourceDraft, cast: SceneCast | None = None
+) -> dict[str, Any]:
     """Everything the request is built from, as plain JSON values. Pure: it reads columns only.
 
     The scene's texts are the current ones, whoever wrote them. A text that is blank is None.
+
+    A scene that shows a character or a place of the project's cast also has `cast`: the
+    reference pictures the image model is shown, in the order it is shown them. A scene that
+    shows none has no such key, so its inputs (and its prompt's hash) are what they were before
+    the cast existed.
     """
-    return {
+    inputs: dict[str, Any] = {
         "orientation": project.orientation,
         "width": project.gen_width,
         "height": project.gen_height,
@@ -151,6 +159,18 @@ def prompt_inputs(scene: Scene, project: Project, source: SourceDraft) -> dict[s
         "first_frame_description": _text(scene.first_frame_description),
         "video_prompt": _text(scene.scene_description),
     }
+    if cast is not None and not cast.is_empty:
+        inputs["cast"] = {
+            "references": [
+                {
+                    "image": number,
+                    "kind": kind,
+                    "appearance": _one_line(member.appearance_description),
+                }
+                for number, (kind, member) in enumerate(cast.references(), start=1)
+            ]
+        }
+    return inputs
 
 
 def inputs_sha256(inputs: dict[str, Any]) -> str:
@@ -191,6 +211,16 @@ def _render_inputs(inputs: dict[str, Any]) -> str:
         lines += [f"- Place, {item['name']}: {item['description']}" for item in world["places"]]
     else:
         lines.append("none given")
+    cast = inputs.get("cast")
+    if cast:
+        lines += [
+            "",
+            "References (the image model is shown these pictures, numbered in this order. Each "
+            "picture shows what its description says: do not repeat the description):",
+        ]
+        for reference in cast["references"]:
+            label = "the character" if reference["kind"] == "character" else "the place"
+            lines.append(f"- Image {reference['image']}, {label}: {reference['appearance']}")
     lines += ["", f"Narration of this scene: {inputs['narration']}"]
     continuity = inputs["continuity"]
     if continuity in CONTINUITY_MEANINGS:
@@ -207,25 +237,50 @@ def _render_inputs(inputs: dict[str, Any]) -> str:
 
 
 def _system_prompt(profile: ImagePromptProfile) -> str:
+    if profile.uses_references:
+        opening = (
+            "You write one prompt for an image model that makes a picture from reference "
+            "pictures and your prompt. The picture it makes is the first frame of one scene of "
+            "a narrated video."
+        )
+        sees = (
+            f"- The image model ({profile.image_model}) sees the prompt you write and the "
+            "reference pictures listed under 'References'. It does not see the script, the "
+            "other scenes or any earlier picture, so everything else it needs must be in the "
+            "prompt."
+        )
+        references = [
+            "- The references: the pictures of the character and the place of this scene, "
+            "numbered in the order the image model sees them."
+        ]
+    else:
+        opening = (
+            "You write one prompt for a text-to-image model. The picture it makes is the "
+            "first frame of one scene of a narrated video."
+        )
+        sees = (
+            f"- The image model ({profile.image_model}) sees only the prompt you write. It "
+            "does not see the script, the other scenes or any earlier picture, so everything "
+            "it needs must be in the prompt."
+        )
+        references = []
     return "\n".join(
         [
-            "You write one prompt for a text-to-image model. The picture it makes is the "
-            "first frame of one scene of a narrated video.",
+            opening,
             "",
             "How the picture is used",
             "- A voiceover reads a script, and the video shows pictures that illustrate the "
             "narration. Each scene becomes one short clip.",
             "- A video model starts the clip from your picture and animates it, so the "
             "picture is the instant just before the scene's motion begins.",
-            f"- The image model ({profile.image_model}) sees only the prompt you write. It "
-            "does not see the script, the other scenes or any earlier picture, so everything "
-            "it needs must be in the prompt.",
+            sees,
             "",
             "What you are given",
             "- The frame: its shape and size.",
             "- The style of the whole video, and the author's instructions if there are any.",
             "- The world: the recurring subjects and places of the video, each with a fixed "
             "description.",
+            *references,
             "- The narration of this scene, and how the scene follows the previous one.",
             "- The first frame description: a short plan for the picture, written earlier.",
             "- The video prompt: the motion the video model will make from the picture.",

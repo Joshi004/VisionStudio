@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
 import { AutoPipelineSection } from "../components/projects/AutoPipelineSection";
+import { CastSection } from "../components/projects/CastSection";
 import { RenderSection } from "../components/projects/RenderSection";
 import { ScenesSection } from "../components/projects/ScenesSection";
 import { ScriptSection } from "../components/projects/ScriptSection";
@@ -68,6 +69,7 @@ export function ProjectPage() {
           <ScriptSection project={project} />
           <AutoPipelineSection project={project} />
           <TranscriptSection project={project} />
+          <CastSection project={project} />
           <ScenesSection project={project} />
           <RenderSection project={project} />
         </>

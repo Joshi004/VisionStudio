@@ -34,6 +34,7 @@ from app.db.models import Project, Scene
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
+from app.services import cast as cast_service
 from app.services import first_frames as frames_service
 from app.services import image_prompts as prompts_service
 from app.services import last_frames as last_frames_service
@@ -134,6 +135,8 @@ async def generate_first_frames(project_id: int, session: SessionDep) -> Generat
     prompt_states = await prompts_service.prompt_states(session, project, state.scenes)
     # A scene that continues the previous scene's action starts on its last frame (Phase 23).
     chained = await last_frames_service.chain_sources(session, project.id, state.scenes)
+    # A scene that shows a character or a place of the cast waits for their reference pictures.
+    reference_blocks = await cast_service.reference_blocks(session, project.id, state.scenes)
     candidates: list[Scene] = [
         scene
         for scene in state.scenes
@@ -144,6 +147,7 @@ async def generate_first_frames(project_id: int, session: SessionDep) -> Generat
             prompt_job_active=scene.id in active_prompts,
             frame_job_active=scene.id in active_frames,
             chained=scene.id in chained,
+            references_block=reference_blocks.get(scene.id),
         )
     ]
     nothing = frames_service.all_block(len(candidates), len(active_frames))
@@ -216,10 +220,12 @@ async def generate_first_frame(
     if active is None:
         active_prompts = await prompts_service.active_prompt_jobs(session, project.id)
         prompt_states = await prompts_service.prompt_states(session, project, [scene])
+        reference_blocks = await cast_service.reference_blocks(session, project.id, [scene])
         scene_block = frames_service.scene_block(
             scene,
             prompt_out_of_date=scene.id in prompt_states and prompt_states[scene.id].out_of_date,
             prompt_job_active=scene.id in active_prompts,
+            references_block=reference_blocks.get(scene.id),
         )
         if scene_block is not None:
             raise _unprocessable(scene_block)

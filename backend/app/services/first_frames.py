@@ -88,12 +88,20 @@ def needs_upload_confirmation(scene: Scene, asset: Asset | None) -> bool:
     return scene.first_frame_asset_id is not None and not is_ai_frame(asset)
 
 
-def scene_block(scene: Scene, *, prompt_out_of_date: bool, prompt_job_active: bool) -> str | None:
+def scene_block(
+    scene: Scene,
+    *,
+    prompt_out_of_date: bool,
+    prompt_job_active: bool,
+    references_block: str | None = None,
+) -> str | None:
     """Why this scene's first frame cannot be made now, or None when it can. The upload
     confirmation is not a block: the page asks, and the endpoint answers 409.
 
     `prompt_out_of_date` is about an AI prompt (`image_prompts.prompt_states`): the author's
-    prompt is never out of date.
+    prompt is never out of date. `references_block` is why a scene that shows a character or a
+    place of the cast cannot be made yet (`cast.references_block`): its prompt counts on
+    reference pictures that are not made.
     """
     if prompt_job_active:
         return _PROMPT_WRITING
@@ -101,7 +109,7 @@ def scene_block(scene: Scene, *, prompt_out_of_date: bool, prompt_job_active: bo
         return _NO_PROMPT
     if prompt_out_of_date:
         return _PROMPT_OUT_OF_DATE
-    return None
+    return references_block
 
 
 def frame_out_of_date(
@@ -136,6 +144,7 @@ def is_candidate(
     prompt_job_active: bool,
     frame_job_active: bool,
     chained: bool = False,
+    references_block: str | None = None,
 ) -> bool:
     """ "Generate first frames" covers a scene with a current image prompt and nothing running
     that has no first frame, or an AI first frame that is out of date. An uploaded first
@@ -149,7 +158,10 @@ def is_candidate(
         return False
     if (
         scene_block(
-            scene, prompt_out_of_date=prompt_out_of_date, prompt_job_active=prompt_job_active
+            scene,
+            prompt_out_of_date=prompt_out_of_date,
+            prompt_job_active=prompt_job_active,
+            references_block=references_block,
         )
         is not None
     ):

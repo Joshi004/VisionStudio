@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, Project, Scene
 from app.jobs import store
+from app.services import cast as cast_service
 from app.services import image_prompt_writer as writer
 from app.services import scenes as scenes_service
 from app.services.descriptions import DRAFT_JOB
@@ -245,13 +246,14 @@ async def prompt_states(
     if not holding:
         return {}
     sources = await load_sources(session, project.id, holding)
+    casts = await cast_service.load_scene_casts(session, project.id, holding)
     prompt_jobs = await jobs_by_id(
         session,
         {s.image_prompt_job_id for s in holding if s.image_prompt_job_id is not None},
     )
     states: dict[int, PromptState] = {}
     for scene in holding:
-        inputs = writer.prompt_inputs(scene, project, sources[scene.id])
+        inputs = writer.prompt_inputs(scene, project, sources[scene.id], casts[scene.id])
         sha = writer.inputs_sha256(inputs)
         job = prompt_jobs.get(scene.image_prompt_job_id or 0)
         states[scene.id] = PromptState(

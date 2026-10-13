@@ -32,6 +32,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (Phase 24, 2026-10-11):** migration `0013`. **The Talking character lab**: a character picture speaks a line of dialogue, lip-synced, and the three labs become tabs of one Lab page (no schema change for that part). (1) The GPU server's audio-to-video endpoint (`POST /v1/ltx/videos/audio-to-video`, `AudioToVideoRequest`, LTX-2.3, quality recipe only) makes a clip to match a recorded speech and muxes that speech in unchanged. It is a `lab_video` job like any other Video lab run, and `lab_video_run` gains `audio_input` (`{"source": "voice_run" \| "voice", "id": n}`, NULL for every other clip); the job's input also carries `audio` (the file's path and type, copied when the run starts). The clip is as long as the speech (the smallest `8k + 1` frame count that is not shorter, at most 20 seconds). (2) `job.type` gains `write_talk_prompts` (a paid call to the language model that writes a voice instruction and a video prompt). (3) New tables `lab_character` (the cast: a name, a picture, a description the language model reads, an optional default voice) and `lab_talk_run` (one take: the dialogue, the picture, the prompts, and the three steps it is made in, each a job the other labs already run: `prompt_job_id`, `voice_run_id`, `video_run_id`). A take with `auto_continue` starts its next step by itself when the prompts job finishes and when the speech is stored; if a step cannot start, the reason is kept in `lab_talk_run.last_error`. See Sections 3, 4.10, 4.13, 4.14 and 5.
 
+**Update (project cast, 2026-10-12):** migration `0014`. **A project's cast, so a character or a place looks the same in every scene.** (1) New tables `character` and `location` (Sections 4.15 and 4.16): the characters and places of a story, each with the text that describes it (found by one language model job that reads the script, edited by hand), the prompt for its **reference picture** and the picture itself. (2) `scene` gains `character_id` and `location_id` (the one character and the one place the scene shows; a scene never shows two characters), `cast_assignment_source` (`manual` \| `ai`) and `cast_assignment_job_id`. (3) `asset.kind` gains `reference` (a reference picture). (4) `job.type` gains `extract_cast`, `write_character_reference_prompt`, `generate_character_reference` and `assign_cast`. (5) A scene that shows a member has its first frame made by **the image model's edit endpoint, from the picture of each member** (the character is image 1, the place the next), instead of from words alone; the image prompt of such a scene is written for that (`QWEN_IMAGE_21_CHARACTER_EDIT`), and it carries the members in its inputs, so assigning a scene differently makes its prompt out of date. A scene that shows none is made as before. (6) A character's picture is asked for on a plain **white** backdrop, which is then removed (`rembg`), so the stored picture has a transparent backdrop; a place is kept whole. It is sent to the image model flattened on white again. (7) The automatic run has four more steps, between `scenes` and `descriptions`: `cast`, `cast_prompts`, `cast_images` and `cast_assignment`. (8) A scene's choice of cast counts as one of its inputs (`scene_cuts.has_inputs` and `NO_INPUTS`): replacing a scene, or changing its cut, asks first and then clears the choice, like a description or a frame. Nothing speaks in these stories: a character's voice is only a note for the language model. See Sections 3, 4.2, 4.4, 4.5, 4.15, 4.16, 5 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -75,7 +77,7 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 ## 3. Entity-relationship overview
 
-Fourteen tables, all scoped under one `project` except the global ones (`setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run`, and, from Phase 24, `lab_character` and `lab_talk_run`), which hold no `project_id` because they describe the app, the GPU server or a manual test, not one video. The Video lab's jobs are rows of `job` too, with a NULL `project_id` (Phase 19).
+Sixteen tables (the two newest, `character` and `location`, belong to one project: its cast, Sections 4.15 and 4.16), all scoped under one `project` except the global ones (`setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run`, and, from Phase 24, `lab_character` and `lab_talk_run`), which hold no `project_id` because they describe the app, the GPU server or a manual test, not one video. The Video lab's jobs are rows of `job` too, with a NULL `project_id` (Phase 19).
 
 ```mermaid
 erDiagram
@@ -165,6 +167,15 @@ erDiagram
 | `lab_talk_run` | `prompt_job_id` | `job.id` | Yes (the `write_talk_prompts` job; `SET NULL`). Phase 24 |
 | `lab_talk_run` | `voice_run_id` | `lab_voice_run.id` | Yes (the speech the take made or reuses; `SET NULL`). Phase 24 |
 | `lab_talk_run` | `video_run_id` | `lab_video_run.id` | Yes (the lip-synced clip; `SET NULL`). Phase 24 |
+| `character` | `project_id` | `project.id` | No (`CASCADE`). Project cast |
+| `character` | `reference_prompt_job_id` | `job.id` | Yes (the `write_character_reference_prompt` job; `SET NULL`). Project cast |
+| `character` | `reference_asset_id` | `asset.id` | Yes (the reference picture; `SET NULL`). Project cast |
+| `location` | `project_id` | `project.id` | No (`CASCADE`). Project cast |
+| `location` | `reference_prompt_job_id` | `job.id` | Yes (the `write_character_reference_prompt` job; `SET NULL`). Project cast |
+| `location` | `reference_asset_id` | `asset.id` | Yes (the reference picture; `SET NULL`). Project cast |
+| `scene` | `character_id` | `character.id` | Yes (the one character the scene shows; `SET NULL`). Project cast |
+| `scene` | `location_id` | `location.id` | Yes (the one place the scene shows; `SET NULL`). Project cast |
+| `scene` | `cast_assignment_job_id` | `job.id` | Yes (the `assign_cast` job that chose; `SET NULL`). Project cast |
 
 Note the one circular-looking reference: `asset.project_id` points at `project`, and `project.voiceover_asset_id` points back at `asset`. This isn't a problem in practice because of the order things happen in (Section 1 of `ANALYSIS.md`): the project row is created first with `voiceover_asset_id` left `NULL`, the voiceover file is uploaded afterwards as an `asset` row, and only then is `project.voiceover_asset_id` updated to point at it.
 
@@ -173,6 +184,8 @@ Phase 12 adds a second pair: `scene.description_job_id` points at `job`, and `jo
 Phase 16 adds a third: `scene.image_prompt_job_id` points at `job`. Unlike a draft, a `write_image_prompt` job is a scene job (`scene_id` is set, `ON DELETE CASCADE`), so merging a scene away, or replacing the scenes, deletes the jobs that wrote its prompt, and their paid answers with them. The API therefore refuses a cut edit of such a scene, and a proposal, while one of these jobs is queued or running (as it does for a clip job). `image_prompt_job_id` is `use_alter` too.
 
 Phase 23 adds a fourth, `scene.last_frame_prompt_job_id`, with the same rules: a `write_last_frame_prompt` job is a scene job (`ON DELETE CASCADE`), so a cut edit of the scene, and a proposal, are refused while one is queued or running, and so while a `generate_last_frame` job is. `last_frame_prompt_job_id` is `use_alter` too.
+
+The project cast adds a cycle of its own: `job.scene_id` → `scene`, `scene.character_id` → `character`, and `character.reference_prompt_job_id` → `job`. `character.reference_prompt_job_id` and `location.reference_prompt_job_id` are `use_alter` (the way `scene.description_job_id` is), and so is `scene.cast_assignment_job_id`. The cast jobs belong to the project, not to a scene (`scene_id` is NULL; a reference job names its member in `input.cast_kind` and `input.cast_id`), so they survive the replacement of the scenes. Replacing the scenes removes the scenes' own choices of who they show, and leaves the cast itself as it is.
 
 ---
 
@@ -244,7 +257,7 @@ Any file on disk — uploaded or generated. Covers the voiceover, every frame, e
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | Owning project |
-| `kind` | TEXT | NOT NULL | — | `voiceover` \| `frame` \| `clip` \| `final` |
+| `kind` | TEXT | NOT NULL | — | `voiceover` \| `frame` \| `clip` \| `final` \| `reference` (`reference`: the reference picture of a cast member, with the raw image it was made from and, for a character, the cut-out; which member points at it is told by `character.reference_asset_id` or `location.reference_asset_id`, not by the kind, the way `frame` covers first and last frames) |
 | `path` | TEXT | NOT NULL | — | Server-generated (UUID) path on the `data` volume |
 | `mime` | TEXT | NOT NULL | — | MIME type |
 | `size_bytes` | INTEGER | NOT NULL | — | File size |
@@ -260,7 +273,7 @@ Any file on disk — uploaded or generated. Covers the voiceover, every frame, e
 CREATE TABLE asset (
     id          INTEGER PRIMARY KEY,
     project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-    kind        TEXT NOT NULL CHECK (kind IN ('voiceover', 'frame', 'clip', 'final')),
+    kind        TEXT NOT NULL CHECK (kind IN ('voiceover', 'frame', 'clip', 'final', 'reference')),
     path        TEXT NOT NULL,
     mime        TEXT NOT NULL,
     size_bytes  INTEGER NOT NULL,
@@ -340,6 +353,10 @@ One cut = one clip (called "Segment" in Revision 1 of `ANALYSIS.md`). The centra
 | `use_clip_sound` | BOOLEAN | NOT NULL | true | Per-scene switch; false mutes this scene's own sound |
 | `selected_clip_asset_id` | INTEGER, FK → `asset.id` | NULL | — | Which generated take is used in the final render |
 | `video_model` | TEXT | NULL | — | `ltx-2.3` \| `ltx-2.5`. The video model that makes this scene's clips. NULL means "use the project's" (and, when that is NULL too, the app's default). It changes the clips made from now on: a clip already made keeps the model it was made with (Phase 19) |
+| `character_id` | INTEGER, FK → `character.id` | NULL | — | The one character this scene shows, or NULL. A scene never shows two. A scene that has one (or a `location_id`) has its first frame made by the image model's edit, from the member's reference picture, and waits until that picture exists. `ON DELETE SET NULL` (project cast) |
+| `location_id` | INTEGER, FK → `location.id` | NULL | — | The one place this scene shows, or NULL. Same rules as `character_id`. `ON DELETE SET NULL` (project cast) |
+| `cast_assignment_source` | TEXT | NULL | — | `manual` \| `ai`. Who chose `character_id` and `location_id`; NULL until somebody has chosen. A choice of *nobody* is a choice: the source is set and both ids are NULL. The author's choice (`manual`) is never overwritten by the AI (project cast) |
+| `cast_assignment_job_id` | INTEGER, FK → `job.id` | NULL | — | The `assign_cast` job that last chose for this scene, kept after the user changes the choice. `ON DELETE SET NULL`, and `use_alter` like the other job columns of `scene` (project cast) |
 
 ```sql
 CREATE TABLE scene (
@@ -369,6 +386,10 @@ CREATE TABLE scene (
     use_clip_sound            BOOLEAN NOT NULL DEFAULT 1,
     selected_clip_asset_id    INTEGER REFERENCES asset(id) ON DELETE SET NULL,
     video_model               TEXT CHECK (video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')),
+    character_id              INTEGER REFERENCES character(id) ON DELETE SET NULL,
+    location_id               INTEGER REFERENCES location(id) ON DELETE SET NULL,
+    cast_assignment_source    TEXT CHECK (cast_assignment_source IN ('manual', 'ai')),
+    cast_assignment_job_id    INTEGER REFERENCES job(id) ON DELETE SET NULL,
     UNIQUE (project_id, "index")
 );
 ```
@@ -384,7 +405,7 @@ Every unit of background work: transcribe, plan scenes, generate a clip, render 
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL only for the Video lab's jobs (`lab_video`, `write_lab_video_prompt`) and the Voice lab's (`lab_voice`), which belong to no project; the Activity page shows them under "Video lab" and "Voice lab" (Phases 19 and 21) |
 | `scene_id` | INTEGER, FK → `scene.id` | NULL | — | Set only for per-scene jobs (`generate_clip`, and since Phase 16 `write_image_prompt`, since Phase 17 `generate_frame`, and since Phase 23 `write_last_frame_prompt` and `generate_last_frame`) |
-| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` \| `lab_video` \| `write_lab_video_prompt` \| `auto_pipeline` \| `lab_voice` \| `generate_voiceover` \| `lab_image` \| `write_last_frame_prompt` \| `generate_last_frame` \| `write_talk_prompts` (`write_talk_prompts`: Phase 24, the Talking character lab; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `auto_pipeline`: Phase 20, the automatic flow; `lab_voice` and `generate_voiceover`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; `write_last_frame_prompt` and `generate_last_frame`: Phase 23, the last frame) |
+| `type` | TEXT | NOT NULL | — | `transcribe` \| `plan_scenes` \| `draft_descriptions` \| `write_image_prompt` \| `generate_frame` \| `generate_clip` \| `render_final` \| `lab_video` \| `write_lab_video_prompt` \| `auto_pipeline` \| `lab_voice` \| `generate_voiceover` \| `lab_image` \| `write_last_frame_prompt` \| `generate_last_frame` \| `write_talk_prompts` \| `extract_cast` \| `write_character_reference_prompt` \| `generate_character_reference` \| `assign_cast` (`extract_cast`, `write_character_reference_prompt` and `assign_cast`: paid calls to the language model for the project's cast, and `generate_character_reference`: a remote GPU job, one per character or place, whose input names it in `cast_kind` (`character` \| `location`) and `cast_id`; `write_talk_prompts`: Phase 24, the Talking character lab; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `auto_pipeline`: Phase 20, the automatic flow; `lab_voice` and `generate_voiceover`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; `write_last_frame_prompt` and `generate_last_frame`: Phase 23, the last frame) |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, when `generate_frame` moved to `gpu`, and the CHECK keeps it) \| `local` |
@@ -404,7 +425,7 @@ CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
     scene_id         INTEGER REFERENCES scene(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', 'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', 'generate_voiceover', 'lab_image', 'write_last_frame_prompt', 'generate_last_frame', 'write_talk_prompts')),
+    type             TEXT NOT NULL CHECK (type IN ('transcribe', 'plan_scenes', 'draft_descriptions', 'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', 'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', 'generate_voiceover', 'lab_image', 'write_last_frame_prompt', 'generate_last_frame', 'write_talk_prompts', 'extract_cast', 'write_character_reference_prompt', 'generate_character_reference', 'assign_cast')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -780,6 +801,74 @@ CREATE INDEX idx_lab_voice_run_job     ON lab_voice_run (job_id);
 CREATE INDEX idx_lab_character_created ON lab_character (created_at);
 CREATE INDEX idx_lab_talk_run_created  ON lab_talk_run (created_at);
 CREATE INDEX idx_lab_talk_run_voice_run ON lab_talk_run (voice_run_id);
+CREATE INDEX idx_character_project     ON character (project_id);
+CREATE INDEX idx_location_project      ON location (project_id);
+```
+
+### 4.15 `character`
+
+A character of one project's story (project cast): who it is, what it looks like, and the **reference picture** that pins the look, so every scene that shows it is made from the same picture. The text is written by the language model that reads the script (an `extract_cast` job) and is edited by hand. The picture is made in two steps, each a job of its own (Section 5): the prompt (`write_character_reference_prompt`) and the image (`generate_character_reference`). The rows of a project are replaced together when the cast is found again (`cast.replace_cast`); a character is never deleted on its own in this iteration.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | Owning project. `ON DELETE CASCADE` |
+| `name` | TEXT | NOT NULL | — | As the script writes it. Unique within the project's characters in practice (an edit that would repeat a name is refused), because a scene's character is chosen by name from a closed list |
+| `appearance_description` | TEXT | NOT NULL | — | What a picture shows: apparent age, build, skin, face, hair, clothing, what the character carries. The reference prompt is written from it, and it is what the language model is told about the character in a scene's image prompt |
+| `personality_description` | TEXT | NULL | — | How the character carries themselves: guides the bearing and the expression of the picture |
+| `voice_description` | TEXT | NULL | — | A note for the language model only. **Nothing speaks** in these stories (a narrator tells them), so it is never sent to speech synthesis |
+| `reference_prompt` | TEXT | NULL | — | The prompt for the image model, written by the AI or by hand. The prompt never holds the character's name |
+| `reference_prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_character_reference_prompt` job that wrote `reference_prompt`. NULL for a prompt written by hand (the page shows it as the user's, and an automatic run keeps it). `ON DELETE SET NULL`, and `use_alter` (a cycle through `scene` otherwise) |
+| `reference_asset_id` | INTEGER, FK → `asset.id` | NULL | — | The reference picture (`kind='reference'`): the cut-out with a transparent backdrop, or, when the backdrop could not be removed, the picture on its white backdrop. A new picture replaces it and the old one stays on disk. `ON DELETE SET NULL` |
+| `status` | TEXT | NOT NULL | `pending` | `pending` (nothing yet) \| `prompted` (the prompt is written) \| `ready` (the picture is made) \| `failed` (the picture job failed and the character has no picture; one that has a picture stays `ready`) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE character (
+    id                       INTEGER PRIMARY KEY,
+    project_id               INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    name                     TEXT NOT NULL,
+    appearance_description   TEXT NOT NULL,
+    personality_description  TEXT,
+    voice_description        TEXT,
+    reference_prompt         TEXT,
+    reference_prompt_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    reference_asset_id       INTEGER REFERENCES asset(id) ON DELETE SET NULL,
+    status                   TEXT NOT NULL DEFAULT 'pending'
+                             CHECK (status IN ('pending', 'prompted', 'ready', 'failed')),
+    created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 4.16 `location`
+
+A place of one project's story (a palace, a forest): the same as a `character` without a personality or a voice. Its reference picture is an empty establishing view of the place and is kept whole (the place *is* the background, so nothing is cut out), in the nearest shape to the project's frame.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | Owning project. `ON DELETE CASCADE` |
+| `name` | TEXT | NOT NULL | — | As the script writes it |
+| `appearance_description` | TEXT | NOT NULL | — | What an empty picture of the place shows: the buildings or landscape, materials, colours, light, time of day, mood. No people |
+| `reference_prompt` | TEXT | NULL | — | As for a character |
+| `reference_prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | As for a character |
+| `reference_asset_id` | INTEGER, FK → `asset.id` | NULL | — | The reference picture (`kind='reference'`). `ON DELETE SET NULL` |
+| `status` | TEXT | NOT NULL | `pending` | As for a character |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE location (
+    id                       INTEGER PRIMARY KEY,
+    project_id               INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    name                     TEXT NOT NULL,
+    appearance_description   TEXT NOT NULL,
+    reference_prompt         TEXT,
+    reference_prompt_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    reference_asset_id       INTEGER REFERENCES asset(id) ON DELETE SET NULL,
+    status                   TEXT NOT NULL DEFAULT 'pending'
+                             CHECK (status IN ('pending', 'prompted', 'ready', 'failed')),
+    created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ---
@@ -1567,17 +1656,32 @@ Then every server job is purged and `output.purge` (one answer per piece) is mer
 
 `output` of a `generate_voiceover` job is `{"asset_id": 77, "duration_s": 63.4, "parts": 2, "voice_id": 3}`; of a `lab_voice` job `{"run_id": 9, "speech": {"duration_s": 4.2, "sample_rate": 24000, "channels": 1, "size_bytes": 201644}}`. A voiceover is out of date when the script's hash is no longer `provenance.script_sha256` (`services/voiceover_generation.is_current`); the transcript then becomes stale too, because the voiceover's id changed. Neither job can be cancelled once it runs on the server (the same as a transcription).
 
+### `job.input` and `job.output` for the cast jobs (project cast)
+
+Four job types make and use a project's cast. All of them belong to the project. The three that call the language model share one rule set (`jobs/llm_call.py`, the rules of `plan_scenes`): they only start from a click or from an automatic run, **at most 2 attempts** (the second only for a rate limit, a server error, no answer, or an answer that cannot be used; a refusal is never retried), every answer is saved on the job the moment it arrives (`output.answer`, next to `attempts`, `usage` and `content` for an unusable answer), a restart never re-runs one (`never_rerun`), and logs hold ids and token counts, never a prompt. Unlike the scene prompts they keep no request-hash cache: a click is a new paid call.
+
+- **`extract_cast`** (`provider='llm'`, one per project, model `description_llm_model`). Reads `project.script_text` (at most 1,500 words) with the style and the description instructions, and answers `{"characters": [{"name", "appearance", "personality", "voice"}], "locations": [{"name", "appearance"}]}`, cleaned (no blank or repeated names, at most 12 characters and 10 places; two empty lists are a usable answer: the story has no cast). The save **replaces the whole cast** (`character` and `location` rows) and clears every scene's choice, in one transaction, and refuses (the job fails) when a reference prompt, a reference picture or an `assign_cast` job is queued or running. `input.script_sha256` is the hash of the script it read, so the page can tell the cast was found in an earlier script, and an automatic run knows a script that gave no cast has been read. `output` adds `characters` and `locations` (counts).
+- **`write_character_reference_prompt`** (`provider='llm'`, one per member, model `image_prompt_llm_model`). `input.cast_kind` (`character` \| `location`) and `input.cast_id` name the member; `input.generate_after` (true when the click asked for a picture and the member had no prompt) makes the save create the `generate_character_reference` job in the same transaction. It writes `{"image_prompt": ...}` from the member's description and the style (never its name), under the profile `QWEN_IMAGE_21_CHARACTER_SHEET` (a standing figure on a plain white seamless backdrop, soft even light) or `QWEN_IMAGE_21_LOCATION_SHEET` (an empty establishing view), checked by the same `image_prompt_writer.check_prompt` the scene prompts use. The save sets `reference_prompt`, `reference_prompt_job_id` and, while the member has no picture, `status='prompted'`. `input` also holds `profile` (`id`, `version`), `instructions_sha256`, `inputs_sha256` and the exact `request`. A prompt the user writes in the page sets `reference_prompt_job_id` to NULL.
+- **`generate_character_reference`** (`provider='gpu'`, restart rule `resume`, one per member, like `generate_frame`: `RemoteImageHandler` does submit, poll and download; the request is built once and stored, so a later attempt sends the same one). `input.cast_kind`, `input.cast_id`, then `member_sent` (`kind`, `id`, `name`), `reference_prompt`, `endpoint` (`/v1/qwen-image21/images/generate`), `aspect_ratio` (`2:3` for a character, the nearest shape to the project's frame for a place) and `request`. **The picture is stored exactly as it came first** (`asset.kind='reference'`, `source='ai'`, `provenance.role='reference_raw'`; the server may keep a result for one download only), and `output.raw_asset_id` names it. For a character the backdrop is then removed (`services/background_removal.py`, `rembg`, model `isnet-general-use`, downloaded on first use into `$DATA_DIR/rembg`) and the cut-out is stored as a second asset (`source='derived'`, `provenance.role='reference_cutout'`, `raw_asset_id`); it becomes `reference_asset_id`. **Removing the backdrop is best effort**: when it fails (the model cannot be downloaded, or no subject is found), the raw picture on its white backdrop is the reference, `output.background_removed` is false, `output.background_warning` says why, and the job still succeeds. A place is kept whole. `output` ends with `reference_asset_id`, `background_removed` and `purge`. The member's `status` becomes `ready` in the transaction that finishes the job. A job that fails marks a member that has **no** picture `failed`; one that has a picture stays `ready`.
+- **`assign_cast`** (`provider='llm'`, one per project, model `llm_model`). Sends the narration of every scene and the cast as a closed list (a name and a short description each), and answers `{"scenes": [{"scene": 1, "character": "Name or null", "location": "Name or null"}]}`. Code maps the names to ids; a name that is not on the lists counts as none (`output.unknown_names`), a scene the answer leaves out counts as showing neither (`output.missing_scenes`), and an answer that covers fewer than half of the scenes is unusable. A scene gets **one** character and **one** place at most: there is one field for each. The save refuses when any scene changed while the model worked (`input.scenes_sent` holds each scene's id, times and words), keeps every scene whose `cast_assignment_source` is `manual` (`output.kept_manual`), and writes the rest with source `ai` and `cast_assignment_job_id`; a choice of nobody is written too.
+
+**A scene made from the cast.** When `scene.character_id` or `scene.location_id` is set, `write_image_prompt` uses the profile `QWEN_IMAGE_21_CHARACTER_EDIT` and its inputs gain `cast.references` (`image`: 1 for the character, the next number for the place; `kind`; `appearance`). A scene without cast has no `cast` key in its inputs, so its `inputs_sha256`, and so whether its prompt is out of date, is exactly what it was before the cast existed. The job's `input.cast_references` names the members. `generate_frame` then calls the **edit** endpoint (`/v1/qwen-image21/images/edit`) instead of the generate one: `input.references` lists `{cast_kind, cast_id, asset_id}` in the order they are sent, and `input.uploads` records each upload (`flattened_on_white` is true for a character, whose transparent picture is flattened on white before it is sent). The references are uploaded again at every start, because the server deletes a job's inputs when it ends. The frame's provenance gains `references`. The job (and the page, and an automatic run) refuses while a member of the scene has no picture yet.
+
 ### `job.input` and `job.output` for an `auto_pipeline` job (Phase 20)
 
 One run of the automatic flow of a project. It belongs to the project (`scene_id` is NULL), is a local job (`provider='local'`) and does no work itself: it makes the jobs of the manual steps, one step after the other, and moves on only when every scene has finished the step it is at. Only one is active per project at a time (a second start returns the active one), and a run starts only when no other job of the project is waiting or running. It is **resumable** (`restart_rule='resume'`): `start` saves the marker `auto` in `provider_job_id`, so the dispatcher calls the handler's `poll` at every tick, and all of the run's state is in the row, so a restart continues where it was.
 
-The ten steps (since Phase 23; eight since Phase 21, seven before), in order, with what the run makes in each and when a target (a scene, or the project) counts as done. Each reuses the rule of the manual step, so a run never makes what its button would refuse:
+The fourteen steps (since the project cast; ten since Phase 23, eight since Phase 21, seven before), in order, with what the run makes in each and when a target (a scene, or the project) counts as done. Each reuses the rule of the manual step, so a run never makes what its button would refuse:
 
 | Step (`key`) | Job it makes | One job per | Done when |
 |---|---|---|---|
 | `voiceover` | `generate_voiceover` | project | the project has a voiceover the user uploaded, or one the app made from the script as it is now (`asset.provenance.script_sha256` equals the script's hash). Otherwise the run makes one, in the project's saved voice (`project.voice_id`); a script that changed since is made again. Phase 21 |
 | `transcribe` | `transcribe` | project | there is a transcript that is not out of date |
 | `scenes` | `plan_scenes` | project | there are scenes that are not out of date, and no proposal is active |
+| `cast` | `extract_cast` | project | the project has a cast (a run never finds it again by itself: that replaces the cast and its pictures), or the newest `extract_cast` job succeeded for this very script and found nobody |
+| `cast_prompts` | `write_character_reference_prompt` | character or place | the member has a reference prompt (one written by hand counts). A project with no cast has no target: the step is complete at once |
+| `cast_images` | `generate_character_reference` | character or place | the member has a reference picture (it is never replaced by a run). A target's problems are named after the member |
+| `cast_assignment` | `assign_cast` | project | every scene has a choice of character and place (nobody is a choice), or the project has no cast |
 | `descriptions` | `draft_descriptions` | project | every scene has a `scene_description`, and no draft is active |
 | `image_prompts` | `write_image_prompt` | scene | the scene has an image prompt that is not out of date, or its first frame was uploaded (no prompt is needed) |
 | `first_frames` | `generate_frame` | scene | the scene has a first frame that is not an out-of-date AI frame (an upload is never replaced). A scene that continues the previous scene's action and whose previous scene has a last frame (**chained**) counts as done here: its first frame is that last frame, and it is made in the step below (Phase 23) |
@@ -1592,7 +1696,7 @@ The ten steps (since Phase 23; eight since Phase 21, seven before), in order, wi
 { "accept_mismatch": false, "discard_scenes_with_inputs": false }
 ```
 
-`output` is the whole state of the run. A new object is written on every change (the JSON rule). `jobs` names every job the run made, by step and target (a scene's id as text, or `project`), oldest first: the number of tries of a target is the length of its list, so it survives a restart.
+`output` is the whole state of the run. A new object is written on every change (the JSON rule). `jobs` names every job the run made, by step and target (a scene's id as text, `project`, or, in the two cast steps with a job per member, `character:3` or `location:1`), oldest first: the number of tries of a target is the length of its list, so it survives a restart.
 
 ```json
 {
@@ -1601,6 +1705,10 @@ The ten steps (since Phase 23; eight since Phase 21, seven before), in order, wi
     "voiceover":     { "status": "skipped", "done": 1,  "total": 1 },
     "transcribe":    { "status": "skipped", "done": 1,  "total": 1 },
     "scenes":        { "status": "done",    "done": 1,  "total": 1 },
+    "cast":          { "status": "done",    "done": 1,  "total": 1 },
+    "cast_prompts":  { "status": "done",    "done": 3,  "total": 3 },
+    "cast_images":   { "status": "done",    "done": 3,  "total": 3 },
+    "cast_assignment": { "status": "done",  "done": 1,  "total": 1 },
     "descriptions":  { "status": "done",    "done": 1,  "total": 1 },
     "image_prompts": { "status": "done",    "done": 12, "total": 12 },
     "first_frames":  { "status": "running", "done": 9,  "total": 12 },
@@ -1611,6 +1719,7 @@ The ten steps (since Phase 23; eight since Phase 21, seven before), in order, wi
   },
   "jobs": {
     "scenes": { "project": [101] },
+    "cast_images": { "character:1": [120], "character:2": [121], "location:1": [122] },
     "image_prompts": { "44": [105, 118], "45": [106] },
     "first_frames": { "44": [130], "45": [131, 140] }
   },
