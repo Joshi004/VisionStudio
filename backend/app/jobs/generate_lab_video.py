@@ -2,7 +2,7 @@
 
 It is a remote job like `generate_clip`, and it is that handler with two differences, so it
 extends it and keeps everything else (polling, pre-emption, the download retry, the cleanup on
-the server, cancelling, the shared slots of `max_parallel_generations`):
+the server, cancelling, the shared slots of the GPU pool, `max_parallel_gpu_jobs`):
 
 - `start`: the request was built and checked when the run was created
   (`services/video_lab.create_runs`) and is stored in `job.input`, together with the endpoint,

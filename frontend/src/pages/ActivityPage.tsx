@@ -9,6 +9,7 @@ import { useProjects } from "../api/projects";
 import { JobActions } from "../components/jobs/JobActions";
 import { JobDetailDrawer } from "../components/jobs/JobDetailDrawer";
 import { JobStatusBadge } from "../components/jobs/JobStatusBadge";
+import { PoolCapacityPanel } from "../components/jobs/PoolCapacityPanel";
 import { elapsedText, jobTypeLabel, labPathFor } from "../components/jobs/jobFormat";
 import { formatDateTime } from "../format";
 import { useNow } from "../hooks/useNow";
@@ -48,6 +49,8 @@ export function ActivityPage() {
           w={260}
         />
       </Group>
+
+      <PoolCapacityPanel />
 
       {isLoading && <Loader size="sm" />}
 

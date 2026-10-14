@@ -48,9 +48,9 @@ function progressSignature(data: AutoGenerateState): string {
  * The newest automatic run of the project and where it is. Reads the database only. It is
  * loaded again every few seconds while the run is waiting or running.
  *
- * A run makes the jobs of the other sections one after the other, so between two of them no
- * job may be active and those sections would stop checking. Each time the run moves, the whole
- * page is loaded again instead.
+ * A run makes the jobs of the other sections as the work becomes ready, so at times no job may
+ * be active and those sections would stop checking. Each time the run moves, the whole page is
+ * loaded again instead.
  */
 export function useAutoGenerate(projectId: number) {
   const queryClient = useQueryClient();

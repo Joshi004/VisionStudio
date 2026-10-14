@@ -4,12 +4,14 @@ import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { GPU_KEY } from "./gpu";
-import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { ACTIVE_POLL_MS, STATUS_POLL_MS, isJobActive } from "./polling";
 import { PROJECTS_KEY } from "./projects";
 import type { components } from "./schema";
 
 export type JobSummary = components["schemas"]["JobSummary"];
 export type JobDetail = components["schemas"]["JobDetail"];
+export type JobCapacity = components["schemas"]["JobCapacity"];
+export type PoolCapacity = components["schemas"]["PoolCapacity"];
 
 /** Every job query starts with this key, so one call refreshes them all. */
 export const JOBS_KEY = ["jobs"] as const;
@@ -42,6 +44,33 @@ export function useJobs(projectId?: number) {
     queryKey: [...JOBS_KEY, "list", projectId ?? "all"],
     queryFn: () => fetchJobs(projectId),
     refetchInterval: (query) => (query.state.data?.some(isJobActive) ? ACTIVE_POLL_MS : false),
+  });
+}
+
+async function fetchCapacity() {
+  const { data, response } = await api.GET("/api/jobs/capacity");
+  if (!data) {
+    throw new ApiError(
+      `Could not load the GPU and API slots (HTTP ${response.status}).`,
+      response.status,
+    );
+  }
+  return data;
+}
+
+/**
+ * The two shared pools of running slots, the GPU server's and the paid inference API's: the
+ * limit, what is running and waiting, and which kinds of job. It is loaded again every few
+ * seconds while anything is running or waiting in a pool, and now and then otherwise.
+ */
+export function useJobCapacity() {
+  return useQuery({
+    queryKey: [...JOBS_KEY, "capacity"],
+    queryFn: fetchCapacity,
+    refetchInterval: (query) =>
+      query.state.data?.pools.some((pool) => pool.running + pool.queued > 0)
+        ? ACTIVE_POLL_MS
+        : STATUS_POLL_MS,
   });
 }
 

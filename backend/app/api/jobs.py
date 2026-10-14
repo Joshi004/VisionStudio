@@ -18,7 +18,7 @@ from app.api.errors import ErrorResponse
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionDep
-from app.jobs import dispatcher, store
+from app.jobs import dispatcher, handlers, pools, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
@@ -144,6 +144,69 @@ async def list_jobs(
     """Jobs, newest first: all of them, or those of one project."""
     rows = await store.list_jobs(session, project_id=project_id, limit=limit)
     return [job_summary(row) for row in rows]
+
+
+class PoolTypeCount(BaseModel):
+    """What one kind of job is using in a pool right now."""
+
+    type: JobType
+    running: int
+    queued: int
+
+
+class PoolCapacity(BaseModel):
+    """One of the two shared pools: how many jobs may run in it, and what is in it now."""
+
+    pool: Literal["gpu", "paid_api"]
+    label: str
+    # The setting. Running jobs are never stopped when it is lowered, so `running` can be
+    # above it for a while.
+    limit: int
+    running: int
+    queued: int
+    # Only the kinds of job that have a job running or queued in the pool.
+    by_type: list[PoolTypeCount]
+
+
+class JobCapacity(BaseModel):
+    pools: list[PoolCapacity]
+
+
+# Registered before `/jobs/{job_id}`, which would take "capacity" for a job id.
+@router.get("/jobs/capacity", response_model=JobCapacity)
+async def get_capacity(session: SessionDep) -> JobCapacity:
+    """The GPU server's and the paid inference API's shared slots: the limit, how many jobs
+    are running and waiting for a slot in each, and which kinds of job they are.
+    """
+    limits = await pools.shared_limits(session)
+    counts = await store.active_counts(session)
+
+    by_type: dict[str, dict[str, PoolTypeCount]] = {pool: {} for pool in limits}
+    for (job_type, job_status), count in sorted(counts.items()):
+        pool = handlers.slot_key(job_type)
+        if pool not in by_type:
+            continue  # a local job (the render, the automatic run) is in no shared pool
+        entry = by_type[pool].setdefault(
+            job_type, PoolTypeCount(type=cast(JobType, job_type), running=0, queued=0)
+        )
+        if job_status == "running":
+            entry.running += count
+        else:
+            entry.queued += count
+
+    return JobCapacity(
+        pools=[
+            PoolCapacity(
+                pool=cast(Literal["gpu", "paid_api"], pool),
+                label=pools.POOL_LABELS[pool],
+                limit=limit,
+                running=sum(entry.running for entry in by_type[pool].values()),
+                queued=sum(entry.queued for entry in by_type[pool].values()),
+                by_type=list(by_type[pool].values()),
+            )
+            for pool, limit in limits.items()
+        ]
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetail, responses=_NOT_FOUND)

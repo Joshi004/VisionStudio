@@ -40,8 +40,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import outbound
 from app.core import settings as settings_service
 from app.db.models import Asset, Job, Project
@@ -50,7 +48,6 @@ from app.jobs import phases, store
 from app.jobs.generate_clip import GPU_URL_KEY, PARTITION_KEY
 from app.jobs.generate_frame import IMAGE_MODE_KEY
 from app.jobs.remote_image import RemoteImageHandler
-from app.jobs.scene_frame import MAX_PARALLEL_KEY
 from app.providers import contract_guard, image_generator
 from app.services import api_contract, background_removal, frame_images, image_models
 from app.services import cast as cast_service
@@ -101,9 +98,6 @@ async def _one_chunk(data: bytes) -> AsyncIterator[bytes]:
 
 class GenerateCharacterReferenceHandler(RemoteImageHandler):
     job_type = JOB_TYPE
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return await settings_service.get_int(session, MAX_PARALLEL_KEY)
 
     # --- start: check, prepare (once), submit ------------------------------------------
 

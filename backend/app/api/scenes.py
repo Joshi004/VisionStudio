@@ -32,10 +32,9 @@ from app.db.models import Asset, Job, Project, Scene
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
-from app.jobs.generate_clip import MAX_PARALLEL_KEY
 from app.jobs.generate_frame import IMAGE_MODE_KEY
 from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
-from app.jobs.scene_frame import MAX_PARALLEL_KEY as MAX_PARALLEL_IMAGES_KEY
+from app.jobs.pools import MAX_PARALLEL_GPU_KEY
 from app.jobs.store import JobRow
 from app.jobs.write_image_prompt import IMAGE_PROMPT_MODEL_KEY
 from app.providers import video_generator
@@ -375,8 +374,9 @@ class ScenesOut(BaseModel):
     # How many scenes "Generate all ready scenes" would start: ready, no clip yet, nothing
     # running, and not blocked.
     generate_ready_count: int
-    # The setting, so the page can say how many run at once.
-    max_parallel_generations: int
+    # The GPU server's shared limit (clips, frames, pictures and the rest all count in it), so
+    # the page can say how many GPU jobs run at once.
+    max_parallel_gpu_jobs: int
     # Why the final video cannot be rendered now (a scene has no clip, a clip is too short,
     # the scenes are out of date...), or None when it can. Changes with every take or cut edit,
     # which answer with this object, so the Render button follows without another request.
@@ -404,8 +404,6 @@ class ScenesOut(BaseModel):
     # How many jobs "Generate first frames" would start: scenes with a current image prompt and
     # no first frame or an out-of-date AI one, and nothing running. Uploads are skipped.
     frame_candidate_count: int
-    # The setting, so the page can say how many images are made at once.
-    max_parallel_image_generations: int
     # Last frames (Phase 23). Why "Write last frame prompts" cannot start any job now, or None
     # when it can, and how many jobs it would start.
     last_frame_prompts_blocked_reason: str | None
@@ -938,7 +936,7 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     active_clips = await clips_service.active_clip_jobs(session, project.id)
     clip_jobs = await store.latest_jobs_by_scene(session, project.id, clips_service.GENERATE_JOB)
     takes = await clips_service.takes_by_scene(session, project.id)
-    max_parallel = await settings_service.get_int(session, MAX_PARALLEL_KEY)
+    max_parallel_gpu = await settings_service.get_int(session, MAX_PARALLEL_GPU_KEY)
     default_video_model = await projects_service.default_video_model(session)
 
     # Image prompts (Phase 16): the newest job of each scene, which prompts are out of date
@@ -963,7 +961,6 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
     # to, and why a frame cannot be made.
     image_mode = image_models.resolve_mode(await settings_service.get_str(session, IMAGE_MODE_KEY))
     image_model_label = f"{image_models.MODEL_LABEL}, {image_mode}"
-    max_parallel_images = await settings_service.get_int(session, MAX_PARALLEL_IMAGES_KEY)
     frame_jobs = await store.latest_jobs_by_scene(
         session, project.id, first_frames_service.FRAME_JOB
     )
@@ -1106,7 +1103,7 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
         edit_blocked_reason=blocked_reason,
         ready_count=sum(1 for scene in scene_outs if scene.ready),
         generate_ready_count=generate_ready_count,
-        max_parallel_generations=max_parallel,
+        max_parallel_gpu_jobs=max_parallel_gpu,
         render_blocked_reason=renders_service.render_block(
             project,
             state.scenes,
@@ -1132,7 +1129,6 @@ async def scenes_out(session: AsyncSession, project: Project) -> ScenesOut:
         frames_blocked_reason=prompts_project_block
         or first_frames_service.all_block(frame_candidates, len(active_frames)),
         frame_candidate_count=frame_candidates,
-        max_parallel_image_generations=max_parallel_images,
         last_frame_prompts_blocked_reason=prompts_project_block
         or last_frame_prompts_service.all_block(last_prompt_candidates, len(active_last_prompts)),
         last_frame_prompt_candidate_count=last_prompt_candidates,

@@ -315,8 +315,8 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
                 </Button>
                 <Text size="xs" c="dimmed">
                   Starts a clip for each ready scene that has none yet. Each takes 5 to 10 minutes
-                  on the GPU server, and at most {data.max_parallel_generations} run at once. The
-                  page updates by itself.
+                  on the GPU server, which runs at most {data.max_parallel_gpu_jobs} jobs at once
+                  (clips, frames and the rest share them). The page updates by itself.
                 </Text>
               </Group>
               {generateAll.isError && (
@@ -652,9 +652,9 @@ export function ScenesSection({ project }: { project: ProjectDetail }) {
           <Text size="sm">
             Start {data?.generate_ready_count ?? 0}{" "}
             {data?.generate_ready_count === 1 ? "clip generation" : "clip generations"}? Each one
-            uses a GPU on your server for about 5 to 10 minutes, and at most{" "}
-            {data?.max_parallel_generations ?? 0} run at once. Scenes that already have a clip are
-            skipped.
+            uses a GPU on your server for about 5 to 10 minutes. The server runs at most{" "}
+            {data?.max_parallel_gpu_jobs ?? 0} jobs at once, shared with the frames and other GPU
+            work. Scenes that already have a clip are skipped.
           </Text>
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={() => setConfirmingAll(false)}>

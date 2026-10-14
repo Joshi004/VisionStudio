@@ -263,29 +263,35 @@ REGISTRY: tuple[SettingSpec, ...] = (
         allow_blank=True,
     ),
     SettingSpec(
-        key="max_parallel_generations",
+        key="max_parallel_gpu_jobs",
         group=GROUP_LIMITS,
-        label="Maximum parallel clip generations",
+        label="Maximum parallel GPU server jobs",
         help=(
-            "How many clips may generate on the GPU server at the same time. It applies the "
-            "next time the app looks for work, and running jobs are not stopped. No range is "
-            "enforced: you are trusted to pick a number your GPU server can actually handle."
+            "How many jobs may run on your GPU server at the same time, all kinds together: "
+            "clips, first and last frames, reference pictures, transcription and speech. Each "
+            "image job loads about 31 GB of model weights first, so pick a number your GPU "
+            "server can actually handle. It applies the next time the app looks for work, and "
+            "running jobs are not stopped."
         ),
         value_type="integer",
         default=4,
+        min_value=1,
+        max_value=100,
     ),
     SettingSpec(
-        key="max_parallel_image_generations",
+        key="max_parallel_paid_api_calls",
         group=GROUP_LIMITS,
-        label="Maximum parallel image generations",
+        label="Maximum parallel paid API calls",
         help=(
-            "How many first frames may be made on the GPU server at the same time. Each one is "
-            "its own GPU job that loads about 31 GB of model weights first. It applies the next "
-            "time the app looks for work, and running jobs are not stopped. No range is "
-            "enforced: you are trusted to pick a number your GPU server can actually handle."
+            "How many calls may run on the paid inference API (Bitdeer) at the same time, all "
+            "kinds together: scene proposals, the cast, descriptions and image prompts. Pick a "
+            "number your plan's rate limit allows. It applies the next time the app looks for "
+            "work, and running calls are not stopped."
         ),
         value_type="integer",
-        default=2,
+        default=8,
+        min_value=1,
+        max_value=100,
     ),
     SettingSpec(
         key="poll_interval_seconds",

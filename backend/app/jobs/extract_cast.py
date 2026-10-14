@@ -23,8 +23,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project
@@ -41,8 +39,6 @@ _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = cast_service.EXTRACT_JOB
 MODEL_KEY: Final = "description_llm_model"
-# At most this many run at once (a constant, not a setting).
-CONCURRENCY_LIMIT: Final = 2
 # The model reasons before it answers (see `plan_scenes`). The answer is streamed, so this limits
 # only the whole call.
 REQUEST_TIMEOUT_S: Final = 600.0
@@ -69,9 +65,6 @@ class ExtractCastHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return CONCURRENCY_LIMIT
 
     async def start(self, job_id: int) -> None:
         async with SessionLocal() as session:

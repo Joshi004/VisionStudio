@@ -1,0 +1,79 @@
+"""The pools of running slots the dispatcher counts jobs in.
+
+Only two things limit how much work can run at once, so only two numbers are enforced, and every
+kind of job shares them:
+
+- **`gpu`**: the in-house GPU server (clips, frames, reference pictures, transcription, speech).
+  Its limit is the `max_parallel_gpu_jobs` setting.
+- **`paid_api`**: the paid inference API (every language model call, and any image call to it).
+  Its limit is the `max_parallel_paid_api_calls` setting.
+
+A job type has no limit of its own. Which pool a job counts in comes from its handler's
+`provider`, so a new job type joins the right pool without anything else being written.
+
+A job whose provider is neither (the `local` ones: the final render and the automatic run) is its
+own pool, counted under its job type, and its handler says how many may run at once.
+
+Both settings are read at every tick, so a change on the Settings page applies at once. Running
+jobs are never stopped by a lower number.
+
+This module does not import the handler registry (the registry imports this one): the dispatcher
+and the capacity endpoint pass the handlers in.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Final
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core import settings as settings_service
+
+if TYPE_CHECKING:
+    from app.jobs.handlers import JobHandler
+
+GPU_POOL: Final = "gpu"
+PAID_API_POOL: Final = "paid_api"
+
+MAX_PARALLEL_GPU_KEY: Final = "max_parallel_gpu_jobs"
+MAX_PARALLEL_PAID_API_KEY: Final = "max_parallel_paid_api_calls"
+
+# What the page calls each shared pool.
+POOL_LABELS: Final[dict[str, str]] = {
+    GPU_POOL: "GPU server",
+    PAID_API_POOL: "Paid inference API",
+}
+
+_SETTING_OF_POOL: Final[dict[str, str]] = {
+    GPU_POOL: MAX_PARALLEL_GPU_KEY,
+    PAID_API_POOL: MAX_PARALLEL_PAID_API_KEY,
+}
+
+
+def pool_of(handler: JobHandler) -> str:
+    """The pool a handler's jobs are counted in. A local handler is its own pool."""
+    if handler.provider == "gpu":
+        return GPU_POOL
+    if handler.provider in ("llm", "image"):
+        return PAID_API_POOL
+    return handler.job_type
+
+
+async def shared_limits(session: AsyncSession) -> dict[str, int]:
+    """How many jobs may be running in each of the two shared pools right now."""
+    return {
+        pool: await settings_service.get_int(session, key) for pool, key in _SETTING_OF_POOL.items()
+    }
+
+
+async def limits(session: AsyncSession, all_handlers: Iterable[JobHandler]) -> dict[str, int]:
+    """How many jobs may be running in each pool right now, by pool name: the two shared pools
+    and the pool of each local job type.
+    """
+    result = await shared_limits(session)
+    for handler in all_handlers:
+        pool = pool_of(handler)
+        if pool not in result:
+            result[pool] = await handler.concurrency_limit(session)
+    return result

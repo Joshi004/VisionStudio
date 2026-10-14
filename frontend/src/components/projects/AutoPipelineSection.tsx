@@ -8,8 +8,8 @@ import {
   Modal,
   Paper,
   Stack,
-  Stepper,
   Text,
+  ThemeIcon,
   Title,
 } from "@mantine/core";
 
@@ -22,13 +22,14 @@ import { useNow } from "../../hooks/useNow";
 import { useRefreshWhenFinished } from "../../hooks/useRefreshWhenFinished";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
-import { activeStepIndex, problemText, stepDescription } from "./autoPipelineView";
+import { problemText, stepDescription, stepMarker } from "./autoPipelineView";
 
 /**
  * Automatic generation: one click runs every step to the final video. The steps are the ones
- * of the sections below, done one after the other. A step starts only when every scene has
- * finished the one before, and a scene that fails is tried again a few times before the run
- * stops and says what is wrong.
+ * of the sections below. Steps that do not depend on each other go on at the same time, and a
+ * scene goes on to its next step as soon as its own input is ready, so several steps can be
+ * running at once. A scene that fails is tried again a few times before the run stops, once
+ * nothing else can go on, and says what is wrong.
  */
 export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
   const query = useAutoGenerate(project.id);
@@ -94,9 +95,11 @@ export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
           </Text>
         ) : (
           <Text size="sm" c="dimmed">
-            Does every step for you, one after the other, up to the final video. A step starts only
-            when every scene has finished the step before, and a scene that fails is tried again, up
-            to {maxTries} tries in a step. Steps that are already done are skipped.
+            Does every step for you, up to the final video. Steps that do not depend on each other
+            run at the same time, and each scene goes on as soon as its own input is ready: its clip
+            starts once its frames are made, while other scenes are still making theirs. A scene
+            that fails is tried again, up to {maxTries} tries in a step. Steps that are already
+            done are skipped.
           </Text>
         )}
 
@@ -138,23 +141,47 @@ export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
         )}
 
         {showSteps && (
-          <Stepper
-            active={activeStepIndex(steps)}
-            orientation="vertical"
-            size="sm"
-            allowNextStepsSelect={false}
-          >
-            {steps.map((step) => (
-              <Stepper.Step
-                key={step.key}
-                label={step.label}
-                description={stepDescription(step)}
-                loading={step.status === "running"}
-                color={step.status === "failed" ? "red" : undefined}
-                allowStepSelect={false}
-              />
-            ))}
-          </Stepper>
+          // A list, not a stepper: a stepper has one active step, and here several steps run at
+          // once, each with its own status.
+          <Stack gap={8} aria-label="Steps of the automatic flow">
+            {steps.map((step, index) => {
+              const marker = stepMarker(step, index + 1);
+              const description = stepDescription(step);
+              const quiet = step.status === "pending" || step.status === "stopped";
+              return (
+                <Group key={step.key} gap="sm" wrap="nowrap" align="flex-start">
+                  <ThemeIcon
+                    size={24}
+                    radius="xl"
+                    color={marker.color}
+                    variant={quiet ? "light" : "filled"}
+                  >
+                    {step.status === "running" ? (
+                      <Loader size={12} color="white" />
+                    ) : (
+                      <Text size="xs" fw={700} lh={1} c="inherit">
+                        {marker.text}
+                      </Text>
+                    )}
+                  </ThemeIcon>
+                  <Stack gap={0}>
+                    <Text
+                      size="sm"
+                      fw={step.status === "running" ? 600 : 400}
+                      c={step.status === "pending" ? "dimmed" : undefined}
+                    >
+                      {step.label}
+                    </Text>
+                    {description !== "" && (
+                      <Text size="xs" c="dimmed">
+                        {description}
+                      </Text>
+                    )}
+                  </Stack>
+                </Group>
+              );
+            })}
+          </Stack>
         )}
 
         {job?.status === "failed" && (
@@ -184,7 +211,7 @@ export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
         )}
 
         {isActive && problems.length > 0 && (
-          <Alert color="yellow" title="Some scenes could not be done">
+          <Alert color="yellow" title="Some work could not be done">
             <Stack gap={4}>
               {problems.map((problem, index) => (
                 <Text
@@ -196,7 +223,7 @@ export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
                 </Text>
               ))}
               <Text size="sm">
-                The other scenes of this step go on. The run stops when nothing is left to try.
+                The rest of the run goes on. It stops when nothing is left to try.
               </Text>
             </Stack>
           </Alert>
@@ -211,9 +238,10 @@ export function AutoPipelineSection({ project }: { project: ProjectDetail }) {
       >
         <Stack gap="sm">
           <Text size="sm">
-            These steps run one after the other. Each starts only when every scene has finished
-            the step before. Steps that are already done are skipped, and frames you uploaded are
-            never replaced.
+            Steps that do not depend on each other run at the same time, and each scene goes on as
+            soon as its own input is ready, so several calls to your GPU server and the language
+            model run together (up to the limits set on the Settings page). Steps that are already
+            done are skipped, and frames you uploaded are never replaced.
           </Text>
           <List type="ordered" size="sm" spacing={2}>
             {steps.map((step) => (

@@ -1,8 +1,19 @@
 """The automatic video pipeline: the steps, and what "done" means for each of them.
 
-One run (an `auto_pipeline` job, driven by `jobs/auto_pipeline.py`) goes through `STEPS` in
-order. It creates the same jobs the manual buttons create, and moves on to the next step only
-when every scene (or the project, for a project-level step) has finished the current one.
+One run (an `auto_pipeline` job, driven by `jobs/auto_pipeline.py`) works through `STEPS`, which
+is a graph, not a queue. It creates the same jobs the manual buttons create, and a step does not
+wait for the one before it unless it has to:
+
+- `Step.needs`: steps that must be complete before this step makes any job (the data it reads
+  is only final then). Steps that need nothing from each other run at the same time: the cast
+  is found from the script while the voiceover is made, transcribed and cut into scenes.
+- `Step.follows` and `Target.waits_for`: steps this one streams behind. A target (a scene, a
+  character, a place) waits only for the *same* scene or member in the earlier step, so its job
+  starts the moment that one is done, while other scenes are still in the earlier step. A scene
+  whose first frame is ready does not wait for the other scenes' frames to make its clip.
+
+How many jobs run at once is not decided here. The run creates every job that is ready, and the
+dispatcher starts them as the two shared pools allow (`jobs/pools.py`).
 
 This module holds the rules, so the handler only has to orchestrate them:
 
@@ -10,9 +21,10 @@ This module holds the rules, so the handler only has to orchestrate them:
   scene, or the project) and whether each is done, being worked on, or cannot get a job.
   It reuses the rules of the manual steps (`is_candidate`, `scene_block`, `generation_block`,
   `render_block` and so on), so the run never does what the buttons would refuse.
-- `plan_step`: pure. From those targets and the jobs this run has already made for them, it
-  decides what to do now: wait, create the next job, or report a problem. A target gets at most
-  `MAX_TRIES` jobs from one run per step.
+- `plan_step`: pure. From those targets, the jobs this run has already made for them and what
+  the earlier steps of the same poll found (`Standing`), it decides what to do now: wait,
+  create the next job, or report a problem. A target gets at most `MAX_TRIES` jobs from one run
+  per step.
 - The run's stored state (`job.output`): `new_output`, `read_output`, `add_job_id` and
   `load_run_jobs`. The jobs a run made are named in its output, so the count of tries survives
   a restart.
@@ -24,7 +36,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable, Coroutine, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Final, Literal, cast
 
 from sqlalchemy import select
@@ -91,8 +103,22 @@ class Step:
     missing: str
     # The step asks the language model: a second try must not reuse the stored answer.
     asks_model: bool = False
+    # Steps that must be complete before this one makes any job.
+    needs: tuple[str, ...] = ()
+    # Steps this one streams behind: its targets wait for the same target of those steps (see
+    # `Target.waits_for`), so each starts when its own input is ready. It is complete only when
+    # they are too. Whatever those steps need, this one needs as well (directly or through
+    # another step), so they have been reached whenever this step is.
+    follows: tuple[str, ...] = ()
 
 
+# What every step that works on the scenes' texts needs: the scenes are cut, their descriptions
+# are drafted, and each scene knows who it shows. Nothing after this point reads them while they
+# can still change.
+_SCENE_INPUTS: Final = ("descriptions", "cast_assignment")
+
+# The order here is the order the page lists the steps, and a valid order to evaluate them in:
+# every step comes after the steps it needs and follows.
 STEPS: Final[tuple[Step, ...]] = (
     Step(
         "voiceover",
@@ -109,7 +135,9 @@ STEPS: Final[tuple[Step, ...]] = (
         "gpu",
         False,
         "a current transcript",
+        needs=("voiceover",),
     ),
+    # The scene cuts need each word's start time, so this waits for the transcript.
     Step(
         "scenes",
         "Propose scenes",
@@ -118,9 +146,12 @@ STEPS: Final[tuple[Step, ...]] = (
         False,
         "scenes that match the script",
         asks_model=True,
+        needs=("transcribe",),
     ),
-    # The project's cast (characters and places): found once from the script, drawn once each,
-    # and chosen per scene. A project whose script has no cast passes through all four.
+    # The project's cast (characters and places): found once from the script alone, so it starts
+    # at once, beside the voiceover. Each member is drawn as soon as its prompt is written, and
+    # chosen per scene once the scenes exist. A project whose script has no cast passes through
+    # all four.
     Step(
         "cast",
         "Find the characters and places",
@@ -138,6 +169,7 @@ STEPS: Final[tuple[Step, ...]] = (
         False,
         "a reference prompt",
         asks_model=True,
+        needs=("cast",),
     ),
     Step(
         "cast_images",
@@ -146,7 +178,10 @@ STEPS: Final[tuple[Step, ...]] = (
         "gpu",
         False,
         "a reference picture",
+        needs=("cast",),
+        follows=("cast_prompts",),
     ),
+    # Chooses from the names and the appearances, so it needs no picture.
     Step(
         "cast_assignment",
         "Choose who is in each scene",
@@ -155,7 +190,9 @@ STEPS: Final[tuple[Step, ...]] = (
         False,
         "a choice of character and place for every scene",
         asks_model=True,
+        needs=("scenes", "cast"),
     ),
+    # One call for the whole project (it keeps the story in order), and it does not read the cast.
     Step(
         "descriptions",
         "Draft descriptions",
@@ -164,7 +201,9 @@ STEPS: Final[tuple[Step, ...]] = (
         False,
         "a description for every scene",
         asks_model=True,
+        needs=("scenes",),
     ),
+    # The prompt names who is in the scene, so it waits for the choice.
     Step(
         "image_prompts",
         "Write image prompts",
@@ -173,7 +212,9 @@ STEPS: Final[tuple[Step, ...]] = (
         True,
         "an image prompt",
         asks_model=True,
+        needs=_SCENE_INPUTS,
     ),
+    # A scene waits for its own prompt and for the pictures of the members it shows.
     Step(
         "first_frames",
         "Make first frames",
@@ -181,7 +222,10 @@ STEPS: Final[tuple[Step, ...]] = (
         "gpu",
         True,
         "a first frame",
+        needs=_SCENE_INPUTS,
+        follows=("image_prompts", "cast_images"),
     ),
+    # Written from text only (not from the first frame), beside the first frames.
     Step(
         "last_frame_prompts",
         "Write last frame prompts",
@@ -190,7 +234,10 @@ STEPS: Final[tuple[Step, ...]] = (
         True,
         "a last frame prompt",
         asks_model=True,
+        needs=_SCENE_INPUTS,
+        follows=("image_prompts",),
     ),
+    # Edited from the scene's own first frame, with its own prompt.
     Step(
         "last_frames",
         "Make last frames",
@@ -198,7 +245,10 @@ STEPS: Final[tuple[Step, ...]] = (
         "gpu",
         True,
         "a last frame",
+        needs=_SCENE_INPUTS,
+        follows=("first_frames", "last_frame_prompts"),
     ),
+    # A scene's clip needs its first frame, and its last frame when it gets one.
     Step(
         "clips",
         "Generate clips",
@@ -206,6 +256,8 @@ STEPS: Final[tuple[Step, ...]] = (
         "gpu",
         True,
         "a clip",
+        needs=_SCENE_INPUTS,
+        follows=("first_frames", "last_frames"),
     ),
     Step(
         "render",
@@ -214,13 +266,40 @@ STEPS: Final[tuple[Step, ...]] = (
         "local",
         False,
         "a finished video",
+        needs=(
+            "voiceover",
+            "transcribe",
+            "scenes",
+            "cast",
+            "cast_prompts",
+            "cast_images",
+            "cast_assignment",
+            "descriptions",
+            "image_prompts",
+            "first_frames",
+            "last_frame_prompts",
+            "last_frames",
+            "clips",
+        ),
     ),
 )
 STEP_KEYS: Final = tuple(step.key for step in STEPS)
+STEP_LABELS: Final = {step.key: step.label for step in STEPS}
 
 
-def step_index(key: object) -> int:
-    return STEP_KEYS.index(key) if isinstance(key, str) and key in STEP_KEYS else 0
+def _check_graph() -> None:
+    """Every step comes after the steps it needs and follows: the order of `STEPS` is then a
+    valid order to evaluate them in, and the graph has no cycle.
+    """
+    seen: set[str] = set()
+    for step in STEPS:
+        unknown = [key for key in (*step.needs, *step.follows) if key not in seen]
+        if unknown:
+            raise ValueError(f"step {step.key} needs or follows {unknown}, not before it")
+        seen.add(step.key)
+
+
+_check_graph()
 
 
 # --- What the user confirmed when starting --------------------------------------------------
@@ -268,11 +347,14 @@ class Target:
     block: str | None = None
     # What the job is created with (the run adds its own keys).
     job_input: dict[str, Any] = field(default_factory=dict)
-    # The key of the target of this step that this one waits for (a scene that continues the
-    # previous scene's action waits for that scene's last frame, which becomes its first frame).
-    # It waits only while that target can still go on: if that one cannot, this one does not
-    # wait forever, and the run stops with the reason that target gave.
-    after: str | None = None
+    # The targets this one waits for, each as `(step key, target key)`: the same scene in an
+    # earlier step (a clip waits for its scene's first frame), or, in this step, the previous
+    # scene (a scene that continues the previous scene's action waits for that scene's last
+    # frame, which becomes its first frame). A target that is done, or that does not exist, is
+    # not waited for. It waits only while every target it waits for can still go on: if one
+    # cannot, this one does not wait for ever, and the run stops with the reason that target
+    # gave. Build each with `wait`.
+    waits_for: tuple[tuple[str, str], ...] = ()
     # What a problem with this target is about, when it is neither a scene nor the project (a
     # character or a place of the cast): its name.
     label: str | None = None
@@ -293,8 +375,19 @@ class Create:
     retry: bool
 
 
+def wait(step_key: str, target_key: str) -> tuple[str, str]:
+    """A target of an earlier step, as `Target.waits_for` names it. A misspelt step would be
+    waited for never, so it is refused here instead.
+    """
+    if step_key not in STEP_KEYS:
+        raise ValueError(f"unknown step {step_key!r}")
+    return step_key, target_key
+
+
 @dataclass(frozen=True)
 class Problem:
+    # The step it is about. Empty for a problem an older run stored without one.
+    step_key: str
     scene_id: int | None
     scene_number: int | None
     tries: int
@@ -304,9 +397,9 @@ class Problem:
         message = self.message if self.message.endswith((".", "!", "?")) else f"{self.message}."
         return message if self.scene_number is None else f"Scene {self.scene_number}: {message}"
 
-    def as_json(self, step_key: str) -> dict[str, Any]:
+    def as_json(self) -> dict[str, Any]:
         return {
-            "step": step_key,
+            "step": self.step_key,
             "scene_id": self.scene_id,
             "scene_number": self.scene_number,
             "tries": self.tries,
@@ -322,10 +415,39 @@ class StepPlan:
     waiting: int
     creates: list[Create]
     problems: list[Problem]
+    # The keys of the targets that are not done, and of those that have a job in progress or are
+    # about to get one. The steps after this one wait on them (`Standing`).
+    pending: frozenset[str] = frozenset()
+    progressing: frozenset[str] = frozenset()
 
     @property
     def complete(self) -> bool:
         return self.done == self.total
+
+
+@dataclass(frozen=True)
+class Standing:
+    """What the steps evaluated so far in one poll found, as `(step key, target key)`, so a
+    later step can tell whether the targets it waits for are done, going on, or stuck.
+
+    A step left out of it is either complete (all its targets are done) or `unreached`: it is
+    not complete and what it needs is not, so it has made no job and nothing waits on it
+    successfully.
+    """
+
+    pending: frozenset[tuple[str, str]] = frozenset()
+    progressing: frozenset[tuple[str, str]] = frozenset()
+    unreached: frozenset[str] = frozenset()
+
+    def after_step(self, step_key: str, plan: StepPlan) -> Standing:
+        return Standing(
+            pending=self.pending | {(step_key, key) for key in plan.pending},
+            progressing=self.progressing | {(step_key, key) for key in plan.progressing},
+            unreached=self.unreached,
+        )
+
+    def with_unreached(self, step_key: str) -> Standing:
+        return Standing(self.pending, self.progressing, self.unreached | {step_key})
 
 
 def _short(text: str) -> str:
@@ -356,23 +478,44 @@ def exhausted_message(step: Step, tried: Sequence[Job]) -> str:
     return f"Tried {len(tried)} times without success. The last try: {reason}"
 
 
-def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]]) -> StepPlan:
+def plan_step(
+    step: Step,
+    view: StepView,
+    run_jobs: Mapping[str, Sequence[Job]],
+    standing: Standing,
+) -> StepPlan:
     """What to do now about a step. Pure.
 
-    For each target that is not done: wait when a job is in progress for it; report it when no
-    job can be made or it has had `MAX_TRIES`; otherwise create the next job.
+    For each target that is not done, in this order: wait when a job is in progress for it; wait
+    when a target it waits for (`Target.waits_for`) is not done yet and can still go on; report
+    it when no job can be made or it has had `MAX_TRIES`; otherwise create the next job.
+    `standing` is what the steps before this one found in the same poll.
     """
     pending = [target for target in view.targets if not target.done]
     waiting = 0
     creates: list[Create] = []
     problems: list[Problem] = []
-    # A target that waits for another (`Target.after`) is decided last, in the order of the
-    # view, because the one it waits for may itself be waiting for an earlier one. It waits only
-    # for a target that is not done: a target that is done has nothing left to wait for.
-    pending_keys = {target.key for target in pending}
-    following: list[Target] = []
+    pending_here = {(step.key, target.key) for target in pending}
     # The targets that have a job in progress or are about to get one.
     progressing: set[str] = set()
+
+    def is_pending(wait_for: tuple[str, str]) -> bool:
+        # A target that is done, or that does not exist, has nothing left to wait for. A step
+        # that was not reached has made nothing, so everything in it is still to do.
+        return (
+            wait_for in pending_here
+            or wait_for in standing.pending
+            or wait_for[0] in standing.unreached
+        )
+
+    def is_progressing(wait_for: tuple[str, str]) -> bool:
+        in_this_step = wait_for[0] == step.key and wait_for[1] in progressing
+        return in_this_step or wait_for in standing.progressing
+
+    # A target that waits is decided last, in the order of the view, because the one it waits
+    # for may itself be waiting for an earlier one (a scene's last frame waits for the previous
+    # scene's last frame, which waits for the one before).
+    following: list[Target] = []
 
     for target in pending:
         tried = run_jobs.get(target.key, [])
@@ -381,11 +524,12 @@ def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]])
             progressing.add(target.key)
         elif view.block is not None:
             continue  # reported once, below
-        elif target.after is not None and target.after in pending_keys:
+        elif any(is_pending(wait_for) for wait_for in target.waits_for):
             following.append(target)
         elif target.block is not None:
             problems.append(
                 Problem(
+                    step.key,
                     target.scene_id,
                     target.scene_number,
                     len(tried),
@@ -395,6 +539,7 @@ def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]])
         elif len(tried) >= MAX_TRIES:
             problems.append(
                 Problem(
+                    step.key,
                     target.scene_id,
                     target.scene_number,
                     len(tried),
@@ -406,14 +551,17 @@ def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]])
             progressing.add(target.key)
 
     for target in following:
-        # What it waits for has a job in progress or will get one: wait. Otherwise that target
-        # cannot go on and is reported (or the whole step is blocked), so nothing is added here.
-        if target.after in progressing:
+        # Every target it waits for that is not done has a job in progress or will get one:
+        # wait. Otherwise one of them cannot go on and is reported (or its whole step is
+        # blocked, or not reached), so nothing is added here: counting this one as going on
+        # would keep the run alive for ever.
+        blockers = [wait_for for wait_for in target.waits_for if is_pending(wait_for)]
+        if all(is_progressing(wait_for) for wait_for in blockers):
             waiting += 1
             progressing.add(target.key)
 
     if view.block is not None and pending:
-        problems.append(Problem(None, None, 0, view.block))
+        problems.append(Problem(step.key, None, None, 0, view.block))
 
     return StepPlan(
         done=len(view.targets) - len(pending),
@@ -421,16 +569,35 @@ def plan_step(step: Step, view: StepView, run_jobs: Mapping[str, Sequence[Job]])
         waiting=waiting,
         creates=creates,
         problems=problems,
+        pending=frozenset(target.key for target in pending),
+        progressing=frozenset(progressing),
     )
 
 
-def failure_message(number: int, total: int, step: Step, problems: Sequence[Problem]) -> str:
-    """What a stopped run says: the step it stopped at, and what is wrong."""
+def failure_message(done: int, total: int, problems: Sequence[Problem]) -> str:
+    """What a stopped run says: how far it got, and what is wrong, step by step."""
     shown = problems[:_MAX_PROBLEMS_SHOWN]
-    parts = " ".join(problem.text() for problem in shown)
+    by_step: dict[str, list[str]] = {}
+    for problem in shown:
+        by_step.setdefault(problem.step_key, []).append(problem.text())
+    parts = " ".join(
+        f"{STEP_LABELS.get(key, key)}: {' '.join(texts)}" if key else " ".join(texts)
+        for key, texts in by_step.items()
+    )
     more = len(problems) - len(shown)
     tail = f" And {more} more." if more > 0 else ""
-    return f"Stopped at step {number} of {total}, {step.label.lower()}. {parts}{tail}"
+    return f"Stopped with {done} of {total} steps done. {parts}{tail}"
+
+
+def idle_message(done: int, total: int, incomplete: Sequence[Step]) -> str:
+    """What a run says when nothing is running, nothing can be started and nothing is reported,
+    yet it is not finished. It should not happen: it is a way out, so a run never hangs.
+    """
+    labels = ", ".join(step.label.lower() for step in incomplete)
+    return (
+        f"Stopped with {done} of {total} steps done: nothing is running and nothing can be "
+        f"started, but these steps are not complete: {labels}. Press Start again to try them."
+    )
 
 
 # --- The run's stored state -----------------------------------------------------------------
@@ -439,7 +606,6 @@ def failure_message(number: int, total: int, step: Step, problems: Sequence[Prob
 def new_output() -> dict[str, Any]:
     """The output of a run that has just started: every step waiting, no job made yet."""
     return {
-        "step": STEPS[0].key,
         "steps": {step.key: {"status": "pending", "done": 0, "total": 0} for step in STEPS},
         # step key -> target key -> ids of the jobs this run made, oldest first.
         "jobs": {step.key: {} for step in STEPS},
@@ -450,15 +616,19 @@ def new_output() -> dict[str, Any]:
 def read_output(value: object) -> dict[str, Any]:
     """A copy of a run's stored output that is safe to change (the stored JSON is replaced by a
     new object, never changed in place). Anything that is not a run's output starts afresh.
+
+    A run made before the steps went on at the same time also stored the one step it was at
+    (`step`). That is dropped: every step that is not complete is looked at in each poll, and the
+    steps it had passed stay passed.
     """
     if (
         not isinstance(value, dict)
-        or value.get("step") not in STEP_KEYS
         or not isinstance(value.get("steps"), dict)
         or not isinstance(value.get("jobs"), dict)
     ):
         return new_output()
     output: dict[str, Any] = copy.deepcopy(value)
+    output.pop("step", None)
     fresh = new_output()
     for key in STEP_KEYS:
         if not isinstance(output["steps"].get(key), dict):
@@ -669,6 +839,7 @@ def _scene_target(
     active: Job | None,
     block: str | None,
     job_input: dict[str, Any],
+    waits_for: tuple[tuple[str, str], ...] = (),
 ) -> Target:
     return Target(
         key=str(scene.id),
@@ -678,6 +849,7 @@ def _scene_target(
         active=active,
         block=None if done else block,
         job_input=job_input,
+        waits_for=waits_for,
     )
 
 
@@ -892,7 +1064,8 @@ async def _cast_prompts(session: AsyncSession, ctx: RunContext) -> StepView:
 
 async def _cast_images(session: AsyncSession, ctx: RunContext) -> StepView:
     """One target for each character and place that has no reference picture yet. A picture that
-    exists is never replaced by a run.
+    exists is never replaced by a run. A member is drawn as soon as its own prompt is written,
+    while the other members' prompts are still being written.
     """
     project = ctx.project
     cast = await cast_service.load_cast(session, project.id)
@@ -914,6 +1087,7 @@ async def _cast_images(session: AsyncSession, ctx: RunContext) -> StepView:
                     cast_service.KIND_KEY: kind,
                     cast_service.ID_KEY: member.id,
                 },
+                waits_for=(wait("cast_prompts", key),),
                 label=member.name,
             )
         )
@@ -1015,6 +1189,10 @@ async def _image_prompts(session: AsyncSession, ctx: RunContext) -> StepView:
 
 
 async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
+    """A scene's frame is made as soon as the scene's own image prompt is written and the
+    reference pictures of the characters and the place it shows are drawn. It does not wait for
+    the other scenes' prompts, nor for the pictures of members this scene does not show.
+    """
     project = ctx.project
     state = await scenes_service.scenes_state(session, project)
     block = await _prompts_block(session, project, state)
@@ -1023,10 +1201,11 @@ async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
     states = await prompts_service.prompt_states(session, project, state.scenes)
     frames = await scene_inputs.load_frames(session, state.scenes)
     chained = await last_frames_service.chain_sources(session, project.id, state.scenes)
-    reference_blocks = await cast_service.reference_blocks(session, project.id, state.scenes)
+    scene_casts = await cast_service.load_scene_casts(session, project.id, state.scenes)
 
     targets: list[Target] = []
     for scene in state.scenes:
+        scene_cast = scene_casts.get(scene.id, cast_service.NO_CAST)
         asset = frames.get(scene.first_frame_asset_id or 0)
         out_of_date = frames_service.is_ai_frame(asset) and frames_service.frame_out_of_date(
             scene, asset, chain_source_id=chained.get(scene.id)
@@ -1046,7 +1225,7 @@ async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
                     scene,
                     prompt_out_of_date=prompt_out_of_date,
                     prompt_job_active=False,
-                    references_block=reference_blocks.get(scene.id),
+                    references_block=cast_service.references_block(scene_cast),
                 ),
                 # A frame the author uploaded counts as done above, so it is never replaced.
                 job_input={
@@ -1054,12 +1233,23 @@ async def _first_frames(session: AsyncSession, ctx: RunContext) -> StepView:
                     "replace_upload": False,
                     "first_frame_at_click": scene.first_frame_asset_id,
                 },
+                waits_for=(
+                    wait("image_prompts", str(scene.id)),
+                    *(
+                        wait("cast_images", cast_service.member_key(kind, member.id))
+                        for kind, member in scene_cast.references()
+                    ),
+                ),
             )
         )
     return StepView(targets, block=block)
 
 
 async def _last_frame_prompts(session: AsyncSession, ctx: RunContext) -> StepView:
+    """A scene's last frame prompt is written from text only (its image prompt and its
+    descriptions, not the first frame), so it starts as soon as the scene's image prompt is
+    written, beside the scene's first frame.
+    """
     project = ctx.project
     state = await scenes_service.scenes_state(session, project)
     block = await _prompts_block(session, project, state)
@@ -1084,6 +1274,7 @@ async def _last_frame_prompts(session: AsyncSession, ctx: RunContext) -> StepVie
                 active=active.get(scene.id),
                 block=last_prompts_service.scene_block(scene),
                 job_input={"requested": "write_all"},
+                waits_for=(wait("image_prompts", str(scene.id)),),
             )
         )
     return StepView(targets, block=block)
@@ -1094,8 +1285,12 @@ async def _last_frames(session: AsyncSession, ctx: RunContext) -> StepView:
 
     The second kind has nothing to make: its first frame is the previous scene's last frame, which
     the app puts there when that frame is attached (`last_frames.apply_chains`). So it *waits* for
-    that scene (`Target.after`). Its own last frame, if it gets one, is edited from that first
+    that scene (`Target.waits_for`). Its own last frame, if it gets one, is edited from that first
     frame, so it waits too.
+
+    A scene that gets a last frame also waits for its own first frame (the frame is edited from
+    it) and its own last frame prompt, and for nothing else: it starts the moment both are done,
+    while other scenes are still in those steps.
     """
     project = ctx.project
     state = await scenes_service.scenes_state(session, project)
@@ -1137,15 +1332,17 @@ async def _last_frames(session: AsyncSession, ctx: RunContext) -> StepView:
             continue
         done = done_by_scene[scene.id]
         wants_last = not _blank(scene.last_frame_description)
-        waits_for = before if chain_pending[scene.id] and before is not None else None
+        chain_source = before if chain_pending[scene.id] and before is not None else None
+        waits: list[tuple[str, str]] = []
         # Waiting is only for a scene that has not finished: one that is done has delivered.
-        after = (
-            str(waits_for.id)
-            if waits_for is not None and not done_by_scene.get(waits_for.id, True)
-            else None
-        )
+        if chain_source is not None and not done_by_scene.get(chain_source.id, True):
+            waits.append(wait("last_frames", str(chain_source.id)))
+        waits_for_chain = bool(waits)
+        if wants_last:
+            waits.append(wait("first_frames", str(scene.id)))
+            waits.append(wait("last_frame_prompts", str(scene.id)))
         block_reason: str | None = None
-        if chain_pending[scene.id] and after is None:
+        if chain_pending[scene.id] and not waits_for_chain:
             block_reason = (
                 "The previous scene's last frame could not be used as this scene's first frame."
             )
@@ -1167,12 +1364,17 @@ async def _last_frames(session: AsyncSession, ctx: RunContext) -> StepView:
                 "replace_upload": False,
                 "last_frame_at_click": scene.last_frame_asset_id,
             },
+            waits_for=tuple(waits),
         )
-        targets.append(replace(target, after=after))
+        targets.append(target)
     return StepView(targets, block=block)
 
 
 async def _clips(session: AsyncSession, ctx: RunContext) -> StepView:
+    """A scene's clip starts when the scene is ready: its first frame is made and, if it gets
+    one, its last frame too. It does not wait for the other scenes' frames. (A scene that gets
+    no last frame has no target in `last_frames`, so there is nothing to wait for.)
+    """
     project = ctx.project
     state = await scenes_service.scenes_state(session, project)
     block = clips_service.scenes_block_reason(state.job, state.stale_reasons)
@@ -1192,6 +1394,10 @@ async def _clips(session: AsyncSession, ctx: RunContext) -> StepView:
                     scene, project, scenes_blocked=None, active=None
                 ),
                 job_input={"requested": "generate_all"},
+                waits_for=(
+                    wait("first_frames", str(scene.id)),
+                    wait("last_frames", str(scene.id)),
+                ),
             )
         )
     return StepView(targets, block=block)
@@ -1296,6 +1502,7 @@ def describe(output: object, run_status: str) -> RunState:
         )
     problems = [
         Problem(
+            step_key=str(item.get("step") or ""),
             scene_id=item.get("scene_id"),
             scene_number=item.get("scene_number"),
             tries=int(item.get("tries", 0)),

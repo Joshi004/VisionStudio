@@ -1,11 +1,12 @@
 """Automatic generation (the `auto_pipeline` job; ANALYSIS.md Section 3.3).
 
 `POST /api/projects/{id}/auto-generate` starts one run and returns at once with HTTP 202. The
-run goes through the manual steps one after the other (make the voiceover when there is
-none, transcribe, propose scenes, descriptions, image prompts, first frames, clips, final
-render), and starts a step only when every scene has finished the one before. A scene whose
-job fails is tried again, up to `max_tries` jobs in a step, and then the run stops and says
-what is wrong. The dispatcher does the work (`jobs/auto_pipeline.py`).
+run goes through the manual steps (make the voiceover when there is none, transcribe, propose
+scenes, find the cast, descriptions, image prompts, first frames, clips, final render). Steps
+that do not depend on each other go on at the same time, and a scene moves to its next step as
+soon as its own input is ready, without waiting for the other scenes. A scene whose job fails
+is tried again, up to `max_tries` jobs in a step, and then the run stops, once nothing else can
+go on, and says what is wrong. The dispatcher does the work (`jobs/auto_pipeline.py`).
 
 Starting is the one consent for everything the run does, paid calls included, so the page asks
 first. `GET .../auto-generate` carries what it must ask: the two questions the manual "Propose
@@ -74,6 +75,9 @@ class StepOut(BaseModel):
 
 
 class ProblemOut(BaseModel):
+    # The label of the step it is about (steps go on at the same time, so a problem must say
+    # which one). Empty for a run that stored none.
+    step: str
     # None when the problem is about the project, not one scene.
     scene_id: int | None
     scene_number: int | None
@@ -201,6 +205,7 @@ async def get_auto_generate(project_id: int, session: SessionDep) -> AutoGenerat
         ],
         problems=[
             ProblemOut(
+                step=auto.STEP_LABELS.get(problem.step_key, ""),
                 scene_id=problem.scene_id,
                 scene_number=problem.scene_number,
                 tries=problem.tries,

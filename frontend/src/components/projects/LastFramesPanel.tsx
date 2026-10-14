@@ -171,10 +171,11 @@ export function LastFramesPanel({ project, data }: LastFramesPanelProps) {
       >
         <Stack gap="sm">
           <Text size="sm">
-            {frameCount} {frameCount === 1 ? "scene" : "scenes"}, {imageModel}, a few minutes each,
-            at most {data.max_parallel_image_generations} at a time on your GPU server. Each image
-            edits a scene's first frame in a new GPU job that loads the model first: nothing is
-            reused, and a job that fails is not tried again by itself.
+            {frameCount} {frameCount === 1 ? "scene" : "scenes"}, {imageModel}, a few minutes each.
+            Your GPU server runs at most {data.max_parallel_gpu_jobs} jobs at a time, shared with
+            the clips and other GPU work. Each image edits a scene's first frame in a new GPU job
+            that loads the model first: nothing is reused, and a job that fails is not tried again
+            by itself.
           </Text>
           {replacingFrames > 0 && (
             <Text size="sm">

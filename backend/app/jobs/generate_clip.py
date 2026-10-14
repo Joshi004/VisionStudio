@@ -69,7 +69,6 @@ GPU_URL_KEY: Final = "gpu_api_base_url"
 PARTITION_KEY: Final = "gpu_partition"
 DEFAULT_NEGATIVE_PROMPT_KEY: Final = "default_negative_prompt"
 DEFAULT_VIDEO_MODEL_KEY: Final = "default_video_model"
-MAX_PARALLEL_KEY: Final = "max_parallel_generations"
 
 SERVER_RETRY_DELAY_S: Final = 5.0
 # How many ticks the download is tried again while the server answers 410 but still says the
@@ -97,11 +96,6 @@ class GenerateClipHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "gpu"
     restart_rule = "resume"
-    # The Video lab's clips use the same GPUs, so they share these slots.
-    concurrency_group = "video_generation"
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return await settings_service.get_int(session, MAX_PARALLEL_KEY)
 
     # --- start: prepare (once), upload, submit ----------------------------------
 

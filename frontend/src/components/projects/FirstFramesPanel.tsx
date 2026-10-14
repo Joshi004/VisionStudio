@@ -93,10 +93,10 @@ export function FirstFramesPanel({ project, data }: FirstFramesPanelProps) {
       >
         <Stack gap="sm">
           <Text size="sm">
-            {count} {count === 1 ? "scene" : "scenes"}, {model}, a few minutes each, at most{" "}
-            {data.max_parallel_image_generations} at a time on your GPU server. Each image is a new
-            GPU job that loads the model first: nothing is reused, and a job that fails is not
-            tried again by itself.
+            {count} {count === 1 ? "scene" : "scenes"}, {model}, a few minutes each. Your GPU
+            server runs at most {data.max_parallel_gpu_jobs} jobs at a time, shared with the clips
+            and other GPU work. Each image is a new GPU job that loads the model first: nothing
+            is reused, and a job that fails is not tried again by itself.
           </Text>
           {replacing > 0 && (
             <Text size="sm">

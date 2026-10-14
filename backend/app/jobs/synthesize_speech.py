@@ -39,8 +39,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Job
@@ -54,9 +52,6 @@ from app.services import ffmpeg, speech_audio
 from app.services.storage import StorageError, TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
-
-# At most this many speeches are made on the server at once (a constant, not a setting).
-CONCURRENCY_LIMIT: Final = 2
 
 GPU_URL_KEY: Final = "gpu_api_base_url"
 PARTITION_KEY: Final = "gpu_partition"
@@ -151,11 +146,6 @@ def read_plan(recorded: object) -> Plan | None:
 class SpeechHandler(JobHandler):
     provider = "gpu"
     restart_rule = "resume"
-    # The Voice lab's speeches and a project's voiceover share the same slots.
-    concurrency_group = "speech"
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return CONCURRENCY_LIMIT
 
     @abstractmethod
     async def store_result(self, job: Job, speech: SpeechFile) -> bool:

@@ -26,8 +26,6 @@ import logging
 import time
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project
@@ -47,9 +45,6 @@ _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = cast_service.REFERENCE_PROMPT_JOB
 MODEL_KEY: Final = "image_prompt_llm_model"
-# At most this many prompts are written at once (a constant, not a setting). One member's
-# request is small and quick.
-CONCURRENCY_LIMIT: Final = 4
 # One paragraph of about 200 words is a few hundred tokens (see `write_image_prompt`).
 REQUEST_TIMEOUT_S: Final = 300.0
 
@@ -80,9 +75,6 @@ class WriteCharacterReferencePromptHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return CONCURRENCY_LIMIT
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()

@@ -496,6 +496,19 @@ async def waiting_job_count(session: AsyncSession) -> int:
     return int((await session.execute(statement)).scalar_one())
 
 
+async def active_counts(session: AsyncSession) -> dict[tuple[str, str], int]:
+    """How many jobs are queued and running, by `(job type, status)`, in one query (for the
+    pool counts the Activity page shows).
+    """
+    statement = (
+        select(Job.type, Job.status, func.count(Job.id))
+        .where(Job.status.in_(ACTIVE_STATUSES))
+        .group_by(Job.type, Job.status)
+    )
+    result = await session.execute(statement)
+    return {(job_type, job_status): int(count) for job_type, job_status, count in result.all()}
+
+
 def owner_name(job: Job, project_name: str | None) -> str:
     """The project's name, or the lab the job belongs to when it has no project."""
     if project_name:

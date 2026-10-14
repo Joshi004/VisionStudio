@@ -9,13 +9,16 @@ task handles are in memory.
 Each tick, which happens every poll interval (a setting) or sooner when something nudges
 the loop:
 
-1. Read the poll interval, the running and the queued jobs, and each job type's limit.
+1. Read the poll interval, the running and the queued jobs, and the limit of each pool. There
+   are two shared pools, the GPU server and the paid inference API (`jobs/pools.py`): every
+   kind of job counts in the pool of its provider, and has no limit of its own. A local job
+   type (the final render, the automatic run) is a pool of its own.
 2. If any GPU job needs the server, check its health and store the result for the banner.
    If it does not answer, GPU jobs wait, and the loop backs off (the wait doubles up to
    120 s, or the poll interval if that is longer).
 3. Ask each running remote job's handler to `poll`. A handler that says "ready" gets its
    `finish` started as a task.
-4. Start queued jobs while their type (or concurrency group) has free slots. Before the
+4. Start queued jobs, oldest first, while their pool has free slots. Before the
    first GPU job is started, the recorded GPU API is checked, and nothing starts unless it
    still matches the approved version (ANALYSIS.md Section 6.5).
 5. Wait.
@@ -39,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionLocal
-from app.jobs import handlers, phases, register_handlers, store
+from app.jobs import handlers, phases, pools, register_handlers, store
 from app.jobs.handlers import JobHandler
 from app.providers import contract_guard
 from app.services import gpu_status
@@ -54,6 +57,11 @@ INTERRUPTED_MESSAGE: Final = (
     "Interrupted by a restart. Paid calls never re-run by themselves; start it again."
 )
 UNEXPECTED_ERROR_MAX_CHARS: Final = 500
+# What a queued job shows while its pool is full.
+_SLOT_PHASES: Final = {
+    pools.GPU_POOL: phases.WAITING_FOR_GPU_SLOT,
+    pools.PAID_API_POOL: phases.WAITING_FOR_PAID_API_SLOT,
+}
 
 _logger = logging.getLogger(__name__)
 
@@ -162,11 +170,9 @@ class _Dispatcher:
             interval = await settings_service.get_int(session, POLL_INTERVAL_KEY)
             running = await self._jobs(session, "running")
             queued = await self._jobs(session, "queued")
-            # By pool: job types of one concurrency group share their slots.
-            limits = {
-                handlers.slot_key(handler.job_type): await handler.concurrency_limit(session)
-                for handler in handlers.all_handlers()
-            }
+            # By pool: every GPU job shares the GPU server's slots, every paid call the paid
+            # API's, and a local job type has its own.
+            limits = await pools.limits(session, handlers.all_handlers())
             await session.commit()  # end the read before any network call
         self._interval_s = float(interval)
 
@@ -279,7 +285,9 @@ class _Dispatcher:
 
             pool = handlers.slot_key(job.type)
             if free.get(pool, 0) <= 0:
-                await self._set_queued_phase(job.id, phases.WAITING_FOR_SLOT)
+                await self._set_queued_phase(
+                    job.id, _SLOT_PHASES.get(pool, phases.WAITING_FOR_SLOT)
+                )
                 continue
 
             if handler.provider == "gpu":

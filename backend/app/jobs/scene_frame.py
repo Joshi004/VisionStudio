@@ -34,12 +34,11 @@ import logging
 from abc import abstractmethod
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import outbound
-from app.core import settings as settings_service
 from app.db.models import Asset, Job, Project, Scene
 from app.db.session import SessionLocal
 from app.jobs import phases, store
@@ -51,8 +50,6 @@ from app.services.frame_images import FrameRejected
 from app.services.storage import StorageError, StoredFile, TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
-
-MAX_PARALLEL_KEY: Final = "max_parallel_image_generations"
 
 
 def scene_record(scene: Scene) -> dict[str, Any]:
@@ -85,9 +82,6 @@ class SceneFrameHandler(RemoteImageHandler):
     label: str
     # What the stored frame's provenance says it is (`first_frame`, `last_frame`).
     role: str
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return await settings_service.get_int(session, MAX_PARALLEL_KEY)
 
     # --- The hooks ------------------------------------------------------------------------
 

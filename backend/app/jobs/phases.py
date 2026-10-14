@@ -15,6 +15,10 @@ MAX_ATTEMPTS: Final = 3
 # --- Queued: the job has not started, or is waiting to start again ----------------
 WAITING_TO_START: Final = "waiting to start"
 WAITING_FOR_SLOT: Final = "waiting for a free slot"
+# The two shared pools (`jobs/pools.py`): every GPU job waits for the first, every paid language
+# model call for the second, whatever kind of job it is.
+WAITING_FOR_GPU_SLOT: Final = "waiting for a free GPU server slot"
+WAITING_FOR_PAID_API_SLOT: Final = "waiting for a free paid API slot"
 PAUSED_API_CHANGED: Final = "paused: GPU API changed"
 PAUSED_API_NOT_APPROVED: Final = "paused: GPU API not approved"
 WAITING_API_UNCHECKED: Final = "waiting: GPU API could not be checked"
@@ -151,12 +155,27 @@ def preempted(next_attempt: int) -> str:
     return f"pre-empted: submitting again (attempt {next_attempt} of {MAX_ATTEMPTS})"
 
 
-def auto_step(number: int, total: int, label: str, done: int, count: int) -> str:
-    """Where an automatic run is: "step 5 of 7: make first frames (4 of 12 done)". `count` is
-    the number of targets of the step; a project-level step has one, and shows no count.
+# At most this many running steps are named in an automatic run's phase.
+_AUTO_STEPS_SHOWN = 3
+
+
+def auto_progress(done: int, total: int, running: list[tuple[str, int, int]]) -> str:
+    """Where an automatic run is, now that its steps go on at the same time: "5 of 14 steps
+    done; running: make first frames (4 of 12), write last frame prompts (6 of 12)". `running`
+    holds each step that is going on as `(label, done, count)`, where `count` is the number of
+    targets of the step: a project-level step has one, and shows no count.
     """
-    text = f"step {number} of {total}: {label.lower()}"
-    return f"{text} ({done} of {count} done)" if count > 1 else text
+    text = f"{done} of {total} steps done"
+    if not running:
+        return text
+    named = [
+        f"{label.lower()} ({targets_done} of {count})" if count > 1 else label.lower()
+        for label, targets_done, count in running[:_AUTO_STEPS_SHOWN]
+    ]
+    more = len(running) - _AUTO_STEPS_SHOWN
+    if more > 0:
+        named.append(f"{more} more")
+    return f"{text}; running: {', '.join(named)}"
 
 
 def trimming(number: int, total: int) -> str:

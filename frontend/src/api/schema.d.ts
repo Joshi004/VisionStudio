@@ -271,6 +271,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Capacity
+         * @description The GPU server's and the paid inference API's shared slots: the limit, how many jobs
+         *     are running and waiting for a slot in each, and which kinds of job they are.
+         */
+        get: operations["get_capacity_api_jobs_capacity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -2109,6 +2130,11 @@ export interface components {
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
         };
+        /** JobCapacity */
+        JobCapacity: {
+            /** Pools */
+            pools: components["schemas"]["PoolCapacity"][];
+        };
         /** JobDetail */
         JobDetail: {
             /** Id */
@@ -2563,8 +2589,46 @@ export interface components {
             fetched_at: string;
             diff: components["schemas"]["ContractDiffOut"];
         };
+        /**
+         * PoolCapacity
+         * @description One of the two shared pools: how many jobs may run in it, and what is in it now.
+         */
+        PoolCapacity: {
+            /**
+             * Pool
+             * @enum {string}
+             */
+            pool: "gpu" | "paid_api";
+            /** Label */
+            label: string;
+            /** Limit */
+            limit: number;
+            /** Running */
+            running: number;
+            /** Queued */
+            queued: number;
+            /** By Type */
+            by_type: components["schemas"]["PoolTypeCount"][];
+        };
+        /**
+         * PoolTypeCount
+         * @description What one kind of job is using in a pool right now.
+         */
+        PoolTypeCount: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast";
+            /** Running */
+            running: number;
+            /** Queued */
+            queued: number;
+        };
         /** ProblemOut */
         ProblemOut: {
+            /** Step */
+            step: string;
             /** Scene Id */
             scene_id: number | null;
             /** Scene Number */
@@ -3036,8 +3100,8 @@ export interface components {
             ready_count: number;
             /** Generate Ready Count */
             generate_ready_count: number;
-            /** Max Parallel Generations */
-            max_parallel_generations: number;
+            /** Max Parallel Gpu Jobs */
+            max_parallel_gpu_jobs: number;
             /** Render Blocked Reason */
             render_blocked_reason: string | null;
             description_job: components["schemas"]["JobSummary"] | null;
@@ -3057,8 +3121,6 @@ export interface components {
             frames_blocked_reason: string | null;
             /** Frame Candidate Count */
             frame_candidate_count: number;
-            /** Max Parallel Image Generations */
-            max_parallel_image_generations: number;
             /** Last Frame Prompts Blocked Reason */
             last_frame_prompts_blocked_reason: string | null;
             /** Last Frame Prompt Candidate Count */
@@ -4139,6 +4201,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_capacity_api_jobs_capacity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCapacity"];
                 };
             };
         };

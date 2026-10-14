@@ -18,8 +18,6 @@ import logging
 from pathlib import Path
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import outbound
 from app.core import settings as settings_service
 from app.db.models import Job, LabImage, LabRun
@@ -35,15 +33,10 @@ from app.services.storage import StorageError, TempFile, get_storage
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = image_lab.RUN_JOB
-# Each run loads about 31 GB of model weights on the GPU server, so only a couple at a time.
-CONCURRENCY_LIMIT: Final = 2
 
 
 class GenerateLabImageHandler(RemoteImageHandler):
     job_type = JOB_TYPE
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return CONCURRENCY_LIMIT
 
     # --- start: submit the stored request -------------------------------------------------
 

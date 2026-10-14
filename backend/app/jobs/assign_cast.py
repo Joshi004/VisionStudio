@@ -26,8 +26,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project, Scene
@@ -48,8 +46,6 @@ _logger = logging.getLogger(__name__)
 JOB_TYPE: Final = cast_service.ASSIGN_JOB
 # The cheap model of the scene cuts: choosing names from a list is not hard.
 MODEL_KEY: Final = "llm_model"
-# At most this many run at once (a constant, not a setting).
-CONCURRENCY_LIMIT: Final = 2
 REQUEST_TIMEOUT_S: Final = 600.0
 
 _SCENES_CHANGED = (
@@ -83,9 +79,6 @@ class AssignCastHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return CONCURRENCY_LIMIT
 
     async def start(self, job_id: int) -> None:
         async with SessionLocal() as session:

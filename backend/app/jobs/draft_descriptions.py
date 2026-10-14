@@ -37,8 +37,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project, Scene
@@ -60,8 +58,6 @@ _logger = logging.getLogger(__name__)
 JOB_TYPE: Final = descriptions_service.DRAFT_JOB
 DESCRIPTION_MODEL_KEY: Final = "description_llm_model"
 
-# At most this many drafts run at once (a constant, not a setting).
-CONCURRENCY_LIMIT: Final = 2
 # One call, and one more if it fails in a way that can pass (ANALYSIS.md Section 5.8, 6.2).
 MAX_ATTEMPTS: Final = 2
 RETRY_DELAY_S: Final = 5.0
@@ -141,9 +137,6 @@ class DraftDescriptionsHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return CONCURRENCY_LIMIT
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()

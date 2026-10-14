@@ -34,8 +34,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
@@ -44,7 +42,6 @@ from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.handlers import JobHandler
 from app.jobs.plan_scenes import LLM_URL_KEY
 from app.jobs.write_lab_video_prompt import (
-    CONCURRENCY_LIMIT,
     IDLE_TIMEOUT_S,
     MAX_ATTEMPTS,
     RAW_CONTENT_MAX_CHARS,
@@ -106,9 +103,6 @@ class WriteTalkPromptsHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
-
-    async def concurrency_limit(self, session: AsyncSession) -> int:
-        return CONCURRENCY_LIMIT
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
