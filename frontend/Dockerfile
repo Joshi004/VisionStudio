@@ -8,4 +8,5 @@ RUN npm run build
 FROM nginx:1.30-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=755 40-print-app-url.sh /docker-entrypoint.d/40-print-app-url.sh
 EXPOSE 80
