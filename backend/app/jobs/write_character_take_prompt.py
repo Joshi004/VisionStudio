@@ -5,6 +5,10 @@ needed_keys` says the take's remaining steps need (`services/character_takes._st
 already works this out and renders the character's card, so this job only has to ask the
 model and save what it writes).
 
+For a MiniMax H3 take the model gives the pieces of H3's structured prompt and the writer
+assembles them, so `output.video_prompt` is the finished text. A take of H3 may also need a
+`last_frame_prompt`, the instruction that edits its first frame into its last.
+
 A paid call, so the rules of `write_image_prompt` hold here too (they are in
 `jobs/llm_call.py`): at most 2 attempts, a refusal never retried, every answer saved the moment
 it arrives, and a restart never re-runs it (`never_rerun`): the take's own "continue" step asks
@@ -44,16 +48,16 @@ REQUEST_TIMEOUT_S: Final = 300.0
 _BAD_INPUT = "This job has no texts to write."
 
 
-def _reader(needed: frozenset[str]) -> llm_call.ReadAnswer:
+def _reader(inputs: dict[str, Any]) -> llm_call.ReadAnswer:
     def read(result: llm.ChatResult) -> tuple[str | None, writer.CheckedTakePrompts | None]:
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
         try:
-            answer = writer.parse_answer(result.content, needed)
+            answer = writer.parse_answer(result.content, inputs)
         except ValueError as exc:
             return str(exc), None
         try:
-            checked = writer.check_prompts(answer, needed)
+            checked = writer.check_prompts(answer, inputs)
         except ValueError as exc:
             return str(exc), None
         return None, checked
@@ -96,7 +100,7 @@ class WriteCharacterTakePromptHandler(JobHandler):
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, base_url, body, _reader(needed), timeout_s=REQUEST_TIMEOUT_S
+            job_id, base_url, body, _reader(inputs), timeout_s=REQUEST_TIMEOUT_S
         )
         checked: writer.CheckedTakePrompts | None = outcome.value
         if checked is None:
@@ -108,6 +112,7 @@ class WriteCharacterTakePromptHandler(JobHandler):
             **outcome.record(),
             "content": None,
             "image_prompt": checked.image_prompt,
+            "last_frame_prompt": checked.last_frame_prompt,
             "video_prompt": checked.video_prompt,
             "delivery_instruction": checked.delivery_instruction,
             "warnings": list(checked.warnings),

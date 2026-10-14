@@ -24,6 +24,8 @@ export type CharacterTake = components["schemas"]["app__api__character_lab__Take
 export type TakeCreate = components["schemas"]["TakeIn"];
 export type TakeRerun = components["schemas"]["RerunIn"];
 export type TakeStep = NonNullable<CharacterTake["active_step"]>;
+/** How a MiniMax H3 clip uses the speech: MiniMax's own words for it. */
+export type AudioMarker = TakeCreate["audio_marker"];
 
 const PAGE_SIZE = 20;
 
@@ -58,7 +60,13 @@ export function lookIsBusy(look: CharacterLook): boolean {
 
 /** The first step of a take whose job failed or was cancelled, or null. */
 export function failedStepJob(take: CharacterTake): JobSummary | null {
-  const jobs = [take.prompt_job, take.image?.job, take.voice?.job, take.video?.job];
+  const jobs = [
+    take.prompt_job,
+    take.image?.job,
+    take.last_frame?.job,
+    take.voice?.job,
+    take.video?.job,
+  ];
   for (const job of jobs) {
     if (job && (job.status === "failed" || job.status === "cancelled")) {
       return job;
@@ -246,6 +254,30 @@ export function useStartLook() {
       const { data, error, response } = await api.POST("/api/lab/characters/{character_id}/looks", {
         params: { path: { character_id: characterId } },
       });
+      if (!data) {
+        throw failure(error, response.status, "The look was not started");
+      }
+      return data;
+    },
+    onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+/**
+ * Starts a new look from the author's own picture (a lab image, uploaded first): the prompt is
+ * written for that picture, then four candidates are made by editing it.
+ */
+export function useStartLookFromPicture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { characterId: number; imageId: number }) => {
+      const { data, error, response } = await api.POST(
+        "/api/lab/characters/{character_id}/looks/from-picture",
+        {
+          params: { path: { character_id: input.characterId } },
+          body: { image_id: input.imageId },
+        },
+      );
       if (!data) {
         throw failure(error, response.status, "The look was not started");
       }

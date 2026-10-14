@@ -1,4 +1,16 @@
-import { Alert, Badge, Button, Group, Loader, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
+import {
+  Alert,
+  Badge,
+  Button,
+  FileButton,
+  Group,
+  Loader,
+  Paper,
+  SimpleGrid,
+  Stack,
+  Text,
+} from "@mantine/core";
+import { useRef } from "react";
 
 import {
   lookIsBusy,
@@ -6,12 +18,15 @@ import {
   useCharacterLooks,
   useRedoAngle,
   useStartLook,
+  useStartLookFromPicture,
   type Angle,
   type CharacterLook,
   type LibraryCharacter,
   type LookCandidate,
 } from "../../api/characterLab";
 import { describeError } from "../../api/errors";
+import { LAB_UPLOAD_MAX_MB, useLabUpload } from "../../api/imageLab";
+import { ACCEPT } from "../imageLab/ReferenceTray";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ANGLE_LABELS, ANGLES, referencePicture } from "./characterLabView";
 
@@ -122,24 +137,43 @@ function ReferenceStrip({
 
 /**
  * The look step: a look is five pictures of the character on a white backdrop. "Generate looks"
- * makes four candidates to choose from. The one you choose is the master (the front view), and
- * the other four angles are made from it by themselves. Any angle can be made again.
+ * makes four candidates to choose from; "Generate from my picture" makes the four from the
+ * author's own picture instead. The one you choose is the master (the front view), and the other
+ * four angles are made from it by themselves. Any angle can be made again.
  */
 export function LookPicker({ character }: { character: LibraryCharacter }) {
   const looks = useCharacterLooks(character.id);
   const start = useStartLook();
+  const upload = useLabUpload();
+  const startFromPicture = useStartLookFromPicture();
   const choose = useChooseMaster();
   const redo = useRedoAngle();
+  // Lets the same file be picked again after a failed upload.
+  const resetFileButton = useRef<() => void>(null);
 
   const latest = looks.data?.[0] ?? null;
   const busy = latest !== null && lookIsBusy(latest);
+  const pictureBusy = upload.isPending || startFromPicture.isPending;
   const failure = start.isError
     ? start.error
-    : choose.isError
-      ? choose.error
-      : redo.isError
-        ? redo.error
-        : null;
+    : upload.isError
+      ? upload.error
+      : startFromPicture.isError
+        ? startFromPicture.error
+        : choose.isError
+          ? choose.error
+          : redo.isError
+            ? redo.error
+            : null;
+
+  function chooseFile(file: File | null) {
+    resetFileButton.current?.();
+    if (file) {
+      upload.mutate(file, {
+        onSuccess: (image) => startFromPicture.mutate({ characterId: character.id, imageId: image.id }),
+      });
+    }
+  }
 
   return (
     <Stack gap="md">
@@ -159,6 +193,19 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
         <Text size="xs" c="dimmed">
           The character keeps using look {character.current_look.version} until this one is ready.
         </Text>
+      )}
+
+      {latest?.reference_url && (latest.status === "writing_prompt" || latest.status === "choosing") && (
+        <Group gap="sm">
+          <img
+            src={latest.reference_url}
+            alt="Your picture"
+            style={{ ...PICTURE_STYLE, width: 64 }}
+          />
+          <Text size="xs" c="dimmed">
+            Made from your picture.
+          </Text>
+        </Group>
       )}
 
       {latest?.status === "writing_prompt" && (
@@ -222,12 +269,34 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
       )}
 
       <Stack gap={4} align="flex-start">
-        <Button loading={start.isPending} disabled={busy} onClick={() => start.mutate(character.id)}>
-          {latest === null ? "Generate looks" : "Generate new looks"}
-        </Button>
+        <Group gap="sm">
+          <Button
+            loading={start.isPending}
+            disabled={busy || pictureBusy}
+            onClick={() => start.mutate(character.id)}
+          >
+            {latest === null ? "Generate looks" : "Generate new looks"}
+          </Button>
+          <FileButton resetRef={resetFileButton} onChange={chooseFile} accept={ACCEPT}>
+            {(props) => (
+              <Button
+                {...props}
+                variant="default"
+                loading={pictureBusy}
+                disabled={busy || start.isPending}
+              >
+                Generate from my picture
+              </Button>
+            )}
+          </FileButton>
+        </Group>
         <Text size="xs" c="dimmed">
           One call to the language model and four pictures of a few minutes each, then four more
           for the angles. Nothing starts until you press the button. Earlier looks are kept.
+        </Text>
+        <Text size="xs" c="dimmed">
+          From your picture (PNG, JPEG or WebP, up to {LAB_UPLOAD_MAX_MB} MB): the four candidates
+          keep its face, hair and build, and wear the outfit from the profile.
         </Text>
       </Stack>
     </Stack>

@@ -66,7 +66,13 @@ export function LabPage() {
 
   const actions: LibraryActions = {
     firstFrameForVideo: (item) => {
-      setVideoForm((form) => ({ ...form, firstFrame: item }));
+      // A first frame belongs to the "generate" mode: the reference mode has none.
+      setVideoForm((form) => ({
+        ...form,
+        kind: "generate",
+        models: form.kind === "h3_reference" ? DEFAULT_VIDEO_FORM.models : form.models,
+        firstFrame: item,
+      }));
       show("video");
     },
     loadSpeech: (run) => {

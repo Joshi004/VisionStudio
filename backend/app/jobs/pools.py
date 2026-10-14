@@ -14,6 +14,9 @@ A job type has no limit of its own. Which pool a job counts in comes from its ha
 A job whose provider is neither (the `local` ones: the final render and the automatic run) is its
 own pool, counted under its job type, and its handler says how many may run at once.
 
+A job takes one slot of its pool, except a MiniMax H3 clip, which holds two GPUs on one node and
+so takes `H3_SLOT_COST` (`slot_cost`). The limit counts slots, not jobs.
+
 Both settings are read at every tick, so a change on the Settings page applies at once. Running
 jobs are never stopped by a lower number.
 
@@ -29,8 +32,10 @@ from typing import TYPE_CHECKING, Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
+from app.providers import video_generator
 
 if TYPE_CHECKING:
+    from app.db.models import Job
     from app.jobs.handlers import JobHandler
 
 GPU_POOL: Final = "gpu"
@@ -49,6 +54,27 @@ _SETTING_OF_POOL: Final[dict[str, str]] = {
     GPU_POOL: MAX_PARALLEL_GPU_KEY,
     PAID_API_POOL: MAX_PARALLEL_PAID_API_KEY,
 }
+
+
+# A MiniMax H3 job reserves two H100s on one node.
+H3_SLOT_COST: Final = 2
+
+
+def slot_cost(job: Job) -> int:
+    """How many slots of its pool a job takes: `H3_SLOT_COST` for a MiniMax H3 clip (its endpoint
+    is recorded on the job's input), else 1.
+    """
+    recorded = job.input if isinstance(job.input, dict) else {}
+    return H3_SLOT_COST if video_generator.is_h3_endpoint(recorded.get("endpoint")) else 1
+
+
+def fits(free: int, limit: int, cost: int) -> bool:
+    """Whether a job that takes `cost` slots may start when `free` of the pool's `limit` slots
+    are free. A job that costs more than the whole pool (an H3 clip with a limit of 1) would
+    never start, so it may start when nothing else is running in the pool. A limit of 0 still
+    stops everything.
+    """
+    return free >= cost or (limit > 0 and free == limit)
 
 
 def pool_of(handler: JobHandler) -> str:

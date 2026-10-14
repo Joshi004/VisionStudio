@@ -113,21 +113,61 @@ _EXAMPLE_MASTER_ANSWER: Final = (
 )
 
 
+def _master_from_picture_system_prompt(profile: ImagePromptProfile) -> str:
+    return "\n".join(
+        [
+            "You write one prompt for an image-editing model. It is shown the author's own "
+            "picture of a character (image 1), and makes from it the reference picture of that "
+            "character for a library of characters: every picture, scene and clip of the "
+            "character later is made to match it, so it must show clearly how the character "
+            "looks.",
+            "",
+            f"- The image model ({profile.image_model}) sees image 1 and the prompt you write, "
+            "nothing else.",
+            "- You are given a card describing the character: its age, gender, species, time, "
+            "appearance, outfit, personality and any other notes. The picture decides who the "
+            "character is; the card adds the outfit and, when it describes one, the style. The "
+            "personality and the notes only guide the bearing and the expression.",
+            "- Never write the character's name in the prompt.",
+            "",
+            profile.prompt_rules,
+            "",
+            "Example (an unrelated character; do not reuse its content):",
+            "Input:",
+            _render_master_inputs(profile.example_inputs),
+            "Answer:",
+            profile.example_answer,
+            "",
+            "Answer with one JSON object only, in exactly this form:",
+            '{"image_prompt": "..."}',
+        ]
+    )
+
+
 def build_master_request(
     inputs: dict[str, Any], *, model: str, profile: ImagePromptProfile
 ) -> dict[str, Any]:
     """The exact request body sent to the model for the master look prompt. Nothing about the
     call is hidden from the job record: this body is stored on the job (`job.input.request`).
+
+    A profile that `uses_references` is the one for a look started from the author's own
+    picture: the image model is then shown that picture as image 1.
     """
+    if profile.uses_references:
+        system_prompt = _master_from_picture_system_prompt(profile)
+        task = "Write the image prompt for this character's reference picture, made from image 1."
+    else:
+        system_prompt = _master_system_prompt(profile)
+        task = "Write the image prompt for this character's reference picture."
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": _master_system_prompt(profile)},
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": "\n".join(
                     [
-                        "Write the image prompt for this character's reference picture.",
+                        task,
                         "",
                         _render_master_inputs(inputs),
                         "",

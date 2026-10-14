@@ -487,6 +487,108 @@ QWEN_IMAGE_21_CHARACTER_SHEET: Final = ImagePromptProfile(
     ),
 )
 
+# A library character's master picture made from the author's own picture of it (image 1): the
+# inputs are the Character lab's card (`character_look_prompt_writer.prompt_inputs`).
+_CHARACTER_SHEET_FROM_PICTURE_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "card": (
+        "Name: Mira.\n"
+        "Age: 9 years old.\n"
+        "Gender: female.\n"
+        "Species: human.\n"
+        "Time: set in the present day.\n"
+        "Appearance: A small, wiry girl with a gap-toothed grin.\n"
+        "Outfit: A yellow hooded raincoat over a striped navy-and-white jumper, rolled-up blue "
+        "jeans and red rubber boots.\n"
+        "Personality: Curious and fearless, always first to splash into a puddle.\n"
+        "Has a visible mouth."
+    ),
+}
+
+_CHARACTER_SHEET_FROM_PICTURE_EXAMPLE_PROMPT: Final = (
+    "A natural studio photograph of the girl in image 1, standing alone and facing the viewer. "
+    "She keeps her face, her hair, her skin and her build exactly as they are in image 1, and "
+    "her expression is a bright, curious grin. She wears a yellow hooded raincoat, open at the "
+    "front over a striped navy-and-white jumper, rolled-up blue jeans and shiny red rubber "
+    "boots. She stands in a relaxed, neutral pose with her arms slightly away from her body, so "
+    "the raincoat, the jumper and her hands can be seen, and her whole figure from boots to hair "
+    "fills the tall frame, centred, with a little space around her. She is set against a plain, "
+    "seamless white studio backdrop and lit by soft, even light from the front, so the white "
+    "behind her stays clean and bright. The finish keeps the natural photographic look of "
+    "image 1."
+)
+
+# The edit endpoint sees the author's picture as image 1. The picture decides who the character
+# is (face, hair, skin, build, species): words about those can change them, so the prompt never
+# describes them. The profile's outfit, and a style the profile describes, are applied on top.
+QWEN_IMAGE_21_CHARACTER_SHEET_FROM_PICTURE: Final = ImagePromptProfile(
+    id="qwen-image-2.1-character-sheet-from-picture",
+    version=1,
+    image_model="Qwen-Image-2.1 (edit, with the author's picture)",
+    prompt_rules="\n".join(
+        [
+            'Rules for "image_prompt", the prompt for the image model. The model is shown the '
+            "author's own picture of the character as image 1, and makes from it the reference "
+            "of that character: a single figure on a plain white backdrop, which is cut out "
+            "afterwards.",
+            "1. One paragraph of plain English prose, in complete sentences and the present "
+            "tense, 80 to 220 words. No lists, no headings, no labels and no piles of "
+            "comma-separated keywords.",
+            "2. Open with the kind of picture it is, taken from the style (rule 7), and go "
+            "straight to the character of image 1, standing alone and facing the viewer. Call "
+            "it 'the character in image 1', or 'the girl in image 1', 'the robot in image 1' "
+            "and so on.",
+            "3. The picture decides who the character is. Never describe its face, hair, skin, "
+            "build or species in words: the picture shows them, and any words about them can "
+            "change them. Say it once, in one sentence: the character keeps its face, hair, "
+            "skin and build exactly as they are in image 1. Use the appearance on the card only "
+            "for a part of the body the picture does not show, and never let it change what "
+            "the picture does show. The personality only guides the bearing and the expression.",
+            "4. The clothes: when the card gives an outfit, dress the character in it and "
+            "describe it from head to foot, with its colours and materials. With no outfit on "
+            "the card, say in one sentence that the character wears the same clothes as in "
+            "image 1, and complete any part of them the picture does not show in keeping with "
+            "the rest.",
+            "5. Then the pose and the framing: a relaxed, neutral standing pose with the arms "
+            "slightly away from the body so the clothes and the hands can be seen, the whole "
+            "figure from head to feet in the frame, centred, with a little space around it.",
+            "6. Then the backdrop and the light, in these words or close to them: the character "
+            "is set against a plain, seamless white studio backdrop and lit by soft, even light "
+            "from the front. The backdrop takes the place of whatever is around the character in "
+            "image 1: never describe those surroundings, and say nothing about scenery, "
+            "furniture, a floor or any other object.",
+            "7. Put the style into words as the last sentence: the style the appearance or the "
+            "notes describe (a cartoon, a puppet, a painting) when they describe one, otherwise "
+            "the look of image 1 itself (a photograph stays a photograph, a drawing stays a "
+            "drawing).",
+            "8. Nothing is written in the picture: no text, captions, letters, numbers, signs "
+            "with words, labels, logos, watermarks, borders or split panels. The model draws any "
+            "wording it is given, so do not name any of these, not even to say there are none.",
+            "9. Describe only what is visible. The model has no negative prompt, and naming a "
+            "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
+            "the space instead.",
+            "10. Never write the character's name, and never name a real person or a famous "
+            "figure: refer to the character by its image number.",
+            "11. Concrete nouns and plain adjectives. No quality tags (such as 8k, masterpiece "
+            "or highly detailed) and no camera brand names.",
+        ]
+    ),
+    example_inputs=_CHARACTER_SHEET_FROM_PICTURE_EXAMPLE_INPUTS,
+    example_answer=json.dumps(
+        {"image_prompt": _CHARACTER_SHEET_FROM_PICTURE_EXAMPLE_PROMPT}, ensure_ascii=False
+    ),
+    min_words=80,
+    max_words=220,
+    rules=(
+        *SEEDREAM_50_LITE.rules,
+        TextRule(
+            _NEGATIVE_WORDS,
+            "A negative found (no, not, without, nothing). The image model has no negative "
+            "prompt, and naming a thing can make it appear: say what is there instead.",
+        ),
+    ),
+    uses_references=True,
+)
+
 _LOCATION_SHEET_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
     "kind": "location",
     "style_prefix": "soft watercolour illustration",
@@ -707,6 +809,8 @@ ACTIVE_IMAGE_PROFILE: Final = QWEN_IMAGE_21
 ACTIVE_EDIT_PROFILE: Final = QWEN_IMAGE_21_EDIT
 # The reference pictures of the cast: a character on a white backdrop, a place as it is.
 ACTIVE_CHARACTER_SHEET_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET
+# A library character's master picture made from the author's own picture of it.
+ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET_FROM_PICTURE
 ACTIVE_LOCATION_SHEET_PROFILE: Final = QWEN_IMAGE_21_LOCATION_SHEET
 # The image adapter that makes a first frame from the pictures of the scene's cast.
 ACTIVE_CAST_SCENE_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_EDIT

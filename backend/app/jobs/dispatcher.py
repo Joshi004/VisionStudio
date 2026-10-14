@@ -276,8 +276,14 @@ class _Dispatcher:
         limits: dict[str, int],
         gpu_blocked: bool,
     ) -> None:
-        running_by_pool = Counter(handlers.slot_key(job.type) for job in running)
-        free = {pool: limit - running_by_pool[pool] for pool, limit in limits.items()}
+        # The limits count slots: a job takes one, except a MiniMax H3 clip (two GPUs).
+        used_by_pool: Counter[str] = Counter()
+        for job in running:
+            used_by_pool[handlers.slot_key(job.type)] += pools.slot_cost(job)
+        free = {pool: limit - used_by_pool[pool] for pool, limit in limits.items()}
+        # A pool in which a job is waiting for slots lets no later job start in this tick, so a
+        # job that needs two slots is not starved by a stream of jobs that need one.
+        full_pools: set[str] = set()
         checked_contract = False
 
         for job, handler in waiting:
@@ -285,7 +291,9 @@ class _Dispatcher:
                 continue  # `_server_answers` already set the phase
 
             pool = handlers.slot_key(job.type)
-            if free.get(pool, 0) <= 0:
+            cost = pools.slot_cost(job)
+            if pool in full_pools or not pools.fits(free.get(pool, 0), limits.get(pool, 0), cost):
+                full_pools.add(pool)
                 await self._set_queued_phase(
                     job.id, _SLOT_PHASES.get(pool, phases.WAITING_FOR_SLOT)
                 )
@@ -302,7 +310,7 @@ class _Dispatcher:
                 claimed = await store.claim(session, job.id)
             if not claimed:
                 continue  # cancelled in the meantime
-            free[pool] -= 1
+            free[pool] -= cost
             self._retry_after.pop(job.id, None)
             self._spawn(job.id, handler.start(job.id))
 

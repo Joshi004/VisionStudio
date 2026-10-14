@@ -18,22 +18,25 @@ function countsText(running: number, queued: number): string {
 }
 
 function PoolCard({ pool }: { pool: PoolCapacity }) {
-  // A lower limit never stops a running job, so there can be more running than the limit.
-  const percent = pool.limit > 0 ? Math.min(100, (pool.running / pool.limit) * 100) : 0;
+  // A lower limit never stops a running job, so there can be more slots in use than the limit.
+  // A job usually takes one slot, but a MiniMax H3 clip takes two (two GPUs), so the slots in use
+  // can be more than the number of jobs running.
+  const percent = pool.limit > 0 ? Math.min(100, (pool.slots_used / pool.limit) * 100) : 0;
   return (
     <Paper withBorder p="sm" radius="md">
       <Stack gap={6}>
         <Group justify="space-between" align="baseline" wrap="nowrap">
           <Text fw={600}>{pool.label}</Text>
           <Text size="sm" c="dimmed">
-            {pool.running} of {pool.limit} slots in use
+            {pool.slots_used} of {pool.limit} slots in use
+            {pool.slots_used !== pool.running ? ` (${pool.running} running)` : ""}
             {pool.queued > 0 ? `, ${pool.queued} waiting` : ""}
           </Text>
         </Group>
         <Progress
           value={percent}
-          color={pool.running >= pool.limit ? "orange" : "blue"}
-          aria-label={`${pool.label}: ${pool.running} of ${pool.limit} slots in use`}
+          color={pool.slots_used >= pool.limit ? "orange" : "blue"}
+          aria-label={`${pool.label}: ${pool.slots_used} of ${pool.limit} slots in use`}
         />
         {pool.by_type.length === 0 ? (
           <Text size="xs" c="dimmed">
@@ -57,9 +60,10 @@ function PoolCard({ pool }: { pool: PoolCapacity }) {
 }
 
 /**
- * The two numbers that limit all work: how many jobs the GPU server runs at once and how many
- * calls the paid inference API gets at once. Every kind of job shares them, so each pool shows
- * what is using it. The limits are set on the Settings page.
+ * The two numbers that limit all work: how many slots the GPU server uses at once (a job takes
+ * one, a MiniMax H3 clip two) and how many calls the paid inference API gets at once. Every kind
+ * of job shares them, so each pool shows what is using it. The limits are set on the Settings
+ * page.
  */
 export function PoolCapacityPanel() {
   const { data, isError, error } = useJobCapacity();

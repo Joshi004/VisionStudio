@@ -7,7 +7,9 @@ library character (ANALYSIS.md Phase 25), told apart by `job.input["requested"]`
   reader and checks, like `write_character_reference_prompt.py` does. Once saved, the look's
   four candidate pictures are started (`character_looks.on_look_prompt_written`); if the model
   fails, the look is marked failed (`character_looks.on_look_prompt_failed`), so the drawer
-  shows why instead of waiting forever.
+  shows why instead of waiting forever. A look started from the author's own picture
+  (`job.input["reference_image_id"]`) is written on the from-picture profile instead
+  (`ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE`): the image model is shown that picture.
 - `"audition"`: a short line of dialogue to read aloud while auditioning a voice
   (`services/character_library.start_audition_line`). Only the job's own answer is saved: an
   author may edit the line before clicking to make the audition's samples
@@ -42,7 +44,11 @@ from app.providers import llm
 from app.services import character_library, character_looks, description_writer
 from app.services import character_look_prompt_writer as writer
 from app.services import image_prompt_writer as prompt_checks
-from app.services.image_prompt_profiles import ACTIVE_CHARACTER_SHEET_PROFILE, ImagePromptProfile
+from app.services.image_prompt_profiles import (
+    ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE,
+    ACTIVE_CHARACTER_SHEET_PROFILE,
+    ImagePromptProfile,
+)
 from app.services.image_prompt_writer import CheckedPrompt
 
 _logger = logging.getLogger(__name__)
@@ -139,7 +145,11 @@ class WriteCharacterLookPromptHandler(JobHandler):
         started: float,
     ) -> None:
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        profile = ACTIVE_CHARACTER_SHEET_PROFILE
+        profile = (
+            ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE
+            if job_input.get("reference_image_id") is not None
+            else ACTIVE_CHARACTER_SHEET_PROFILE
+        )
         inputs = writer.prompt_inputs(card)
         body = writer.build_master_request(inputs, model=model, profile=profile)
         job_input.update(

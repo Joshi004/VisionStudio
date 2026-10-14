@@ -5,7 +5,9 @@ white-backdrop reference pictures (a "look"), and an optional voice. It is unrel
 project's own cast (`/api/projects/{id}/cast`): the two are never linked.
 
 - `POST /looks` starts a new look: a language model writes the master prompt, then four
-  candidate pictures are made to choose from (`POST /looks/{id}/master`). Choosing one starts
+  candidate pictures are made to choose from (`POST /looks/{id}/master`). `POST
+  /looks/from-picture` does the same from the author's own uploaded picture, the candidates
+  then being edits of it. Choosing one starts
   the other four angles by itself. `POST /looks/{id}/angles/{angle}` redoes a single angle.
 - The voice is either an existing saved voice, one chosen from a 3-sample audition
   (`POST /{id}/voice/audition-line` writes a line to read, `POST /{id}/voice/auditions` makes
@@ -35,11 +37,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobSummary, job_summary
+from app.api.video_lab import (
+    AudioInputIn,
+    AudioInputOut,
+    FirstFrameIn,
+    FirstFrameOut,
+    audio_input_out,
+    frame_out,
+    frame_urls_for,
+)
 from app.db.models import (
     CharacterLook,
     Job,
     LabImage,
     LabRun,
+    LabVoiceRun,
     LibraryCharacter,
     Voice,
 )
@@ -50,7 +62,8 @@ from app.services import character_library, character_looks, character_takes, im
 from app.services.character_looks import CharacterLookError
 from app.services.character_takes import CharacterTakeError
 from app.services.storage import media_url
-from app.services.video_models import VideoModel
+from app.services.video_lab import AudioRef, FirstFrameRef
+from app.services.video_models import LabVideoModel
 from app.services.voices import VoiceInputError
 
 router = APIRouter()
@@ -73,8 +86,11 @@ Orientation = Literal["portrait", "landscape"]
 Angle = Literal["front", "three_quarter", "profile", "back", "face"]
 LookStatus = Literal["writing_prompt", "choosing", "making_angles", "ready", "failed"]
 Output = Literal["image", "audio", "video"]
-RunStep = Literal["all", "image", "voice", "video"]
-Step = Literal["prompts", "image", "voice", "video"]
+RunStep = Literal["all", "image", "last_frame", "voice", "video"]
+Step = Literal["prompts", "image", "last_frame", "voice", "video"]
+# MiniMax's words for how a speech is used by an H3 clip.
+AudioMarker = Literal["fully_copy", "partially_copy", "reference", "weak_reference"]
+PromptKey = Literal["image_prompt", "last_frame_prompt", "video_prompt", "delivery_instruction"]
 
 
 def _missing(message: str) -> HTTPException:
@@ -165,6 +181,9 @@ class LookOut(BaseModel):
     prompt: str | None
     error: str | None
     prompt_job: JobSummary | None
+    # The author's own picture this look was started from. None for a look made from the
+    # profile alone.
+    reference_url: str | None
     # Only while `status == "choosing"`.
     candidates: list[LookCandidateOut]
     # The angles made so far, in a fixed order. Empty before a master is chosen.
@@ -219,6 +238,10 @@ async def _look_out(session: AsyncSession, look: CharacterLook) -> LookOut:
     candidate_jobs = await image_lab.jobs_for_runs(session, list(candidate_runs.values()))
     candidate_images = await image_lab.images_by_run(session, candidate_run_ids)
 
+    source_image = (
+        await session.get(LabImage, look.reference_image_id) if look.reference_image_id else None
+    )
+
     reference_image_ids = [r.lab_image_id for r in references if r.lab_image_id is not None]
     reference_images: dict[int, LabImage] = {}
     if reference_image_ids:
@@ -263,6 +286,7 @@ async def _look_out(session: AsyncSession, look: CharacterLook) -> LookOut:
         prompt=look.prompt,
         error=look.error,
         prompt_job=_job_summary(prompt_job),
+        reference_url=media_url(source_image.path) if source_image is not None else None,
         candidates=candidates_out,
         references=references_out,
     )
@@ -432,6 +456,34 @@ async def start_look(character_id: CharacterId, session: SessionDep) -> LookOut:
     """
     try:
         look = await character_looks.start_look(session, character_id)
+    except CharacterLookError as exc:
+        raise _unprocessable(str(exc)) from exc
+    dispatcher.nudge()
+    return await _look_out(session, look)
+
+
+class LookFromPictureIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # A lab image: upload the picture first (`POST /api/lab/images/uploads`).
+    image_id: Id
+
+
+@router.post(
+    "/lab/characters/{character_id}/looks/from-picture",
+    response_model=LookOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def start_look_from_picture(
+    character_id: CharacterId, body: LookFromPictureIn, session: SessionDep
+) -> LookOut:
+    """Starts a fresh look from the author's own picture of the character: a language model
+    writes the master prompt for it, then four candidates are made by editing that picture.
+    The picture decides the face, hair, skin and build; the profile's outfit is applied on top.
+    """
+    try:
+        look = await character_looks.start_look(session, character_id, body.image_id)
     except CharacterLookError as exc:
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
@@ -627,19 +679,38 @@ async def set_voice(
 class TakeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # "all": run the whole chain by itself. "image"/"voice"/"video": start only that one step.
+    # "all": run the whole chain by itself. "image"/"last_frame"/"voice"/"video": start only that
+    # one step.
     run: RunStep = "all"
     output: Output
     action: StrictStr | None = None
     dialogue: StrictStr | None = None
     framing: Framing = "medium"
     orientation: Orientation = "portrait"
-    video_model: VideoModel | None = None
+    video_model: LabVideoModel | None = None
     lip_sync: StrictBool = False
-    # Video with no dialogue only. Left out: 5 seconds.
+    # Video with no dialogue only (MiniMax H3: also with dialogue when the clip does not match
+    # the speech). Left out: 5 seconds.
     duration_s: Annotated[float, Field(allow_inf_nan=False, gt=0)] | None = None
     seed: StrictInt | None = None
     negative_prompt: StrictStr | None = None
+    # --- MiniMax H3 only (the other models refuse these) ---
+    # Pick the first frame instead of having one made.
+    first_frame: FirstFrameIn | None = None
+    # Make a last frame by editing the first frame. Not together with `last_frame`.
+    make_last_frame: StrictBool = False
+    # Pick the last frame instead.
+    last_frame: FirstFrameIn | None = None
+    # Pick the speech instead of having one made (a take with dialogue).
+    audio: AudioInputIn | None = None
+    # How the speech is used (a take with dialogue).
+    audio_marker: AudioMarker = "reference"
+    # True: the clip is as long as the speech, and `duration_s` is ignored.
+    match_audio_duration: StrictBool = True
+    # 4 to 100 denoising steps. Left out: the pipeline's own default.
+    num_inference_steps: StrictInt | None = None
+    # Also send the look's pictures as references after the frames (a take with dialogue).
+    identity_refs: StrictBool = False
 
 
 class RerunIn(BaseModel):
@@ -650,6 +721,7 @@ class RerunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     image_prompt: StrictStr | None = None
+    last_frame_prompt: StrictStr | None = None
     video_prompt: StrictStr | None = None
     delivery_instruction: StrictStr | None = None
 
@@ -660,6 +732,15 @@ class TakeMediaOut(BaseModel):
     job: JobSummary | None
 
 
+class TakeAudioOut(BaseModel):
+    """The speech a take's clip hears: `{source, id}` as the Video lab names it, with its length
+    (2 to 15 seconds is what MiniMax H3 takes).
+    """
+
+    audio: AudioInputOut
+    duration_s: float | None
+
+
 class TakeOut(BaseModel):
     id: int
     created_at: datetime
@@ -668,22 +749,41 @@ class TakeOut(BaseModel):
     output: Output
     action: str | None
     dialogue: str | None
-    video_model: VideoModel | None
+    video_model: LabVideoModel | None
     lip_sync: bool
     framing: Framing
     orientation: Orientation
     seed: int | None
     duration_s: float | None
     negative_prompt: str | None
+    # MiniMax H3 video takes only (else None, or off).
+    audio_marker: AudioMarker | None
+    match_audio_duration: bool
+    num_inference_steps: int | None
+    identity_refs: bool
+    make_last_frame: bool
     prompts: dict[str, Any]
+    # The texts this take uses, in the order the page shows them.
+    prompt_keys: list[PromptKey]
     last_error: str | None
-    # The step running now, if any, and the step that starts next (None once the take is done).
+    # The steps this take has, in the order they run (a picture or a speech the author picked is
+    # not a step). The step running now, if any, and the step that starts next (None once the
+    # take is done).
+    steps: list[Step]
     active_step: Step | None
     next_step: Step | None
     prompt_job: JobSummary | None
     image: TakeMediaOut | None
+    # The last frame the take made (None when it picked one, or has none).
+    last_frame: TakeMediaOut | None
     voice: TakeMediaOut | None
     video: TakeMediaOut | None
+    # What a new take can start from, whether the take picked it or made it: the first frame,
+    # the last frame (None when it has none) and the speech (None before it exists). They are
+    # None until the picture or the speech is ready.
+    first_frame_ref: FirstFrameOut | None
+    last_frame_ref: FirstFrameOut | None
+    audio_ref: TakeAudioOut | None
 
 
 class TakesOut(BaseModel):
@@ -691,27 +791,89 @@ class TakesOut(BaseModel):
     next_before_id: int | None
 
 
-async def _take_image_urls(session: AsyncSession, run_ids: list[int]) -> dict[int, str]:
-    images = await image_lab.images_by_run(session, run_ids)
-    return {run_id: media_url(found[0].path) for run_id, found in images.items() if found}
+async def _audio_durations(
+    session: AsyncSession, audio: list[AudioInputOut]
+) -> dict[tuple[str, int], float | None]:
+    """The length of each speech named, keyed by (source, id). A speech that is gone, or not
+    made yet, has no length.
+    """
+    durations: dict[tuple[str, int], float | None] = {}
+    run_ids = {ref.id for ref in audio if ref.source == "voice_run"}
+    voice_ids = {ref.id for ref in audio if ref.source == "voice"}
+    if run_ids:
+        found_runs = await session.execute(select(LabVoiceRun).where(LabVoiceRun.id.in_(run_ids)))
+        for run in found_runs.scalars():
+            durations[("voice_run", run.id)] = run.duration_s
+    if voice_ids:
+        found_voices = await session.execute(select(Voice).where(Voice.id.in_(voice_ids)))
+        for voice in found_voices.scalars():
+            durations[("voice", voice.id)] = voice.duration_s
+    return durations
+
+
+def _row_audio(row: character_takes.TakeRow) -> AudioInputOut | None:
+    """The speech the take's clip hears: the one the take picked, or the one it made (once it
+    has a file).
+    """
+    picked = audio_input_out(row.take.audio_input)
+    if picked is not None:
+        return picked
+    if row.voice is not None and row.voice.run.path is not None:
+        return AudioInputOut(source="voice_run", id=row.voice.run.id)
+    return None
 
 
 async def _takes_out(session: AsyncSession, rows: list[character_takes.TakeRow]) -> list[TakeOut]:
-    image_run_ids = [row.take.image_run_id for row in rows if row.take.image_run_id is not None]
-    image_urls = await _take_image_urls(session, image_run_ids)
+    made_run_ids = [
+        run_id
+        for row in rows
+        for run_id in (row.take.image_run_id, row.take.last_frame_run_id)
+        if run_id is not None
+    ]
+    made_images = await image_lab.images_by_run(session, made_run_ids)
+
+    def made_image(run_id: int | None) -> LabImage | None:
+        found = made_images.get(run_id) if run_id is not None else None
+        return found[0] if found else None
+
+    def made_media(run_id: int | None, job: Job | None) -> TakeMediaOut | None:
+        """A first frame or a last frame the take made, with its job."""
+        if run_id is None:
+            return None
+        image = made_image(run_id)
+        return TakeMediaOut(
+            run_id=run_id,
+            url=media_url(image.path) if image is not None else None,
+            job=_job_summary(job),
+        )
+
+    # Thumbnails of the pictures a take picked (`{source, id}`) and of the ones it made.
+    frame_urls = await frame_urls_for(
+        session, [frame for row in rows for frame in (row.take.first_frame, row.take.last_frame)]
+    )
+    for found in made_images.values():
+        if found:
+            frame_urls[("lab", found[0].id)] = media_url(found[0].path)
+
+    def frame_ref(picked: Any, run_id: int | None) -> FirstFrameOut | None:
+        """The picture a new take could start from: the one the take picked, or the one it made
+        (None while it is not made).
+        """
+        if picked is not None:
+            return frame_out(picked, frame_urls)
+        image = made_image(run_id)
+        return None if image is None else frame_out({"source": "lab", "id": image.id}, frame_urls)
+
+    row_audio = {row.take.id: _row_audio(row) for row in rows}
+    durations = await _audio_durations(
+        session, [audio for audio in row_audio.values() if audio is not None]
+    )
+
     out = []
     for row in rows:
         take = row.take
         state = row.state
-        image = (
-            TakeMediaOut(
-                run_id=take.image_run_id,
-                url=image_urls.get(take.image_run_id),
-                job=_job_summary(row.image_job),
-            )
-            if take.image_run_id is not None
-            else None
-        )
+        audio = row_audio[take.id]
         voice = (
             TakeMediaOut(
                 run_id=take.voice_run_id,
@@ -739,24 +901,49 @@ async def _takes_out(session: AsyncSession, rows: list[character_takes.TakeRow])
                 output=typing_cast(Output, take.output),
                 action=take.action,
                 dialogue=take.dialogue,
-                video_model=typing_cast(VideoModel, take.video_model) if take.video_model else None,
+                video_model=(
+                    typing_cast(LabVideoModel, take.video_model) if take.video_model else None
+                ),
                 lip_sync=take.lip_sync,
                 framing=typing_cast(Framing, take.framing),
                 orientation=typing_cast(Orientation, take.orientation),
                 seed=take.seed,
                 duration_s=take.duration_s,
                 negative_prompt=take.negative_prompt,
+                audio_marker=(
+                    typing_cast(AudioMarker, take.audio_marker) if take.audio_marker else None
+                ),
+                match_audio_duration=take.match_audio_duration,
+                num_inference_steps=take.num_inference_steps,
+                identity_refs=take.identity_refs,
+                make_last_frame=take.make_last_frame,
                 prompts=take.prompts if isinstance(take.prompts, dict) else {},
+                prompt_keys=typing_cast(list[PromptKey], character_takes.prompt_keys(take)),
                 last_error=take.last_error,
+                steps=character_takes.step_order(take),
                 active_step=state.active,
                 next_step=character_takes.next_step(take, state),
                 prompt_job=_job_summary(row.prompt_job),
-                image=image,
+                image=made_media(take.image_run_id, row.image_job),
+                last_frame=made_media(take.last_frame_run_id, row.last_frame_job),
                 voice=voice,
                 video=video,
+                first_frame_ref=frame_ref(take.first_frame, take.image_run_id),
+                last_frame_ref=frame_ref(take.last_frame, take.last_frame_run_id),
+                audio_ref=(
+                    None
+                    if audio is None
+                    else TakeAudioOut(
+                        audio=audio, duration_s=durations.get((audio.source, audio.id))
+                    )
+                ),
             )
         )
     return out
+
+
+def _frame_ref(frame: FirstFrameIn | None) -> FirstFrameRef | None:
+    return None if frame is None else FirstFrameRef(source=frame.source, id=frame.id)
 
 
 @router.post(
@@ -767,7 +954,8 @@ async def _takes_out(session: AsyncSession, rows: list[character_takes.TakeRow])
 )
 async def create_take(character_id: CharacterId, body: TakeIn, session: SessionDep) -> TakeOut:
     """The Create panel: checks the form, saves a take and starts its first step (or, with
-    `run` set to one step, only that step).
+    `run` set to one step, only that step). A MiniMax H3 video take can also name a first
+    frame, a last frame and a speech to use instead of having them made.
     """
     form = character_takes.TakeForm(
         character_id=character_id,
@@ -782,6 +970,14 @@ async def create_take(character_id: CharacterId, body: TakeIn, session: SessionD
         duration_s=body.duration_s,
         seed=body.seed,
         negative_prompt=body.negative_prompt,
+        first_frame=_frame_ref(body.first_frame),
+        make_last_frame=body.make_last_frame,
+        last_frame=_frame_ref(body.last_frame),
+        audio=None if body.audio is None else AudioRef(source=body.audio.source, id=body.audio.id),
+        audio_marker=body.audio_marker,
+        match_audio_duration=body.match_audio_duration,
+        num_inference_steps=body.num_inference_steps,
+        identity_refs=body.identity_refs,
     )
     try:
         row = await character_takes.create_take(session, form)
@@ -847,6 +1043,7 @@ async def rerun_take(take_id: TakeId, body: RerunIn, session: SessionDep) -> Tak
             session,
             take_id,
             image_prompt=body.image_prompt,
+            last_frame_prompt=body.last_frame_prompt,
             video_prompt=body.video_prompt,
             delivery_instruction=body.delivery_instruction,
         )

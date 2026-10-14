@@ -5,14 +5,34 @@ import { isJobActive } from "../../api/polling";
 import { useLabVideoRuns, type LabVideoRun } from "../../api/videoLab";
 import { useNow } from "../../hooks/useNow";
 import { formatDateTime } from "../../format";
-import { videoModelLabel } from "../../videoModels";
+import { H3_MODEL, videoModelLabel } from "../../videoModels";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { Thumb } from "../imageLab/ReferenceTray";
-import { negativePromptOf, paramsLine, runStats } from "./videoLabView";
+import {
+  isLipSyncRun,
+  isReferenceRun,
+  negativePromptOf,
+  paramsLine,
+  runStats,
+} from "./videoLabView";
 
-/** The runs one click started, in the order the models are listed: LTX-2.3, then LTX-2.5. */
+/** The badge colour of each model, so a group's runs can be told apart at a glance. */
+function modelColor(model: LabVideoRun["video_model"]): string {
+  if (model === "ltx-2.5") {
+    return "blue";
+  }
+  return model === H3_MODEL ? "violet" : "gray";
+}
+
+/** How many reference pictures a group's header shows (a clip can have up to 9). */
+const REFERENCE_THUMBS = 4;
+
+/**
+ * The runs one click started, in the order the models are listed: LTX-2.3, LTX-2.5, then
+ * MiniMax H3 (which is also the alphabetical order of their ids).
+ */
 type RunGroup = { key: string; runs: LabVideoRun[] };
 
 /** Groups consecutive runs that share a `group_key`. Runs arrive newest first. */
@@ -41,16 +61,25 @@ function RunCard({ run, now }: { run: LabVideoRun; now: number }) {
       <Stack gap={6}>
         <Group justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap">
-            <Badge variant="filled" color={run.video_model === "ltx-2.5" ? "blue" : "gray"}>
+            <Badge variant="filled" color={modelColor(run.video_model)}>
               {videoModelLabel(run.video_model)}
             </Badge>
-            {run.audio_input !== null && (
+            {isLipSyncRun(run) && (
               <Badge
                 variant="light"
                 color="grape"
                 title="Made to match a recorded speech: the character's lips follow it, and the speech is the clip's sound."
               >
                 lip-sync
+              </Badge>
+            )}
+            {isReferenceRun(run) && (
+              <Badge
+                variant="light"
+                color="violet"
+                title="Made from reference pictures and an audio reference: the model follows the voice and makes its own sound."
+              >
+                reference
               </Badge>
             )}
             {job !== null && <JobStatusBadge job={job} />}
@@ -89,7 +118,9 @@ function RunCard({ run, now }: { run: LabVideoRun; now: number }) {
           job !== null &&
           isJobActive(job) && (
             <Text size="sm" c="dimmed">
-              The clip takes 5 to 10 minutes. This page updates by itself.
+              {run.video_model === H3_MODEL
+                ? "MiniMax H3 holds two GPUs and can take more than 10 minutes. This page updates by itself."
+                : "The clip takes 5 to 10 minutes. This page updates by itself."}
             </Text>
           )
         )}
@@ -109,8 +140,8 @@ type VideoLabRunListProps = {
 };
 
 /**
- * Every run, newest first. The runs of one click sit side by side, so the two models can be
- * compared on the same prompt, first frame, size, length and seed.
+ * Every run, newest first. The runs of one click sit side by side, so the models can be
+ * compared on the same prompt, first frame, length and seed.
  */
 export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
   const runs = useLabVideoRuns();
@@ -140,6 +171,7 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
         const first = group.runs[0];
         const frame = first.first_frame;
         const lastFrame = first.last_frame;
+        const pictures = first.references.filter((picture) => picture.url !== null);
         return (
           <Paper key={group.key} withBorder p="md" radius="md">
             <Stack gap="sm">
@@ -155,25 +187,32 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
                       <Thumb url={lastFrame.url} width={null} height={null} />
                     </div>
                   )}
+                  {pictures.slice(0, REFERENCE_THUMBS).map((picture) => (
+                    <div key={`${picture.source}-${picture.id}`} style={{ width: 56, flexShrink: 0 }}>
+                      <Thumb url={picture.url ?? ""} width={null} height={null} />
+                    </div>
+                  ))}
                   <Stack gap={2}>
                     <Text size="sm" lineClamp={4} style={{ whiteSpace: "pre-wrap" }}>
                       {first.prompt}
                     </Text>
                     <Text size="xs" c="dimmed">
                       {paramsLine(first)}
-                      {first.audio_input !== null
-                        ? " · lip-sync to a speech"
-                        : lastFrame !== null
-                          ? " · first to last frame"
-                          : frame !== null
-                            ? " · from a first frame"
-                            : " · text-to-video"}{" "}
+                      {isReferenceRun(first)
+                        ? ` · ${first.references.length} reference ${first.references.length === 1 ? "picture" : "pictures"} and an audio reference`
+                        : isLipSyncRun(first)
+                          ? " · lip-sync to a speech"
+                          : lastFrame !== null
+                            ? " · first to last frame"
+                            : frame !== null
+                              ? " · from a first frame"
+                              : " · text-to-video"}{" "}
                       ·{" "}
                       {formatDateTime(first.created_at)}
                     </Text>
                   </Stack>
                 </Group>
-                {first.audio_input !== null ? (
+                {isLipSyncRun(first) ? (
                   // This form has no speech to give: a lip-synced clip is remade in its own tab.
                   <Text size="xs" c="dimmed" ta="right">
                     Made in the Characters tab
@@ -191,7 +230,7 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
                   </Button>
                 )}
               </Group>
-              <SimpleGrid cols={{ base: 1, md: Math.min(group.runs.length, 2) }} spacing="sm">
+              <SimpleGrid cols={{ base: 1, md: Math.min(group.runs.length, 3) }} spacing="sm">
                 {group.runs.map((run) => (
                   <RunCard key={run.id} run={run} now={now} />
                 ))}

@@ -267,11 +267,12 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_LIMITS,
         label="Maximum parallel GPU server jobs",
         help=(
-            "How many jobs may run on your GPU server at the same time, all kinds together: "
-            "clips, first and last frames, reference pictures, transcription and speech. Each "
-            "image job loads about 31 GB of model weights first, so pick a number your GPU "
-            "server can actually handle. It applies the next time the app looks for work, and "
-            "running jobs are not stopped."
+            "How many slots may be in use on your GPU server at the same time, all kinds of job "
+            "together: clips, first and last frames, reference pictures, transcription and "
+            "speech. A job takes one slot, except a MiniMax H3 clip (Video lab), which takes two "
+            "because it needs two GPUs. Each image job loads about 31 GB of model weights "
+            "first, so pick a number your GPU server can actually handle. It applies the next "
+            "time the app looks for work, and running jobs are not stopped."
         ),
         value_type="integer",
         default=4,

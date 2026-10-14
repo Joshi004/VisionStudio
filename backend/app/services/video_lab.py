@@ -1,4 +1,9 @@
-"""The Video lab: try a prompt on LTX-2.3 and LTX-2.5, side by side (Phase 19).
+"""The Video lab: try a prompt on LTX-2.3, LTX-2.5 and MiniMax H3, side by side (Phase 19).
+
+MiniMax H3 is a lab-only model: it differs from LTX in its sizes (1344 x 768), its fixed 24 fps,
+its `17n + 5` frame grid, its prompt format and the two GPUs it needs, so `create_runs` works
+all of that out per model. Its reference mode (pictures and an audio reference, no first frame)
+is its own form, `H3ReferenceForm`, started by `create_h3_reference_run`.
 
 The lab belongs to no project. A run is a `lab_video` job (`job.project_id` is NULL) that makes
 one clip on one model, and a `lab_video_run` row that holds what the page lists and compares:
@@ -6,9 +11,10 @@ the model, the prompt, the form's parameters and, once the job has finished, the
 under `media/lab/`. The job holds the status, the phase, the exact request and the server's
 answers, so a run can be resumed after a restart or a pre-emption like a scene's clip.
 
-"Run on both models" makes two runs from one click. They share a `group_key`, the same prompt,
-the same first frame, the same size and length, the same recipe and the same seed, so the two
-clips differ only by the model. Each run is a paid GPU job of 5 to 10 minutes, so a run starts
+"Run on several models" makes one run per model from one click. They share a `group_key`, the
+same prompt, the same first frame, the same length, the same recipe and the same seed, so the
+clips differ only by the model (and by what the model forces: H3's size and frame grid). Each
+run is a paid GPU job of 5 to 10 minutes or more, so a run starts
 only from a click, is never retried by itself beyond what a scene's clip is, and is never
 merged into an earlier one (`dedupe=False`).
 
@@ -34,8 +40,9 @@ from app.jobs import store
 from app.providers import contract_guard, video_generator
 from app.services import api_contract, frame_counts, projects, video_models
 from app.services import lab_prompt_writer as prompt_writer
+from app.services.lab_prompt_profiles import profile_for
 from app.services.scene_inputs import ClipMode
-from app.services.video_models import VideoModel
+from app.services.video_models import LabVideoModel, VideoModel
 
 _logger = logging.getLogger(__name__)
 
@@ -59,7 +66,27 @@ DURATION_MAX_S: Final = 20.0
 LIP_SYNC_FPS: Final = 25
 # Seeds are drawn below this, so they fit every signed 32-bit integer field.
 SEED_LIMIT: Final = 2**31
-MAX_MODELS: Final = 2
+MAX_MODELS: Final = len(video_models.LAB_MODEL_IDS)
+
+# MiniMax H3, from the GPU server's guide (version 0.13.0). It is trained at 1344 x 768 and
+# 768 x 1344 whatever the project's own size is; the lab sends these sizes explicitly (both are
+# multiples of 64, so the frame fitting and `check_size` keep working).
+H3_SIZES: Final[dict[Orientation, tuple[int, int]]] = {
+    "landscape": (1344, 768),
+    "portrait": (768, 1344),
+}
+# The lengths H3 can make: from 5 s (the model makes at least 124 frames, 5.17 s, so a shorter
+# ask would silently get more) up to 345 frames at 24 fps, which the guide calls 14.4 s. A
+# length of 14.4 s is 345.6 frames, so `create_runs` caps the frame count at 345, as the server
+# does ("15 s becomes 345 frames").
+H3_DURATION_MIN_S: Final = 5.0
+H3_DURATION_MAX_S: Final = 14.4
+# Denoising steps: 4 to 100, and the pipeline's own default (50) when none is sent.
+H3_STEPS_MIN: Final = 4
+H3_STEPS_MAX: Final = 100
+# The audio reference of a reference clip lasts 2 to 15 s (the server's limits).
+H3_AUDIO_MIN_S: Final = 2.0
+H3_AUDIO_MAX_S: Final = 15.0
 
 
 class LabVideoInputError(ValueError):
@@ -77,7 +104,8 @@ class FirstFrameRef:
 @dataclass(frozen=True)
 class LabVideoForm:
     prompt: str
-    models: Sequence[VideoModel]
+    models: Sequence[LabVideoModel]
+    # LTX only: MiniMax H3 has one recipe and ignores it.
     mode: Mode
     orientation: Orientation
     duration_s: float
@@ -87,6 +115,8 @@ class LabVideoForm:
     first_frame: FirstFrameRef | None
     # Needs a first frame. A run with both frames moves from the first to the last.
     last_frame: FirstFrameRef | None = None
+    # MiniMax H3 only: 4 to 100 denoising steps. None sends none (the pipeline's own 50).
+    num_inference_steps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +125,27 @@ class AudioRef:
 
     source: AudioSource
     id: int
+
+
+@dataclass(frozen=True)
+class H3ReferenceForm:
+    """A MiniMax H3 reference clip: 1 to 9 pictures and an audio reference, no first frame.
+
+    The pictures are `<Picture 1>`, `<Picture 2>`, ... in the prompt, in this order, and the
+    audio is `<Audio 1>`. The audio is a reference the model reads (its voice, its delivery) and
+    then makes its own soundtrack from. It is not muxed in, unlike a lip-synced LTX clip.
+    The pictures do not set the clip's shape, so `orientation` does.
+    """
+
+    prompt: str
+    orientation: Orientation
+    seed: int | None
+    references: Sequence[FirstFrameRef]
+    audio: AudioRef
+    # True: the clip is as long as the audio. False: it lasts `duration_s`.
+    match_audio_duration: bool
+    duration_s: float | None = None
+    num_inference_steps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +188,24 @@ class RunRow:
 # --- The form (pure checks) ---------------------------------------------------------------
 
 
+def _check_h3_duration(duration_s: float) -> None:
+    """Raises LabVideoInputError when MiniMax H3 cannot make a clip this long."""
+    # Written so that NaN, which compares false to everything, is rejected too.
+    if not H3_DURATION_MIN_S <= duration_s <= H3_DURATION_MAX_S:
+        raise LabVideoInputError(
+            f"MiniMax H3: the length must be from {H3_DURATION_MIN_S:g} to "
+            f"{H3_DURATION_MAX_S:g} seconds."
+        )
+
+
+def _check_h3_steps(steps: int | None) -> None:
+    """Raises LabVideoInputError for a number of denoising steps H3 does not take."""
+    if steps is not None and not H3_STEPS_MIN <= steps <= H3_STEPS_MAX:
+        raise LabVideoInputError(
+            f"MiniMax H3: the steps must be from {H3_STEPS_MIN} to {H3_STEPS_MAX}."
+        )
+
+
 def validate_form(form: LabVideoForm) -> None:
     """Raises LabVideoInputError for a form no run should be started with."""
     if not form.prompt.strip():
@@ -144,15 +213,18 @@ def validate_form(form: LabVideoForm) -> None:
     if len(form.prompt) > MAX_PROMPT_CHARS:
         raise LabVideoInputError(f"The prompt must be at most {MAX_PROMPT_CHARS:,} characters.")
     if not 1 <= len(form.models) <= MAX_MODELS or len(set(form.models)) != len(form.models):
-        raise LabVideoInputError("Choose LTX-2.3, LTX-2.5, or both.")
+        raise LabVideoInputError("Choose one or more models, each at most once.")
     for model in form.models:
-        if not video_models.is_video_model(model):
+        if not video_models.is_lab_video_model(model):
             raise LabVideoInputError(f"{model} is not a known video model.")
     # Written so that NaN, which compares false to everything, is rejected too.
     if not DURATION_MIN_S <= form.duration_s <= DURATION_MAX_S:
         raise LabVideoInputError(
             f"The length must be from {DURATION_MIN_S:g} to {DURATION_MAX_S:g} seconds."
         )
+    if video_models.H3_MODEL in form.models:
+        _check_h3_duration(form.duration_s)
+    _check_h3_steps(form.num_inference_steps)
     if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
         raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
     if form.negative_prompt is not None and len(form.negative_prompt) > NEGATIVE_PROMPT_MAX_CHARS:
@@ -179,22 +251,51 @@ def validate_lip_sync_form(form: LipSyncForm) -> None:
         )
 
 
-def validate_prompt_draft(idea: str, shots: int, duration_s: float, note: str | None) -> None:
-    """Raises LabVideoInputError for a request for a multi-shot prompt that should not be made."""
+def validate_h3_reference_form(form: H3ReferenceForm) -> None:
+    """Raises LabVideoInputError for a reference form no run should be started with."""
+    if not form.prompt.strip():
+        raise LabVideoInputError("Write the video prompt first.")
+    if len(form.prompt) > MAX_PROMPT_CHARS:
+        raise LabVideoInputError(f"The prompt must be at most {MAX_PROMPT_CHARS:,} characters.")
+    if not 1 <= len(form.references) <= video_generator.H3_MAX_REFERENCE_IMAGES:
+        raise LabVideoInputError(
+            f"Choose 1 to {video_generator.H3_MAX_REFERENCE_IMAGES} reference pictures."
+        )
+    if not form.match_audio_duration:
+        if form.duration_s is None:
+            raise LabVideoInputError("Choose a length, or let the clip match the audio.")
+        _check_h3_duration(form.duration_s)
+    _check_h3_steps(form.num_inference_steps)
+    if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
+        raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
+
+
+def validate_prompt_draft(
+    idea: str,
+    shots: int,
+    duration_s: float,
+    note: str | None,
+    target_model: LabVideoModel = "ltx-2.5",
+) -> None:
+    """Raises LabVideoInputError for a request for a multi-shot prompt that should not be made.
+    The number of shots and the length depend on the model the prompt is for: MiniMax H3 takes 1
+    to 4 shots and 5 to 14.4 seconds, LTX 2 to 4 shots and 1 to 20 seconds.
+    """
+    profile = profile_for(target_model)
     if not idea.strip():
         raise LabVideoInputError("Write the idea first.")
     if len(idea) > prompt_writer.IDEA_MAX_CHARS:
         raise LabVideoInputError(
             f"The idea must be at most {prompt_writer.IDEA_MAX_CHARS:,} characters."
         )
-    if not prompt_writer.MIN_SHOTS <= shots <= prompt_writer.MAX_SHOTS:
-        raise LabVideoInputError(
-            f"Ask for {prompt_writer.MIN_SHOTS} to {prompt_writer.MAX_SHOTS} shots."
-        )
+    if not profile.min_shots <= shots <= profile.max_shots:
+        raise LabVideoInputError(f"Ask for {profile.min_shots} to {profile.max_shots} shots.")
     if not DURATION_MIN_S <= duration_s <= DURATION_MAX_S:
         raise LabVideoInputError(
             f"The length must be from {DURATION_MIN_S:g} to {DURATION_MAX_S:g} seconds."
         )
+    if target_model == video_models.H3_MODEL:
+        _check_h3_duration(duration_s)
     if note is not None and len(note) > prompt_writer.FIRST_FRAME_NOTE_MAX_CHARS:
         raise LabVideoInputError(
             f"The first frame note must be at most "
@@ -257,11 +358,16 @@ async def create_runs(
     making a silent clip) can link one and commit everything together.
 
     A run with a last frame is made by the model's first-and-last-frame endpoint, one without
-    by its image-to-video (or text-to-video) endpoint.
+    by its image-to-video (or text-to-video) endpoint. Size, frame rate and frame count are
+    worked out per model: an LTX run uses the orientation's size, 24 fps and the next `8k + 1`
+    frames; a MiniMax H3 run uses 1344 x 768 (or 768 x 1344), a fixed 24 fps and the next
+    `17n + 5` frames, and its prompt gets the first line that places the frames
+    (`video_generator.h3_prompt_prefix`). The run keeps the prompt as typed; the request holds
+    the prompt that is sent.
 
-    Raises LabVideoInputError. Every request is checked against the limits of the approved GPU
-    API first (ANALYSIS.md Section 5.3 and 5.8: a wrong request wastes a GPU run), so a model
-    the approved API does not have an endpoint for refuses the whole click, and no run starts.
+    Raises LabVideoInputError. Every request is checked against the limits of the newest
+    recorded GPU API first (a wrong request wastes a GPU run), so a model the API does not have
+    an endpoint for refuses the whole click, and no run starts.
     """
     validate_form(form)
     if form.first_frame is not None:
@@ -285,40 +391,64 @@ async def create_runs(
     clip_mode: ClipMode = "first_and_last" if form.last_frame is not None else "first_frame"
 
     # Every request is built and checked before any row is written.
-    planned: list[tuple[VideoModel, str, dict[str, Any], dict[str, Any]]] = []
+    planned: list[tuple[LabVideoModel, str, dict[str, Any], dict[str, Any]]] = []
+    prompt = form.prompt.strip()
     for model in form.models:
-        endpoint = video_generator.endpoint_for(model, clip_mode).endpoint
+        is_h3 = model == video_models.H3_MODEL
         try:
+            endpoint = video_generator.lab_endpoint_for(model, clip_mode)
+            if is_h3:
+                width, height = H3_SIZES[form.orientation]
+                run_fps = frame_counts.H3_FPS
+                # Capped at the model's last frame count: 14.4 s is 345.6 frames.
+                run_frames = frame_counts.h3_num_frames(
+                    min(round(form.duration_s * run_fps), frame_counts.H3_MAX_FRAMES)
+                )
+            else:
+                width, height = sizes.gen_width, sizes.gen_height
+                run_fps, run_frames = fps, num_frames
             if spec is None:
                 raise ValueError(video_generator.no_endpoint_message(endpoint))
-            video_generator.check_frames(num_frames, video_generator.frame_limits(spec, endpoint))
-            video_generator.check_size(sizes.gen_width, sizes.gen_height)
+            video_generator.check_frames(run_frames, video_generator.frame_limits(spec, endpoint))
+            video_generator.check_size(width, height)
         except ValueError as exc:
             raise LabVideoInputError(f"{video_models.label(model)}: {exc}") from exc
+
+        sent_prompt = prompt
+        if is_h3:
+            prefix = video_generator.h3_prompt_prefix(
+                run_frames, form.first_frame is not None, form.last_frame is not None, prompt
+            )
+            if prefix:
+                sent_prompt = f"{prefix}\n\n{prompt}"
         request = video_generator.build_request(
             endpoint=endpoint,
-            prompt=form.prompt.strip(),
+            prompt=sent_prompt,
             negative_prompt=negative_prompt,
-            width=sizes.gen_width,
-            height=sizes.gen_height,
-            num_frames=num_frames,
-            fps=fps,
+            width=width,
+            height=height,
+            num_frames=run_frames,
+            fps=run_fps,
             seed=seed,
             partition=partition,
             mode=form.mode,
+            num_inference_steps=form.num_inference_steps if is_h3 else None,
         )
         params: dict[str, Any] = {
-            "mode": form.mode,
+            # MiniMax H3 has one recipe, so the form's recipe is not recorded for it.
+            "mode": None if is_h3 else form.mode,
             "orientation": form.orientation,
-            "width": sizes.gen_width,
-            "height": sizes.gen_height,
-            "fps": fps,
+            "width": width,
+            "height": height,
+            "fps": run_fps,
             "duration_s": form.duration_s,
-            "num_frames": num_frames,
+            "num_frames": run_frames,
             "seed": seed,
             # Only a model that has the field gets it, so the page can show what was sent.
             "negative_prompt": request.get("negative_prompt"),
         }
+        if is_h3:
+            params["num_inference_steps"] = form.num_inference_steps
         planned.append((model, endpoint, request, params))
 
     rows: list[RunRow] = []
@@ -327,7 +457,7 @@ async def create_runs(
             group_key=group_key,
             video_model=model,
             endpoint=endpoint,
-            prompt=form.prompt.strip(),
+            prompt=prompt,
             params=params,
             first_frame=frame_json,
             last_frame=last_frame_json,
@@ -358,10 +488,10 @@ async def create_runs(
     else:
         await session.flush()
     _logger.info(
-        "lab video runs started: group=%s models=%s frames=%d",
+        "lab video runs started: group=%s models=%s frames=%s",
         group_key,
         ",".join(form.models),
-        num_frames,
+        ",".join(str(params["num_frames"]) for _model, _endpoint, _request, params in planned),
     )
     return rows
 
@@ -495,15 +625,165 @@ async def create_audio_run(
     return RunRow(run=run, job=job)
 
 
+async def create_h3_reference_run(
+    session: AsyncSession, form: H3ReferenceForm, *, commit: bool = True
+) -> RunRow:
+    """Checks the form and starts one MiniMax H3 reference clip. Commits, unless `commit` is
+    False: the run and its job are then only flushed, so a caller can link them and commit
+    everything together.
+
+    The clip is made by `/v1/h3/videos/audio-to-video` from the pictures (`<Picture n>`, in the
+    order given) and the audio reference (`<Audio 1>`). The audio must last 2 to 15 s. The
+    pictures do not set the clip's shape, so the size is the orientation's (1344 x 768 or
+    768 x 1344). The prompt is sent exactly as written: the six-part reference format has no
+    first line for the code to add.
+
+    With `match_audio_duration` the request says so and sends no `num_frames` (the two exclude
+    each other on the server), so the clip is as long as the audio, within H3's 124 to 345
+    frames. Otherwise the frame count is the smallest `17n + 5` at least as long as `duration_s`.
+
+    Raises LabVideoInputError.
+    """
+    validate_h3_reference_form(form)
+    for reference in form.references:
+        await first_frame_path(session, reference)  # only checks that it exists
+    audio = await audio_file(session, form.audio)
+    if not H3_AUDIO_MIN_S <= audio.duration_s <= H3_AUDIO_MAX_S:  # NaN is rejected too
+        raise LabVideoInputError(
+            f"The audio reference lasts {audio.duration_s:.1f} seconds, and MiniMax H3 needs "
+            f"{H3_AUDIO_MIN_S:g} to {H3_AUDIO_MAX_S:g} seconds."
+        )
+
+    width, height = H3_SIZES[form.orientation]
+    fps = frame_counts.H3_FPS
+    # `validate_h3_reference_form` asks for a length whenever the clip does not match the audio.
+    if form.match_audio_duration or form.duration_s is None:
+        seconds = audio.duration_s
+        target = math.ceil(seconds * fps)  # rounded up, so the audio is never cut
+    else:
+        seconds = form.duration_s
+        target = round(seconds * fps)
+    num_frames = frame_counts.h3_num_frames(min(target, frame_counts.H3_MAX_FRAMES))
+    seed = form.seed if form.seed is not None else secrets.randbelow(SEED_LIMIT)
+    partition = await settings_service.get_str(session, PARTITION_KEY)
+    bodies = await contract_guard.latest_bodies(session)
+    spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
+
+    endpoint = video_generator.H3_AUDIO_TO_VIDEO_PATH
+    try:
+        if spec is None:
+            raise ValueError(video_generator.no_endpoint_message(endpoint))
+        limits = video_generator.frame_limits(spec, endpoint)  # also checks the endpoint exists
+        if not form.match_audio_duration:
+            video_generator.check_frames(num_frames, limits)
+        video_generator.check_size(width, height)
+    except ValueError as exc:
+        raise LabVideoInputError(
+            f"{video_models.label(video_models.H3_MODEL)}: {exc} If the GPU server has this "
+            "endpoint, test the connection in Settings, so the app reads its current API."
+        ) from exc
+    request = video_generator.build_request(
+        endpoint=endpoint,
+        prompt=form.prompt.strip(),
+        negative_prompt=None,
+        width=width,
+        height=height,
+        num_frames=num_frames,
+        fps=fps,
+        seed=seed,
+        partition=partition,
+        num_inference_steps=form.num_inference_steps,
+    )
+    if form.match_audio_duration:
+        # The server refuses both: the clip's length is the audio's.
+        del request["num_frames"]
+        request["match_audio_duration"] = True
+
+    params: dict[str, Any] = {
+        "mode": None,
+        "orientation": form.orientation,
+        "width": width,
+        "height": height,
+        "fps": fps,
+        # What the clip should last. With `match_audio_duration` the server rounds it onto its
+        # frame grid, so the real length is on the finished run.
+        "duration_s": round(seconds, 3),
+        "num_frames": None if form.match_audio_duration else num_frames,
+        "seed": seed,
+        "negative_prompt": None,
+        "num_inference_steps": form.num_inference_steps,
+        "match_audio_duration": form.match_audio_duration,
+        "audio_duration_s": audio.duration_s,
+    }
+    reference_json = [{"source": ref.source, "id": ref.id} for ref in form.references]
+    audio_json = {"source": form.audio.source, "id": form.audio.id}
+
+    run = LabVideoRun(
+        group_key=secrets.token_hex(8),
+        video_model=video_models.H3_MODEL,
+        endpoint=endpoint,
+        prompt=form.prompt.strip(),
+        params=params,
+        first_frame=None,
+        last_frame=None,
+        audio_input=audio_json,
+        references=reference_json,
+    )
+    session.add(run)
+    await session.flush()
+    job, _created = await store.create_job(
+        session,
+        project_id=None,
+        type=RUN_JOB,
+        provider="gpu",
+        input={
+            "requested": "lab_video",
+            "run_id": run.id,
+            "video_model": video_models.H3_MODEL,
+            "endpoint": endpoint,
+            "request": request,
+            "first_frame": None,
+            "last_frame": None,
+            # Uploaded in this order: the order is what `<Picture n>` means in the prompt.
+            "references": reference_json,
+            # What the job needs of the audio, copied now like a voice's recording is for a
+            # speech: a later change to the run changes nothing for this clip.
+            "audio": {**audio_json, "path": audio.path, "mime": audio.mime},
+        },
+        commit=False,
+        dedupe=False,
+    )
+    run.job_id = job.id
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
+    _logger.info(
+        "lab H3 reference run started: run=%d audio=%s:%d pictures=%d match_audio=%s",
+        run.id,
+        form.audio.source,
+        form.audio.id,
+        len(form.references),
+        form.match_audio_duration,
+    )
+    return RunRow(run=run, job=job)
+
+
 async def create_prompt_draft(
-    session: AsyncSession, idea: str, shots: int, duration_s: float, first_frame_note: str | None
+    session: AsyncSession,
+    idea: str,
+    shots: int,
+    duration_s: float,
+    first_frame_note: str | None,
+    target_model: LabVideoModel = "ltx-2.5",
 ) -> Job:
-    """Starts the job that writes a multi-shot prompt from an idea. Commits.
+    """Starts the job that writes a multi-shot prompt from an idea, in the format of
+    `target_model` (MiniMax H3's structured prompt, or LTX-2.5's one paragraph). Commits.
 
     Raises LabVideoInputError. Each call is a paid try of its own, so none is merged into an
     earlier one.
     """
-    validate_prompt_draft(idea, shots, duration_s, first_frame_note)
+    validate_prompt_draft(idea, shots, duration_s, first_frame_note, target_model)
     job, _created = await store.create_job(
         session,
         project_id=None,
@@ -511,7 +791,9 @@ async def create_prompt_draft(
         provider="llm",
         input={
             "requested": "lab_video_prompt",
-            "inputs": prompt_writer.prompt_inputs(idea, shots, duration_s, first_frame_note),
+            "inputs": prompt_writer.prompt_inputs(
+                idea, shots, duration_s, first_frame_note, target_model
+            ),
         },
         dedupe=False,
     )

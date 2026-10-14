@@ -8,7 +8,9 @@ master (Phase 25).
    (`image_prompt_profiles.ACTIVE_CHARACTER_SHEET_PROFILE`).
 2. When it finishes (`on_look_prompt_written`, called by the job), four `lab_image` runs with
    different random seeds make the candidates to choose a master from
-   (`character_look_candidate` rows, read live from their `lab_run`).
+   (`character_look_candidate` rows, read live from their `lab_run`). A look started from the
+   author's own picture (`reference_image_id`) makes them as four `lab_image` **edit** runs of
+   that picture instead, from a prompt written for it.
 3. `choose_master` cuts the backdrop from the chosen candidate (best effort, as the project
    cast does), stores it as the `front` reference, and starts four `lab_image` **edit** runs
    that turn the master into the other four angles, with a fixed prompt per angle: no language
@@ -129,15 +131,26 @@ async def _next_version(session: AsyncSession, character_id: int) -> int:
     return (highest or 0) + 1
 
 
-async def start_look(session: AsyncSession, character_id: int) -> CharacterLook:
+async def start_look(
+    session: AsyncSession, character_id: int, reference_image_id: int | None = None
+) -> CharacterLook:
     """Starts a new, fresh version of a character's look: a job writes its master prompt
-    first. Commits. Raises CharacterLookError.
+    first. With `reference_image_id` (a lab image: the author's own picture of the character),
+    the candidates are edits of that picture instead of text-to-image pictures. Commits.
+    Raises CharacterLookError.
     """
     character = await session.get(LibraryCharacter, character_id)
     if character is None:
         raise CharacterLookError(f"There is no character {character_id}.")
+    if reference_image_id is not None and await session.get(LabImage, reference_image_id) is None:
+        raise CharacterLookError(f"There is no lab image {reference_image_id}.")
     version = await _next_version(session, character_id)
-    look = CharacterLook(character_id=character_id, version=version, status="writing_prompt")
+    look = CharacterLook(
+        character_id=character_id,
+        version=version,
+        status="writing_prompt",
+        reference_image_id=reference_image_id,
+    )
     session.add(look)
     await session.flush()
     job, _created = await store.create_job(
@@ -145,13 +158,24 @@ async def start_look(session: AsyncSession, character_id: int) -> CharacterLook:
         project_id=None,
         type=character_library.PROMPT_JOB,
         provider="llm",
-        input={"requested": "master", "character_id": character_id, "look_id": look.id},
+        input={
+            "requested": "master",
+            "character_id": character_id,
+            "look_id": look.id,
+            "reference_image_id": reference_image_id,
+        },
         commit=False,
         dedupe=False,
     )
     look.prompt_job_id = job.id
     await session.commit()
-    _logger.info("look %d started: character=%d version=%d", look.id, character_id, version)
+    _logger.info(
+        "look %d started: character=%d version=%d reference_image=%s",
+        look.id,
+        character_id,
+        version,
+        reference_image_id,
+    )
     return look
 
 
@@ -169,6 +193,7 @@ async def on_look_prompt_written(job_id: int) -> bool:
             return False
         job = await session.get(Job, job_id)
         output = job.output if job is not None and isinstance(job.output, dict) else {}
+        job_input = job.input if job is not None and isinstance(job.input, dict) else {}
         prompt = output.get("image_prompt")
         if not isinstance(prompt, str) or not prompt.strip():
             look.status = "failed"
@@ -176,8 +201,15 @@ async def on_look_prompt_written(job_id: int) -> bool:
             await session.commit()
             return False
         look.prompt = prompt.strip()
+        # Read from the job, not the look: the prompt was written for this picture, so a
+        # picture deleted since then must fail the look, never fall back to text-to-image.
+        reference_image_id = job_input.get("reference_image_id")
         try:
-            await _start_candidates(session, look)
+            await _start_candidates(
+                session,
+                look,
+                reference_image_id if isinstance(reference_image_id, int) else None,
+            )
         except CharacterLookError as exc:
             await session.rollback()
             look = await session.get(CharacterLook, look.id)
@@ -205,16 +237,34 @@ async def on_look_prompt_failed(job_id: int, error: str) -> None:
         await session.commit()
 
 
-async def _start_candidates(session: AsyncSession, look: CharacterLook) -> None:
+async def _start_candidates(
+    session: AsyncSession, look: CharacterLook, reference_image_id: int | None
+) -> None:
+    """Four text-to-image runs from the master prompt, or, with `reference_image_id`, four
+    edit runs of that picture (the author's own picture of the character).
+    """
     mode = await _image_mode(session)
     prompt = look.prompt or ""
     for _ in range(CANDIDATE_COUNT):
         seed = secrets.randbelow(image_models_service.SEED_LIMIT)
-        form = QwenLabForm(
-            prompt=prompt, mode=mode, aspect_ratio=MASTER_SHAPE, seed=seed, steps=None
-        )
         try:
-            run, _job = await image_lab.create_qwen_run(session, form, commit=False)
+            if reference_image_id is None:
+                form = QwenLabForm(
+                    prompt=prompt, mode=mode, aspect_ratio=MASTER_SHAPE, seed=seed, steps=None
+                )
+                run, _job = await image_lab.create_qwen_run(session, form, commit=False)
+            else:
+                edit_form = QwenEditForm(
+                    prompt=prompt,
+                    mode=mode,
+                    # Asked for, not taken from the picture: the master is always a standing
+                    # figure, whatever the shape of the author's picture.
+                    aspect_ratio=MASTER_SHAPE,
+                    seed=seed,
+                    steps=None,
+                    references=[Ref(source="lab", id=reference_image_id)],
+                )
+                run, _job = await image_lab.create_qwen_edit_run(session, edit_form, commit=False)
         except LabInputError as exc:
             raise CharacterLookError(str(exc)) from exc
         session.add(CharacterLookCandidate(look_id=look.id, lab_run_id=run.id))

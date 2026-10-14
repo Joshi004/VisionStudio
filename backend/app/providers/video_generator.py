@@ -42,6 +42,19 @@ scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
   on the server (the job still succeeds, without lip sync): `gpu_server.RemoteStatus.lip_sync`
   carries whether it was applied.
 
+- MiniMax H3 (the Video lab and the Character lab's takes, never a scene's clip),
+  `POST /v1/h3/videos/generate`
+  (`H3GenerateRequest`): text-to-video, first frame, or first and last frame, all by one
+  endpoint. The body has no `frame_rate` (a fixed 24 fps), `mode`, `enhance_prompt` or
+  `negative_prompt`; it has an optional `num_inference_steps`. The frames are named as
+  `first_frame_asset_id` and `last_frame_asset_id`. The prompt is used exactly as sent and
+  was trained in a structured format, with a first line that places the frames
+  (`h3_prompt_prefix`). `lab_endpoint_for` finds it; `ENDPOINTS` (the scenes') never lists it.
+- MiniMax H3 reference mode, `POST /v1/h3/videos/audio-to-video` (`H3AudioToVideoRequest`):
+  up to 9 reference pictures (`image_asset_ids`) and one audio reference (`audio_asset_id`,
+  2 to 15 s) that the model reads and then makes its own soundtrack from, unlike the LTX
+  audio-to-video endpoints, which mux the speech in unchanged. `with_h3_references` adds both.
+
 `with_frames` builds the part of the body that names the frames, in the shape the chosen
 endpoint wants. Every pair of (model, clip mode) has an endpoint. `endpoint_for` still falls
 back to LTX-2.3 for a pair that has none, and says so in a note.
@@ -57,6 +70,9 @@ No body sends `orientation`, `duration_seconds` (the frame count is computed her
 
 from __future__ import annotations
 
+import mimetypes
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -64,9 +80,9 @@ from typing import Any, Final
 from app.core import outbound
 from app.providers import gpu_server
 from app.services import video_models
-from app.services.frame_counts import MIN_NUM_FRAMES
+from app.services.frame_counts import H3_FPS, MIN_NUM_FRAMES
 from app.services.scene_inputs import ClipMode
-from app.services.video_models import VideoModel
+from app.services.video_models import LabVideoModel, VideoModel
 
 KEYFRAME_PATH: Final = "/v1/ltx/videos/keyframe-interpolation"
 GENERATE_PATH: Final = "/v1/ltx/videos/generate"
@@ -78,6 +94,11 @@ LTX25_INTERPOLATE_PATH: Final = "/v1/ltx25/videos/interpolate"
 # are not in `ENDPOINTS` (which is keyed by `ClipMode`, not by "has audio").
 AUDIO_TO_VIDEO_PATH: Final = "/v1/ltx/videos/audio-to-video"
 LTX25_AUDIO_TO_VIDEO_PATH: Final = "/v1/ltx25/videos/audio-to-video"
+# MiniMax H3, used by the Video lab and the Character lab's takes: text, first-frame and
+# first-and-last-frame video by one endpoint, and reference mode (pictures and an audio
+# reference) by the other.
+H3_GENERATE_PATH: Final = "/v1/h3/videos/generate"
+H3_AUDIO_TO_VIDEO_PATH: Final = "/v1/h3/videos/audio-to-video"
 # The audio-to-video endpoint for each video model.
 AUDIO_ENDPOINTS: Final[dict[VideoModel, str]] = {
     "ltx-2.3": AUDIO_TO_VIDEO_PATH,
@@ -91,6 +112,17 @@ ENDPOINTS: Final[dict[tuple[VideoModel, ClipMode], str]] = {
     ("ltx-2.5", "first_frame"): LTX25_GENERATE_PATH,
     ("ltx-2.5", "first_and_last"): LTX25_INTERPOLATE_PATH,
 }
+# The same for the Video lab, which can also use MiniMax H3 (one endpoint for both modes, and
+# for a text-only clip). It is a separate map so a scene, which only ever uses `ENDPOINTS`, can
+# never be given an H3 endpoint.
+LAB_ENDPOINTS: Final[dict[tuple[LabVideoModel, ClipMode], str]] = {
+    ("ltx-2.3", "first_frame"): GENERATE_PATH,
+    ("ltx-2.3", "first_and_last"): KEYFRAME_PATH,
+    ("ltx-2.5", "first_frame"): LTX25_GENERATE_PATH,
+    ("ltx-2.5", "first_and_last"): LTX25_INTERPOLATE_PATH,
+    ("minimax-h3", "first_frame"): H3_GENERATE_PATH,
+    ("minimax-h3", "first_and_last"): H3_GENERATE_PATH,
+}
 _REQUEST_SCHEMAS: Final[dict[str, str]] = {
     KEYFRAME_PATH: "KeyframeInterpolationRequest",
     GENERATE_PATH: "TextToVideoRequest",
@@ -98,9 +130,11 @@ _REQUEST_SCHEMAS: Final[dict[str, str]] = {
     LTX25_INTERPOLATE_PATH: "Ltx25InterpolateRequest",
     AUDIO_TO_VIDEO_PATH: "AudioToVideoRequest",
     LTX25_AUDIO_TO_VIDEO_PATH: "Ltx25AudioToVideoRequest",
+    H3_GENERATE_PATH: "H3GenerateRequest",
+    H3_AUDIO_TO_VIDEO_PATH: "H3AudioToVideoRequest",
 }
 # The endpoints that take `mode` and `enhance_prompt` (the keyframe and audio-to-video endpoints
-# have neither).
+# have neither, and neither do the MiniMax H3 ones).
 _MODE_ENDPOINTS: Final = frozenset({GENERATE_PATH, LTX25_GENERATE_PATH, LTX25_INTERPOLATE_PATH})
 # The endpoints that have a `negative_prompt` field. The two plain LTX-2.5 endpoints have none
 # (they run without guidance), but LTX-2.5 audio-to-video does (its own default includes "bad
@@ -110,7 +144,21 @@ _NEGATIVE_PROMPT_ENDPOINTS: Final = frozenset(
 )
 _LTX23_PREFIX: Final = "/v1/ltx/"
 _LTX25_PREFIX: Final = "/v1/ltx25/"
+_H3_PREFIX: Final = "/v1/h3/"
+# What `/v1/h3/videos/audio-to-video` takes: up to 9 reference pictures (`image_asset_ids`).
+H3_MAX_REFERENCE_IMAGES: Final = 9
 _SIZE_MULTIPLE: Final = 64
+# What the server's guide says the first line of an H3 prompt must be when frames are given.
+_H3_FIRST_FRAME_LINE: Final = (
+    "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) "
+    "is fully referenced."
+)
+_H3_FIRST_AND_LAST_LINE: Final = (
+    "How the reference pictures align with the target video -- Picture 1 (from Shot 1) aligns "
+    "with the 0.00-second mark of the target video; Picture 2 (from Shot {shots}) aligns with "
+    "the {seconds}-second mark of the target video."
+)
+_H3_SHOT_MARKER = re.compile(r"\[Shot\s+(\d+)\]", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -141,6 +189,23 @@ def endpoint_for(model: VideoModel, mode: ClipMode) -> EndpointChoice:
         f"so {video_models.label(fallback)} is used for this clip."
     )
     return EndpointChoice(endpoint=ENDPOINTS[(fallback, mode)], model=fallback, note=note)
+
+
+def lab_endpoint_for(model: LabVideoModel, mode: ClipMode) -> str:
+    """The endpoint the Video lab makes a clip of this `mode` with. Unlike `endpoint_for` there
+    is no fallback to another model: the lab runs exactly the models it was asked for.
+
+    Raises ValueError, with a message for the user, for a pair that has no endpoint.
+    """
+    endpoint = LAB_ENDPOINTS.get((model, mode))
+    if endpoint is None:
+        raise ValueError(f"{video_models.label(model)} has no endpoint for this kind of clip.")
+    return endpoint
+
+
+def is_h3_endpoint(endpoint: object) -> bool:
+    """True for the two MiniMax H3 endpoints (whose jobs need two GPUs)."""
+    return isinstance(endpoint, str) and endpoint.startswith(_H3_PREFIX)
 
 
 def audio_endpoint_for(model: VideoModel) -> str:
@@ -264,6 +329,7 @@ def build_request(
     seed: int,
     partition: str,
     mode: str = "quality",
+    num_inference_steps: int | None = None,
 ) -> dict[str, Any]:
     """The body for `endpoint` without its frames (those need the server's asset ids).
 
@@ -277,6 +343,11 @@ def build_request(
     `mode` is `quality` unless the caller says otherwise (a scene's clip is always quality;
     the Video lab can also ask for `fast`). A request holds only what the user chose and the
     numbers worked out from it, so it can be stored and sent again unchanged.
+
+    A MiniMax H3 body (`/v1/h3/`) has no `frame_rate` (the model runs at a fixed 24 fps, so
+    `fps` is not sent), `mode`, `enhance_prompt` or `negative_prompt`: `mode` and
+    `negative_prompt` are ignored for it. `num_inference_steps` is sent only to H3 and only when
+    it is given; left out, the pipeline's own default (50 steps) applies.
     """
     body: dict[str, Any] = {
         "prompt": prompt,
@@ -286,6 +357,13 @@ def build_request(
         "frame_rate": float(fps),
         "seed": seed,
     }
+    if is_h3_endpoint(endpoint):
+        del body["frame_rate"]
+        if num_inference_steps is not None:
+            body["num_inference_steps"] = num_inference_steps
+        if partition:
+            body["partition"] = partition
+        return body
     if endpoint in _MODE_ENDPOINTS:
         body["mode"] = mode
         body["enhance_prompt"] = False
@@ -305,8 +383,14 @@ def with_frames(
     """The full body: `request` plus the frames, in the shape `endpoint` wants.
 
     The first frame is always the video's literal first frame. A last frame is needed by the
-    two first-and-last endpoints and ignored by the first-frame ones.
+    two first-and-last endpoints and ignored by the first-frame ones. MiniMax H3 has one
+    endpoint for both: it gets the last frame when there is one.
     """
+    if endpoint == H3_GENERATE_PATH:
+        body = {**request, "first_frame_asset_id": first_remote_id}
+        if last_remote_id is not None:
+            body["last_frame_asset_id"] = last_remote_id
+        return body
     if endpoint in (KEYFRAME_PATH, LTX25_INTERPOLATE_PATH):
         if last_remote_id is None:
             raise ValueError(f"{endpoint} needs a last frame.")
@@ -343,12 +427,69 @@ def with_audio(request: dict[str, Any], audio_remote_id: str) -> dict[str, Any]:
     return {**request, "audio_asset_id": audio_remote_id, "audio_start_time": 0.0}
 
 
+def with_h3_references(
+    request: dict[str, Any], image_remote_ids: Sequence[str], audio_remote_id: str
+) -> dict[str, Any]:
+    """`request` plus the references of a MiniMax H3 reference clip, for `H3_AUDIO_TO_VIDEO_PATH`.
+
+    The pictures are named in the order given, and that order is what the prompt's
+    `<Picture 1>`, `<Picture 2>`, ... mean. The audio is `<Audio 1>`: a reference the model reads,
+    not a soundtrack that is muxed in.
+    """
+    if not 1 <= len(image_remote_ids) <= H3_MAX_REFERENCE_IMAGES:
+        raise ValueError(
+            f"A MiniMax H3 reference clip needs 1 to {H3_MAX_REFERENCE_IMAGES} pictures."
+        )
+    return {
+        **request,
+        "image_asset_ids": list(image_remote_ids),
+        "audio_asset_id": audio_remote_id,
+    }
+
+
+def h3_prompt_prefix(num_frames: int, has_first: bool, has_last: bool, prompt: str) -> str:
+    """The first line a MiniMax H3 prompt needs when frames are given, or "" when it needs none.
+
+    H3 was trained on a prompt whose first line places the frames on the clip's timeline, so the
+    code writes it (it depends on the frame count, which the language model cannot know) and the
+    author or the language model writes the rest:
+
+    - a first frame only: the first picture is fully referenced at 0.00 seconds;
+    - a first and a last frame: picture 1 sits at 0.00 seconds and picture 2 at the clip's
+      length in seconds, with two decimals (124 frames at 24 fps is 5.17). The last picture
+      belongs to the last `[Shot N]` the prompt names, or to shot 1 when it names none;
+    - no frame (text-to-video), or a last frame alone (the lab never makes one): no line.
+
+    A prompt that already opens with that line is left alone (an earlier run was edited and
+    sent again), so the line is never doubled.
+    """
+    if not has_first:
+        return ""
+    stripped = prompt.lstrip()
+    if stripped.startswith(("For the target video,", "How the reference pictures align")):
+        return ""
+    if not has_last:
+        return _H3_FIRST_FRAME_LINE
+    shots = max((int(number) for number in _H3_SHOT_MARKER.findall(prompt)), default=1)
+    return _H3_FIRST_AND_LAST_LINE.format(shots=shots, seconds=f"{num_frames / H3_FPS:.2f}")
+
+
 # --- The steps of a clip job (every call raises `gpu_server.GpuCallError`) ----------
 
 
 async def upload_frame(base_url: str, path: Path, filename: str) -> str:
     """Uploads one normalised frame (a PNG) and returns the server's asset id."""
     return await gpu_server.upload_file(base_url, path, filename, "image/png")
+
+
+async def upload_reference_picture(base_url: str, path: Path, filename: str) -> str:
+    """Uploads one reference picture of a MiniMax H3 reference clip, as it is stored (it is not
+    cropped to the clip: the pictures do not set its shape), and returns the server's asset id.
+    The server reads the file's type from the extension of `filename`, so the stored file's own
+    extension must be kept there.
+    """
+    mime = mimetypes.guess_type(filename)[0] or "image/png"
+    return await gpu_server.upload_file(base_url, path, filename, mime)
 
 
 async def upload_audio(base_url: str, path: Path, filename: str, mime: str) -> str:

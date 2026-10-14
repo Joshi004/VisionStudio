@@ -24,6 +24,7 @@ import { useVoiceLabRuns, useVoices, type VoiceLabRun } from "../../api/voiceLab
 import { formatDateTime } from "../../format";
 import { referenceFromFrame, referenceFromImage, type ReferenceItem } from "../imageLab/labView";
 import { Thumb } from "../imageLab/ReferenceTray";
+import { isLipSyncRun, isReferenceRun } from "../videoLab/videoLabView";
 import { paramsLine as speechParamsLine } from "../voiceLab/voiceLabView";
 
 /**
@@ -275,9 +276,14 @@ function ClipsSection({ actions }: { actions: LibraryActions }) {
               <Badge variant="light" color="gray">
                 {run.video_model}
               </Badge>
-              {run.audio_input !== null && (
+              {isLipSyncRun(run) && (
                 <Badge variant="light" color="grape">
                   lip-sync
+                </Badge>
+              )}
+              {isReferenceRun(run) && (
+                <Badge variant="light" color="violet">
+                  reference
                 </Badge>
               )}
               <Text size="xs" c="dimmed">
@@ -296,8 +302,9 @@ function ClipsSection({ actions }: { actions: LibraryActions }) {
             <Text size="xs" c="dimmed" lineClamp={2} title={run.prompt}>
               {run.prompt}
             </Text>
-            {/* A lip-synced clip needs its speech, which the Video form does not have. */}
-            {run.audio_input === null && (
+            {/* A lip-synced clip needs its speech, which the Video form does not have. A
+                MiniMax H3 reference clip is loaded as the reference form. */}
+            {!isLipSyncRun(run) && (
               <Group>
                 <Button size="compact-xs" variant="default" onClick={() => actions.loadClip(run)}>
                   Load into Video

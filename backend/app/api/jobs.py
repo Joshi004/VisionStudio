@@ -163,7 +163,10 @@ class PoolCapacity(BaseModel):
     # The setting. Running jobs are never stopped when it is lowered, so `running` can be
     # above it for a while.
     limit: int
+    # How many jobs are running, and how many of the `limit` slots they hold. They differ when a
+    # MiniMax H3 clip runs: it is one job but takes two slots (two GPUs).
     running: int
+    slots_used: int
     queued: int
     # Only the kinds of job that have a job running or queued in the pool.
     by_type: list[PoolTypeCount]
@@ -195,6 +198,12 @@ async def get_capacity(session: SessionDep) -> JobCapacity:
         else:
             entry.queued += count
 
+    slots_used = dict.fromkeys(limits, 0)
+    for job in await store.running_jobs(session):
+        pool = handlers.slot_key(job.type)
+        if pool in slots_used:
+            slots_used[pool] += pools.slot_cost(job)
+
     return JobCapacity(
         pools=[
             PoolCapacity(
@@ -202,6 +211,7 @@ async def get_capacity(session: SessionDep) -> JobCapacity:
                 label=pools.POOL_LABELS[pool],
                 limit=limit,
                 running=sum(entry.running for entry in by_type[pool].values()),
+                slots_used=slots_used[pool],
                 queued=sum(entry.queued for entry in by_type[pool].values()),
                 by_type=list(by_type[pool].values()),
             )

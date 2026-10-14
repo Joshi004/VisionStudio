@@ -24,6 +24,15 @@ MIN_NUM_FRAMES: Final = 9
 
 _FRAMES_PER_STEP: Final = 8
 
+# MiniMax H3 (the Video lab and the Character lab's takes) runs at a fixed 24 fps and only
+# decodes `17n + 5` frames, from 124 (n = 7, 5.17 s) to 345 (n = 20, 14.4 s), the range the GPU
+# server's guide documents.
+H3_FPS: Final = 24
+H3_MIN_FRAMES: Final = 124
+H3_MAX_FRAMES: Final = 345
+_H3_FRAMES_PER_STEP: Final = 17
+_H3_BASE_FRAMES: Final = 5
+
 
 def boundary_frame(time_s: float, fps: int) -> int:
     """The index of the frame a boundary at `time_s` falls on: the nearest, halves up."""
@@ -47,3 +56,22 @@ def request_num_frames(target: int) -> int:
     """
     steps = -(-(target - 1) // _FRAMES_PER_STEP)  # ceil without floats
     return max(MIN_NUM_FRAMES, _FRAMES_PER_STEP * steps + 1)
+
+
+def h3_num_frames(target: int) -> int:
+    """The frame count to ask MiniMax H3 for: the smallest `17n + 5` that is at least `target`
+    and at least `H3_MIN_FRAMES` (so a short `target` gives 124 frames, 5.17 s).
+
+    H3 rounds any other count up on its own, so asking for the exact grid keeps the stored
+    request equal to what runs. Raises ValueError, with a message for the user, when even the
+    smallest such count is above `H3_MAX_FRAMES` (14.4 s).
+    """
+    wanted = max(target, H3_MIN_FRAMES)
+    steps = -(-(wanted - _H3_BASE_FRAMES) // _H3_FRAMES_PER_STEP)  # ceil without floats
+    frames = _H3_FRAMES_PER_STEP * steps + _H3_BASE_FRAMES
+    if frames > H3_MAX_FRAMES:
+        raise ValueError(
+            f"MiniMax H3 makes at most {H3_MAX_FRAMES} frames "
+            f"({H3_MAX_FRAMES / H3_FPS:.1f} seconds at {H3_FPS} fps), and {target} are needed."
+        )
+    return frames

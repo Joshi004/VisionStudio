@@ -2,10 +2,19 @@ import type { Dispatch, SetStateAction } from "react";
 import { Alert, Paper, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
-import { useCreateLabVideoRuns, type LabVideoRun } from "../../api/videoLab";
+import {
+  useCreateH3ReferenceRun,
+  useCreateLabVideoRuns,
+  type LabVideoRun,
+} from "../../api/videoLab";
 import { VideoLabForm } from "../videoLab/VideoLabForm";
 import { VideoLabRunList } from "../videoLab/VideoLabRunList";
-import { stateFromRuns, toRequest, type VideoLabFormState } from "../videoLab/videoLabView";
+import {
+  stateFromRuns,
+  toReferenceRequest,
+  toRequest,
+  type VideoLabFormState,
+} from "../videoLab/videoLabView";
 
 type VideoLabPanelProps = {
   /** The form lives in the Lab page, so the library drawer can fill it from any tab. */
@@ -14,45 +23,58 @@ type VideoLabPanelProps = {
 };
 
 /**
- * The Video lab tab: trying a prompt on LTX-2.3 and LTX-2.5 side by side, and trying the
- * multi-shot prompts only LTX-2.5 can cut. Each run is a paid GPU job of 5 to 10 minutes that
- * shares the GPU slots of the scene clips. Every run is kept with its exact settings, so clips
- * can be compared later. It belongs to no project and changes none.
+ * The Video lab tab: trying a prompt on LTX-2.3, LTX-2.5 and MiniMax H3 side by side, trying the
+ * multi-shot prompts only LTX-2.5 can cut, and making a MiniMax H3 clip from reference pictures
+ * and a voice. Each run is a paid GPU job of 5 to 10 minutes or more (MiniMax H3 holds two GPUs)
+ * that shares the GPU slots of the scene clips. Every run is kept with its exact settings, so
+ * clips can be compared later. It belongs to no project and changes none.
  */
 export function VideoLabPanel({ form, onFormChange }: VideoLabPanelProps) {
   const create = useCreateLabVideoRuns();
+  const createReference = useCreateH3ReferenceRun();
+  // The two modes start runs differently; the page shows what the mode in the form did last.
+  const started = form.kind === "h3_reference" ? createReference : create;
 
   function loadIntoForm(runs: LabVideoRun[]) {
     onFormChange(stateFromRuns(runs));
   }
 
+  function run() {
+    if (form.kind === "h3_reference") {
+      createReference.mutate(toReferenceRequest(form));
+    } else {
+      create.mutate(toRequest(form));
+    }
+  }
+
   return (
     <Stack gap="lg" maw={1100}>
       <Text size="sm" c="dimmed">
-        Try a prompt on LTX-2.3 and LTX-2.5 and compare the clips side by side. LTX-2.5 can cut
-        between two to four shots inside one clip when the prompt names each cut in a sentence, and
-        LTX-2.3 always makes one continuous shot. Each run is a paid GPU job of 5 to 10 minutes, and
-        it belongs to no project. To make a character speak a line in its own voice, use the
-        Characters tab.
+        Try a prompt on LTX-2.3, LTX-2.5 and MiniMax H3 and compare the clips side by side. LTX-2.5
+        can cut between two to four shots inside one clip when the prompt names each cut in a
+        sentence, LTX-2.3 always makes one continuous shot, and MiniMax H3 makes its own sound with
+        the picture and reads a structured prompt. Each run is a paid GPU job of 5 to 10 minutes
+        (MiniMax H3: more, on two GPUs), and it belongs to no project. To make a character speak a
+        line in its own voice, use the Characters tab.
       </Text>
 
       <Paper withBorder p="md" radius="md">
         <VideoLabForm
           state={form}
           onChange={onFormChange}
-          onRun={() => create.mutate(toRequest(form))}
-          running={create.isPending}
+          onRun={run}
+          running={started.isPending}
         />
       </Paper>
 
-      {create.isError && (
+      {started.isError && (
         <Alert color="red" title="The runs were not started">
-          {describeError(create.error)}
+          {describeError(started.error)}
         </Alert>
       )}
-      {create.isSuccess && (
+      {started.isSuccess && (
         <Alert color="green" title="Started">
-          {create.data.runs.length === 1 ? "The run is" : `${create.data.runs.length} runs are`}{" "}
+          {started.data.runs.length === 1 ? "The run is" : `${started.data.runs.length} runs are`}{" "}
           waiting for a free GPU slot and will appear below. You can leave this page: they keep
           going.
         </Alert>

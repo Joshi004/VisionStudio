@@ -1,5 +1,5 @@
 """The `write_lab_video_prompt` job: a language model turns a short idea into a multi-shot
-prompt for LTX-2.5, for the Video lab (Phase 19).
+prompt for LTX-2.5 or for MiniMax H3 (`inputs.target_model`), for the Video lab (Phase 19).
 
 It belongs to no project (`job.project_id` is NULL), so it is not a scene job and it saves
 nothing to a scene: the prompt is in `job.output` (`prompt`, `warnings`) and the page puts it
@@ -43,7 +43,7 @@ from app.providers import llm
 from app.providers.llm import LlmCallError
 from app.services import description_writer
 from app.services import lab_prompt_writer as writer
-from app.services.lab_prompt_profiles import ACTIVE_LAB_PROFILE, LabPromptProfile
+from app.services.lab_prompt_profiles import LabPromptProfile, profile_for
 from app.services.lab_prompt_writer import CheckedPrompt
 
 _logger = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ def _read_answer(
     if result.finish_reason == "length":
         return "The model's answer was cut off because it reached the token limit.", None, None
     try:
-        answer = writer.parse_answer(result.content)
+        answer = writer.parse_answer(result.content, profile)
     except ValueError as exc:
         return str(exc), None, None
     checked = writer.check_prompt(answer, inputs, profile)
@@ -124,11 +124,12 @@ class WriteLabVideoPromptHandler(JobHandler):
             await session.commit()
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        profile = ACTIVE_LAB_PROFILE
         inputs = job_input.get("inputs")
         if not isinstance(inputs, dict):
             await self._fail(job_id, "The request for the prompt is missing.")
             return
+        # LTX-2.5 unless the request names MiniMax H3 (an older job names no model).
+        profile = profile_for(inputs.get("target_model"))
         body = writer.build_request(inputs, model=model, profile=profile)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},

@@ -1,4 +1,4 @@
-import type { VideoModel } from "../../videoModels";
+import { H3_MODEL, type LabVideoModel } from "../../videoModels";
 
 /** What the server's guide says one shot needs to register. */
 export const SECONDS_PER_SHOT = 3;
@@ -6,6 +6,9 @@ export const SECONDS_PER_SHOT = 3;
 export const MAX_PROMPT_WORDS = 200;
 export const MIN_SHOTS = 2;
 export const MAX_SHOTS = 4;
+/** MiniMax H3 takes one to four shots (a single shot is right when interpolating two frames). */
+export const H3_MIN_SHOTS = 1;
+export const H3_MAX_SHOTS = 4;
 
 function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
@@ -28,23 +31,83 @@ export function countNamedCuts(text: string): number {
   return text.split(/(?<=[.!?])\s+/).filter((sentence) => TRANSITION.test(sentence)).length;
 }
 
+// The first field of a MiniMax H3 prompt for text and frames, and of its reference prompt.
+const H3_FIELDS = /^\s*integrated_multimodal_description\s*:/im;
+const H3_REFERENCE_FIELDS = /^\s*subject_definitions\s*:/im;
+
 type HintInput = {
   prompt: string;
   durationS: number | null;
-  models: VideoModel[];
+  models: LabVideoModel[];
+  /** "h3_reference": a MiniMax H3 reference clip. Left out: one run per model. */
+  kind?: "generate" | "h3_reference";
+  /** How many reference pictures a reference clip has (`<Picture 1>` to `<Picture n>`). */
+  pictureCount?: number;
 };
+
+/** Hints for the prompt of a MiniMax H3 reference clip: its six-part format and its labels. */
+function referenceHints(text: string, pictureCount: number): string[] {
+  const hints: string[] = [];
+  if (!H3_REFERENCE_FIELDS.test(text)) {
+    hints.push(
+      "MiniMax H3 reference mode was trained on six parts: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape and non_diegetic_music. Use the skeleton button, or write them.",
+    );
+  }
+  for (let number = 1; number <= pictureCount; number += 1) {
+    if (!text.includes(`<Picture ${number}>`)) {
+      hints.push(`<Picture ${number}> is not named in the prompt. Say what it shows and how it is used.`);
+    }
+  }
+  if (!text.includes("<Audio 1>")) {
+    hints.push(
+      "<Audio 1> is not named in the prompt. Say how the audio is used: reference (follow its voice and delivery), fully_copy, partially_copy or weak_reference.",
+    );
+  }
+  return hints;
+}
 
 /**
  * Soft warnings about a prompt, from the server's guide and Lightricks' prompting guide for
- * LTX-2.5. They never block a run: the lab exists to try exactly the wording that tends to
- * go wrong, and to see what each model does with it.
+ * LTX-2.5, and the server's guide for MiniMax H3's own structured prompt. They never block a
+ * run: the lab exists to try exactly the wording that tends to go wrong, and to see what each
+ * model does with it.
  */
-export function labPromptHints({ prompt, durationS, models }: HintInput): string[] {
+export function labPromptHints({
+  prompt,
+  durationS,
+  models,
+  kind = "generate",
+  pictureCount = 0,
+}: HintInput): string[] {
   const text = prompt.trim();
   if (text === "") {
     return [];
   }
+  if (kind === "h3_reference") {
+    return referenceHints(text, pictureCount);
+  }
   const hints: string[] = [];
+  const hasH3 = models.includes(H3_MODEL);
+  const hasLtx = models.some((model) => model !== H3_MODEL);
+  if (H3_FIELDS.test(text)) {
+    // A MiniMax H3 prompt: [Shot N] blocks with cut times, which the LTX hints below would
+    // misread (a time such as 00:03.000, a long prompt), so they are not applied to it.
+    if (hasLtx) {
+      hints.push(
+        "This is a MiniMax H3 prompt, with its own fields and [Shot N] blocks. The LTX models read it as plain text, labels and brackets included, so an LTX prompt serves them better.",
+      );
+    }
+    return hints;
+  }
+  if (hasH3) {
+    hints.push(
+      "MiniMax H3 was trained on a structured prompt (integrated_multimodal_description, overall_soundscape and non_diegetic_music). A plain prompt is accepted but gives it far less to go on: write the prompt with AI, in the MiniMax H3 format.",
+    );
+  }
+  if (!hasLtx) {
+    // The hints below are about LTX wording (named cuts, no times, about 200 words).
+    return hints;
+  }
   const cuts = countNamedCuts(text);
   const shots = cuts + 1;
 

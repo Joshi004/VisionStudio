@@ -284,10 +284,14 @@ export function referenceFromFrame(frame: ProjectFrame): ReferenceItem {
   };
 }
 
-/** Adds items that are not in the list yet, up to the limit. Says what was left out, if anything. */
+/**
+ * Adds items that are not in the list yet, up to the limit (the Image lab's, unless the caller
+ * has its own: MiniMax H3 takes 9). Says what was left out, if anything.
+ */
 export function addReferences(
   current: ReferenceItem[],
   added: ReferenceItem[],
+  max: number = MAX_REFERENCES,
 ): { items: ReferenceItem[]; note: string | null } {
   const items = [...current];
   let skipped = 0;
@@ -295,7 +299,7 @@ export function addReferences(
   for (const item of added) {
     if (items.some((have) => have.source === item.source && have.id === item.id)) {
       duplicates += 1;
-    } else if (items.length >= MAX_REFERENCES) {
+    } else if (items.length >= max) {
       skipped += 1;
     } else {
       items.push(item);
@@ -306,7 +310,7 @@ export function addReferences(
     notes.push(`${duplicates} already in the list`);
   }
   if (skipped > 0) {
-    notes.push(`${skipped} not added: at most ${MAX_REFERENCES} references`);
+    notes.push(`${skipped} not added: at most ${max} references`);
   }
   return { items, note: notes.length > 0 ? `${notes.join("; ")}.` : null };
 }

@@ -494,7 +494,10 @@ class LabVideoRun(Base):
 
     __tablename__ = "lab_video_run"
     __table_args__ = (
-        CheckConstraint("video_model IN ('ltx-2.3', 'ltx-2.5')", name="video_model_valid"),
+        # Unlike `project` and `scene`, the lab can also use MiniMax H3 (revision 0017).
+        CheckConstraint(
+            "video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')", name="video_model_valid"
+        ),
         Index("idx_lab_video_run_created", "created_at"),
         Index("idx_lab_video_run_group", "group_key"),
         Index("idx_lab_video_run_job", "job_id"),
@@ -519,6 +522,9 @@ class LabVideoRun(Base):
     # Added in Phase 24 (Talking character lab): {source: "voice_run" | "voice", id} when the
     # clip is lip-synced to a recorded speech (audio-to-video), else NULL.
     audio_input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # Added in revision 0017 (MiniMax H3 reference mode): the pictures the clip was made from,
+    # in the order the prompt names them, as a list of {source: "lab" | "asset", id}. Else NULL.
+    references: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # The result, NULL until the job has finished and the clip was stored.
     path: Mapped[str | None] = mapped_column(default=None)
     size_bytes: Mapped[int | None] = mapped_column(default=None)
@@ -663,6 +669,10 @@ class CharacterLook(Base):
     `making_angles` -> `ready`, or `failed`. The four candidates to choose the master from are
     `character_look_candidate` rows; the five angle pictures of a ready look are
     `character_reference` rows.
+
+    `reference_image_id` is the author's own picture a look was started from: its candidates
+    are then edits of that picture instead of text-to-image pictures. NULL for a look made from
+    the profile alone.
     """
 
     __tablename__ = "character_look"
@@ -689,6 +699,9 @@ class CharacterLook(Base):
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
     error: Mapped[str | None] = mapped_column(default=None)
+    reference_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
 
 
 class CharacterLookCandidate(Base):
@@ -761,8 +774,15 @@ class CharacterTake(Base):
     __tablename__ = "character_take"
     __table_args__ = (
         CheckConstraint("output IN ('image', 'audio', 'video')", name="output_valid"),
+        # A take can use MiniMax H3 too (revision 0019), unlike a project's scenes.
         CheckConstraint(
-            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')", name="video_model_valid"
+            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')",
+            name="video_model_valid",
+        ),
+        CheckConstraint(
+            "audio_marker IS NULL OR audio_marker IN "
+            "('fully_copy', 'partially_copy', 'reference', 'weak_reference')",
+            name="audio_marker_valid",
         ),
         CheckConstraint("framing IN ('close_up', 'medium', 'wide')", name="framing_valid"),
         CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
@@ -812,4 +832,30 @@ class CharacterTake(Base):
     video_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_video_run.id", ondelete="SET NULL"), default=None
     )
+    # MiniMax H3 video takes only (revision 0019); NULL or off for every other take.
+    # How the speech is used, in MiniMax's own words: fully_copy, partially_copy, reference or
+    # weak_reference. Only a take with dialogue has one.
+    audio_marker: Mapped[str | None] = mapped_column(default=None)
+    # The clip is as long as the speech (else `duration_s` says how long it is).
+    match_audio_duration: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("0")
+    )
+    # 4 to 100 denoising steps. NULL: the pipeline's own default.
+    num_inference_steps: Mapped[int | None] = mapped_column(default=None)
+    # The look's pictures are sent as extra reference pictures after the frames.
+    identity_refs: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # {source: "lab" | "asset", id} when the author picked the first frame instead of having
+    # one made. NULL: the take makes it (`image_run_id`).
+    first_frame: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The last frame: made by editing the first frame (`make_last_frame`, then
+    # `last_frame_run_id`) or picked (`last_frame`, the shape of `first_frame`). Neither: the
+    # clip has no last frame.
+    make_last_frame: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    last_frame: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    last_frame_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    # {source: "voice_run" | "voice", id} when the author picked the speech instead of having
+    # one made. NULL: the take makes it (`voice_run_id`).
+    audio_input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     last_error: Mapped[str | None] = mapped_column(default=None)

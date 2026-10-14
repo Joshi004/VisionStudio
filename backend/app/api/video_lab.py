@@ -1,9 +1,13 @@
-"""`/api/lab/videos`: the Video lab (Phase 19). Try a prompt on LTX-2.3 and LTX-2.5.
+"""`/api/lab/videos`: the Video lab (Phase 19). Try a prompt on LTX-2.3, LTX-2.5 and MiniMax H3.
 
 `POST .../runs` checks the form and starts one run per chosen model, then returns at once with
-HTTP 202: a run is a GPU job of 5 to 10 minutes, so the page follows it by itself (each run
-carries its job, the same one the Activity page shows). Two models make two runs with the same
-prompt, first frame, size, length, recipe and seed, so the clips differ only by the model.
+HTTP 202: a run is a GPU job of 5 to 10 minutes or more, so the page follows it by itself (each
+run carries its job, the same one the Activity page shows). Several models make several runs
+with the same prompt, first frame, length, recipe and seed, so the clips differ only by the
+model (MiniMax H3 also forces its own size and frame grid).
+
+`POST .../reference-runs` starts one MiniMax H3 reference clip: up to 9 pictures and an audio
+reference instead of a first frame. It answers like `.../runs` does, with the one run.
 
 `POST .../prompt-drafts` starts the paid job that writes a multi-shot prompt from an idea. It
 answers with that job; its `output.prompt` is what the page puts in the form.
@@ -20,7 +24,7 @@ from datetime import datetime
 from typing import Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,9 +34,10 @@ from app.db.models import Asset, LabImage
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
-from app.services import video_lab
+from app.providers import video_generator
+from app.services import video_lab, video_models
 from app.services.storage import media_url
-from app.services.video_models import VideoModel
+from app.services.video_models import LabVideoModel
 
 router = APIRouter()
 
@@ -57,18 +62,49 @@ class LabVideoRunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompt: StrictStr
-    # One model, or both: two runs that differ only by the model.
-    models: list[VideoModel] = Field(min_length=1, max_length=video_lab.MAX_MODELS)
+    # One model or several: one run each, differing only by the model.
+    models: list[LabVideoModel] = Field(min_length=1, max_length=video_lab.MAX_MODELS)
+    # LTX only: MiniMax H3 has one recipe and ignores it.
     mode: Literal["quality", "fast"]
     orientation: Literal["landscape", "portrait"]
     duration_s: Annotated[float, Field(allow_inf_nan=False)]
     # Left out: a random seed, shared by the runs of one click.
     seed: StrictInt | None = None
-    # LTX-2.3 only. Left out or blank: the pipeline's own default applies.
+    # LTX-2.3 only (the other models are sent none). Left out or blank: the pipeline's own
+    # default applies.
     negative_prompt: StrictStr | None = None
     first_frame: FirstFrameIn | None = None
     # Needs a first frame. The clip then moves from the first frame to this one.
     last_frame: FirstFrameIn | None = None
+    # MiniMax H3 only: 4 to 100 denoising steps. Left out: the pipeline's own default (50).
+    num_inference_steps: StrictInt | None = None
+
+
+class AudioInputIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # "voice_run": a Voice lab speech. "voice": a saved voice's recording.
+    source: Literal["voice_run", "voice"]
+    id: Id
+
+
+class H3ReferenceRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: StrictStr
+    orientation: Literal["landscape", "portrait"]
+    seed: StrictInt | None = None
+    # `<Picture 1>`, `<Picture 2>`, ... in the prompt, in this order.
+    references: list[FirstFrameIn] = Field(
+        min_length=1, max_length=video_generator.H3_MAX_REFERENCE_IMAGES
+    )
+    # `<Audio 1>`: 2 to 15 seconds. A reference the model reads, not a soundtrack.
+    audio: AudioInputIn
+    # True: the clip is as long as the audio, and `duration_s` is ignored.
+    match_audio_duration: StrictBool
+    # Needed when `match_audio_duration` is false.
+    duration_s: Annotated[float, Field(allow_inf_nan=False)] | None = None
+    num_inference_steps: StrictInt | None = None
 
 
 class PromptDraftCreate(BaseModel):
@@ -79,6 +115,9 @@ class PromptDraftCreate(BaseModel):
     duration_s: Annotated[float, Field(allow_inf_nan=False)]
     # What the first frame shows, when the clip will start from one.
     first_frame_note: StrictStr | None = None
+    # The model the prompt is written for: MiniMax H3 gets its own structured format, LTX-2.5
+    # (also what LTX-2.3 uses) one paragraph.
+    target_model: LabVideoModel = "ltx-2.5"
 
 
 class FirstFrameOut(BaseModel):
@@ -99,15 +138,19 @@ class LabVideoRunOut(BaseModel):
     created_at: datetime
     # The runs that one click started share it. The page shows them side by side.
     group_key: str | None
-    video_model: VideoModel
+    video_model: LabVideoModel
     endpoint: str
     prompt: str
-    # What the form held and what was sent: mode, orientation, size, fps, duration, frame count,
-    # seed and, for LTX-2.3, the negative prompt.
+    # What the form held and what was sent: mode (LTX only), orientation, size, fps, duration,
+    # frame count, seed, the negative prompt (LTX-2.3 only) and the steps (MiniMax H3 only).
     params: dict[str, Any]
     first_frame: FirstFrameOut | None
     last_frame: FirstFrameOut | None
-    # The speech a lip-synced clip matches (the Character lab), else None.
+    # The pictures of a MiniMax H3 reference clip, in the order the prompt names them. Empty for
+    # every other clip.
+    references: list[FirstFrameOut]
+    # The speech a lip-synced clip matches (the Character lab), or the audio reference of a
+    # MiniMax H3 reference clip. Else None.
     audio_input: AudioInputOut | None
     # The run's job: its status, phase and error, with cancel and resubmit.
     job: JobSummary | None
@@ -166,7 +209,7 @@ def frame_out(frame: Any, frame_urls: dict[tuple[str, int], str]) -> FirstFrameO
     return None
 
 
-def _audio_input_out(value: Any) -> AudioInputOut | None:
+def audio_input_out(value: Any) -> AudioInputOut | None:
     if isinstance(value, dict) and value.get("source") in ("voice_run", "voice"):
         audio_id = value.get("id")
         if isinstance(audio_id, int) and not isinstance(audio_id, bool):
@@ -181,18 +224,26 @@ def run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> La
     run = row.run
     audio = run.audio
     codec = audio.get("codec") if isinstance(audio, dict) else None
+    references = run.references if isinstance(run.references, list) else []
     return LabVideoRunOut(
         id=run.id,
         created_at=run.created_at,
         group_key=run.group_key,
         # The database CHECK constraint keeps this to the known models.
-        video_model="ltx-2.5" if run.video_model == "ltx-2.5" else "ltx-2.3",
+        video_model=run.video_model
+        if video_models.is_lab_video_model(run.video_model)
+        else "ltx-2.3",
         endpoint=run.endpoint,
         prompt=run.prompt,
         params=run.params if isinstance(run.params, dict) else {},
         first_frame=frame_out(run.first_frame, frame_urls),
         last_frame=frame_out(run.last_frame, frame_urls),
-        audio_input=_audio_input_out(run.audio_input),
+        references=[
+            picture
+            for picture in (frame_out(reference, frame_urls) for reference in references)
+            if picture is not None
+        ],
+        audio_input=audio_input_out(run.audio_input),
         job=(
             job_summary(JobRow(job=row.job, project_name=store.NO_PROJECT_NAME, scene_index=None))
             if row.job is not None
@@ -209,9 +260,12 @@ def run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> La
 
 
 async def runs_out(session: AsyncSession, rows: list[video_lab.RunRow]) -> list[LabVideoRunOut]:
-    urls = await frame_urls_for(
-        session, (frame for row in rows for frame in (row.run.first_frame, row.run.last_frame))
-    )
+    frames: list[Any] = []
+    for row in rows:
+        frames += [row.run.first_frame, row.run.last_frame]
+        if isinstance(row.run.references, list):
+            frames += row.run.references
+    urls = await frame_urls_for(session, frames)
     return [run_out(row, urls) for row in rows]
 
 
@@ -222,7 +276,10 @@ async def runs_out(session: AsyncSession, rows: list[video_lab.RunRow]) -> list[
     responses=_INVALID,
 )
 async def create_runs(body: LabVideoRunCreate, session: SessionDep) -> LabVideoRunsOut:
-    """Starts one run per chosen model. Each is a paid GPU job of 5 to 10 minutes."""
+    """Starts one run per chosen model. Each is a paid GPU job of 5 to 10 minutes (MiniMax H3
+    more: it holds two GPUs). `negative_prompt` and `mode` are ignored for MiniMax H3, and the
+    run's `params` show that.
+    """
     form = video_lab.LabVideoForm(
         prompt=body.prompt,
         models=body.models,
@@ -241,6 +298,7 @@ async def create_runs(body: LabVideoRunCreate, session: SessionDep) -> LabVideoR
             if body.last_frame is not None
             else None
         ),
+        num_inference_steps=body.num_inference_steps,
     )
     try:
         rows = await video_lab.create_runs(session, form)
@@ -248,6 +306,37 @@ async def create_runs(body: LabVideoRunCreate, session: SessionDep) -> LabVideoR
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
     return LabVideoRunsOut(runs=await runs_out(session, rows))
+
+
+@router.post(
+    "/lab/videos/reference-runs",
+    response_model=LabVideoRunsOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_INVALID,
+)
+async def create_reference_run(body: H3ReferenceRunCreate, session: SessionDep) -> LabVideoRunsOut:
+    """Starts one MiniMax H3 reference clip from 1 to 9 pictures and an audio reference of 2 to
+    15 seconds. A paid GPU job that holds two GPUs, and often takes more than 10 minutes.
+    """
+    form = video_lab.H3ReferenceForm(
+        prompt=body.prompt,
+        orientation=body.orientation,
+        seed=body.seed,
+        references=[
+            video_lab.FirstFrameRef(source=reference.source, id=reference.id)
+            for reference in body.references
+        ],
+        audio=video_lab.AudioRef(source=body.audio.source, id=body.audio.id),
+        match_audio_duration=body.match_audio_duration,
+        duration_s=body.duration_s,
+        num_inference_steps=body.num_inference_steps,
+    )
+    try:
+        row = await video_lab.create_h3_reference_run(session, form)
+    except video_lab.LabVideoInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    dispatcher.nudge()
+    return LabVideoRunsOut(runs=await runs_out(session, [row]))
 
 
 @router.get("/lab/videos/runs", response_model=list[LabVideoRunOut])
@@ -281,7 +370,12 @@ async def create_prompt_draft(body: PromptDraftCreate, session: SessionDep) -> J
     """
     try:
         job = await video_lab.create_prompt_draft(
-            session, body.idea, body.shots, body.duration_s, body.first_frame_note
+            session,
+            body.idea,
+            body.shots,
+            body.duration_s,
+            body.first_frame_note,
+            body.target_model,
         )
     except video_lab.LabVideoInputError as exc:
         raise _unprocessable(str(exc)) from exc

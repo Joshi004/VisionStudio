@@ -37,7 +37,16 @@ type ReferenceTrayProps = {
   items: ReferenceItem[];
   /** Takes a function of the current list, so a change made while an upload runs is not lost. */
   onChange: (update: (current: ReferenceItem[]) => ReferenceItem[]) => void;
-  mode: LabMode;
+  /** The Image lab's mode. Left out when the tray is used for something else. */
+  mode?: LabMode;
+  /** How many images fit: the Image lab's limit unless given (MiniMax H3 takes 9). */
+  max?: number;
+  /** Replaces the heading ("Reference images"). */
+  title?: string;
+  /** Replaces the badge on each thumbnail ("image 1"). `position` starts at 1. */
+  itemName?: (position: number) => string;
+  /** Replaces the line under the box about how the images are sent. */
+  footnote?: string;
 };
 
 /** A thumbnail that keeps the image's own shape. */
@@ -64,7 +73,15 @@ export function Thumb({ url, width, height }: { url: string; width: number | nul
  * 1"). Add one by choosing a file, dropping it or pasting (Cmd+V) into the box, or pick an
  * earlier lab image, or a frame of any project.
  */
-export function ReferenceTray({ items, onChange, mode }: ReferenceTrayProps) {
+export function ReferenceTray({
+  items,
+  onChange,
+  mode,
+  max = MAX_REFERENCES,
+  title = "Reference images",
+  itemName = (position) => `image ${position}`,
+  footnote,
+}: ReferenceTrayProps) {
   const upload = useLabUpload();
   const fileInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -73,8 +90,8 @@ export function ReferenceTray({ items, onChange, mode }: ReferenceTrayProps) {
   const unused = mode === "text_to_image";
 
   function add(added: ReferenceItem[]) {
-    setNote(addReferences(items, added).note);
-    onChange((current) => addReferences(current, added).items);
+    setNote(addReferences(items, added, max).note);
+    onChange((current) => addReferences(current, added, max).items);
   }
 
   async function uploadAll(files: File[]) {
@@ -122,7 +139,7 @@ export function ReferenceTray({ items, onChange, mode }: ReferenceTrayProps) {
     <Stack gap="xs">
       <Group justify="space-between" align="center">
         <Text size="sm" fw={600}>
-          Reference images ({items.length} of {MAX_REFERENCES})
+          {title} ({items.length} of {max})
         </Text>
         <Group gap="xs">
           <Button
@@ -184,7 +201,7 @@ export function ReferenceTray({ items, onChange, mode }: ReferenceTrayProps) {
                   color="dark"
                   style={{ position: "absolute", top: 4, left: 4 }}
                 >
-                  image {index + 1}
+                  {itemName(index + 1)}
                 </Badge>
                 <ActionIcon
                   size="sm"
@@ -222,8 +239,8 @@ export function ReferenceTray({ items, onChange, mode }: ReferenceTrayProps) {
       />
 
       <Text size="xs" c="dimmed">
-        PNG, JPEG or WebP, up to {LAB_UPLOAD_MAX_MB} MB each. A reference is sent as a JPEG, in the
-        order shown.
+        PNG, JPEG or WebP, up to {LAB_UPLOAD_MAX_MB} MB each.{" "}
+        {footnote ?? "A reference is sent as a JPEG, in the order shown."}
       </Text>
       {note && (
         <Text size="xs" c="orange.8">

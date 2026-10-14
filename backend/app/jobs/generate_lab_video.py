@@ -10,6 +10,10 @@ the server, cancelling, the shared slots of the GPU pool, `max_parallel_gpu_jobs
   fitted to the run's size and uploaded. A run without a first frame is text-to-video: the
   same endpoint, no `images`. A lip-synced clip (the Character lab) also has `audio`, the
   speech it matches: it is uploaded after the frame and named in the body (`with_audio`).
+  A MiniMax H3 reference clip has `references` (1 to 9 pictures, uploaded as they are stored and
+  in order, because the order is what `<Picture n>` means in the prompt) and an `audio`
+  reference, uploaded as it is stored too, never padded: H3 reads it as a reference and makes
+  its own soundtrack (`with_h3_references`).
   Every attempt (after pre-emption, an expired result) sends the same stored request, with the
   same seed, because "the correct response to a pre-emption failure is to resubmit the exact
   same request unchanged" (the server's guide).
@@ -57,8 +61,10 @@ class _LabPlan:
     request: dict[str, Any]
     first_frame: video_lab.FirstFrameRef | None
     last_frame: video_lab.FirstFrameRef | None
-    # Only a lip-synced clip (audio-to-video) has one.
+    # Only a lip-synced clip (audio-to-video) or a MiniMax H3 reference clip has one.
     audio: _AudioInput | None = None
+    # Only a MiniMax H3 reference clip has any: its pictures, in the order the prompt names them.
+    references: tuple[video_lab.FirstFrameRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -98,6 +104,23 @@ def _frame_ref(frame: object) -> video_lab.FirstFrameRef | None:
     return None
 
 
+def _reference_refs(value: object) -> tuple[video_lab.FirstFrameRef, ...] | None:
+    """The reference pictures stored on the job's input: an empty tuple when there are none, or
+    None when the list is malformed.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        return None
+    refs: list[video_lab.FirstFrameRef] = []
+    for item in value:
+        ref = _frame_ref(item)
+        if ref is None:
+            return None
+        refs.append(ref)
+    return tuple(refs)
+
+
 def _plan(recorded: object) -> _LabPlan | None:
     """The plan stored on the job, or None when the input is not a run's."""
     if not isinstance(recorded, dict):
@@ -117,8 +140,16 @@ def _plan(recorded: object) -> _LabPlan | None:
     audio = _audio_input(recorded.get("audio"))
     if recorded.get("audio") is not None and audio is None:
         return None
+    references = _reference_refs(recorded.get("references"))
+    if references is None:
+        return None
     return _LabPlan(
-        endpoint=endpoint, request=request, first_frame=first, last_frame=last, audio=audio
+        endpoint=endpoint,
+        request=request,
+        first_frame=first,
+        last_frame=last,
+        audio=audio,
+        references=references,
     )
 
 
@@ -153,6 +184,11 @@ class GenerateLabVideoHandler(GenerateClipHandler):
         plan = _plan(job.input)
         if plan is None:
             await self._fail(job_id, "The request for this run is missing.")
+            return
+        if plan.endpoint == video_generator.H3_AUDIO_TO_VIDEO_PATH and (
+            not plan.references or plan.audio is None
+        ):
+            await self._fail(job_id, "The pictures or the audio reference of this run are missing.")
             return
         await self._upload_and_submit_run(job, base_url, plan)
 
@@ -213,6 +249,56 @@ class GenerateLabVideoHandler(GenerateClipHandler):
         remote_id = await video_generator.upload_audio(base_url, padded, filename, "audio/wav")
         return filename, remote_id
 
+    @staticmethod
+    async def _upload_references(
+        base_url: str, plan: _LabPlan, uploads: list[dict[str, Any]]
+    ) -> list[str]:
+        """Uploads the reference pictures of a MiniMax H3 reference clip, one after the other and
+        in order, as they are stored (no crop: they do not set the clip's shape). Returns the
+        server's asset ids in that order and appends what was uploaded to `uploads`. Raises
+        FrameUnavailable and GpuCallError.
+        """
+        storage = get_storage()
+        remote_ids: list[str] = []
+        for number, ref in enumerate(plan.references, start=1):
+            async with SessionLocal() as session:
+                try:
+                    relative = await video_lab.first_frame_path(session, ref)
+                except video_lab.LabVideoInputError as exc:
+                    raise FrameUnavailable(f"Reference picture {number}: {exc}") from exc
+                await session.commit()
+            try:
+                path = storage.get_path(relative)
+            except StorageError:
+                raise FrameUnavailable(
+                    f"Reference picture {number}'s file could not be found on disk."
+                ) from None
+            # The server reads the file's type from the extension, so the stored one is kept.
+            filename = f"lab-reference-{ref.source}-{ref.id}{Path(relative).suffix or '.png'}"
+            remote_id = await video_generator.upload_reference_picture(base_url, path, filename)
+            remote_ids.append(remote_id)
+            uploads.append({"filename": filename, "remote_asset_id": remote_id})
+        return remote_ids
+
+    @staticmethod
+    async def _upload_audio_reference(base_url: str, audio: _AudioInput) -> tuple[str, str]:
+        """Uploads the audio reference of a MiniMax H3 reference clip exactly as it is stored.
+        Unlike the speech of an LTX lip-sync clip it is not padded: H3 reads 2 to 15 seconds of
+        it as a reference and makes its own soundtrack. Returns the file name sent and the
+        server's asset id. Raises AudioUnavailable and GpuCallError.
+        """
+        try:
+            path = get_storage().get_path(audio.path)
+        except StorageError:
+            raise AudioUnavailable(
+                "The audio reference's file could not be found on disk."
+            ) from None
+        filename = (
+            f"lab-reference-audio-{audio.source}-{audio.id}{Path(audio.path).suffix or '.wav'}"
+        )
+        remote_id = await video_generator.upload_audio(base_url, path, filename, audio.mime)
+        return filename, remote_id
+
     async def _upload_and_submit_run(self, job: Job, base_url: str, plan: _LabPlan) -> None:
         """Uploads the first frame (when there is one) and submits. The server's job id is
         saved the moment the submit answers, with nothing that can fail in between.
@@ -247,13 +333,27 @@ class GenerateLabVideoHandler(GenerateClipHandler):
                         uploads[0]["remote_asset_id"],
                         uploads[1]["remote_asset_id"] if len(uploads) > 1 else None,
                     )
+                image_remote_ids: list[str] = []
+                if plan.references:
+                    await self._phase(job.id, phases.UPLOADING_REFERENCE)
+                    image_remote_ids = await self._upload_references(base_url, plan, uploads)
                 if plan.audio is not None:
-                    await self._phase(job.id, phases.UPLOADING_AUDIO)
-                    filename, audio_remote_id = await self._upload_audio(
-                        base_url, plan.audio, plan.request, temps
-                    )
+                    if video_generator.is_h3_endpoint(plan.endpoint):
+                        # A reference the model reads, not a soundtrack: sent as it is stored.
+                        await self._phase(job.id, phases.UPLOADING_VOICE)
+                        filename, audio_remote_id = await self._upload_audio_reference(
+                            base_url, plan.audio
+                        )
+                        body = video_generator.with_h3_references(
+                            body, image_remote_ids, audio_remote_id
+                        )
+                    else:
+                        await self._phase(job.id, phases.UPLOADING_AUDIO)
+                        filename, audio_remote_id = await self._upload_audio(
+                            base_url, plan.audio, plan.request, temps
+                        )
+                        body = video_generator.with_audio(body, audio_remote_id)
                     uploads.append({"filename": filename, "remote_asset_id": audio_remote_id})
-                    body = video_generator.with_audio(body, audio_remote_id)
                 if not await self._is_running(job.id):
                     return  # cancelled while uploading: nothing was submitted
                 await self._phase(job.id, phases.SUBMITTING)

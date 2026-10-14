@@ -16,11 +16,12 @@ import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import {
   changedPrompts,
-  PROMPT_HINTS,
+  isH3Take,
   PROMPT_LABELS,
-  PROMPT_LIMITS,
   promptDraftsFrom,
+  promptHint,
   promptKeys,
+  promptLimit,
   rerunProblem,
   STEP_LABELS,
   takeSteps,
@@ -44,42 +45,84 @@ const STEP_STATE_TEXT: Record<StepState, string> = {
   todo: "not started",
 };
 
+const FRAME_STYLE = {
+  maxWidth: "100%",
+  objectFit: "contain",
+  background: "var(--mantine-color-gray-1)",
+  borderRadius: 4,
+  alignSelf: "flex-start",
+} as const;
+
+/**
+ * The first frame and the last frame of a MiniMax H3 take, picked or made, so a clip can be
+ * judged against the pictures it was given. A picture that is not there yet is left out.
+ */
+function Frames({ take }: { take: CharacterTake }) {
+  const first = take.first_frame_ref?.url ?? take.image?.url ?? null;
+  const last = take.last_frame_ref?.url ?? take.last_frame?.url ?? null;
+  if (first === null && last === null) {
+    return null;
+  }
+  return (
+    <Group gap="sm" align="flex-start">
+      {first !== null && (
+        <Stack gap={2}>
+          <img src={first} alt="The take's first frame" loading="lazy" style={{ ...FRAME_STYLE, maxHeight: 120 }} />
+          <Text size="xs" c="dimmed">
+            First frame
+          </Text>
+        </Stack>
+      )}
+      {last !== null && (
+        <Stack gap={2}>
+          <img src={last} alt="The take's last frame" loading="lazy" style={{ ...FRAME_STYLE, maxHeight: 120 }} />
+          <Text size="xs" c="dimmed">
+            Last frame
+          </Text>
+        </Stack>
+      )}
+    </Group>
+  );
+}
+
 /** What a finished take made, and the pieces of a take that is still being made. */
 function Result({ take }: { take: CharacterTake }) {
+  // A picture the author picked is not a result of the take, but it is what the clip starts from.
   const picture = take.image?.url ?? null;
   const speech = take.voice?.url ?? null;
   const clip = take.video?.url ?? null;
+  const h3 = isH3Take(take);
 
   if (take.output === "video" && clip !== null) {
     return (
-      // Keyed by the run, so another take always loads fresh.
-      <video
-        key={take.video?.run_id}
-        src={clip}
-        controls
-        preload="metadata"
-        playsInline
-        style={{ width: "100%", maxHeight: 460, background: "#000" }}
-      />
+      <Stack gap={6}>
+        {/* Keyed by the run, so another take always loads fresh. */}
+        <video
+          key={take.video?.run_id}
+          src={clip}
+          controls
+          preload="metadata"
+          playsInline
+          style={{ width: "100%", maxHeight: 460, background: "#000" }}
+        />
+        {h3 && <Frames take={take} />}
+      </Stack>
     );
   }
   return (
     <Stack gap={6}>
-      {picture !== null && (
-        <img
-          key={take.image?.run_id}
-          src={picture}
-          alt="The picture made for this take"
-          loading="lazy"
-          style={{
-            maxWidth: "100%",
-            maxHeight: take.output === "image" ? 460 : 200,
-            objectFit: "contain",
-            background: "var(--mantine-color-gray-1)",
-            borderRadius: 4,
-            alignSelf: "flex-start",
-          }}
-        />
+      {h3 ? (
+        <Frames take={take} />
+      ) : (
+        picture !== null && (
+          <img
+            key={take.image?.run_id}
+            src={picture}
+            alt="The picture made for this take"
+            loading="lazy"
+            style={{ ...FRAME_STYLE, maxHeight: take.output === "image" ? 460 : 200 }}
+          />
+        )
       )}
       {speech !== null && (
         <audio key={take.voice?.run_id} src={speech} controls preload="metadata" style={{ width: "100%" }} />
@@ -123,12 +166,13 @@ function PromptEditor({ take, running }: { take: CharacterTake; running: boolean
         <Textarea
           key={key}
           label={PROMPT_LABELS[key]}
-          description={`${PROMPT_HINTS[key]} ${(drafts[key] ?? "").length} of ${PROMPT_LIMITS[key]} characters.`}
+          description={`${promptHint(take, key)} ${(drafts[key] ?? "").length} of ${promptLimit(take, key)} characters.`}
           value={drafts[key] ?? ""}
           onChange={(event) => edit(key, event.currentTarget.value)}
           autosize
           minRows={2}
-          maxRows={10}
+          // A MiniMax H3 video prompt is several sections of 350 to 500 words in all.
+          maxRows={key === "video_prompt" && isH3Take(take) ? 28 : 10}
         />
       ))}
       <Group gap="sm">
@@ -169,7 +213,16 @@ function PromptEditor({ take, running }: { take: CharacterTake; running: boolean
  * the video) with its own job, the result when there is one, and, under Advanced, the prompts
  * the language model wrote, which can be edited and run again.
  */
-export function TakeCard({ take, now }: { take: CharacterTake; now: number }) {
+export function TakeCard({
+  take,
+  now,
+  onReuse,
+}: {
+  take: CharacterTake;
+  now: number;
+  /** Fills the Create panel from this take (its settings, pictures and speech). */
+  onReuse: (take: CharacterTake) => void;
+}) {
   const status = takeStatus(take);
   const badge = STATUS_BADGES[status];
   const steps = takeSteps(take);
@@ -194,6 +247,16 @@ export function TakeCard({ take, now }: { take: CharacterTake; now: number }) {
               {formatDateTime(take.created_at)}
             </Text>
           </Stack>
+          {take.output === "video" && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              title="Fills Create with this take's settings, and with its pictures and speech as ones to use, so another marker, model or seed can be tried without making them again."
+              onClick={() => onReuse(take)}
+            >
+              New take from this
+            </Button>
+          )}
         </Group>
 
         {take.action !== null && (
@@ -282,6 +345,11 @@ export function TakeCard({ take, now }: { take: CharacterTake; now: number }) {
                   Seed: {take.seed ?? "random"}
                   {take.duration_s !== null ? ` · Length: ${take.duration_s} s` : ""}
                   {take.negative_prompt ? ` · Negative prompt: ${take.negative_prompt}` : ""}
+                  {take.audio_marker !== null
+                    ? ` · Speech: ${take.audio_marker}${take.match_audio_duration ? ", clip as long as the speech" : ""}`
+                    : ""}
+                  {take.num_inference_steps !== null ? ` · Steps: ${take.num_inference_steps}` : ""}
+                  {take.identity_refs ? " · With the character's pictures as references" : ""}
                 </Text>
                 <PromptEditor take={take} running={status === "running"} />
               </Stack>

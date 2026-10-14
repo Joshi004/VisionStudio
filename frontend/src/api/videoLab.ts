@@ -8,6 +8,7 @@ import type { components } from "./schema";
 
 export type LabVideoRun = components["schemas"]["LabVideoRunOut"];
 export type LabVideoRunCreate = components["schemas"]["LabVideoRunCreate"];
+export type H3ReferenceRunCreate = components["schemas"]["H3ReferenceRunCreate"];
 export type PromptDraftCreate = components["schemas"]["PromptDraftCreate"];
 
 const PAGE_SIZE = 20;
@@ -64,6 +65,34 @@ export function useCreateLabVideoRuns() {
       return data;
     },
     // New jobs: the runs, the job lists and the banner's waiting count all change.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: runsKey }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/**
+ * Starts one MiniMax H3 reference clip (1 to 9 pictures and an audio reference) and returns at
+ * once with that one run. It is a paid GPU job on two GPUs and can take more than 10 minutes.
+ */
+export function useCreateH3ReferenceRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: H3ReferenceRunCreate) => {
+      const { data, error, response } = await api.POST("/api/lab/videos/reference-runs", {
+        body,
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `The run was not started (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    // A new job: the runs, the job lists and the banner's waiting count all change.
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: runsKey }),

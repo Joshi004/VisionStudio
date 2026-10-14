@@ -3,14 +3,21 @@ import { Alert, Button, Group, Loader, Stack, Text } from "@mantine/core";
 import { takeStatus, useCharacterTakes } from "../../api/characterLab";
 import { describeError } from "../../api/errors";
 import { useNow } from "../../hooks/useNow";
+import type { CharacterTake } from "../../api/characterLab";
 import { TakeCard } from "./TakeCard";
+
+type TakeGalleryProps = {
+  characterId: number;
+  /** "New take from this": the page fills the Create panel from the take. */
+  onReuse: (take: CharacterTake) => void;
+};
 
 /**
  * Everything made with this character, newest first, a page at a time. Takes are never
  * deleted. While one is running the page asks again by itself, and the clock of each running
  * step counts up.
  */
-export function TakeGallery({ characterId }: { characterId: number }) {
+export function TakeGallery({ characterId, onReuse }: TakeGalleryProps) {
   const gallery = useCharacterTakes(characterId);
   const takes = gallery.data?.pages.flatMap((page) => page.takes) ?? [];
   const moving = takes.some((take) => takeStatus(take) === "running");
@@ -32,7 +39,7 @@ export function TakeGallery({ characterId }: { characterId: number }) {
         </Text>
       )}
       {takes.map((take) => (
-        <TakeCard key={take.id} take={take} now={now} />
+        <TakeCard key={take.id} take={take} now={now} onReuse={onReuse} />
       ))}
       {gallery.hasNextPage && (
         <Group>

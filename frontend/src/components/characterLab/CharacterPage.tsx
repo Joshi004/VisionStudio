@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Alert,
   Badge,
@@ -17,6 +18,7 @@ import {
   useCharacterLooks,
   useEditCharacter,
   useLibraryCharacter,
+  type CharacterTake,
   type LibraryCharacter,
 } from "../../api/characterLab";
 import { describeError } from "../../api/errors";
@@ -26,8 +28,12 @@ import {
   ANGLE_LABELS,
   ANGLES,
   characterSubtitle,
+  CREATE_PANEL_ID,
+  DEFAULT_TAKE_FORM,
   eraText,
   referencePicture,
+  takeToForm,
+  type TakeFormState,
 } from "./characterLabView";
 import { TakeGallery } from "./TakeGallery";
 
@@ -104,6 +110,13 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
   // Followed here too, so a look that is made after the drawer is closed still shows up.
   const looks = useCharacterLooks(characterId);
   const edit = useEditCharacter();
+  // The Create panel's form lives here, so a take in the gallery can fill it.
+  const [takeForm, setTakeForm] = useState<TakeFormState>(DEFAULT_TAKE_FORM);
+
+  function reuseTake(take: CharacterTake) {
+    setTakeForm(takeToForm(take));
+    document.getElementById(CREATE_PANEL_ID)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   const back = (
     <Group>
@@ -224,8 +237,8 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
 
         <Grid.Col span={{ base: 12, lg: 8 }}>
           <Stack gap="lg">
-            <CreatePanel character={data} />
-            <TakeGallery characterId={data.id} />
+            <CreatePanel character={data} form={takeForm} onChange={setTakeForm} />
+            <TakeGallery characterId={data.id} onReuse={reuseTake} />
           </Stack>
         </Grid.Col>
       </Grid>

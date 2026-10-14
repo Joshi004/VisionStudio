@@ -509,6 +509,12 @@ async def active_counts(session: AsyncSession) -> dict[tuple[str, str], int]:
     return {(job_type, job_status): int(count) for job_type, job_status, count in result.all()}
 
 
+async def running_jobs(session: AsyncSession) -> list[Job]:
+    """Every running job (for the slots they take: a MiniMax H3 clip takes two)."""
+    statement = select(Job).where(Job.status == "running").execution_options(populate_existing=True)
+    return list((await session.execute(statement)).scalars().all())
+
+
 def owner_name(job: Job, project_name: str | None) -> str:
     """The project's name, or the lab the job belongs to when it has no project."""
     if project_name:

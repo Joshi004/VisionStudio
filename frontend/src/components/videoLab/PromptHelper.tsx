@@ -1,25 +1,36 @@
 import { useState } from "react";
-import { Alert, Button, Group, Paper, Select, Stack, Text, Textarea } from "@mantine/core";
+import { Alert, Button, Group, Paper, SegmentedControl, Select, Stack, Text, Textarea } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import { useJob } from "../../api/jobs";
 import { isJobActive } from "../../api/polling";
 import { useCreatePromptDraft } from "../../api/videoLab";
 import { useNow } from "../../hooks/useNow";
+import { H3_MODEL, type LabVideoModel } from "../../videoModels";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
-import { MAX_SHOTS, MIN_SHOTS } from "./labPromptHints";
+import { H3_MAX_SHOTS, H3_MIN_SHOTS, MAX_SHOTS, MIN_SHOTS } from "./labPromptHints";
+import { H3_DURATION_MAX_S, H3_DURATION_MIN_S } from "./videoLabView";
 
-const SHOT_CHOICES = Array.from({ length: MAX_SHOTS - MIN_SHOTS + 1 }, (_, index) => {
-  const shots = MIN_SHOTS + index;
-  return { value: String(shots), label: `${shots} shots` };
-});
+type PromptFormat = "ltx" | "h3";
+
+/** The numbers of shots a prompt can be written for: MiniMax H3 also takes a single shot. */
+function shotChoices(format: PromptFormat) {
+  const min = format === "h3" ? H3_MIN_SHOTS : MIN_SHOTS;
+  const max = format === "h3" ? H3_MAX_SHOTS : MAX_SHOTS;
+  return Array.from({ length: max - min + 1 }, (_, index) => {
+    const shots = min + index;
+    return { value: String(shots), label: shots === 1 ? "1 shot" : `${shots} shots` };
+  });
+}
 
 type PromptHelperProps = {
   /** The clip's length in seconds, or null while the form's length box is not a number. */
   durationS: number | null;
   /** Whether the clip starts from a first frame (the writer then continues from it). */
   hasFirstFrame: boolean;
+  /** The models the form will run: they decide which prompt formats can be written. */
+  models: LabVideoModel[];
   /** Puts the written prompt into the form. */
   onUse: (prompt: string) => void;
 };
@@ -40,23 +51,36 @@ function readOutput(output: unknown): { prompt: string; warnings: string[] } | n
 }
 
 /**
- * Writes a multi-shot prompt for LTX-2.5 from a short idea, with a language model. It is a
- * paid call, so it runs only when the button is pressed, and the prompt is not put into the
- * form until you choose to use it: nothing you typed is overwritten.
+ * Writes a multi-shot prompt from a short idea, with a language model: one paragraph that names
+ * every cut for LTX-2.5, or the three structured fields MiniMax H3 was trained on. It is a paid
+ * call, so it runs only when the button is pressed, and the prompt is not put into the form
+ * until you choose to use it: nothing you typed is overwritten.
  */
-export function PromptHelper({ durationS, hasFirstFrame, onUse }: PromptHelperProps) {
+export function PromptHelper({ durationS, hasFirstFrame, models, onUse }: PromptHelperProps) {
   const [idea, setIdea] = useState("");
   const [shots, setShots] = useState<string>("3");
   const [note, setNote] = useState("");
   const [jobId, setJobId] = useState<number | null>(null);
+  const [chosenFormat, setChosenFormat] = useState<PromptFormat>("ltx");
   const draft = useCreatePromptDraft();
   const job = useJob(jobId);
+
+  const hasH3 = models.includes(H3_MODEL);
+  const hasLtx = models.some((model) => model !== H3_MODEL);
+  // One format when the form has one kind of model; a choice when it has both.
+  const format: PromptFormat = hasH3 && !hasLtx ? "h3" : hasH3 ? chosenFormat : "ltx";
+  const choices = shotChoices(format);
+  // Switching to LTX can leave a single shot chosen, which LTX cannot cut.
+  const shotsValue = choices.some((choice) => choice.value === shots) ? shots : "3";
+  const h3LengthOk =
+    durationS !== null && durationS >= H3_DURATION_MIN_S && durationS <= H3_DURATION_MAX_S;
 
   const current = job.data;
   const active = isJobActive(current) || draft.isPending;
   const now = useNow(active, job.dataUpdatedAt);
   const result = current?.status === "succeeded" ? readOutput(current.output) : null;
-  const canWrite = idea.trim() !== "" && durationS !== null && !active;
+  const canWrite =
+    idea.trim() !== "" && durationS !== null && !active && (format === "ltx" || h3LengthOk);
 
   function write() {
     if (durationS === null) {
@@ -65,9 +89,10 @@ export function PromptHelper({ durationS, hasFirstFrame, onUse }: PromptHelperPr
     draft.mutate(
       {
         idea,
-        shots: Number(shots),
+        shots: Number(shotsValue),
         duration_s: durationS,
         first_frame_note: hasFirstFrame && note.trim() !== "" ? note : null,
+        target_model: format === "h3" ? H3_MODEL : "ltx-2.5",
       },
       { onSuccess: (created) => setJobId(created.id) },
     );
@@ -81,11 +106,32 @@ export function PromptHelper({ durationS, hasFirstFrame, onUse }: PromptHelperPr
             Write a multi-shot prompt with AI
           </Text>
           <Text size="xs" c="dimmed">
-            Give a short idea and the number of shots. The language model writes one paragraph
-            that names every cut, which is the only way LTX-2.5 cuts between shots. It is a paid
-            call to the language model, made only when you press the button.
+            {format === "h3"
+              ? "Give a short idea and the number of shots. The language model writes the three fields MiniMax H3 was trained on: the [Shot N] blocks with their cut times, the soundscape and the music. When a first or last frame is chosen, the app adds the line that places it when the clip runs. "
+              : "Give a short idea and the number of shots. The language model writes one paragraph that names every cut, which is the only way LTX-2.5 cuts between shots. "}
+            It is a paid call to the language model, made only when you press the button.
           </Text>
         </Stack>
+
+        {hasH3 && hasLtx && (
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              Write it for
+            </Text>
+            <SegmentedControl
+              value={format}
+              onChange={(value) => setChosenFormat(value === "h3" ? "h3" : "ltx")}
+              data={[
+                { value: "ltx", label: "LTX-2.5 (one paragraph)" },
+                { value: "h3", label: "MiniMax H3 (structured)" },
+              ]}
+            />
+            <Text size="xs" c="dimmed">
+              The form runs both kinds of model with one prompt. Write it for the one you care
+              about, or write each and run them separately.
+            </Text>
+          </Stack>
+        )}
 
         <Textarea
           label="Idea"
@@ -102,10 +148,10 @@ export function PromptHelper({ durationS, hasFirstFrame, onUse }: PromptHelperPr
             description={
               durationS === null
                 ? undefined
-                : `${(durationS / Number(shots)).toFixed(1)} seconds a shot at ${durationS} seconds`
+                : `${(durationS / Number(shotsValue)).toFixed(1)} seconds a shot at ${durationS} seconds`
             }
-            data={SHOT_CHOICES}
-            value={shots}
+            data={choices}
+            value={shotsValue}
             onChange={(value) => value !== null && setShots(value)}
             allowDeselect={false}
           />
@@ -122,6 +168,12 @@ export function PromptHelper({ durationS, hasFirstFrame, onUse }: PromptHelperPr
             />
           )}
         </Group>
+        {format === "h3" && durationS !== null && !h3LengthOk && (
+          <Text size="xs" c="orange.8">
+            MiniMax H3 makes {H3_DURATION_MIN_S} to {H3_DURATION_MAX_S} seconds: set the length in
+            the form first.
+          </Text>
+        )}
 
         <Group gap="sm">
           <Button onClick={write} disabled={!canWrite} loading={draft.isPending}>

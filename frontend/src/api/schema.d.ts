@@ -1240,9 +1240,32 @@ export interface paths {
         put?: never;
         /**
          * Create Runs
-         * @description Starts one run per chosen model. Each is a paid GPU job of 5 to 10 minutes.
+         * @description Starts one run per chosen model. Each is a paid GPU job of 5 to 10 minutes (MiniMax H3
+         *     more: it holds two GPUs). `negative_prompt` and `mode` are ignored for MiniMax H3, and the
+         *     run's `params` show that.
          */
         post: operations["create_runs_api_lab_videos_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/videos/reference-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Reference Run
+         * @description Starts one MiniMax H3 reference clip from 1 to 9 pictures and an audio reference of 2 to
+         *     15 seconds. A paid GPU job that holds two GPUs, and often takes more than 10 minutes.
+         */
+        post: operations["create_reference_run_api_lab_videos_reference_runs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1486,6 +1509,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/characters/{character_id}/looks/from-picture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Look From Picture
+         * @description Starts a fresh look from the author's own picture of the character: a language model
+         *     writes the master prompt for it, then four candidates are made by editing that picture.
+         *     The picture decides the face, hair, skin and build; the profile's outfit is applied on top.
+         */
+        post: operations["start_look_from_picture_api_lab_characters__character_id__looks_from_picture_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters/looks/{look_id}": {
         parameters: {
             query?: never;
@@ -1643,7 +1688,8 @@ export interface paths {
         /**
          * Create Take
          * @description The Create panel: checks the form, saves a take and starts its first step (or, with
-         *     `run` set to one step, only that step).
+         *     `run` set to one step, only that step). A MiniMax H3 video take can also name a first
+         *     frame, a last frame and a speech to use instead of having them made.
          */
         post: operations["create_take_api_lab_characters__character_id__takes_post"];
         delete?: never;
@@ -1790,6 +1836,16 @@ export interface components {
             operation_count: number | null;
             /** Tags */
             tags: components["schemas"]["TagGroupOut"][];
+        };
+        /** AudioInputIn */
+        AudioInputIn: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "voice_run" | "voice";
+            /** Id */
+            id: number;
         };
         /** AudioInputOut */
         AudioInputOut: {
@@ -2404,6 +2460,27 @@ export interface components {
             /** Waiting Jobs */
             waiting_jobs: number;
         };
+        /** H3ReferenceRunCreate */
+        H3ReferenceRunCreate: {
+            /** Prompt */
+            prompt: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Seed */
+            seed?: number | null;
+            /** References */
+            references: components["schemas"]["FirstFrameIn"][];
+            audio: components["schemas"]["AudioInputIn"];
+            /** Match Audio Duration */
+            match_audio_duration: boolean;
+            /** Duration S */
+            duration_s?: number | null;
+            /** Num Inference Steps */
+            num_inference_steps?: number | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2716,7 +2793,7 @@ export interface components {
             /** Prompt */
             prompt: string;
             /** Models */
-            models: ("ltx-2.3" | "ltx-2.5")[];
+            models: ("ltx-2.3" | "ltx-2.5" | "minimax-h3")[];
             /**
              * Mode
              * @enum {string}
@@ -2735,6 +2812,8 @@ export interface components {
             negative_prompt?: string | null;
             first_frame?: components["schemas"]["FirstFrameIn"] | null;
             last_frame?: components["schemas"]["FirstFrameIn"] | null;
+            /** Num Inference Steps */
+            num_inference_steps?: number | null;
         };
         /** LabVideoRunOut */
         LabVideoRunOut: {
@@ -2751,7 +2830,7 @@ export interface components {
              * Video Model
              * @enum {string}
              */
-            video_model: "ltx-2.3" | "ltx-2.5";
+            video_model: "ltx-2.3" | "ltx-2.5" | "minimax-h3";
             /** Endpoint */
             endpoint: string;
             /** Prompt */
@@ -2762,6 +2841,8 @@ export interface components {
             };
             first_frame: components["schemas"]["FirstFrameOut"] | null;
             last_frame: components["schemas"]["FirstFrameOut"] | null;
+            /** References */
+            references: components["schemas"]["FirstFrameOut"][];
             audio_input: components["schemas"]["AudioInputOut"] | null;
             job: components["schemas"]["JobSummary"] | null;
             /** Url */
@@ -2848,6 +2929,11 @@ export interface components {
             url: string | null;
             job: components["schemas"]["JobSummary"] | null;
         };
+        /** LookFromPictureIn */
+        LookFromPictureIn: {
+            /** Image Id */
+            image_id: number;
+        };
         /** LookOut */
         LookOut: {
             /** Id */
@@ -2869,6 +2955,8 @@ export interface components {
             /** Error */
             error: string | null;
             prompt_job: components["schemas"]["JobSummary"] | null;
+            /** Reference Url */
+            reference_url: string | null;
             /** Candidates */
             candidates: components["schemas"]["LookCandidateOut"][];
             /** References */
@@ -2936,6 +3024,8 @@ export interface components {
             limit: number;
             /** Running */
             running: number;
+            /** Slots Used */
+            slots_used: number;
             /** Queued */
             queued: number;
             /** By Type */
@@ -3136,6 +3226,12 @@ export interface components {
             duration_s: number;
             /** First Frame Note */
             first_frame_note?: string | null;
+            /**
+             * Target Model
+             * @default ltx-2.5
+             * @enum {string}
+             */
+            target_model: "ltx-2.3" | "ltx-2.5" | "minimax-h3";
         };
         /**
          * ProposalOut
@@ -3251,6 +3347,8 @@ export interface components {
         RerunIn: {
             /** Image Prompt */
             image_prompt?: string | null;
+            /** Last Frame Prompt */
+            last_frame_prompt?: string | null;
             /** Video Prompt */
             video_prompt?: string | null;
             /** Delivery Instruction */
@@ -3669,6 +3767,16 @@ export interface components {
             /** Operations */
             operations: components["schemas"]["OperationOut"][];
         };
+        /**
+         * TakeAudioOut
+         * @description The speech a take's clip hears: `{source, id}` as the Video lab names it, with its length
+         *     (2 to 15 seconds is what MiniMax H3 takes).
+         */
+        TakeAudioOut: {
+            audio: components["schemas"]["AudioInputOut"];
+            /** Duration S */
+            duration_s: number | null;
+        };
         /** TakeIn */
         TakeIn: {
             /**
@@ -3676,7 +3784,7 @@ export interface components {
              * @default all
              * @enum {string}
              */
-            run: "all" | "image" | "voice" | "video";
+            run: "all" | "image" | "last_frame" | "voice" | "video";
             /**
              * Output
              * @enum {string}
@@ -3699,7 +3807,7 @@ export interface components {
              */
             orientation: "portrait" | "landscape";
             /** Video Model */
-            video_model?: ("ltx-2.3" | "ltx-2.5") | null;
+            video_model?: ("ltx-2.3" | "ltx-2.5" | "minimax-h3") | null;
             /**
              * Lip Sync
              * @default false
@@ -3711,6 +3819,32 @@ export interface components {
             seed?: number | null;
             /** Negative Prompt */
             negative_prompt?: string | null;
+            first_frame?: components["schemas"]["FirstFrameIn"] | null;
+            /**
+             * Make Last Frame
+             * @default false
+             */
+            make_last_frame: boolean;
+            last_frame?: components["schemas"]["FirstFrameIn"] | null;
+            audio?: components["schemas"]["AudioInputIn"] | null;
+            /**
+             * Audio Marker
+             * @default reference
+             * @enum {string}
+             */
+            audio_marker: "fully_copy" | "partially_copy" | "reference" | "weak_reference";
+            /**
+             * Match Audio Duration
+             * @default true
+             */
+            match_audio_duration: boolean;
+            /** Num Inference Steps */
+            num_inference_steps?: number | null;
+            /**
+             * Identity Refs
+             * @default false
+             */
+            identity_refs: boolean;
         };
         /** TakeMediaOut */
         TakeMediaOut: {
@@ -3980,7 +4114,7 @@ export interface components {
             /** Dialogue */
             dialogue: string | null;
             /** Video Model */
-            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            video_model: ("ltx-2.3" | "ltx-2.5" | "minimax-h3") | null;
             /** Lip Sync */
             lip_sync: boolean;
             /**
@@ -3999,20 +4133,38 @@ export interface components {
             duration_s: number | null;
             /** Negative Prompt */
             negative_prompt: string | null;
+            /** Audio Marker */
+            audio_marker: ("fully_copy" | "partially_copy" | "reference" | "weak_reference") | null;
+            /** Match Audio Duration */
+            match_audio_duration: boolean;
+            /** Num Inference Steps */
+            num_inference_steps: number | null;
+            /** Identity Refs */
+            identity_refs: boolean;
+            /** Make Last Frame */
+            make_last_frame: boolean;
             /** Prompts */
             prompts: {
                 [key: string]: unknown;
             };
+            /** Prompt Keys */
+            prompt_keys: ("image_prompt" | "last_frame_prompt" | "video_prompt" | "delivery_instruction")[];
             /** Last Error */
             last_error: string | null;
+            /** Steps */
+            steps: ("prompts" | "image" | "last_frame" | "voice" | "video")[];
             /** Active Step */
-            active_step: ("prompts" | "image" | "voice" | "video") | null;
+            active_step: ("prompts" | "image" | "last_frame" | "voice" | "video") | null;
             /** Next Step */
-            next_step: ("prompts" | "image" | "voice" | "video") | null;
+            next_step: ("prompts" | "image" | "last_frame" | "voice" | "video") | null;
             prompt_job: components["schemas"]["JobSummary"] | null;
             image: components["schemas"]["TakeMediaOut"] | null;
+            last_frame: components["schemas"]["TakeMediaOut"] | null;
             voice: components["schemas"]["TakeMediaOut"] | null;
             video: components["schemas"]["TakeMediaOut"] | null;
+            first_frame_ref: components["schemas"]["FirstFrameOut"] | null;
+            last_frame_ref: components["schemas"]["FirstFrameOut"] | null;
+            audio_ref: components["schemas"]["TakeAudioOut"] | null;
         };
         /**
          * TakeOut
@@ -6700,6 +6852,39 @@ export interface operations {
             };
         };
     };
+    create_reference_run_api_lab_videos_reference_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["H3ReferenceRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabVideoRunsOut"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_run_api_lab_videos_runs__run_id__get: {
         parameters: {
             query?: never;
@@ -7260,6 +7445,50 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_look_from_picture_api_lab_characters__character_id__looks_from_picture_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LookFromPictureIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
