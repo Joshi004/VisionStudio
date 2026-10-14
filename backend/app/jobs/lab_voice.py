@@ -4,8 +4,9 @@ It is `SpeechHandler` with one piece of text, and `store_result` stores the WAV 
 `media/lab/` and writes it on the `lab_voice_run` row, in one transaction with the finished
 job. The job belongs to no project (`job.project_id` is NULL).
 
-A speech made for a take of the Talking character lab (Phase 24) that is set to continue by
-itself starts the take's video when it has been stored (`talk_lab.on_voice_finished`).
+A speech made for a take of the Character lab (Phase 25) best-effort nudges that take along
+when it has been stored (`character_takes.on_voice_finished`); a speech made for anything else
+(a plain Voice lab run) finds no take and does nothing further.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from app.db.models import Job, LabVoiceRun
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, store
 from app.jobs.synthesize_speech import SpeechFile, SpeechHandler
-from app.services import talk_lab, voice_lab
+from app.services import character_takes, voice_lab
 from app.services.storage import get_storage
 
 _logger = logging.getLogger(__name__)
@@ -69,12 +70,12 @@ class LabVoiceHandler(SpeechHandler):
 
     @staticmethod
     async def _continue_take(job_id: int, run_id: int) -> None:
-        """Starts the video of the take this speech was made for, if there is one set to continue
-        by itself. Best effort: a failure here never fails the speech (it is stored), and the
-        take's next step can be started by hand.
+        """Starts the next step of the Character lab take this speech was made for, if any.
+        A plain Voice lab run (not linked to a take) is a no-op here. Best effort: a failure
+        never fails the speech (it is stored), and the take's next step can be started by hand.
         """
         try:
-            started = await talk_lab.on_voice_finished(run_id)
+            started = await character_takes.on_voice_finished(run_id)
         except Exception:
             _logger.exception("job %d: the take could not continue after its speech", job_id)
             return

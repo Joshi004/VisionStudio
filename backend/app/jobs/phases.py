@@ -137,6 +137,18 @@ REFERENCE_FINISHING_PHASES: Final = frozenset(
     {DOWNLOADING_IMAGE, SAVING_IMAGE, REMOVING_BACKDROP, SAVING_REFERENCE}
 )
 
+# --- Running: the Character lab (Phase 25) -----------------------------------------------
+# `write_character_look_prompt` and `write_character_take_prompt` also use PREPARING_PROMPT
+# and `asking_model` from above. A look's angle pictures have their backdrop removed after
+# download, like a project's cast reference, so they also use REMOVING_BACKDROP.
+CHECKING_LOOK_PROMPT: Final = "checking the look prompt"
+SAVING_LOOK_PROMPT: Final = "saving the look prompt"
+CHECKING_AUDITION_LINE: Final = "checking the audition line"
+SAVING_AUDITION_LINE: Final = "saving the audition line"
+CHECKING_TAKE_PROMPTS: Final = "checking the take's prompts"
+SAVING_TAKE_PROMPTS: Final = "saving the take's prompts"
+SAVING_LOOK_REFERENCE: Final = "saving the reference picture"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

@@ -479,8 +479,12 @@ def validate_qwen_form(form: QwenLabForm) -> None:
             )
 
 
-async def create_qwen_run(session: AsyncSession, form: QwenLabForm) -> tuple[LabRun, Job]:
-    """Checks the form and starts one run on the GPU server. Commits. Raises LabInputError.
+async def create_qwen_run(
+    session: AsyncSession, form: QwenLabForm, *, commit: bool = True
+) -> tuple[LabRun, Job]:
+    """Checks the form and starts one run on the GPU server. Commits, unless `commit` is False:
+    the run and its job are then only flushed, so a caller (the Character lab, making several
+    candidates at once) can link them and commit everything together. Raises LabInputError.
 
     The request is built and checked against the approved GPU API first (a request for an
     endpoint the API has not been approved with would only wait), so a bad form starts nothing.
@@ -545,13 +549,147 @@ async def create_qwen_run(session: AsyncSession, form: QwenLabForm) -> tuple[Lab
         dedupe=False,
     )
     run.job_id = job.id
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     _logger.info(
         "lab image run started: run=%d job=%d mode=%s shape=%s",
         run.id,
         job.id,
         form.mode,
         form.aspect_ratio,
+    )
+    return run, job
+
+
+@dataclass(frozen=True)
+class QwenEditForm:
+    """Qwen-Image-2.1's edit endpoint, from the Image lab or from the Character lab (a look's
+    other angles, made by editing its chosen front-view picture).
+    """
+
+    prompt: str
+    mode: image_models.ImageMode
+    # None: the result follows the last reference's shape, instead of asking for one.
+    aspect_ratio: str | None
+    seed: int | None
+    steps: int | None
+    references: list[Ref]
+
+
+def validate_qwen_edit_form(form: QwenEditForm) -> None:
+    """Raises LabInputError for a form no Qwen edit run should be started with."""
+    if not form.prompt.strip():
+        raise LabInputError("Write a prompt first.")
+    if len(form.prompt) > image_generator.MAX_PROMPT_CHARS:
+        raise LabInputError(
+            f"The prompt must be at most {image_generator.MAX_PROMPT_CHARS:,} characters."
+        )
+    if not image_models.is_image_mode(form.mode):
+        raise LabInputError("Choose quality or fast.")
+    if form.aspect_ratio is not None and form.aspect_ratio not in image_models.ASPECT_RATIOS:
+        raise LabInputError(f"Choose one of the shapes: {', '.join(image_models.ASPECT_RATIOS)}.")
+    if form.seed is not None and not 0 <= form.seed < image_models.SEED_LIMIT:
+        raise LabInputError(f"The seed must be from 0 to {image_models.SEED_LIMIT - 1}.")
+    if form.steps is not None:
+        if form.mode != "quality":
+            raise LabInputError("The number of steps can only be set in quality mode.")
+        if not image_generator.MIN_STEPS <= form.steps <= image_generator.MAX_STEPS:
+            raise LabInputError(
+                f"The number of steps must be from {image_generator.MIN_STEPS} to "
+                f"{image_generator.MAX_STEPS}."
+            )
+    if not 1 <= len(form.references) <= image_generator.MAX_REFERENCES:
+        raise LabInputError(f"An edit needs 1 to {image_generator.MAX_REFERENCES} references.")
+
+
+async def create_qwen_edit_run(
+    session: AsyncSession, form: QwenEditForm, *, commit: bool = True
+) -> tuple[LabRun, Job]:
+    """Checks the form and starts one edit run on the GPU server. Commits, unless `commit` is
+    False: the run and its job are then only flushed, so a caller (the Character lab, making
+    several angles at once) can link them and commit everything together. Raises LabInputError.
+
+    Like `create_qwen_run`, but on Qwen-Image-2.1's edit endpoint: the request names the
+    references by the server's own asset ids, which only exist once `jobs/generate_lab_image.py`
+    uploads them at submit time, so `create_qwen_edit_run` stores `{source, id}` for each
+    reference and lets `GenerateLabImageHandler.start` resolve and upload them.
+    """
+    validate_qwen_edit_form(form)
+    for number, ref in enumerate(form.references, start=1):
+        await _reference_path(session, number, ref)  # only checks that it exists
+    seed = form.seed if form.seed is not None else secrets.randbelow(image_models.SEED_LIMIT)
+    partition = await settings_service.get_str(session, PARTITION_KEY)
+    bodies = await contract_guard.latest_bodies(session)
+    spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
+    prompt = form.prompt.strip()
+    try:
+        image_generator.check_edit_endpoint(spec)
+        request = image_generator.build_edit_request(
+            prompt=prompt,
+            mode=form.mode,
+            seed=seed,
+            aspect_ratio=form.aspect_ratio,
+            partition=partition,
+            steps=form.steps,
+        )
+    except ValueError as exc:
+        raise LabInputError(str(exc)) from exc
+
+    expected = image_models.ASPECT_SIZES.get(form.aspect_ratio or "")
+    expected_size = {"width": expected[0], "height": expected[1]} if expected else None
+    reference_json = [{"source": ref.source, "id": ref.id} for ref in form.references]
+
+    run = LabRun(
+        mode="edit",
+        endpoint=image_generator.EDIT_PATH,
+        model=image_models.MODEL_ID,
+        prompt=prompt,
+        params={
+            "engine": "qwen",
+            "qwen_mode": form.mode,
+            "aspect_ratio": form.aspect_ratio,
+            "expected_size": expected_size,
+            "seed": seed,
+            "steps": form.steps,
+        },
+        reference_images=reference_json,
+        status="running",
+        request={"method": "POST", "path": image_generator.EDIT_PATH, "body": request},
+    )
+    session.add(run)
+    await session.flush()
+    job, _created = await store.create_job(
+        session,
+        project_id=None,
+        type=RUN_JOB,
+        provider="gpu",
+        input={
+            "requested": "lab_image",
+            "run_id": run.id,
+            "image_model": image_models.MODEL_ID,
+            "image_mode": form.mode,
+            "aspect_ratio": form.aspect_ratio,
+            "expected_size": expected_size,
+            "endpoint": image_generator.EDIT_PATH,
+            "request": request,
+            "references": reference_json,
+        },
+        commit=False,
+        dedupe=False,
+    )
+    run.job_id = job.id
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
+    _logger.info(
+        "lab image edit run started: run=%d job=%d mode=%s refs=%d",
+        run.id,
+        job.id,
+        form.mode,
+        len(form.references),
     )
     return run, job
 

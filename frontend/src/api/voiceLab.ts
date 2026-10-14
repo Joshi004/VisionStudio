@@ -54,6 +54,33 @@ export function useVoiceLabRuns() {
   });
 }
 
+async function fetchRun(runId: number) {
+  const { data, error, response } = await api.GET("/api/lab/voices/runs/{run_id}", {
+    params: { path: { run_id: runId } },
+  });
+  if (!data) {
+    throw new ApiError(
+      detailMessage(error, `Could not load the speech (HTTP ${response.status}).`),
+      response.status,
+    );
+  }
+  return data;
+}
+
+/**
+ * One run, for a page that follows a single speech (a character's voice audition). Nothing is
+ * loaded while `runId` is null. It is loaded again every few seconds while the run is waiting
+ * or running.
+ */
+export function useVoiceLabRun(runId: number | null) {
+  return useQuery({
+    queryKey: [...VOICE_LAB_KEY, "run", runId],
+    queryFn: () => fetchRun(runId as number),
+    enabled: runId !== null,
+    refetchInterval: (query) => (isJobActive(query.state.data?.job) ? ACTIVE_POLL_MS : false),
+  });
+}
+
 /** Starts one run and returns at once. A run is a paid GPU job of one to three minutes. */
 export function useCreateVoiceLabRun() {
   const queryClient = useQueryClient();

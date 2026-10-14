@@ -336,9 +336,9 @@ class Job(Base):
             "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
             "'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', "
             "'generate_voiceover', 'lab_image', 'write_last_frame_prompt', "
-            "'generate_last_frame', 'write_talk_prompts', 'extract_cast', "
+            "'generate_last_frame', 'extract_cast', "
             "'write_character_reference_prompt', 'generate_character_reference', "
-            "'assign_cast')",
+            "'assign_cast', 'write_character_look_prompt', 'write_character_take_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -596,83 +596,215 @@ class LabVoiceRun(Base):
     duration_s: Mapped[float | None] = mapped_column(default=None)
 
 
-class LabCharacter(Base):
-    """A character of the Talking character lab's cast (Phase 24): a name, the picture that
-    pins how it looks, and what to say about it to the AI that writes prompts.
+class LibraryCharacter(Base):
+    """A character of the Character lab's library (Phase 25): a reusable, project-independent
+    character an author builds once (profile, look, voice) and then draws on to make audio,
+    pictures and clips.
 
-    The picture is referred to by `{source: "lab" | "asset", id}` like a Video lab frame, and is
-    never copied. A character may have a default voice (a saved voice that clones or is directed)
-    or a default description of its voice (for a voice made from a description). Never deleted
-    in iteration 1.
+    Unrelated to a project's own cast (`character`/`location`, Phase 24): the two never touch.
+    `species` and `gender` are free text with no fixed list: the API offers whatever the author
+    has typed before, as a growing list of suggestions, computed from what every character
+    already holds (`services/character_card.suggested_options`).
+
+    Never deleted in iteration 1.
     """
 
-    __tablename__ = "lab_character"
-    __table_args__ = (Index("idx_lab_character_created", "created_at"),)
+    __tablename__ = "library_character"
+    __table_args__ = (
+        CheckConstraint("era_kind IN ('present', 'past', 'future')", name="era_kind_valid"),
+        Index("idx_library_character_created", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
     name: Mapped[str]
-    # Who the character is and what they look like, in words. The language model cannot see the
-    # picture, so this is all it knows of the character.
-    description: Mapped[str] = mapped_column(default="", server_default=text("''"))
-    image: Mapped[Any] = mapped_column(JSON)
+    age: Mapped[int | None] = mapped_column(default=None)
+    gender: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    species: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    era_kind: Mapped[str] = mapped_column(default="present", server_default=text("'present'"))
+    # past or future only: how many years from the present. NULL for "present".
+    era_years: Mapped[int | None] = mapped_column(default=None)
+    # past or future only: what that time looks like here (optional free text).
+    era_setting: Mapped[str | None] = mapped_column(default=None)
+    appearance: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    outfit: Mapped[str | None] = mapped_column(default=None)
+    personality: Mapped[str | None] = mapped_column(default=None)
+    # Anything else worth telling the image, video and voice models (mannerisms, props, a
+    # catchphrase, a limp, anything that keeps the character consistent).
+    notes: Mapped[str | None] = mapped_column(default=None)
+    # False only for a character with no mouth to lip-sync (a robot with a screen face, an
+    # animal, an object): hides lip-sync and disables it even when asked for.
+    has_visible_mouth: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # Optional: a character may be mute. A saved voice that clones or is directed.
     voice_id: Mapped[int | None] = mapped_column(
         ForeignKey("voice.id", ondelete="SET NULL"), default=None
     )
-    voice_instruction: Mapped[str | None] = mapped_column(default=None)
+    # A description of the voice, used only while there is no `voice_id` (a voice made from a
+    # description, Breeze TTS "design" mode).
+    voice_description: Mapped[str | None] = mapped_column(default=None)
+    # The look currently used to make new takes. NULL until a look is chosen. `use_alter`:
+    # `character_look.character_id` points back at this table, the intended cycle (as `asset`'s
+    # own circular reference above): `character_look` is created after this table, and this
+    # column is added by a later ALTER in the same migration.
+    current_look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_look.id", ondelete="SET NULL", use_alter=True), default=None
+    )
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
 
-class LabTalkRun(Base):
-    """One take of the Talking character lab (Phase 24): a line of dialogue spoken by a
-    character picture, made in up to three steps, each a job of its own.
+class CharacterLook(Base):
+    """One attempt at a library character's reference pictures (Phase 25): a master picture (on
+    a white backdrop, like a project's cast reference) plus four more angles made by editing it,
+    so every later picture, scene and clip of the character can be made consistent with it.
 
-    1. `prompt_job_id`: a `write_talk_prompts` job writes `voice_instruction` and
-       `video_prompt` (or the author writes them).
-    2. `voice_run_id`: a `lab_voice_run` makes the speech (or an earlier run is reused).
-    3. `video_run_id`: a `lab_video_run` on the audio-to-video endpoint makes the clip.
-
-    With `auto_continue` the backend starts the next step by itself when one finishes.
+    `version` numbers a character's looks from 1. `status` moves `writing_prompt` ->
+    `choosing` (candidates are ready, waiting for one to be picked as the master) ->
+    `making_angles` -> `ready`, or `failed`. The four candidates to choose the master from are
+    `character_look_candidate` rows; the five angle pictures of a ready look are
+    `character_reference` rows.
     """
 
-    __tablename__ = "lab_talk_run"
+    __tablename__ = "character_look"
     __table_args__ = (
         CheckConstraint(
-            "voice_mode IS NULL OR voice_mode IN ('design', 'clone', 'direction')",
-            name="voice_mode_valid",
+            "status IN ('writing_prompt', 'choosing', 'making_angles', 'ready', 'failed')",
+            name="status_valid",
         ),
-        CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
-        Index("idx_lab_talk_run_created", "created_at"),
-        Index("idx_lab_talk_run_voice_run", "voice_run_id"),
+        Index("idx_character_look_character", "character_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
-    dialogue: Mapped[str]
-    character_id: Mapped[int | None] = mapped_column(
-        ForeignKey("lab_character.id", ondelete="SET NULL"), default=None
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("library_character.id", ondelete="CASCADE")
     )
-    # {source: "lab" | "asset", id}: the picture the speaker is made from.
-    image: Mapped[Any] = mapped_column(JSON)
-    # What the author said about the character, word for word. Blank: the cast character's
-    # description or the prompt that made the picture is used.
-    character_note: Mapped[str | None] = mapped_column(default=None)
-    delivery_note: Mapped[str | None] = mapped_column(default=None)
-    # design | clone | direction when the take makes a new speech. NULL when it reuses one.
-    voice_mode: Mapped[str | None] = mapped_column(default=None)
-    voice_id: Mapped[int | None] = mapped_column(
-        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    version: Mapped[int]
+    status: Mapped[str] = mapped_column(
+        default="writing_prompt", server_default=text("'writing_prompt'")
     )
-    voice_instruction: Mapped[str | None] = mapped_column(default=None)
-    video_prompt: Mapped[str | None] = mapped_column(default=None)
-    orientation: Mapped[str]
-    video_seed: Mapped[int | None] = mapped_column(default=None)
-    negative_prompt: Mapped[str | None] = mapped_column(default=None)
-    auto_continue: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
-    # Why the take could not start its next step by itself (for example, the GPU API was not
-    # approved for the endpoint). NULL when there is nothing to say.
-    last_error: Mapped[str | None] = mapped_column(default=None)
+    # The master prompt, once the language model (or the author) has written it.
+    prompt: Mapped[str | None] = mapped_column(default=None)
     prompt_job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    error: Mapped[str | None] = mapped_column(default=None)
+
+
+class CharacterLookCandidate(Base):
+    """One of the (usually four) master pictures generated for a look to choose from
+    (Phase 25). A pure link to the `lab_run`/`lab_image` that made it: its own status is read
+    from that run, never duplicated here.
+    """
+
+    __tablename__ = "character_look_candidate"
+    __table_args__ = (Index("idx_character_look_candidate_look", "look_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    look_id: Mapped[int] = mapped_column(ForeignKey("character_look.id", ondelete="CASCADE"))
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+
+
+class CharacterReference(Base):
+    """One angle picture of a ready look (Phase 25): the master ("front") or one of the four
+    edited angles. `(look_id, angle)` is unique: redoing an angle updates this row in place, so
+    the character keeps its old picture until the new one is ready.
+
+    `lab_image_id` is the picture exactly as it came from the image model (always on its white
+    backdrop): it is what a later edit (another angle, a take's picture) is made from. The
+    `cutout_*` columns are the same picture with its backdrop removed, for display and for use
+    on any background; they stay NULL when the cutout could not be made (the raw picture on
+    white is still a usable reference).
+    """
+
+    __tablename__ = "character_reference"
+    __table_args__ = (
+        CheckConstraint(
+            "angle IN ('front', 'three_quarter', 'profile', 'back', 'face')", name="angle_valid"
+        ),
+        UniqueConstraint("look_id", "angle"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    look_id: Mapped[int] = mapped_column(ForeignKey("character_look.id", ondelete="CASCADE"))
+    angle: Mapped[str]
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    lab_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
+    cutout_path: Mapped[str | None] = mapped_column(default=None)
+    cutout_mime: Mapped[str | None] = mapped_column(default=None)
+    cutout_width: Mapped[int | None] = mapped_column(default=None)
+    cutout_height: Mapped[int | None] = mapped_column(default=None)
+    cutout_size_bytes: Mapped[int | None] = mapped_column(default=None)
+    cutout_sha256: Mapped[str | None] = mapped_column(default=None)
+
+
+class CharacterTake(Base):
+    """One thing made from a library character in the Character lab (Phase 25): a line of
+    dialogue spoken (audio), a picture, or a clip, with or without dialogue.
+
+    Made in up to three steps, each a job or run the other labs already know how to run, exactly
+    like a Talking character lab take did: `prompt_job_id` writes the texts the other steps need
+    (an image prompt, a video prompt and/or a delivery instruction, depending on `output` and
+    whether `dialogue` is set), then `image_run_id` and/or `voice_run_id` are made, and finally
+    (for a video) `video_run_id`. `look_id` freezes which look was used, so a later new look
+    never changes an old take.
+    """
+
+    __tablename__ = "character_take"
+    __table_args__ = (
+        CheckConstraint("output IN ('image', 'audio', 'video')", name="output_valid"),
+        CheckConstraint(
+            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')", name="video_model_valid"
+        ),
+        CheckConstraint("framing IN ('close_up', 'medium', 'wide')", name="framing_valid"),
+        CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
+        Index("idx_character_take_character", "character_id"),
+        Index("idx_character_take_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("library_character.id", ondelete="CASCADE")
+    )
+    look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_look.id", ondelete="SET NULL"), default=None
+    )
+    output: Mapped[str]
+    # What happens in the picture/clip, in the author's words. Ignored for an audio-only take.
+    action: Mapped[str | None] = mapped_column(default=None)
+    # What the character says. NULL: no dialogue (image or silent video).
+    dialogue: Mapped[str | None] = mapped_column(default=None)
+    # Video only. NULL for an image or audio take.
+    video_model: Mapped[str | None] = mapped_column(default=None)
+    lip_sync: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    framing: Mapped[str] = mapped_column(default="medium", server_default=text("'medium'"))
+    orientation: Mapped[str] = mapped_column(default="portrait", server_default=text("'portrait'"))
+    seed: Mapped[int | None] = mapped_column(default=None)
+    # Video with no dialogue only: the clip's length in seconds. NULL when it follows the
+    # speech instead (a video with dialogue), or for an image or audio take.
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    # Video (LTX) only.
+    negative_prompt: Mapped[str | None] = mapped_column(default=None)
+    # True for a take made with "run all": each step starts by itself once the step before it
+    # finishes, until the take is done or a step cannot start.
+    auto_continue: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # {"image_prompt", "video_prompt", "delivery_instruction"}: written by the language model,
+    # or left out and written by hand. Only the texts this take's steps need are asked for.
+    prompts: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    image_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
     )
     voice_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_voice_run.id", ondelete="SET NULL"), default=None
@@ -680,3 +812,4 @@ class LabTalkRun(Base):
     video_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_video_run.id", ondelete="SET NULL"), default=None
     )
+    last_error: Mapped[str | None] = mapped_column(default=None)

@@ -176,7 +176,7 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
                 {first.audio_input !== null ? (
                   // This form has no speech to give: a lip-synced clip is remade in its own tab.
                   <Text size="xs" c="dimmed" ta="right">
-                    Made in the Talking character tab
+                    Made in the Characters tab
                   </Text>
                 ) : (
                   <Button

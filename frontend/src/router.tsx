@@ -22,8 +22,10 @@ export const router = createBrowserRouter([
       { path: "projects/:projectId/settings", element: <ProjectSettingsPage /> },
       { path: "activity", element: <ActivityPage /> },
       // One Lab with a tab for each of the labs. The tab is in the address.
-      { path: "lab", element: <Navigate to="/lab/talk" replace /> },
+      { path: "lab", element: <Navigate to="/lab/characters" replace /> },
       { path: "lab/:tab", element: <LabPage /> },
+      // The Talking character tab was replaced by the Characters tab.
+      { path: "lab/talk", element: <Navigate to="/lab/characters" replace /> },
       // The addresses the three labs had before they became tabs.
       { path: "image-lab", element: <Navigate to="/lab/image" replace /> },
       { path: "video-lab", element: <Navigate to="/lab/video" replace /> },

@@ -1404,15 +1404,36 @@ export interface paths {
         };
         /**
          * List Characters
-         * @description The cast, newest first.
+         * @description The newest characters first. Pass the last id you have as `before_id` for the next page.
          */
         get: operations["list_characters_api_lab_characters_get"];
         put?: never;
         /**
          * Create Character
-         * @description Saves a character.
+         * @description Saves a new character's profile. Its look and voice are added afterwards.
          */
         post: operations["create_character_api_lab_characters_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Options
+         * @description The growable gender and species choices: a few suggestions, plus every value a
+         *     character already has.
+         */
+        get: operations["get_options_api_lab_characters_options_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1426,20 +1447,63 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Character */
+        get: operations["get_character_api_lab_characters__character_id__get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
         /**
-         * Update Character
-         * @description Changes the fields that are sent. The picture's file is never touched.
+         * Edit Character
+         * @description Changes the profile, archives or unarchives a character, or both at once.
          */
-        patch: operations["update_character_api_lab_characters__character_id__patch"];
+        patch: operations["edit_character_api_lab_characters__character_id__patch"];
         trace?: never;
     };
-    "/api/lab/talk/prompt-drafts": {
+    "/api/lab/characters/{character_id}/looks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Looks
+         * @description Every look of this character, newest version first.
+         */
+        get: operations["list_looks_api_lab_characters__character_id__looks_get"];
+        put?: never;
+        /**
+         * Start Look
+         * @description Starts a fresh look: a language model writes the master prompt, then four candidate
+         *     pictures are made to choose from.
+         */
+        post: operations["start_look_api_lab_characters__character_id__looks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/looks/{look_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Look */
+        get: operations["get_look_api_lab_characters_looks__look_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/looks/{look_id}/master": {
         parameters: {
             query?: never;
             header?: never;
@@ -1449,20 +1513,120 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Create Prompt Draft
-         * @description Starts the job that writes the voice instruction and the video prompt from a line of
-         *     dialogue (a paid call to the language model). Follow it with `GET /api/jobs/{id}`: when it
-         *     has succeeded, `output.voice_instruction` and `output.video_prompt` are the texts and
-         *     `output.warnings` is what to look at.
+         * Choose Master
+         * @description Picks one candidate as the look's master picture and starts the other four angles.
          */
-        post: operations["create_prompt_draft_api_lab_talk_prompt_drafts_post"];
+        post: operations["choose_master_api_lab_characters_looks__look_id__master_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/lab/talk/takes": {
+    "/api/lab/characters/looks/{look_id}/angles/{angle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redo Angle
+         * @description Starts one more picture for a single angle. The character keeps its old one until the
+         *     new one is ready.
+         */
+        post: operations["redo_angle_api_lab_characters_looks__look_id__angles__angle__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/voice/description": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Voice Description
+         * @description Sets what the audition's samples are made from.
+         */
+        put: operations["set_voice_description_api_lab_characters__character_id__voice_description_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/voice/audition-line": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Audition Line
+         * @description Starts the job that writes a short line to read aloud while auditioning a voice.
+         */
+        post: operations["start_audition_line_api_lab_characters__character_id__voice_audition_line_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/voice/auditions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Auditions
+         * @description Starts 3 design-mode samples of this line, read in the voice description, to choose a
+         *     voice from.
+         */
+        post: operations["start_auditions_api_lab_characters__character_id__voice_auditions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Voice
+         * @description Sets the character's voice: an existing saved voice, an audition sample (saved as a
+         *     named voice), or none (mute).
+         */
+        put: operations["set_voice_api_lab_characters__character_id__voice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/takes": {
         parameters: {
             query?: never;
             header?: never;
@@ -1471,23 +1635,24 @@ export interface paths {
         };
         /**
          * List Takes
-         * @description The newest takes first. Pass the last id you have as `before_id` for the next page.
+         * @description The character's gallery: the newest takes first. Pass the last id you have as
+         *     `before_id` for the next page.
          */
-        get: operations["list_takes_api_lab_talk_takes_get"];
+        get: operations["list_takes_api_lab_characters__character_id__takes_get"];
         put?: never;
         /**
          * Create Take
-         * @description Saves a take and starts its first step. Each step is a paid call: the prompts a model
-         *     call, the speech a GPU job of one to three minutes, the clip one of 5 to 10 minutes.
+         * @description The Create panel: checks the form, saves a take and starts its first step (or, with
+         *     `run` set to one step, only that step).
          */
-        post: operations["create_take_api_lab_talk_takes_post"];
+        post: operations["create_take_api_lab_characters__character_id__takes_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/lab/talk/takes/{take_id}": {
+    "/api/lab/characters/takes/{take_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1495,7 +1660,7 @@ export interface paths {
             cookie?: never;
         };
         /** Get Take */
-        get: operations["get_take_api_lab_talk_takes__take_id__get"];
+        get: operations["get_take_api_lab_characters_takes__take_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1504,7 +1669,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lab/talk/takes/{take_id}/continue": {
+    "/api/lab/characters/takes/{take_id}/continue": {
         parameters: {
             query?: never;
             header?: never;
@@ -1515,10 +1680,29 @@ export interface paths {
         put?: never;
         /**
          * Continue Take
-         * @description Starts the next step of a take (one step). Refused while a step is still running, and
-         *     when the take is finished.
+         * @description Starts the take's next step by hand.
          */
-        post: operations["continue_take_api_lab_talk_takes__take_id__continue_post"];
+        post: operations["continue_take_api_lab_characters_takes__take_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/takes/{take_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun Take
+         * @description Edits one or more of the take's prompts and starts what that frees.
+         */
+        post: operations["rerun_take_api_lab_characters_takes__take_id__rerun_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1616,6 +1800,19 @@ export interface components {
             source: "voice_run" | "voice";
             /** Id */
             id: number;
+        };
+        /** AuditionSampleOut */
+        AuditionSampleOut: {
+            /** Voice Run Id */
+            voice_run_id: number;
+            job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+        };
+        /** AuditionsIn */
+        AuditionsIn: {
+            /** Line */
+            line: string;
         };
         /** AutoGenerateOut */
         AutoGenerateOut: {
@@ -1727,27 +1924,45 @@ export interface components {
             /** Scene Count */
             scene_count: number;
         };
-        /** CharacterBrief */
-        CharacterBrief: {
-            /** Id */
-            id: number;
+        /**
+         * CharacterIn
+         * @description The profile step of the drawer. Every field is sent, even when it has not changed.
+         */
+        CharacterIn: {
             /** Name */
             name: string;
-        };
-        /** CharacterCreate */
-        CharacterCreate: {
-            /** Name */
-            name: string;
+            /** Age */
+            age?: number | null;
             /**
-             * Description
+             * Gender
              * @default
              */
-            description: string;
-            image: components["schemas"]["FirstFrameIn"];
-            /** Voice Id */
-            voice_id?: number | null;
-            /** Voice Instruction */
-            voice_instruction?: string | null;
+            gender: string;
+            /** Species */
+            species: string;
+            /**
+             * Era Kind
+             * @default present
+             * @enum {string}
+             */
+            era_kind: "present" | "past" | "future";
+            /** Era Years */
+            era_years?: number | null;
+            /** Era Setting */
+            era_setting?: string | null;
+            /** Appearance */
+            appearance: string;
+            /** Outfit */
+            outfit?: string | null;
+            /** Personality */
+            personality?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Has Visible Mouth
+             * @default true
+             */
+            has_visible_mouth: boolean;
         };
         /** CharacterOut */
         CharacterOut: {
@@ -1758,29 +1973,99 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
             /** Name */
             name: string;
-            /** Description */
-            description: string;
-            image: components["schemas"]["FirstFrameOut"] | null;
-            voice: components["schemas"]["VoiceBrief"] | null;
-            /** Voice Instruction */
-            voice_instruction: string | null;
+            /** Age */
+            age: number | null;
+            /** Gender */
+            gender: string;
+            /** Species */
+            species: string;
+            /**
+             * Era Kind
+             * @enum {string}
+             */
+            era_kind: "present" | "past" | "future";
+            /** Era Years */
+            era_years: number | null;
+            /** Era Setting */
+            era_setting: string | null;
+            /** Appearance */
+            appearance: string;
+            /** Outfit */
+            outfit: string | null;
+            /** Personality */
+            personality: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Has Visible Mouth */
+            has_visible_mouth: boolean;
+            voice: components["schemas"]["VoiceBriefOut"] | null;
+            /** Voice Description */
+            voice_description: string | null;
+            current_look: components["schemas"]["LookOut"] | null;
+            /** Archived */
+            archived: boolean;
         };
         /**
-         * CharacterUpdate
-         * @description Only the fields that are sent change. `voice_id` and `voice_instruction` may be null.
+         * CharacterPatch
+         * @description What to change in a character: any profile field, and/or `archived`. A profile field
+         *     that is left out keeps its current value; the others still need the character's required
+         *     fields to be given somewhere (now, or already saved).
          */
-        CharacterUpdate: {
+        CharacterPatch: {
             /** Name */
             name?: string | null;
-            /** Description */
-            description?: string | null;
-            image?: components["schemas"]["FirstFrameIn"] | null;
-            /** Voice Id */
-            voice_id?: number | null;
-            /** Voice Instruction */
-            voice_instruction?: string | null;
+            /** Age */
+            age?: number | null;
+            /** Gender */
+            gender?: string | null;
+            /** Species */
+            species?: string | null;
+            /** Era Kind */
+            era_kind?: ("present" | "past" | "future") | null;
+            /** Era Years */
+            era_years?: number | null;
+            /** Era Setting */
+            era_setting?: string | null;
+            /** Appearance */
+            appearance?: string | null;
+            /** Outfit */
+            outfit?: string | null;
+            /** Personality */
+            personality?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Has Visible Mouth */
+            has_visible_mouth?: boolean | null;
+            /** Archived */
+            archived?: boolean | null;
+        };
+        /** CharacterReferenceOut */
+        CharacterReferenceOut: {
+            /**
+             * Angle
+             * @enum {string}
+             */
+            angle: "front" | "three_quarter" | "profile" | "back" | "face";
+            /** Url */
+            url: string | null;
+            /** Cutout Url */
+            cutout_url: string | null;
+            /** Ready */
+            ready: boolean;
+        };
+        /** CharactersOut */
+        CharactersOut: {
+            /** Characters */
+            characters: components["schemas"]["CharacterOut"][];
+            /** Next Before Id */
+            next_before_id: number | null;
         };
         /** ChecksOut */
         ChecksOut: {
@@ -1794,6 +2079,11 @@ export interface components {
             flagged: number;
             /** Dropped */
             dropped: number;
+        };
+        /** ChooseMasterIn */
+        ChooseMasterIn: {
+            /** Candidate Id */
+            candidate_id: number;
         };
         /** ClipSoundRequest */
         ClipSoundRequest: {
@@ -2151,7 +2441,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast" | "write_character_look_prompt" | "write_character_take_prompt";
             /**
              * Status
              * @enum {string}
@@ -2208,7 +2498,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast" | "write_character_look_prompt" | "write_character_take_prompt";
             /**
              * Status
              * @enum {string}
@@ -2550,6 +2840,40 @@ export interface components {
             /** Will Call */
             will_call: string | null;
         };
+        /** LookCandidateOut */
+        LookCandidateOut: {
+            /** Id */
+            id: number;
+            /** Url */
+            url: string | null;
+            job: components["schemas"]["JobSummary"] | null;
+        };
+        /** LookOut */
+        LookOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Version */
+            version: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "writing_prompt" | "choosing" | "making_angles" | "ready" | "failed";
+            /** Prompt */
+            prompt: string | null;
+            /** Error */
+            error: string | null;
+            prompt_job: components["schemas"]["JobSummary"] | null;
+            /** Candidates */
+            candidates: components["schemas"]["LookCandidateOut"][];
+            /** References */
+            references: components["schemas"]["CharacterReferenceOut"][];
+        };
         /** OpenApiChangesOut */
         OpenApiChangesOut: {
             /** Operations Added */
@@ -2573,6 +2897,13 @@ export interface components {
             path: string;
             /** Summary */
             summary: string | null;
+        };
+        /** OptionsOut */
+        OptionsOut: {
+            /** Genders */
+            genders: string[];
+            /** Species */
+            species: string[];
         };
         /** PendingChangeOut */
         PendingChangeOut: {
@@ -2619,7 +2950,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "write_talk_prompts" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast";
+            type: "transcribe" | "plan_scenes" | "draft_descriptions" | "write_image_prompt" | "generate_frame" | "generate_clip" | "render_final" | "lab_video" | "write_lab_video_prompt" | "auto_pipeline" | "lab_voice" | "generate_voiceover" | "lab_image" | "write_last_frame_prompt" | "generate_last_frame" | "extract_cast" | "write_character_reference_prompt" | "generate_character_reference" | "assign_cast" | "write_character_look_prompt" | "write_character_take_prompt";
             /** Running */
             running: number;
             /** Queued */
@@ -2913,6 +3244,19 @@ export interface components {
             renders: components["schemas"]["RenderOut"][];
         };
         /**
+         * RerunIn
+         * @description Edited prompt text(s). Only a text this take needs can be sent; sending one clears what
+         *     was made from it, so the take's next step makes it again.
+         */
+        RerunIn: {
+            /** Image Prompt */
+            image_prompt?: string | null;
+            /** Video Prompt */
+            video_prompt?: string | null;
+            /** Delivery Instruction */
+            delivery_instruction?: string | null;
+        };
+        /**
          * SceneCastRequest
          * @description Both fields are always sent: an empty list means the scene shows no character, and null
          *     that it shows no place. The characters are listed in the order of their pictures.
@@ -3051,7 +3395,7 @@ export interface components {
             /** Generate Blocked Reason */
             generate_blocked_reason: string | null;
             /** Takes */
-            takes: components["schemas"]["TakeOut"][];
+            takes: components["schemas"]["app__api__scenes__TakeOut"][];
         };
         /**
          * SceneUpdate
@@ -3325,142 +3669,63 @@ export interface components {
             /** Operations */
             operations: components["schemas"]["OperationOut"][];
         };
-        /**
-         * TakeOut
-         * @description One finished clip of a scene (a succeeded `generate_clip` job and its asset).
-         */
-        TakeOut: {
-            /** Asset Id */
-            asset_id: number;
-            /** Job Id */
-            job_id: number;
-            /** Url */
-            url: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Seed */
-            seed: number | null;
-            /** Frame Count */
-            frame_count: number | null;
-            /** Target Frames */
-            target_frames: number | null;
-            /** Duration S */
-            duration_s: number | null;
-            /** Audio Codec */
-            audio_codec: string | null;
-            /** Clip Mode */
-            clip_mode: ("first_frame" | "first_and_last") | null;
-            /** Video Model */
-            video_model: ("ltx-2.3" | "ltx-2.5") | null;
-            /** Mode */
-            mode: string | null;
-            /** Model Note */
-            model_note: string | null;
-            /** Selected */
-            selected: boolean;
-            /** Out Of Date */
-            out_of_date: boolean;
-            /** Too Short */
-            too_short: boolean;
-        };
-        /** TalkPromptDraftCreate */
-        TalkPromptDraftCreate: {
-            /** Dialogue */
-            dialogue: string;
-            /** Character Id */
-            character_id?: number | null;
-            /** Character Note */
-            character_note?: string | null;
-            image?: components["schemas"]["FirstFrameIn"] | null;
-            /** Delivery Note */
-            delivery_note?: string | null;
-            /** Voice Mode */
-            voice_mode?: ("design" | "clone" | "direction") | null;
-        };
-        /** TalkTakeCreate */
-        TalkTakeCreate: {
+        /** TakeIn */
+        TakeIn: {
             /**
              * Run
+             * @default all
              * @enum {string}
              */
-            run: "all" | "voice" | "video";
+            run: "all" | "image" | "voice" | "video";
+            /**
+             * Output
+             * @enum {string}
+             */
+            output: "image" | "audio" | "video";
+            /** Action */
+            action?: string | null;
             /** Dialogue */
-            dialogue: string;
-            image: components["schemas"]["FirstFrameIn"];
-            /** Character Id */
-            character_id?: number | null;
-            /** Character Note */
-            character_note?: string | null;
-            /** Delivery Note */
-            delivery_note?: string | null;
-            /** Voice Mode */
-            voice_mode?: ("design" | "clone" | "direction") | null;
-            /** Voice Id */
-            voice_id?: number | null;
-            /** Reuse Voice Run Id */
-            reuse_voice_run_id?: number | null;
-            /** Voice Instruction */
-            voice_instruction?: string | null;
-            /** Video Prompt */
-            video_prompt?: string | null;
+            dialogue?: string | null;
+            /**
+             * Framing
+             * @default medium
+             * @enum {string}
+             */
+            framing: "close_up" | "medium" | "wide";
             /**
              * Orientation
+             * @default portrait
              * @enum {string}
              */
-            orientation: "landscape" | "portrait";
-            /** Video Seed */
-            video_seed?: number | null;
+            orientation: "portrait" | "landscape";
+            /** Video Model */
+            video_model?: ("ltx-2.3" | "ltx-2.5") | null;
+            /**
+             * Lip Sync
+             * @default false
+             */
+            lip_sync: boolean;
+            /** Duration S */
+            duration_s?: number | null;
+            /** Seed */
+            seed?: number | null;
             /** Negative Prompt */
             negative_prompt?: string | null;
         };
-        /** TalkTakeOut */
-        TalkTakeOut: {
-            /** Id */
-            id: number;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Dialogue */
-            dialogue: string;
-            character: components["schemas"]["CharacterBrief"] | null;
-            image: components["schemas"]["FirstFrameOut"] | null;
-            /** Character Note */
-            character_note: string | null;
-            /** Delivery Note */
-            delivery_note: string | null;
-            /** Voice Mode */
-            voice_mode: ("design" | "clone" | "direction") | null;
-            /** Voice Id */
-            voice_id: number | null;
-            /** Voice Instruction */
-            voice_instruction: string | null;
-            /** Video Prompt */
-            video_prompt: string | null;
-            /**
-             * Orientation
-             * @enum {string}
-             */
-            orientation: "landscape" | "portrait";
-            /** Video Seed */
-            video_seed: number | null;
-            /** Negative Prompt */
-            negative_prompt: string | null;
-            /** Auto Continue */
-            auto_continue: boolean;
-            /** Last Error */
-            last_error: string | null;
-            prompt_job: components["schemas"]["JobSummary"] | null;
-            voice_run: components["schemas"]["LabVoiceRunOut"] | null;
-            video_run: components["schemas"]["LabVideoRunOut"] | null;
-            /** Running Step */
-            running_step: ("prompts" | "voice" | "video") | null;
-            /** Next Step */
-            next_step: ("prompts" | "voice" | "video") | null;
+        /** TakeMediaOut */
+        TakeMediaOut: {
+            /** Run Id */
+            run_id: number;
+            /** Url */
+            url: string | null;
+            job: components["schemas"]["JobSummary"] | null;
+        };
+        /** TakesOut */
+        TakesOut: {
+            /** Takes */
+            takes: components["schemas"]["app__api__character_lab__TakeOut"][];
+            /** Next Before Id */
+            next_before_id: number | null;
         };
         /** ToolStatus */
         ToolStatus: {
@@ -3543,6 +3808,32 @@ export interface components {
             id: number;
             /** Name */
             name: string;
+        };
+        /** VoiceBriefOut */
+        VoiceBriefOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /** VoiceChoiceIn */
+        VoiceChoiceIn: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "existing" | "audition" | "none";
+            /** Voice Id */
+            voice_id?: number | null;
+            /** Voice Run Id */
+            voice_run_id?: number | null;
+            /** Name */
+            name?: string | null;
+        };
+        /** VoiceDescriptionIn */
+        VoiceDescriptionIn: {
+            /** Voice Description */
+            voice_description?: string | null;
         };
         /** VoiceFromRun */
         VoiceFromRun: {
@@ -3665,6 +3956,104 @@ export interface components {
              * @default false
              */
             generate_after: boolean;
+        };
+        /** TakeOut */
+        app__api__character_lab__TakeOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Character Id */
+            character_id: number;
+            /** Look Id */
+            look_id: number | null;
+            /**
+             * Output
+             * @enum {string}
+             */
+            output: "image" | "audio" | "video";
+            /** Action */
+            action: string | null;
+            /** Dialogue */
+            dialogue: string | null;
+            /** Video Model */
+            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            /** Lip Sync */
+            lip_sync: boolean;
+            /**
+             * Framing
+             * @enum {string}
+             */
+            framing: "close_up" | "medium" | "wide";
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "portrait" | "landscape";
+            /** Seed */
+            seed: number | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Negative Prompt */
+            negative_prompt: string | null;
+            /** Prompts */
+            prompts: {
+                [key: string]: unknown;
+            };
+            /** Last Error */
+            last_error: string | null;
+            /** Active Step */
+            active_step: ("prompts" | "image" | "voice" | "video") | null;
+            /** Next Step */
+            next_step: ("prompts" | "image" | "voice" | "video") | null;
+            prompt_job: components["schemas"]["JobSummary"] | null;
+            image: components["schemas"]["TakeMediaOut"] | null;
+            voice: components["schemas"]["TakeMediaOut"] | null;
+            video: components["schemas"]["TakeMediaOut"] | null;
+        };
+        /**
+         * TakeOut
+         * @description One finished clip of a scene (a succeeded `generate_clip` job and its asset).
+         */
+        app__api__scenes__TakeOut: {
+            /** Asset Id */
+            asset_id: number;
+            /** Job Id */
+            job_id: number;
+            /** Url */
+            url: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Seed */
+            seed: number | null;
+            /** Frame Count */
+            frame_count: number | null;
+            /** Target Frames */
+            target_frames: number | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Audio Codec */
+            audio_codec: string | null;
+            /** Clip Mode */
+            clip_mode: ("first_frame" | "first_and_last") | null;
+            /** Video Model */
+            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            /** Mode */
+            mode: string | null;
+            /** Model Note */
+            model_note: string | null;
+            /** Selected */
+            selected: boolean;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Too Short */
+            too_short: boolean;
         };
     };
     responses: never;
@@ -6662,7 +7051,11 @@ export interface operations {
     };
     list_characters_api_lab_characters_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_archived?: boolean;
+                before_id?: number | null;
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6675,7 +7068,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CharacterOut"][];
+                    "application/json": components["schemas"]["CharactersOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6689,7 +7091,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CharacterCreate"];
+                "application/json": components["schemas"]["CharacterIn"];
             };
         };
         responses: {
@@ -6713,7 +7115,67 @@ export interface operations {
             };
         };
     };
-    update_character_api_lab_characters__character_id__patch: {
+    get_options_api_lab_characters_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionsOut"];
+                };
+            };
+        };
+    };
+    get_character_api_lab_characters__character_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_character_api_lab_characters__character_id__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -6724,7 +7186,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CharacterUpdate"];
+                "application/json": components["schemas"]["CharacterPatch"];
             };
         };
         responses: {
@@ -6737,7 +7199,7 @@ export interface operations {
                     "application/json": components["schemas"]["CharacterOut"];
                 };
             };
-            /** @description There is no such character. */
+            /** @description No character, look or take has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -6757,18 +7219,47 @@ export interface operations {
             };
         };
     };
-    create_prompt_draft_api_lab_talk_prompt_drafts_post: {
+    list_looks_api_lab_characters__character_id__looks_get: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                character_id: number;
+            };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TalkPromptDraftCreate"];
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
+    };
+    start_look_api_lab_characters__character_id__looks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             202: {
@@ -6776,7 +7267,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JobDetail"];
+                    "application/json": components["schemas"]["LookOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description The form breaks a rule. */
@@ -6790,14 +7290,313 @@ export interface operations {
             };
         };
     };
-    list_takes_api_lab_talk_takes_get: {
+    get_look_api_lab_characters_looks__look_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                look_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    choose_master_api_lab_characters_looks__look_id__master_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                look_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChooseMasterIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    redo_angle_api_lab_characters_looks__look_id__angles__angle__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                look_id: number;
+                angle: "front" | "three_quarter" | "profile" | "back" | "face";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_voice_description_api_lab_characters__character_id__voice_description_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceDescriptionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_audition_line_api_lab_characters__character_id__voice_audition_line_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobSummary"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_auditions_api_lab_characters__character_id__voice_auditions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditionsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditionSampleOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_voice_api_lab_characters__character_id__voice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceChoiceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_takes_api_lab_characters__character_id__takes_get: {
         parameters: {
             query?: {
                 before_id?: number | null;
                 limit?: number;
             };
             header?: never;
-            path?: never;
+            path: {
+                character_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -6808,7 +7607,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TalkTakeOut"][];
+                    "application/json": components["schemas"]["TakesOut"];
                 };
             };
             /** @description Validation Error */
@@ -6822,16 +7621,18 @@ export interface operations {
             };
         };
     };
-    create_take_api_lab_talk_takes_post: {
+    create_take_api_lab_characters__character_id__takes_post: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                character_id: number;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TalkTakeCreate"];
+                "application/json": components["schemas"]["TakeIn"];
             };
         };
         responses: {
@@ -6841,7 +7642,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TalkTakeOut"];
+                    "application/json": components["schemas"]["app__api__character_lab__TakeOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description The form breaks a rule. */
@@ -6855,7 +7665,7 @@ export interface operations {
             };
         };
     };
-    get_take_api_lab_talk_takes__take_id__get: {
+    get_take_api_lab_characters_takes__take_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -6872,10 +7682,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TalkTakeOut"];
+                    "application/json": components["schemas"]["app__api__character_lab__TakeOut"];
                 };
             };
-            /** @description No take has this id. */
+            /** @description No character, look or take has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -6895,7 +7705,7 @@ export interface operations {
             };
         };
     };
-    continue_take_api_lab_talk_takes__take_id__continue_post: {
+    continue_take_api_lab_characters_takes__take_id__continue_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -6912,10 +7722,54 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TalkTakeOut"];
+                    "application/json": components["schemas"]["app__api__character_lab__TakeOut"];
                 };
             };
-            /** @description No take has this id. */
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rerun_take_api_lab_characters_takes__take_id__rerun_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RerunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__api__character_lab__TakeOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;

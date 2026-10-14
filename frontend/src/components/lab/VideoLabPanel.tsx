@@ -32,8 +32,8 @@ export function VideoLabPanel({ form, onFormChange }: VideoLabPanelProps) {
         Try a prompt on LTX-2.3 and LTX-2.5 and compare the clips side by side. LTX-2.5 can cut
         between two to four shots inside one clip when the prompt names each cut in a sentence, and
         LTX-2.3 always makes one continuous shot. Each run is a paid GPU job of 5 to 10 minutes, and
-        it belongs to no project. To make a character speak a recorded line, use the Talking
-        character tab.
+        it belongs to no project. To make a character speak a line in its own voice, use the
+        Characters tab.
       </Text>
 
       <Paper withBorder p="md" radius="md">

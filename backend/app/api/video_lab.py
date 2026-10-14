@@ -107,7 +107,7 @@ class LabVideoRunOut(BaseModel):
     params: dict[str, Any]
     first_frame: FirstFrameOut | None
     last_frame: FirstFrameOut | None
-    # The speech a lip-synced clip matches (the Talking character lab), else None.
+    # The speech a lip-synced clip matches (the Character lab), else None.
     audio_input: AudioInputOut | None
     # The run's job: its status, phase and error, with cancel and resubmit.
     job: JobSummary | None

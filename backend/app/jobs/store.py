@@ -35,7 +35,7 @@ ERROR_MAX_CHARS = 4000
 NO_PROJECT_NAME = "Video lab"
 VOICE_LAB_NAME = "Voice lab"
 IMAGE_LAB_NAME = "Image lab"
-TALK_LAB_NAME = "Talking character lab"
+CHARACTER_LAB_NAME = "Character lab"
 
 # Job types that can be cancelled while they run, because the server has a cancel for them
 # (Phase 9). A transcription cannot yet: its cancel is not built.
@@ -515,8 +515,8 @@ def owner_name(job: Job, project_name: str | None) -> str:
         return project_name
     if job.type == "lab_voice":
         return VOICE_LAB_NAME
-    if job.type == "write_talk_prompts":
-        return TALK_LAB_NAME
+    if job.type in ("write_character_look_prompt", "write_character_take_prompt"):
+        return CHARACTER_LAB_NAME
     return IMAGE_LAB_NAME if job.type == "lab_image" else NO_PROJECT_NAME
 
 

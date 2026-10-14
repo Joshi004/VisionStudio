@@ -208,6 +208,10 @@ class RemoteStatus:
     created_at: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
+    # Only on an audio-to-video job that asked for `lip_sync: true` (version 0.12.0 of the
+    # server's guide): {"requested": true, "applied": bool, "error": str | None}. Lip sync can
+    # fail silently (the job still succeeds), so `applied` is how a caller finds out.
+    lip_sync: dict[str, Any] | None = None
 
     def to_json(self) -> dict[str, Any]:
         """What a job stores as `output.remote` while it runs."""
@@ -220,6 +224,7 @@ class RemoteStatus:
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "lip_sync": self.lip_sync,
         }
 
 
@@ -378,7 +383,19 @@ async def job_status(base_url: str, job_id: str) -> RemoteStatus:
         created_at=_text(body.get("created_at")),
         started_at=_text(body.get("started_at")),
         finished_at=_text(body.get("finished_at")),
+        lip_sync=_lip_sync(body.get("lip_sync")),
     )
+
+
+def _lip_sync(value: object) -> dict[str, Any] | None:
+    """Reads the job status's `lip_sync` object, or None when it is absent or not an object."""
+    if not isinstance(value, dict):
+        return None
+    return {
+        "requested": value.get("requested") is True,
+        "applied": value.get("applied") is True,
+        "error": _text(value.get("error")),
+    }
 
 
 def _text(value: object) -> str | None:

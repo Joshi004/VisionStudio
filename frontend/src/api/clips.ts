@@ -9,7 +9,7 @@ import type { components } from "./schema";
 import type { VideoModel } from "../videoModels";
 
 /** One finished clip of a scene. */
-export type Take = components["schemas"]["TakeOut"];
+export type Take = components["schemas"]["app__api__scenes__TakeOut"];
 /** What "Generate all ready scenes" started. */
 export type GenerateReadyResult = components["schemas"]["GenerateReadyOut"];
 

@@ -16,11 +16,12 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   lab_image: "Image lab image",
   write_last_frame_prompt: "Last frame prompt",
   generate_last_frame: "Last frame",
-  write_talk_prompts: "Talking character prompts",
   extract_cast: "Characters and places",
   write_character_reference_prompt: "Reference prompt",
   generate_character_reference: "Reference picture",
   assign_cast: "Cast of each scene",
+  write_character_look_prompt: "Character look prompt",
+  write_character_take_prompt: "Character take prompts",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
@@ -34,8 +35,9 @@ export function labPathFor(type: JobSummary["type"]): string {
       return "/lab/image";
     case "lab_voice":
       return "/lab/voice";
-    case "write_talk_prompts":
-      return "/lab/talk";
+    case "write_character_look_prompt":
+    case "write_character_take_prompt":
+      return "/lab/characters";
     default:
       return "/lab/video";
   }

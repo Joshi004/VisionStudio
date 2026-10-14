@@ -28,11 +28,19 @@ scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
   different places make the model cross-dissolve instead of moving the camera, so a scene's
   two frames should show the same place, subject and light.
 
-- LTX-2.3 audio-to-video, `POST /v1/ltx/videos/audio-to-video` (`AudioToVideoRequest`), only for
-  the Talking character lab: the video is made to match a recorded speech, which is muxed into
-  the MP4 unchanged. The frame at `frame_idx` 0 pins how the speaker looks (`with_frames`, the
-  first-frame body) and `with_audio` names the speech. It is quality recipe only, so the body has
-  no `mode` and no `enhance_prompt`, and it accepts a negative prompt.
+- LTX-2.3 audio-to-video, `POST /v1/ltx/videos/audio-to-video` (`AudioToVideoRequest`), and
+  LTX-2.5 audio-to-video, `POST /v1/ltx25/videos/audio-to-video` (`Ltx25AudioToVideoRequest`):
+  the video is made to match a recorded speech, which is muxed into the MP4 unchanged. The frame
+  at `frame_idx` 0 pins how the speaker looks (`with_frames`, the first-frame body) and
+  `with_audio` names the speech. Both are quality recipe only, so the body has no `mode` and no
+  `enhance_prompt`, and both accept a negative prompt (version 0.12.0 of the server's guide).
+
+- `lip_sync: bool` on either audio-to-video endpoint (also 0.12.0): after the video is made,
+  TBDub redraws the speaker's mouth to match the audio exactly, in the same job. The server
+  forces `frame_rate` to 25 when it is on, so the caller must compute the frame count at 25 fps
+  itself and send that `frame_rate`, so the stored request matches what runs. Failure is silent
+  on the server (the job still succeeds, without lip sync): `gpu_server.RemoteStatus.lip_sync`
+  carries whether it was applied.
 
 `with_frames` builds the part of the body that names the frames, in the shape the chosen
 endpoint wants. Every pair of (model, clip mode) has an endpoint. `endpoint_for` still falls
@@ -64,10 +72,17 @@ KEYFRAME_PATH: Final = "/v1/ltx/videos/keyframe-interpolation"
 GENERATE_PATH: Final = "/v1/ltx/videos/generate"
 LTX25_GENERATE_PATH: Final = "/v1/ltx25/videos/generate"
 LTX25_INTERPOLATE_PATH: Final = "/v1/ltx25/videos/interpolate"
-# Lip-sync: LTX-2.3 makes the video to match a recorded speech and muxes that speech in unchanged
-# (`AudioToVideoRequest`). It has no `mode` (quality recipe only) and no `enhance_prompt`. Only
-# the Talking character lab uses it, so it is not in `ENDPOINTS`.
+# Lip-sync: makes the video to match a recorded speech and muxes that speech in unchanged
+# (`AudioToVideoRequest` / `Ltx25AudioToVideoRequest`). Neither has `mode` (quality recipe only)
+# or `enhance_prompt`. Used by the Character lab (and, for LTX-2.3, by scenes later), so they
+# are not in `ENDPOINTS` (which is keyed by `ClipMode`, not by "has audio").
 AUDIO_TO_VIDEO_PATH: Final = "/v1/ltx/videos/audio-to-video"
+LTX25_AUDIO_TO_VIDEO_PATH: Final = "/v1/ltx25/videos/audio-to-video"
+# The audio-to-video endpoint for each video model.
+AUDIO_ENDPOINTS: Final[dict[VideoModel, str]] = {
+    "ltx-2.3": AUDIO_TO_VIDEO_PATH,
+    "ltx-2.5": LTX25_AUDIO_TO_VIDEO_PATH,
+}
 # Which endpoint makes a clip, by video model and by how the clip is made. A pair that is
 # missing falls back to LTX-2.3 in `endpoint_for`.
 ENDPOINTS: Final[dict[tuple[VideoModel, ClipMode], str]] = {
@@ -82,12 +97,17 @@ _REQUEST_SCHEMAS: Final[dict[str, str]] = {
     LTX25_GENERATE_PATH: "Ltx25TextToVideoRequest",
     LTX25_INTERPOLATE_PATH: "Ltx25InterpolateRequest",
     AUDIO_TO_VIDEO_PATH: "AudioToVideoRequest",
+    LTX25_AUDIO_TO_VIDEO_PATH: "Ltx25AudioToVideoRequest",
 }
-# The endpoints that take `mode` and `enhance_prompt` (the LTX-2.3 keyframe endpoint has neither).
+# The endpoints that take `mode` and `enhance_prompt` (the keyframe and audio-to-video endpoints
+# have neither).
 _MODE_ENDPOINTS: Final = frozenset({GENERATE_PATH, LTX25_GENERATE_PATH, LTX25_INTERPOLATE_PATH})
-# The endpoints that have a `negative_prompt` field. LTX-2.5 has none: it runs without
-# guidance, so there would be nothing for one to act on.
-_NEGATIVE_PROMPT_ENDPOINTS: Final = frozenset({GENERATE_PATH, KEYFRAME_PATH, AUDIO_TO_VIDEO_PATH})
+# The endpoints that have a `negative_prompt` field. The two plain LTX-2.5 endpoints have none
+# (they run without guidance), but LTX-2.5 audio-to-video does (its own default includes "bad
+# lip sync", which a value sent here replaces).
+_NEGATIVE_PROMPT_ENDPOINTS: Final = frozenset(
+    {GENERATE_PATH, KEYFRAME_PATH, AUDIO_TO_VIDEO_PATH, LTX25_AUDIO_TO_VIDEO_PATH}
+)
 _LTX23_PREFIX: Final = "/v1/ltx/"
 _LTX25_PREFIX: Final = "/v1/ltx25/"
 _SIZE_MULTIPLE: Final = 64
@@ -121,6 +141,11 @@ def endpoint_for(model: VideoModel, mode: ClipMode) -> EndpointChoice:
         f"so {video_models.label(fallback)} is used for this clip."
     )
     return EndpointChoice(endpoint=ENDPOINTS[(fallback, mode)], model=fallback, note=note)
+
+
+def audio_endpoint_for(model: VideoModel) -> str:
+    """The audio-to-video endpoint of this video model."""
+    return AUDIO_ENDPOINTS[model]
 
 
 def model_for(endpoint: object) -> VideoModel | None:

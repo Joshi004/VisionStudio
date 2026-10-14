@@ -8,8 +8,8 @@ the server, cancelling, the shared slots of the GPU pool, `max_parallel_gpu_jobs
   (`services/video_lab.create_runs`) and is stored in `job.input`, together with the endpoint,
   so nothing is worked out here. The first frame and the last frame, if the run has them, are
   fitted to the run's size and uploaded. A run without a first frame is text-to-video: the
-  same endpoint, no `images`. A lip-synced clip (the Talking character lab) also has `audio`,
-  the speech it matches: it is uploaded after the frame and named in the body (`with_audio`).
+  same endpoint, no `images`. A lip-synced clip (the Character lab) also has `audio`, the
+  speech it matches: it is uploaded after the frame and named in the body (`with_audio`).
   Every attempt (after pre-emption, an expired result) sends the same stored request, with the
   same seed, because "the correct response to a pre-emption failure is to resubmit the exact
   same request unchanged" (the server's guide).
@@ -319,6 +319,13 @@ class GenerateLabVideoHandler(GenerateClipHandler):
             else None
         )
         remote = job.output.get("remote") if isinstance(job.output, dict) else None
+        lip_sync_requested = bool((recorded.get("request") or {}).get("lip_sync"))
+        lip_sync_result = remote.get("lip_sync") if isinstance(remote, dict) else None
+        lip_sync_applied = (
+            lip_sync_result.get("applied") is True
+            if lip_sync_requested and isinstance(lip_sync_result, dict)
+            else None
+        )
         output: dict[str, Any] = {
             "run_id": run_id,
             "clip": {
@@ -353,6 +360,15 @@ class GenerateLabVideoHandler(GenerateClipHandler):
                 run.frame_count = probe.frame_count
                 run.duration_s = probe.duration_s
                 run.audio = audio
+                if lip_sync_requested:
+                    lip_sync_error = (
+                        lip_sync_result.get("error") if isinstance(lip_sync_result, dict) else None
+                    )
+                    run.params = {
+                        **(run.params or {}),
+                        "lip_sync_applied": lip_sync_applied,
+                        "lip_sync_error": lip_sync_error,
+                    }
             else:
                 _logger.warning("job %d: clip stored but its run %s is gone", job.id, run_id)
             if not await store.finish_job(session, job.id, output):
@@ -377,7 +393,12 @@ class GenerateLabVideoHandler(GenerateClipHandler):
             audio["codec"] if audio else "none",
         )
 
-        # Best effort: a failure here is recorded and never fails the clip.
-        purge = await self._purge(base_url, job.provider_job_id)
+        if lip_sync_requested and lip_sync_applied is False:
+            # The clip is kept (the user paid for it), but the server job that made it is kept
+            # too, unpurged, so a later re-sync can still name it as `source_job_id`.
+            purge: dict[str, Any] = {"skipped": "lip sync was not applied; kept for a re-sync"}
+        else:
+            # Best effort: a failure here is recorded and never fails the clip.
+            purge = await self._purge(base_url, job.provider_job_id)
         async with SessionLocal() as session:
             await store.merge_output(session, job.id, {"purge": purge})

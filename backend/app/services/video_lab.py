@@ -54,6 +54,9 @@ NEGATIVE_PROMPT_MAX_CHARS: Final = 2000
 # What the server's guide says the model handles (an automatic length is clamped to 1 to 20 s).
 DURATION_MIN_S: Final = 1.0
 DURATION_MAX_S: Final = 20.0
+# What `lip_sync: true` forces the server's own frame rate to (ANALYSIS.md / the server's
+# 0.12.0 guide); `create_audio_run` computes the frame count at this rate itself.
+LIP_SYNC_FPS: Final = 25
 # Seeds are drawn below this, so they fit every signed 32-bit integer field.
 SEED_LIMIT: Final = 2**31
 MAX_MODELS: Final = 2
@@ -96,10 +99,12 @@ class AudioRef:
 
 @dataclass(frozen=True)
 class LipSyncForm:
-    """A clip of a character speaking a recorded speech (audio-to-video on LTX-2.3).
+    """A clip of a character speaking a recorded speech (audio-to-video on LTX-2.3 or LTX-2.5).
 
     The length is not asked for: it follows the speech. The first frame is needed, because it
-    is what pins how the speaker looks.
+    is what pins how the speaker looks. `lip_sync` additionally redraws the speaker's mouth to
+    match the audio exactly (TBDub, in the same job); when it is on, the clip is made at 25 fps
+    regardless of the project's own frame rate, because the server would force that anyway.
     """
 
     prompt: str
@@ -108,6 +113,8 @@ class LipSyncForm:
     negative_prompt: str | None
     first_frame: FirstFrameRef
     audio: AudioRef
+    video_model: VideoModel = "ltx-2.3"
+    lip_sync: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,6 +169,8 @@ def validate_lip_sync_form(form: LipSyncForm) -> None:
         raise LabVideoInputError("Write the video prompt first.")
     if len(form.prompt) > MAX_PROMPT_CHARS:
         raise LabVideoInputError(f"The prompt must be at most {MAX_PROMPT_CHARS:,} characters.")
+    if form.video_model not in video_generator.AUDIO_ENDPOINTS:
+        raise LabVideoInputError(f"{form.video_model} is not a known video model.")
     if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
         raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
     if form.negative_prompt is not None and len(form.negative_prompt) > NEGATIVE_PROMPT_MAX_CHARS:
@@ -240,8 +249,12 @@ def _frame_json(ref: FirstFrameRef | None) -> dict[str, Any] | None:
     return None if ref is None else {"source": ref.source, "id": ref.id}
 
 
-async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]:
-    """Checks the form and starts one run per model. Commits.
+async def create_runs(
+    session: AsyncSession, form: LabVideoForm, *, commit: bool = True
+) -> list[RunRow]:
+    """Checks the form and starts one run per model. Commits, unless `commit` is False: the
+    runs and their jobs are then only flushed, so a caller (a take of the Character lab,
+    making a silent clip) can link one and commit everything together.
 
     A run with a last frame is made by the model's first-and-last-frame endpoint, one without
     by its image-to-video (or text-to-video) endpoint.
@@ -340,7 +353,10 @@ async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]
         )
         run.job_id = job.id
         rows.append(RunRow(run=run, job=job))
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     _logger.info(
         "lab video runs started: group=%s models=%s frames=%d",
         group_key,
@@ -354,14 +370,17 @@ async def create_audio_run(
     session: AsyncSession, form: LipSyncForm, *, commit: bool = True
 ) -> RunRow:
     """Checks the form and starts one lip-synced clip. Commits, unless `commit` is False: the
-    run and its job are then only flushed, so a caller (a take of the Talking character lab)
-    can link them and commit everything together.
+    run and its job are then only flushed, so a caller (a take of the Character lab) can link
+    them and commit everything together.
 
-    The clip is made by LTX-2.3's audio-to-video endpoint, in the quality recipe only, from the
-    first frame (how the speaker looks) and the speech. Its length follows the speech: the frame
-    count is the smallest `8k + 1` that is at least as long, so the speech is never cut. The
-    request is checked against the newest recorded GPU API like every other run, so a server
-    that does not have the endpoint refuses the run.
+    The clip is made by the chosen model's audio-to-video endpoint, in the quality recipe only,
+    from the first frame (how the speaker looks) and the speech. Its length follows the speech:
+    the frame count is the smallest `8k + 1` that is at least as long, so the speech is never
+    cut. When `form.lip_sync` is on, the clip is made at 25 fps instead of the project's own
+    frame rate, because the server would force that anyway once lip sync runs; computing it here
+    keeps the stored request the one that actually ran. The request is checked against the
+    newest recorded GPU API like every other run, so a server that does not have the endpoint
+    refuses the run.
 
     Raises LabVideoInputError.
     """
@@ -377,14 +396,15 @@ async def create_audio_run(
         )
 
     sizes = projects.ORIENTATION_DEFAULTS[form.orientation]
-    fps = projects.DEFAULT_FPS
+    fps = LIP_SYNC_FPS if form.lip_sync else projects.DEFAULT_FPS
     num_frames = frame_counts.request_num_frames(math.ceil(audio.duration_s * fps))
     seed = form.seed if form.seed is not None else secrets.randbelow(SEED_LIMIT)
     partition = await settings_service.get_str(session, PARTITION_KEY)
     bodies = await contract_guard.latest_bodies(session)
     spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
 
-    endpoint = video_generator.AUDIO_TO_VIDEO_PATH
+    model: VideoModel = form.video_model
+    endpoint = video_generator.audio_endpoint_for(model)
     try:
         if spec is None:
             raise ValueError(video_generator.no_endpoint_message(endpoint))
@@ -406,7 +426,11 @@ async def create_audio_run(
         seed=seed,
         partition=partition,
     )
-    model: VideoModel = "ltx-2.3"
+    if form.lip_sync:
+        # The server would force this anyway; sending it ourselves keeps the stored request
+        # the one that actually ran, and lets `jobs/generate_lab_video.py` tell this run apart
+        # from a plain audio-to-video one when it reads `remote.lip_sync` back.
+        request["lip_sync"] = True
     params: dict[str, Any] = {
         "mode": "quality",
         "orientation": form.orientation,
@@ -419,6 +443,7 @@ async def create_audio_run(
         "num_frames": num_frames,
         "seed": seed,
         "negative_prompt": request.get("negative_prompt"),
+        "lip_sync": form.lip_sync,
     }
     frame_json = _frame_json(form.first_frame)
     audio_json = {"source": form.audio.source, "id": form.audio.id}
