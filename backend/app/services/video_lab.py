@@ -262,7 +262,7 @@ async def create_runs(session: AsyncSession, form: LabVideoForm) -> list[RunRow]
     num_frames = frame_counts.request_num_frames(target)
     seed = form.seed if form.seed is not None else secrets.randbelow(SEED_LIMIT)
     partition = await settings_service.get_str(session, PARTITION_KEY)
-    bodies = await contract_guard.approved_bodies(session)
+    bodies = await contract_guard.latest_bodies(session)
     spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
 
     negative_prompt = (form.negative_prompt or "").strip() or None
@@ -360,8 +360,8 @@ async def create_audio_run(
     The clip is made by LTX-2.3's audio-to-video endpoint, in the quality recipe only, from the
     first frame (how the speaker looks) and the speech. Its length follows the speech: the frame
     count is the smallest `8k + 1` that is at least as long, so the speech is never cut. The
-    request is checked against the approved GPU API like every other run, so a GPU API that was
-    approved before the endpoint existed refuses the run until it is approved again.
+    request is checked against the newest recorded GPU API like every other run, so a server
+    that does not have the endpoint refuses the run.
 
     Raises LabVideoInputError.
     """
@@ -381,7 +381,7 @@ async def create_audio_run(
     num_frames = frame_counts.request_num_frames(math.ceil(audio.duration_s * fps))
     seed = form.seed if form.seed is not None else secrets.randbelow(SEED_LIMIT)
     partition = await settings_service.get_str(session, PARTITION_KEY)
-    bodies = await contract_guard.approved_bodies(session)
+    bodies = await contract_guard.latest_bodies(session)
     spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
 
     endpoint = video_generator.AUDIO_TO_VIDEO_PATH
@@ -393,7 +393,7 @@ async def create_audio_run(
     except ValueError as exc:
         raise LabVideoInputError(
             f"Lip-sync: {exc} If the GPU server has this endpoint, test the connection in "
-            "Settings and approve its API again."
+            "Settings, so the app reads its current API."
         ) from exc
     request = video_generator.build_request(
         endpoint=endpoint,

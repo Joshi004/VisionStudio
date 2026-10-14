@@ -19,8 +19,9 @@ the loop:
 3. Ask each running remote job's handler to `poll`. A handler that says "ready" gets its
    `finish` started as a task.
 4. Start queued jobs, oldest first, while their pool has free slots. Before the
-   first GPU job is started, the recorded GPU API is checked, and nothing starts unless it
-   still matches the approved version (ANALYSIS.md Section 6.5).
+   first GPU job is started, the GPU API is read and recorded (ANALYSIS.md Section 6.5).
+   A change in the API never stops a job: the app is updated to match the server, so
+   nobody has to approve a new version to keep working.
 5. Wait.
 
 One uvicorn process runs one loop (Section 3.2). Run a second process and each would run
@@ -277,7 +278,7 @@ class _Dispatcher:
     ) -> None:
         running_by_pool = Counter(handlers.slot_key(job.type) for job in running)
         free = {pool: limit - running_by_pool[pool] for pool, limit in limits.items()}
-        contract: contract_guard.CheckResult | None = None
+        checked_contract = False
 
         for job, handler in waiting:
             if handler.provider == "gpu" and gpu_blocked:
@@ -290,13 +291,12 @@ class _Dispatcher:
                 )
                 continue
 
-            if handler.provider == "gpu":
-                if contract is None:
-                    async with SessionLocal() as session:
-                        contract = await contract_guard.check(session)
-                if not contract.is_ok:
-                    await self._set_queued_phase(job.id, _paused_phase(contract.status))
-                    continue
+            if handler.provider == "gpu" and not checked_contract:
+                # Only records what the server says now (the banner and the stored copy of the
+                # API that requests are checked against). A changed API never holds a job back.
+                checked_contract = True
+                async with SessionLocal() as session:
+                    await contract_guard.check(session)
 
             async with SessionLocal() as session:
                 claimed = await store.claim(session, job.id)
@@ -370,14 +370,6 @@ class _Dispatcher:
         if job_type not in self._warned_types:
             self._warned_types.add(job_type)
             _logger.warning("no handler is registered for job type %s; its jobs wait", job_type)
-
-
-def _paused_phase(status: str) -> str:
-    if status == "changed":
-        return phases.PAUSED_API_CHANGED
-    if status == "not_approved":
-        return phases.PAUSED_API_NOT_APPROVED
-    return phases.WAITING_API_UNCHECKED
 
 
 _dispatcher = _Dispatcher()

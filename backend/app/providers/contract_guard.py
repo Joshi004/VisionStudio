@@ -2,10 +2,10 @@
 
 Each configured source is a GET address whose JSON answer is recorded in
 `api_snapshot`. You approve the recorded API once, and `check()` compares what
-the server says now with the approved version. From Phase 5 on, the dispatcher
-calls `check()` before it submits anything and submits only when `is_ok`
-(both "changed" and "not approved" block). Phase 4 runs it from Test
-connection and from `approve()`.
+the server says now with the approved version. The dispatcher calls `check()` before it
+submits a GPU job, to record a new version and update the banner, and **never holds a job
+back because of the result**: approving is an optional review of what changed, not a
+requirement. Requests are checked against the newest recorded document (`latest_bodies`).
 
 Rules that hold throughout:
 
@@ -407,8 +407,8 @@ def _overall(sources: Sequence[SourceCheck]) -> CheckStatus:
 async def check(session: AsyncSession) -> CheckResult:
     """Compares every source with its approved version and stores what it found.
 
-    A changed source is stored as a pending snapshot, once per version. Nothing
-    can be submitted unless the result `is_ok`.
+    A changed source is stored as a pending snapshot, once per version. The result is
+    information only: it does not stop anything from being submitted.
     """
     async with _lock:
         targets = await _load_targets(session)
@@ -420,7 +420,7 @@ async def check(session: AsyncSession) -> CheckResult:
 
         for target, item, source_check in zip(targets, fetched, checks, strict=True):
             if (
-                source_check.status == "changed"
+                source_check.status in ("changed", "not_approved")
                 and isinstance(item, _Document)
                 and not await _pending_exists(session, target, item.fingerprint)
             ):
@@ -589,15 +589,29 @@ async def _approved_row(session: AsyncSession, source: ContractSource) -> ApiSna
     return (await session.execute(statement)).scalars().first()
 
 
-async def approved_bodies(session: AsyncSession) -> list[dict[str, Any]]:
-    """The approved documents of the current sources (the guide, the OpenAPI spec...).
+async def _latest_row(session: AsyncSession, source: ContractSource) -> ApiSnapshot | None:
+    """The newest stored document of a source, approved or not."""
+    statement = (
+        select(ApiSnapshot)
+        .where(ApiSnapshot.source == source.name, ApiSnapshot.url == source.path)
+        .order_by(ApiSnapshot.fetched_at.desc(), ApiSnapshot.id.desc())
+        .limit(1)
+    )
+    return (await session.execute(statement)).scalars().first()
 
-    Phase 9 reads the limits it checks a request against (`num_frames`) from the approved
-    OpenAPI document, so a request is only built against what you approved.
+
+async def latest_bodies(session: AsyncSession) -> list[dict[str, Any]]:
+    """The newest recorded documents of the current sources (the guide, the OpenAPI spec...),
+    whether or not anyone approved them.
+
+    A request is checked (`num_frames` limits, does the endpoint exist) against what the server
+    said the last time it was read, so a new version of the server never has to be approved
+    before its endpoints can be used. The dispatcher reads the server before every GPU job
+    and `check()` stores each new version, so this is the server's current API.
     """
     bodies: list[dict[str, Any]] = []
     for source, _url in await called_urls(session):
-        row = await _approved_row(session, source)
+        row = await _latest_row(session, source)
         if row is not None and isinstance(row.body, dict):
             bodies.append(row.body)
     return bodies

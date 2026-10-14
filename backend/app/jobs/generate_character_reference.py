@@ -210,7 +210,7 @@ class GenerateCharacterReferenceHandler(RemoteImageHandler):
             mode = image_models.resolve_mode(
                 await settings_service.get_str(session, IMAGE_MODE_KEY)
             )
-            bodies = await contract_guard.approved_bodies(session)
+            bodies = await contract_guard.latest_bodies(session)
             await session.commit()
         spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
         return _Read(

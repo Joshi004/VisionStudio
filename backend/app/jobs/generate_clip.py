@@ -187,7 +187,7 @@ class GenerateClipHandler(JobHandler):
             first = await _frame(session, scene.first_frame_asset_id) if scene else None
             last = await _frame(session, scene.last_frame_asset_id) if scene else None
             mode = scene_inputs.clip_mode(scene) if scene else None
-            bodies = await contract_guard.approved_bodies(session)
+            bodies = await contract_guard.latest_bodies(session)
             await session.commit()
 
         if scene is None or project is None or mode is None:

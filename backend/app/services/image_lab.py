@@ -490,7 +490,7 @@ async def create_qwen_run(session: AsyncSession, form: QwenLabForm) -> tuple[Lab
     validate_qwen_form(form)
     seed = form.seed if form.seed is not None else secrets.randbelow(image_models.SEED_LIMIT)
     partition = await settings_service.get_str(session, PARTITION_KEY)
-    bodies = await contract_guard.approved_bodies(session)
+    bodies = await contract_guard.latest_bodies(session)
     spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
     prompt = form.prompt.strip()
     try:
