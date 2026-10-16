@@ -16,16 +16,12 @@ export type LabKind = "generate" | "h3_reference";
 
 export const DURATION_MIN_S = 1;
 export const DURATION_MAX_S = 20;
-/** MiniMax H3 makes 5.17 to 14.4 seconds (124 to 345 frames at a fixed 24 fps). */
-export const H3_DURATION_MIN_S = 5;
-export const H3_DURATION_MAX_S = 14.4;
+// MiniMax H3 has no length limit here: the GPU server documents 5.17 to 14.4 seconds of video
+// and 2 to 15 seconds of audio, but the app sends what was asked and shows the server's answer.
 export const H3_STEPS_MIN = 4;
 export const H3_STEPS_MAX = 100;
 /** `<Picture 1>` to `<Picture 9>`: what the reference endpoint takes. */
 export const H3_MAX_REFERENCES = 9;
-/** The audio reference lasts 2 to 15 seconds. */
-export const H3_AUDIO_MIN_S = 2;
-export const H3_AUDIO_MAX_S = 15;
 const SEED_LIMIT = 2 ** 31;
 
 /** The audio of a MiniMax H3 reference clip: a Voice lab speech, or a saved voice's recording. */
@@ -103,14 +99,9 @@ export function stepsOf(state: Pick<VideoLabFormState, "steps">): number | null 
   return wholeNumber(state.steps);
 }
 
-/** The shortest and longest clip the form's models can make: H3's range when H3 is in it. */
-export function durationLimits(state: Pick<VideoLabFormState, "kind" | "models">): {
-  min: number;
-  max: number;
-} {
-  return usesH3(state)
-    ? { min: H3_DURATION_MIN_S, max: H3_DURATION_MAX_S }
-    : { min: DURATION_MIN_S, max: DURATION_MAX_S };
+/** The shortest and longest clip the form can ask for (the same for every model). */
+export function durationLimits(): { min: number; max: number } {
+  return { min: DURATION_MIN_S, max: DURATION_MAX_S };
 }
 
 function stepsProblem(state: VideoLabFormState): string | null {
@@ -145,13 +136,13 @@ function referenceProblem(state: VideoLabFormState): string | null {
   if (state.audio === null) {
     return "Choose an audio reference.";
   }
-  if (state.audio.durationS < H3_AUDIO_MIN_S || state.audio.durationS > H3_AUDIO_MAX_S) {
-    return `The audio reference lasts ${state.audio.durationS.toFixed(1)} seconds, and MiniMax H3 needs ${H3_AUDIO_MIN_S} to ${H3_AUDIO_MAX_S}.`;
+  if (!(state.audio.durationS > 0)) {
+    return "The audio reference has no length.";
   }
   if (!state.matchAudio) {
     const duration = durationOf(state);
-    if (duration === null || duration < H3_DURATION_MIN_S || duration > H3_DURATION_MAX_S) {
-      return `MiniMax H3: the length must be from ${H3_DURATION_MIN_S} to ${H3_DURATION_MAX_S} seconds.`;
+    if (duration === null || duration < DURATION_MIN_S || duration > DURATION_MAX_S) {
+      return `The length must be from ${DURATION_MIN_S} to ${DURATION_MAX_S} seconds.`;
     }
   }
   return null;
@@ -171,12 +162,6 @@ export function formProblem(state: VideoLabFormState): string | null {
   const duration = durationOf(state);
   if (duration === null || duration < DURATION_MIN_S || duration > DURATION_MAX_S) {
     return `The length must be from ${DURATION_MIN_S} to ${DURATION_MAX_S} seconds.`;
-  }
-  if (
-    state.models.includes(H3_MODEL) &&
-    (duration < H3_DURATION_MIN_S || duration > H3_DURATION_MAX_S)
-  ) {
-    return `MiniMax H3: the length must be from ${H3_DURATION_MIN_S} to ${H3_DURATION_MAX_S} seconds.`;
   }
   if (state.lastFrame !== null && state.firstFrame === null) {
     return "A last frame needs a first frame too.";
@@ -349,7 +334,15 @@ export function paramsLine(run: LabVideoRun): string {
   }
   const duration = numberParam(run, "duration_s");
   if (duration !== null) {
-    parts.push(run.params.match_audio_duration === true ? `${duration} s (the audio's)` : `${duration} s`);
+    parts.push(
+      run.params.match_audio_duration === true
+        ? `${duration.toFixed(2)} s (the audio's)`
+        : `${duration.toFixed(2)} s requested`,
+    );
+  }
+  const audioSeconds = numberParam(run, "audio_duration_s");
+  if (audioSeconds !== null) {
+    parts.push(`audio ${audioSeconds.toFixed(2)} s`);
   }
   const frames = numberParam(run, "num_frames");
   if (frames !== null) {

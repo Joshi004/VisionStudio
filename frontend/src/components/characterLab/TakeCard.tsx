@@ -343,7 +343,10 @@ export function TakeCard({
               <Stack gap="sm">
                 <Text size="xs" c="dimmed">
                   Seed: {take.seed ?? "random"}
-                  {take.duration_s !== null ? ` · Length: ${take.duration_s} s` : ""}
+                  {take.duration_s !== null ? ` · Requested length: ${take.duration_s.toFixed(2)} s` : ""}
+                  {take.video?.duration_s != null ? ` · Clip: ${take.video.duration_s.toFixed(2)} s` : ""}
+                  {take.voice?.duration_s != null ? ` · Made speech: ${take.voice.duration_s.toFixed(2)} s` : ""}
+                  {take.audio_ref?.duration_s != null ? ` · Speech sent: ${take.audio_ref.duration_s.toFixed(2)} s` : ""}
                   {take.negative_prompt ? ` · Negative prompt: ${take.negative_prompt}` : ""}
                   {take.audio_marker !== null
                     ? ` · Speech: ${take.audio_marker}${take.match_audio_duration ? ", clip as long as the speech" : ""}`

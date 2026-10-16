@@ -98,7 +98,8 @@ class H3ReferenceRunCreate(BaseModel):
     references: list[FirstFrameIn] = Field(
         min_length=1, max_length=video_generator.H3_MAX_REFERENCE_IMAGES
     )
-    # `<Audio 1>`: 2 to 15 seconds. A reference the model reads, not a soundtrack.
+    # `<Audio 1>`: any length (the server documents 2 to 15 seconds). A reference the model
+    # reads, not a soundtrack.
     audio: AudioInputIn
     # True: the clip is as long as the audio, and `duration_s` is ignored.
     match_audio_duration: StrictBool

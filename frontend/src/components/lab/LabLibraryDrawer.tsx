@@ -204,7 +204,7 @@ function VoicesSection() {
                 {voice.name}
               </Text>
               <Text size="xs" c="dimmed">
-                {voice.duration_s.toFixed(1)} s
+                {voice.duration_s.toFixed(2)} s
               </Text>
             </Group>
             <audio src={voice.url} controls preload="none" style={{ width: "100%" }} />

@@ -25,11 +25,9 @@ MIN_NUM_FRAMES: Final = 9
 _FRAMES_PER_STEP: Final = 8
 
 # MiniMax H3 (the Video lab and the Character lab's takes) runs at a fixed 24 fps and only
-# decodes `17n + 5` frames, from 124 (n = 7, 5.17 s) to 345 (n = 20, 14.4 s), the range the GPU
-# server's guide documents.
+# decodes `17n + 5` frames. The GPU server's guide documents 124 (5.17 s) to 345 (14.4 s) frames
+# and clamps to that range itself; the app does not enforce it, so the server's real answer shows.
 H3_FPS: Final = 24
-H3_MIN_FRAMES: Final = 124
-H3_MAX_FRAMES: Final = 345
 _H3_FRAMES_PER_STEP: Final = 17
 _H3_BASE_FRAMES: Final = 5
 
@@ -59,19 +57,12 @@ def request_num_frames(target: int) -> int:
 
 
 def h3_num_frames(target: int) -> int:
-    """The frame count to ask MiniMax H3 for: the smallest `17n + 5` that is at least `target`
-    and at least `H3_MIN_FRAMES` (so a short `target` gives 124 frames, 5.17 s).
+    """The frame count to ask MiniMax H3 for: the smallest `17n + 5` (n at least 1) that is at
+    least `target`.
 
     H3 rounds any other count up on its own, so asking for the exact grid keeps the stored
-    request equal to what runs. Raises ValueError, with a message for the user, when even the
-    smallest such count is above `H3_MAX_FRAMES` (14.4 s).
+    request equal to what runs. There is no minimum or maximum here: a count the GPU server
+    does not accept is refused by the server, and its message is shown on the run.
     """
-    wanted = max(target, H3_MIN_FRAMES)
-    steps = -(-(wanted - _H3_BASE_FRAMES) // _H3_FRAMES_PER_STEP)  # ceil without floats
-    frames = _H3_FRAMES_PER_STEP * steps + _H3_BASE_FRAMES
-    if frames > H3_MAX_FRAMES:
-        raise ValueError(
-            f"MiniMax H3 makes at most {H3_MAX_FRAMES} frames "
-            f"({H3_MAX_FRAMES / H3_FPS:.1f} seconds at {H3_FPS} fps), and {target} are needed."
-        )
-    return frames
+    steps = max(1, -(-(target - _H3_BASE_FRAMES) // _H3_FRAMES_PER_STEP))  # ceil without floats
+    return _H3_FRAMES_PER_STEP * steps + _H3_BASE_FRAMES

@@ -10,7 +10,6 @@ import { H3_MODEL, type LabVideoModel } from "../../videoModels";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { H3_MAX_SHOTS, H3_MIN_SHOTS, MAX_SHOTS, MIN_SHOTS } from "./labPromptHints";
-import { H3_DURATION_MAX_S, H3_DURATION_MIN_S } from "./videoLabView";
 
 type PromptFormat = "ltx" | "h3";
 
@@ -72,15 +71,11 @@ export function PromptHelper({ durationS, hasFirstFrame, models, onUse }: Prompt
   const choices = shotChoices(format);
   // Switching to LTX can leave a single shot chosen, which LTX cannot cut.
   const shotsValue = choices.some((choice) => choice.value === shots) ? shots : "3";
-  const h3LengthOk =
-    durationS !== null && durationS >= H3_DURATION_MIN_S && durationS <= H3_DURATION_MAX_S;
-
   const current = job.data;
   const active = isJobActive(current) || draft.isPending;
   const now = useNow(active, job.dataUpdatedAt);
   const result = current?.status === "succeeded" ? readOutput(current.output) : null;
-  const canWrite =
-    idea.trim() !== "" && durationS !== null && !active && (format === "ltx" || h3LengthOk);
+  const canWrite = idea.trim() !== "" && durationS !== null && !active;
 
   function write() {
     if (durationS === null) {
@@ -168,13 +163,6 @@ export function PromptHelper({ durationS, hasFirstFrame, models, onUse }: Prompt
             />
           )}
         </Group>
-        {format === "h3" && durationS !== null && !h3LengthOk && (
-          <Text size="xs" c="orange.8">
-            MiniMax H3 makes {H3_DURATION_MIN_S} to {H3_DURATION_MAX_S} seconds: set the length in
-            the form first.
-          </Text>
-        )}
-
         <Group gap="sm">
           <Button onClick={write} disabled={!canWrite} loading={draft.isPending}>
             Write the prompt

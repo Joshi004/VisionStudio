@@ -75,18 +75,13 @@ H3_SIZES: Final[dict[Orientation, tuple[int, int]]] = {
     "landscape": (1344, 768),
     "portrait": (768, 1344),
 }
-# The lengths H3 can make: from 5 s (the model makes at least 124 frames, 5.17 s, so a shorter
-# ask would silently get more) up to 345 frames at 24 fps, which the guide calls 14.4 s. A
-# length of 14.4 s is 345.6 frames, so `create_runs` caps the frame count at 345, as the server
-# does ("15 s becomes 345 frames").
-H3_DURATION_MIN_S: Final = 5.0
-H3_DURATION_MAX_S: Final = 14.4
+# H3 has no length limit of its own here: the app sends what was asked (within the general
+# `DURATION_MIN_S` to `DURATION_MAX_S`) and shows the GPU server's answer, which documents 124 to
+# 345 frames (5.17 to 14.4 s) and a 2 to 15 s audio reference. This is for trying out what the
+# server really does with a shorter or longer clip or audio.
 # Denoising steps: 4 to 100, and the pipeline's own default (50) when none is sent.
 H3_STEPS_MIN: Final = 4
 H3_STEPS_MAX: Final = 100
-# The audio reference of a reference clip lasts 2 to 15 s (the server's limits).
-H3_AUDIO_MIN_S: Final = 2.0
-H3_AUDIO_MAX_S: Final = 15.0
 
 
 class LabVideoInputError(ValueError):
@@ -188,13 +183,12 @@ class RunRow:
 # --- The form (pure checks) ---------------------------------------------------------------
 
 
-def _check_h3_duration(duration_s: float) -> None:
-    """Raises LabVideoInputError when MiniMax H3 cannot make a clip this long."""
+def _check_duration(duration_s: float) -> None:
+    """Raises LabVideoInputError for a clip length outside the general range."""
     # Written so that NaN, which compares false to everything, is rejected too.
-    if not H3_DURATION_MIN_S <= duration_s <= H3_DURATION_MAX_S:
+    if not DURATION_MIN_S <= duration_s <= DURATION_MAX_S:
         raise LabVideoInputError(
-            f"MiniMax H3: the length must be from {H3_DURATION_MIN_S:g} to "
-            f"{H3_DURATION_MAX_S:g} seconds."
+            f"The length must be from {DURATION_MIN_S:g} to {DURATION_MAX_S:g} seconds."
         )
 
 
@@ -217,13 +211,7 @@ def validate_form(form: LabVideoForm) -> None:
     for model in form.models:
         if not video_models.is_lab_video_model(model):
             raise LabVideoInputError(f"{model} is not a known video model.")
-    # Written so that NaN, which compares false to everything, is rejected too.
-    if not DURATION_MIN_S <= form.duration_s <= DURATION_MAX_S:
-        raise LabVideoInputError(
-            f"The length must be from {DURATION_MIN_S:g} to {DURATION_MAX_S:g} seconds."
-        )
-    if video_models.H3_MODEL in form.models:
-        _check_h3_duration(form.duration_s)
+    _check_duration(form.duration_s)
     _check_h3_steps(form.num_inference_steps)
     if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
         raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
@@ -264,7 +252,7 @@ def validate_h3_reference_form(form: H3ReferenceForm) -> None:
     if not form.match_audio_duration:
         if form.duration_s is None:
             raise LabVideoInputError("Choose a length, or let the clip match the audio.")
-        _check_h3_duration(form.duration_s)
+        _check_duration(form.duration_s)
     _check_h3_steps(form.num_inference_steps)
     if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
         raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
@@ -279,7 +267,7 @@ def validate_prompt_draft(
 ) -> None:
     """Raises LabVideoInputError for a request for a multi-shot prompt that should not be made.
     The number of shots and the length depend on the model the prompt is for: MiniMax H3 takes 1
-    to 4 shots and 5 to 14.4 seconds, LTX 2 to 4 shots and 1 to 20 seconds.
+    to 4 shots, LTX 2 to 4 shots; both take 1 to 20 seconds.
     """
     profile = profile_for(target_model)
     if not idea.strip():
@@ -290,12 +278,7 @@ def validate_prompt_draft(
         )
     if not profile.min_shots <= shots <= profile.max_shots:
         raise LabVideoInputError(f"Ask for {profile.min_shots} to {profile.max_shots} shots.")
-    if not DURATION_MIN_S <= duration_s <= DURATION_MAX_S:
-        raise LabVideoInputError(
-            f"The length must be from {DURATION_MIN_S:g} to {DURATION_MAX_S:g} seconds."
-        )
-    if target_model == video_models.H3_MODEL:
-        _check_h3_duration(duration_s)
+    _check_duration(duration_s)
     if note is not None and len(note) > prompt_writer.FIRST_FRAME_NOTE_MAX_CHARS:
         raise LabVideoInputError(
             f"The first frame note must be at most "
@@ -400,16 +383,16 @@ async def create_runs(
             if is_h3:
                 width, height = H3_SIZES[form.orientation]
                 run_fps = frame_counts.H3_FPS
-                # Capped at the model's last frame count: 14.4 s is 345.6 frames.
-                run_frames = frame_counts.h3_num_frames(
-                    min(round(form.duration_s * run_fps), frame_counts.H3_MAX_FRAMES)
-                )
+                run_frames = frame_counts.h3_num_frames(round(form.duration_s * run_fps))
             else:
                 width, height = sizes.gen_width, sizes.gen_height
                 run_fps, run_frames = fps, num_frames
             if spec is None:
                 raise ValueError(video_generator.no_endpoint_message(endpoint))
-            video_generator.check_frames(run_frames, video_generator.frame_limits(spec, endpoint))
+            limits = video_generator.frame_limits(spec, endpoint)  # also checks the endpoint exists
+            if not is_h3:
+                # H3's frame range is left to the GPU server, so its real answer shows.
+                video_generator.check_frames(run_frames, limits)
             video_generator.check_size(width, height)
         except ValueError as exc:
             raise LabVideoInputError(f"{video_models.label(model)}: {exc}") from exc
@@ -633,14 +616,16 @@ async def create_h3_reference_run(
     everything together.
 
     The clip is made by `/v1/h3/videos/audio-to-video` from the pictures (`<Picture n>`, in the
-    order given) and the audio reference (`<Audio 1>`). The audio must last 2 to 15 s. The
-    pictures do not set the clip's shape, so the size is the orientation's (1344 x 768 or
+    order given) and the audio reference (`<Audio 1>`). The audio can be any length above 0: the
+    GPU server documents 2 to 15 s, and what it does with another length is shown on the run.
+    The pictures do not set the clip's shape, so the size is the orientation's (1344 x 768 or
     768 x 1344). The prompt is sent exactly as written: the six-part reference format has no
     first line for the code to add.
 
     With `match_audio_duration` the request says so and sends no `num_frames` (the two exclude
-    each other on the server), so the clip is as long as the audio, within H3's 124 to 345
-    frames. Otherwise the frame count is the smallest `17n + 5` at least as long as `duration_s`.
+    each other on the server), so the server decides the clip's length (it documents 124 to 345
+    frames). Otherwise the frame count is the smallest `17n + 5` at least as long as
+    `duration_s`, and the server's frame range is not checked here.
 
     Raises LabVideoInputError.
     """
@@ -648,11 +633,8 @@ async def create_h3_reference_run(
     for reference in form.references:
         await first_frame_path(session, reference)  # only checks that it exists
     audio = await audio_file(session, form.audio)
-    if not H3_AUDIO_MIN_S <= audio.duration_s <= H3_AUDIO_MAX_S:  # NaN is rejected too
-        raise LabVideoInputError(
-            f"The audio reference lasts {audio.duration_s:.1f} seconds, and MiniMax H3 needs "
-            f"{H3_AUDIO_MIN_S:g} to {H3_AUDIO_MAX_S:g} seconds."
-        )
+    if not audio.duration_s > 0:  # written so that NaN is rejected too
+        raise LabVideoInputError("The audio reference has no length.")
 
     width, height = H3_SIZES[form.orientation]
     fps = frame_counts.H3_FPS
@@ -663,7 +645,7 @@ async def create_h3_reference_run(
     else:
         seconds = form.duration_s
         target = round(seconds * fps)
-    num_frames = frame_counts.h3_num_frames(min(target, frame_counts.H3_MAX_FRAMES))
+    num_frames = frame_counts.h3_num_frames(target)
     seed = form.seed if form.seed is not None else secrets.randbelow(SEED_LIMIT)
     partition = await settings_service.get_str(session, PARTITION_KEY)
     bodies = await contract_guard.latest_bodies(session)
@@ -673,9 +655,7 @@ async def create_h3_reference_run(
     try:
         if spec is None:
             raise ValueError(video_generator.no_endpoint_message(endpoint))
-        limits = video_generator.frame_limits(spec, endpoint)  # also checks the endpoint exists
-        if not form.match_audio_duration:
-            video_generator.check_frames(num_frames, limits)
+        video_generator.frame_limits(spec, endpoint)  # only checks the endpoint exists
         video_generator.check_size(width, height)
     except ValueError as exc:
         raise LabVideoInputError(

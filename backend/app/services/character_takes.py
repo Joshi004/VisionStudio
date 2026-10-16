@@ -842,11 +842,8 @@ async def _validate_h3(session: AsyncSession, form: TakeForm, has_dialogue: bool
                 audio = await video_lab.audio_file(session, form.audio)
             except LabVideoInputError as exc:
                 raise CharacterTakeError(str(exc)) from exc
-            if not video_lab.H3_AUDIO_MIN_S <= audio.duration_s <= video_lab.H3_AUDIO_MAX_S:
-                raise CharacterTakeError(
-                    f"The speech lasts {audio.duration_s:.1f} seconds, and MiniMax H3 needs "
-                    f"{video_lab.H3_AUDIO_MIN_S:g} to {video_lab.H3_AUDIO_MAX_S:g} seconds."
-                )
+            if not audio.duration_s > 0:  # written so that NaN is rejected too
+                raise CharacterTakeError("The speech has no length.")
             words = await _audio_words(session, form.audio)
             if (
                 form.audio_marker in writer.COPY_MARKERS
@@ -860,10 +857,10 @@ async def _validate_h3(session: AsyncSession, form: TakeForm, has_dialogue: bool
                 )
     if not has_dialogue or not form.match_audio_duration:
         duration = form.duration_s if form.duration_s is not None else DEFAULT_SILENT_DURATION_S
-        if not video_lab.H3_DURATION_MIN_S <= duration <= video_lab.H3_DURATION_MAX_S:
+        if not video_lab.DURATION_MIN_S <= duration <= video_lab.DURATION_MAX_S:
             raise CharacterTakeError(
-                f"The length must be from {video_lab.H3_DURATION_MIN_S:g} to "
-                f"{video_lab.H3_DURATION_MAX_S:g} seconds."
+                f"The length must be from {video_lab.DURATION_MIN_S:g} to "
+                f"{video_lab.DURATION_MAX_S:g} seconds."
             )
 
 

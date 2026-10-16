@@ -730,12 +730,13 @@ class TakeMediaOut(BaseModel):
     run_id: int
     url: str | None
     job: JobSummary | None
+    # The length of the stored file as measured (a clip or a speech), None for a picture or
+    # while the file is not made.
+    duration_s: float | None = None
 
 
 class TakeAudioOut(BaseModel):
-    """The speech a take's clip hears: `{source, id}` as the Video lab names it, with its length
-    (2 to 15 seconds is what MiniMax H3 takes).
-    """
+    """The speech a take's clip hears: `{source, id}` as the Video lab names it, with its length."""
 
     audio: AudioInputOut
     duration_s: float | None
@@ -879,6 +880,7 @@ async def _takes_out(session: AsyncSession, rows: list[character_takes.TakeRow])
                 run_id=take.voice_run_id,
                 url=media_url(row.voice.run.path) if row.voice and row.voice.run.path else None,
                 job=_job_summary(row.voice.job) if row.voice else None,
+                duration_s=row.voice.run.duration_s if row.voice else None,
             )
             if take.voice_run_id is not None
             else None
@@ -888,6 +890,7 @@ async def _takes_out(session: AsyncSession, rows: list[character_takes.TakeRow])
                 run_id=take.video_run_id,
                 url=media_url(row.video.run.path) if row.video and row.video.run.path else None,
                 job=_job_summary(row.video.job) if row.video else None,
+                duration_s=row.video.run.duration_s if row.video else None,
             )
             if take.video_run_id is not None
             else None

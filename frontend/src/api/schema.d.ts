@@ -3769,8 +3769,7 @@ export interface components {
         };
         /**
          * TakeAudioOut
-         * @description The speech a take's clip hears: `{source, id}` as the Video lab names it, with its length
-         *     (2 to 15 seconds is what MiniMax H3 takes).
+         * @description The speech a take's clip hears: `{source, id}` as the Video lab names it, with its length.
          */
         TakeAudioOut: {
             audio: components["schemas"]["AudioInputOut"];
@@ -3853,6 +3852,11 @@ export interface components {
             /** Url */
             url: string | null;
             job: components["schemas"]["JobSummary"] | null;
+            /**
+             * Duration S
+             * @default null
+             */
+            duration_s: number | null;
         };
         /** TakesOut */
         TakesOut: {

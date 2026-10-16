@@ -76,7 +76,7 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
   const has23 = state.models.includes("ltx-2.3");
   const hasH3 = usesH3(state);
   const hasLtx = !isReference && state.models.some((model) => model !== H3_MODEL);
-  const limits = durationLimits(state);
+  const limits = durationLimits();
   const lengthLocked = isReference && state.matchAudio;
 
   function update(changes: Partial<VideoLabFormState>) {
@@ -249,7 +249,7 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
             <AudioReferencePicker value={state.audio} onChange={(audio) => update({ audio })} />
             <Checkbox
               label="Make the clip as long as the audio"
-              description="Kept within 5.17 to 14.4 seconds. Untick it to choose the length above."
+              description="The GPU server decides the final length: see the measured length on the run. Untick it to choose the length above."
               checked={state.matchAudio}
               onChange={(event) => update({ matchAudio: event.currentTarget.checked })}
             />

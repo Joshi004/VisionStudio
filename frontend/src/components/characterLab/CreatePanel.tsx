@@ -18,7 +18,7 @@ import { useCreateTake, type AudioMarker, type LibraryCharacter } from "../../ap
 import { describeError } from "../../api/errors";
 import { FirstFramePicker } from "../videoLab/FirstFramePicker";
 import { AudioReferencePicker } from "../videoLab/AudioReferencePicker";
-import { H3_AUDIO_MAX_S, H3_AUDIO_MIN_S, H3_STEPS_MAX, H3_STEPS_MIN } from "../videoLab/videoLabView";
+import { H3_STEPS_MAX, H3_STEPS_MIN } from "../videoLab/videoLabView";
 import { LicenseNotice } from "../voiceLab/LicenseNotice";
 import {
   AUDIO_MARKER_HINTS,
@@ -93,7 +93,7 @@ export function CreatePanel({ character, form, onChange }: CreatePanelProps) {
       fields.dialogue &&
       form.dialogue.trim() !== "" &&
       !(fields.h3Speech && form.audioMode === "pick"));
-  const lengths = lengthLimits(form);
+  const lengths = lengthLimits();
   const copiesSpeech = form.audioMarker === "fully_copy" || form.audioMarker === "partially_copy";
 
   function update(changes: Partial<TakeFormState>) {
@@ -151,7 +151,7 @@ export function CreatePanel({ character, form, onChange }: CreatePanelProps) {
               description={
                 `What the character says, in its own voice. ${form.dialogue.length} of ${LIMITS.speech} characters.` +
                 (fields.h3Speech
-                  ? ` MiniMax H3 needs the speech to last ${H3_AUDIO_MIN_S} to ${H3_AUDIO_MAX_S} seconds.`
+                  ? " The GPU server documents 2 to 15 seconds of speech for MiniMax H3; other lengths are sent as they are."
                   : "") +
                 (fields.h3Speech && form.audioMode === "pick" && copiesSpeech
                   ? " With a copy marker, write exactly what the recording says."
@@ -249,7 +249,7 @@ export function CreatePanel({ character, form, onChange }: CreatePanelProps) {
                       {form.audioMode === "pick" && (
                         <AudioReferencePicker
                           title="Recording to use"
-                          hint={`${H3_AUDIO_MIN_S} to ${H3_AUDIO_MAX_S} seconds: a saved voice's recording, or a speech from the Voice lab (including the one a take of this character made).`}
+                          hint="A saved voice's recording, or a speech from the Voice lab (including the one a take of this character made). Any length is sent as it is."
                           value={form.audio}
                           onChange={(audio) => update({ audio })}
                         />
@@ -297,7 +297,7 @@ export function CreatePanel({ character, form, onChange }: CreatePanelProps) {
               label="Length"
               description={
                 fields.h3
-                  ? `Seconds, from ${lengths.min} to ${lengths.max}. MiniMax H3 makes at least 5.17 seconds.`
+                  ? `Seconds, from ${lengths.min} to ${lengths.max}. The GPU server decides what MiniMax H3 makes of it.`
                   : `Seconds, from ${lengths.min} to ${lengths.max}. With speech, the clip is as long as the speech.`
               }
               inputMode="decimal"

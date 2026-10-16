@@ -13,10 +13,6 @@ import type { JobSummary } from "../../api/jobs";
 import { isJobActive } from "../../api/polling";
 import type { ReferenceItem } from "../imageLab/labView";
 import {
-  H3_AUDIO_MAX_S,
-  H3_AUDIO_MIN_S,
-  H3_DURATION_MAX_S,
-  H3_DURATION_MIN_S,
   H3_STEPS_MAX,
   H3_STEPS_MIN,
   type AudioChoice,
@@ -499,11 +495,9 @@ export function visibleFields(form: TakeFormState, character: LibraryCharacter):
   };
 }
 
-/** The lengths a clip can have: MiniMax H3's own range, or LTX's. */
-export function lengthLimits(form: TakeFormState): { min: number; max: number } {
-  return form.output === "video" && form.videoModel === H3_MODEL
-    ? { min: H3_DURATION_MIN_S, max: H3_DURATION_MAX_S }
-    : { min: LIMITS.durationMin, max: LIMITS.durationMax };
+/** The lengths a clip can have: the same for every model (the GPU server has the last word). */
+export function lengthLimits(): { min: number; max: number } {
+  return { min: LIMITS.durationMin, max: LIMITS.durationMax };
 }
 
 /** The dialogue that counts: what is typed, but only where the field is shown. */
@@ -546,7 +540,7 @@ export function takeFormProblem(form: TakeFormState, character: LibraryCharacter
   }
   if (fields.length) {
     const seconds = Number(form.durationS);
-    const { min, max } = lengthLimits(form);
+    const { min, max } = lengthLimits();
     if (form.durationS.trim() === "" || !Number.isFinite(seconds) || seconds < min || seconds > max) {
       return `The length must be from ${min} to ${max} seconds.`;
     }
@@ -566,8 +560,8 @@ function h3Problem(form: TakeFormState, fields: VisibleFields): string | null {
     if (form.audio === null) {
       return "Choose the speech, or let it be made.";
     }
-    if (form.audio.durationS < H3_AUDIO_MIN_S || form.audio.durationS > H3_AUDIO_MAX_S) {
-      return `The speech lasts ${form.audio.durationS.toFixed(1)} seconds. MiniMax H3 needs ${H3_AUDIO_MIN_S} to ${H3_AUDIO_MAX_S}.`;
+    if (!(form.audio.durationS > 0)) {
+      return "The speech has no length.";
     }
   }
   if (form.steps.trim() !== "") {

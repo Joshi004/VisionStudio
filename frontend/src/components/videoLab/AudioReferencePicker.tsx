@@ -2,7 +2,7 @@ import { Alert, Group, Loader, Select, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import { useVoiceLabRuns, useVoices } from "../../api/voiceLab";
-import { H3_AUDIO_MAX_S, H3_AUDIO_MIN_S, type AudioChoice } from "./videoLabView";
+import { type AudioChoice } from "./videoLabView";
 
 type AudioReferencePickerProps = {
   value: AudioChoice | null;
@@ -22,21 +22,18 @@ function keyOf(choice: Pick<AudioChoice, "source" | "id">): string {
   return `${choice.source}:${choice.id}`;
 }
 
-/** MiniMax H3 reads 2 to 15 seconds of audio as a reference. */
+/** Any recording with a length can be tried: the GPU server decides what it does with it. */
 function fits(durationS: number): boolean {
-  return durationS >= H3_AUDIO_MIN_S && durationS <= H3_AUDIO_MAX_S;
+  return durationS > 0;
 }
 
 function optionLabel(candidate: Candidate): string {
-  const seconds = `${candidate.choice.durationS.toFixed(1)} s`;
-  return fits(candidate.choice.durationS)
-    ? `${candidate.choice.label} (${seconds})`
-    : `${candidate.choice.label} (${seconds}: needs ${H3_AUDIO_MIN_S} to ${H3_AUDIO_MAX_S} s)`;
+  return `${candidate.choice.label} (${candidate.choice.durationS.toFixed(2)} s)`;
 }
 
 /**
  * The audio reference of a MiniMax H3 reference clip (`<Audio 1>`): a saved voice's recording or
- * a finished Voice lab speech, 2 to 15 seconds long. The model reads it for the voice (timbre
+ * a finished Voice lab speech (the server documents 2 to 15 seconds). The model reads it for the voice (timbre
  * and delivery) and makes its own soundtrack, so the clip's sound is not this recording.
  */
 export function AudioReferencePicker({ value, onChange, title, hint }: AudioReferencePickerProps) {
@@ -116,7 +113,7 @@ export function AudioReferencePicker({ value, onChange, title, hint }: AudioRefe
         }}
         searchable
         clearable
-        nothingFoundMessage="No voice or speech of 2 to 15 seconds."
+        nothingFoundMessage="No voice or speech."
         maw={520}
       />
       {(voices.isLoading || runs.isLoading) && <Loader size="xs" />}
@@ -133,8 +130,9 @@ export function AudioReferencePicker({ value, onChange, title, hint }: AudioRefe
       <Text size="xs" c="dimmed">
         {hint ?? (
           <>
-            {H3_AUDIO_MIN_S} to {H3_AUDIO_MAX_S} seconds. MiniMax H3 follows its voice and delivery
-            but makes its own sound: for the exact recording, use the Characters tab.
+            Any length can be tried (the server documents 2 to 15 seconds). MiniMax H3 follows its
+            voice and delivery but makes its own sound: for the exact recording, use the Characters
+            tab.
           </>
         )}
       </Text>
