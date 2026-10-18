@@ -2455,7 +2455,7 @@ export interface components {
         /** GenerateRequest */
         GenerateRequest: {
             /** Video Model */
-            video_model?: ("ltx-2.3" | "ltx-2.5") | null;
+            video_model?: ("ltx-2.3" | "ltx-2.5" | "minimax-h3") | null;
         };
         /** GpuStatus */
         GpuStatus: {
@@ -3131,12 +3131,12 @@ export interface components {
             /** Script Text */
             script_text: string | null;
             /** Video Model */
-            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            video_model: ("ltx-2.3" | "ltx-2.5" | "minimax-h3") | null;
             /**
              * Default Video Model
              * @enum {string}
              */
-            default_video_model: "ltx-2.3" | "ltx-2.5";
+            default_video_model: "ltx-2.3" | "ltx-2.5" | "minimax-h3";
             /** Voice Id */
             voice_id: number | null;
             voiceover: components["schemas"]["VoiceoverOut"] | null;
@@ -3245,7 +3245,7 @@ export interface components {
             first_frame_note?: string | null;
             /**
              * Target Model
-             * @default ltx-2.5
+             * @default minimax-h3
              * @enum {string}
              */
             target_model: "ltx-2.3" | "ltx-2.5" | "minimax-h3";
@@ -3485,12 +3485,12 @@ export interface components {
             /** Use Clip Sound */
             use_clip_sound: boolean;
             /** Video Model */
-            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            video_model: ("ltx-2.3" | "ltx-2.5" | "minimax-h3") | null;
             /**
              * Effective Video Model
              * @enum {string}
              */
-            effective_video_model: "ltx-2.3" | "ltx-2.5";
+            effective_video_model: "ltx-2.3" | "ltx-2.5" | "minimax-h3";
             /**
              * Effective Video Model Source
              * @enum {string}
@@ -3952,7 +3952,7 @@ export interface components {
         /** VideoModelRequest */
         VideoModelRequest: {
             /** Video Model */
-            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            video_model: ("ltx-2.3" | "ltx-2.5" | "minimax-h3") | null;
         };
         /** VoiceBrief */
         VoiceBrief: {
@@ -4213,7 +4213,7 @@ export interface components {
             /** Clip Mode */
             clip_mode: ("first_frame" | "first_and_last") | null;
             /** Video Model */
-            video_model: ("ltx-2.3" | "ltx-2.5") | null;
+            video_model: ("ltx-2.3" | "ltx-2.5" | "minimax-h3") | null;
             /** Mode */
             mode: string | null;
             /** Model Note */

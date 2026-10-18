@@ -74,6 +74,9 @@ class _Clip:
     frames: int
     asset_id: int
     clip_sound: bool
+    # The frames the clip file must have to cover the scene, at the clip's own frame rate. It
+    # is `frames` unless the clip was made at another rate than the project's (MiniMax H3).
+    source_frames: int
 
     @property
     def number(self) -> int:
@@ -139,7 +142,10 @@ def parse_timeline(recorded: object) -> _Timeline:
         sound = entry.get("clip_sound")
         if index is None or frames is None or frames < 1 or asset_id is None:
             raise _RenderFailed(_CHANGED_MESSAGE)
-        clips.append(_Clip(index, frames, asset_id, sound is True))
+        source_frames = _whole(entry.get("source_frames"))
+        if source_frames is None or source_frames < 1:
+            source_frames = frames  # a timeline from before MiniMax H3 had no such field
+        clips.append(_Clip(index, frames, asset_id, sound is True, source_frames))
     if sum(clip.frames for clip in clips) != total:
         raise _RenderFailed(_CHANGED_MESSAGE)
 
@@ -326,10 +332,10 @@ class RenderFinalHandler(JobHandler):
                         f"The clip of scene {clip.number} could not be read. Regenerate it, "
                         "or use another take."
                     )
-                if probe.frame_count < clip.frames:
+                if probe.frame_count < clip.source_frames:
                     raise _RenderFailed(
                         f"The clip of scene {clip.number} has {probe.frame_count} frames; the "
-                        f"scene needs {clip.frames}. Regenerate it, or use another take."
+                        f"scene needs {clip.source_frames}. Regenerate it, or use another take."
                     )
                 sources[clip.asset_id] = _Source(path=path, probe=probe)
         except StorageError as exc:

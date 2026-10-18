@@ -1,8 +1,8 @@
 """The Video lab: try a prompt on LTX-2.3, LTX-2.5 and MiniMax H3, side by side (Phase 19).
 
-MiniMax H3 is a lab-only model: it differs from LTX in its sizes (1344 x 768), its fixed 24 fps,
-its `17n + 5` frame grid, its prompt format and the 4 or 8 GPUs the server gives it, so
-`create_runs` works all of that out per model. Its reference mode (pictures and optional audio
+MiniMax H3 differs from LTX in its sizes (1344 x 768), its fixed 24 fps, its `17n + 5` frame
+grid, its prompt format and the 4 or 8 GPUs the server gives it, so `create_runs` works all of
+that out per model. Its reference mode (pictures and optional audio
 references, no first frame) is its own form, `H3ReferenceForm`, started by
 `create_h3_reference_run`.
 
@@ -43,7 +43,7 @@ from app.services import api_contract, frame_counts, projects, video_models
 from app.services import lab_prompt_writer as prompt_writer
 from app.services.lab_prompt_profiles import profile_for
 from app.services.scene_inputs import ClipMode
-from app.services.video_models import LabVideoModel, VideoModel
+from app.services.video_models import DEFAULT_MODEL, LabVideoModel, LtxModel
 
 _logger = logging.getLogger(__name__)
 
@@ -75,13 +75,9 @@ LIP_SYNC_FPS: Final = 25
 SEED_LIMIT: Final = 2**31
 MAX_MODELS: Final = len(video_models.LAB_MODEL_IDS)
 
-# MiniMax H3, from the GPU server's guide (version 0.13.0). It is trained at 1344 x 768 and
-# 768 x 1344 whatever the project's own size is; the lab sends these sizes explicitly (both are
-# multiples of 64, so the frame fitting and `check_size` keep working).
-H3_SIZES: Final[dict[Orientation, tuple[int, int]]] = {
-    "landscape": (1344, 768),
-    "portrait": (768, 1344),
-}
+# MiniMax H3 is trained at 1344 x 768 and 768 x 1344 whatever the project's own size is; the lab
+# sends these sizes explicitly (`video_generator.H3_SIZES`, the same ones a scene's clip uses).
+H3_SIZES: Final = video_generator.H3_SIZES
 # H3 has no length limit of its own here: the app sends what was asked (within the general
 # `DURATION_MIN_S` to `DURATION_MAX_S`) and shows the GPU server's answer, which documents 124 to
 # 345 frames (5.17 to 14.4 s) and a 2 to 15 s audio reference. This is for trying out what the
@@ -181,7 +177,7 @@ class LipSyncForm:
     negative_prompt: str | None
     first_frame: FirstFrameRef
     audio: AudioRef
-    video_model: VideoModel = "ltx-2.3"
+    video_model: LtxModel = "ltx-2.3"
     lip_sync: bool = False
 
 
@@ -252,7 +248,9 @@ def validate_lip_sync_form(form: LipSyncForm) -> None:
     if len(form.prompt) > MAX_PROMPT_CHARS:
         raise LabVideoInputError(f"The prompt must be at most {MAX_PROMPT_CHARS:,} characters.")
     if form.video_model not in video_generator.AUDIO_ENDPOINTS:
-        raise LabVideoInputError(f"{form.video_model} is not a known video model.")
+        raise LabVideoInputError(
+            f"{video_models.label(form.video_model)} cannot make a clip from a recorded speech."
+        )
     if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
         raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
     if form.negative_prompt is not None and len(form.negative_prompt) > NEGATIVE_PROMPT_MAX_CHARS:
@@ -320,7 +318,7 @@ def validate_prompt_draft(
     shots: int,
     duration_s: float,
     note: str | None,
-    target_model: LabVideoModel = "ltx-2.5",
+    target_model: LabVideoModel = DEFAULT_MODEL,
 ) -> None:
     """Raises LabVideoInputError for a request for a multi-shot prompt that should not be made.
     The number of shots and the length depend on the model the prompt is for: MiniMax H3 takes 1
@@ -573,7 +571,7 @@ async def create_audio_run(
     bodies = await contract_guard.latest_bodies(session)
     spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
 
-    model: VideoModel = form.video_model
+    model: LtxModel = form.video_model
     endpoint = video_generator.audio_endpoint_for(model)
     try:
         if spec is None:
@@ -825,7 +823,7 @@ async def create_prompt_draft(
     shots: int,
     duration_s: float,
     first_frame_note: str | None,
-    target_model: LabVideoModel = "ltx-2.5",
+    target_model: LabVideoModel = DEFAULT_MODEL,
 ) -> Job:
     """Starts the job that writes a multi-shot prompt from an idea, in the format of
     `target_model` (MiniMax H3's structured prompt, or LTX-2.5's one paragraph). Commits.

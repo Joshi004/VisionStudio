@@ -130,9 +130,9 @@ class PromptDraftCreate(BaseModel):
     duration_s: Annotated[float, Field(allow_inf_nan=False)]
     # What the first frame shows, when the clip will start from one.
     first_frame_note: StrictStr | None = None
-    # The model the prompt is written for: MiniMax H3 gets its own structured format, LTX-2.5
-    # (also what LTX-2.3 uses) one paragraph.
-    target_model: LabVideoModel = "ltx-2.5"
+    # The model the prompt is written for: MiniMax H3 (the default) gets its own structured
+    # format, LTX-2.5 (also what LTX-2.3 uses) one paragraph.
+    target_model: LabVideoModel = video_models.DEFAULT_MODEL
 
 
 class FirstFrameOut(BaseModel):

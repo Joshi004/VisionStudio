@@ -175,9 +175,10 @@ export function ProjectSettingsForm({
               maw={360}
             />
             <Text size="xs" c="dimmed">
-              LTX-2.5 has no negative prompt, so the Negative prompt below is used by LTX-2.3 only.
-              A scene that has a last frame is made by the chosen model's own first-and-last-frame
-              endpoint.
+              LTX-2.5 and MiniMax H3 have no negative prompt, so the Negative prompt below is used
+              by LTX-2.3 only. A scene that has a last frame is made by the chosen model's own
+              first-and-last-frame mode. MiniMax H3 writes its prompt in three fields, so Draft
+              descriptions writes them in that form when it is the project's model.
             </Text>
           </Stack>
         </Paper>
@@ -211,7 +212,7 @@ export function ProjectSettingsForm({
             </Text>
             <TextInput
               label="Style prefix"
-              description='Sent as "Style: ..." at the start of every prompt, for example cinematic-realistic.'
+              description='Sent as "Style: ..." at the start of every LTX prompt, and right after [Shot 1] in a MiniMax H3 prompt, for example cinematic-realistic.'
               value={draft.style_prefix}
               onChange={(event) => edit("style_prefix", event.currentTarget.value)}
             />
@@ -225,7 +226,7 @@ export function ProjectSettingsForm({
             />
             <Textarea
               label="Negative prompt (LTX-2.3 only)"
-              description="What to avoid, for example: blurry, low quality, text, watermark, speech, talking, voices. Leave blank to use the app's default (Settings, Video model). LTX-2.5 ignores it: say what you want in the prompt instead."
+              description="What to avoid, for example: blurry, low quality, text, watermark, speech, talking, voices. Leave blank to use the app's default (Settings, Video model). LTX-2.5 and MiniMax H3 ignore it: say what you want in the prompt instead."
               value={draft.negative_prompt}
               onChange={(event) => edit("negative_prompt", event.currentTarget.value)}
               autosize

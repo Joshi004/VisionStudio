@@ -73,6 +73,7 @@ class WriteCharacterReferencePromptHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
+    model_key = MODEL_KEY
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -83,10 +84,10 @@ class WriteCharacterReferencePromptHandler(JobHandler):
                 return
             job_input: dict[str, Any] = dict(job.input)
             project = await session.get(Project, job.project_id)
-            target = cast_service.member_of_job(job)
+            member_ref = cast_service.member_of_job(job)
             member = (
-                await cast_service.get_member(session, project.id, *target)
-                if project is not None and target is not None
+                await cast_service.get_member(session, project.id, *member_ref)
+                if project is not None and member_ref is not None
                 else None
             )
             target = await llm_target.resolve(session, MODEL_KEY)
@@ -95,14 +96,14 @@ class WriteCharacterReferencePromptHandler(JobHandler):
         if project is None:
             await self._fail(job_id, "The project no longer exists.")
             return
-        if target is None or member is None:
+        if member_ref is None or member is None:
             await self._fail(job_id, "The character or the place no longer exists.")
             return
         block = cast_service.prompt_block(member)
         if block is not None:
             await self._fail(job_id, block)
             return
-        kind, member_id = target
+        kind, member_id = member_ref
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
         profile = writer.profile_for(kind)

@@ -33,6 +33,7 @@ _PROVIDER_KEY_OF_MODEL_KEY: Final[dict[str, str]] = {
     "description_llm_model": settings_service.DESCRIPTION_PROVIDER_KEY,
     "image_prompt_llm_model": settings_service.IMAGE_PROMPT_PROVIDER_KEY,
 }
+MODEL_KEYS: Final = tuple(_PROVIDER_KEY_OF_MODEL_KEY)
 
 
 @dataclass(frozen=True)
@@ -48,10 +49,16 @@ class LlmTarget:
         return self.provider == settings_service.PROVIDER_QWEN38
 
 
+async def provider_of(session: AsyncSession, model_key: str) -> str:
+    """`bitdeer` or `qwen38`: the provider set now for the role whose model setting is
+    `model_key`.
+    """
+    return await settings_service.get_str(session, _PROVIDER_KEY_OF_MODEL_KEY[model_key])
+
+
 async def resolve(session: AsyncSession, model_key: str) -> LlmTarget:
     """The provider, address and model for the role whose model setting is `model_key`."""
-    provider_key = _PROVIDER_KEY_OF_MODEL_KEY[model_key]
-    provider = await settings_service.get_str(session, provider_key)
+    provider = await provider_of(session, model_key)
     if provider == settings_service.PROVIDER_QWEN38:
         return LlmTarget(
             provider=provider,

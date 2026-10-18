@@ -14,6 +14,7 @@ import { JobActions } from "../jobs/JobActions";
 import { elapsedText, typicalText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import {
+  H3_MODEL,
   INHERIT,
   VIDEO_MODELS,
   isVideoModel,
@@ -22,6 +23,14 @@ import {
   type VideoModel,
 } from "../../videoModels";
 import { generateLabel, hasActiveClipJob, modelSourceText, takeLine } from "./clipView";
+
+/** The colour of a take's model badge: LTX-2.5 blue, MiniMax H3 violet (as in the Video lab). */
+function modelBadgeColor(model: string): string {
+  if (model === H3_MODEL) {
+    return "violet";
+  }
+  return model === "ltx-2.5" ? "blue" : "gray";
+}
 
 type SceneClipSectionProps = {
   project: ProjectDetail;
@@ -71,7 +80,7 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
           }
           allowDeselect={false}
           disabled={blocked !== null}
-          w={130}
+          w={150}
         />
         <Button
           onClick={() =>
@@ -98,9 +107,11 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
             {override !== null
               ? "this take only"
               : modelSourceText(scene.effective_video_model_source)}
-            ). A clip takes about {scene.target_frames} frames ({project.fps} fps) and 5 to 10
-            minutes on the GPU server. Each press makes a new take with a new random seed. The
-            page updates by itself.
+            ).{" "}
+            {chosenModel === H3_MODEL
+              ? "A MiniMax H3 clip is made at 24 fps in its own size, is never shorter than 5.17 seconds, and holds 4 or 8 GPUs, so it takes longer to start and to run than an LTX clip."
+              : `A clip takes about ${scene.target_frames} frames (${project.fps} fps) and 5 to 10 minutes on the GPU server.`}{" "}
+            Each press makes a new take with a new random seed. The page updates by itself.
           </Text>
           {chosenNote !== undefined && (
             <Text size="xs" c="orange.8">
@@ -208,7 +219,7 @@ export function SceneClipSection({ project, scene, now }: SceneClipSectionProps)
                     {take.video_model !== null && (
                       <Badge
                         variant="light"
-                        color={take.video_model === "ltx-2.5" ? "blue" : "gray"}
+                        color={modelBadgeColor(take.video_model)}
                       >
                         {videoModelLabel(take.video_model)}
                       </Badge>

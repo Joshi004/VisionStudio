@@ -24,6 +24,7 @@ import {
   type SceneTexts,
 } from "../../api/sceneInputs";
 import type { Scene } from "../../api/scenes";
+import { H3_MODEL, H3_SIZES } from "../../videoModels";
 import { FirstFrameActions, FirstFrameBadges } from "./FirstFrameActions";
 import { FrameSlot } from "./FrameSlot";
 import { clipModeText } from "./clipView";
@@ -123,7 +124,11 @@ export function SceneInputsDrawer({
   const dirty = changed.length > 0;
   const tooLong = TEXT_KEYS.some((key) => draftOf(key).length > DESCRIPTION_MAX_CHARS);
   const draft = draftOf("scene_description");
-  const hints = promptHints(draft);
+  // The video model that will make this scene's clip decides how the description is read.
+  const effectiveModel = scene?.effective_video_model;
+  const isH3 = effectiveModel === H3_MODEL;
+  const hints = promptHints(draft, effectiveModel);
+  const h3Size = H3_SIZES[project.orientation];
   // The last frame's prompt and actions show for a scene that gets a last frame: it has a
   // description of one, a prompt or a frame (or the user is typing a description now). Most
   // scenes get none, and have nothing to show.
@@ -239,13 +244,21 @@ export function SceneInputsDrawer({
                   />
                 </Group>
               }
-              description="What changes from the first frame, and where the motion ends: one flowing paragraph, in the present tense. With a last frame attached, it ends on that frame. Style, camera and lighting come from the project's guidelines."
-              placeholder="A lighthouse beam sweeps slowly across a calm night sea..."
+              description={
+                isH3
+                  ? "MiniMax H3 reads three fields: integrated_multimodal_description (one [Shot 1]: what changes from the first frame, the camera and where the motion ends), overall_soundscape and non_diegetic_music (N/A). The style goes right after [Shot 1], and the app writes the line that places the frames. A plain paragraph also works: it is wrapped in these fields when the clip is made."
+                  : "What changes from the first frame, and where the motion ends: one flowing paragraph, in the present tense. With a last frame attached, it ends on that frame. Style, camera and lighting come from the project's guidelines."
+              }
+              placeholder={
+                isH3
+                  ? "integrated_multimodal_description: [Shot 1] ..."
+                  : "A lighthouse beam sweeps slowly across a calm night sea..."
+              }
               value={draft}
               onChange={(event) => type("scene_description", event.currentTarget.value)}
               autosize
               minRows={4}
-              maxRows={14}
+              maxRows={isH3 ? 20 : 14}
               error={
                 draftOf("scene_description").length > DESCRIPTION_MAX_CHARS
                   ? `At most ${DESCRIPTION_MAX_CHARS.toLocaleString()} characters.`
@@ -446,12 +459,15 @@ export function SceneInputsDrawer({
               </Text>
             )}
             <Text size="xs" c="dimmed">
-              Built from the style prefix, the description and the prompt suffix.
-              {project.negative_prompt ? (
-                <> Negative prompt: {project.negative_prompt}</>
-              ) : (
-                <> No negative prompt is set.</>
-              )}{" "}
+              {isH3
+                ? "Built from the description in MiniMax H3's three fields: the style prefix goes right after [Shot 1], the prompt suffix at the end of the description, and the app adds the line that places the frames. MiniMax H3 has no negative prompt."
+                : "Built from the style prefix, the description and the prompt suffix."}
+              {!isH3 &&
+                (project.negative_prompt ? (
+                  <> Negative prompt: {project.negative_prompt}</>
+                ) : (
+                  <> No negative prompt is set.</>
+                ))}{" "}
               <Anchor component={Link} to={`/projects/${project.id}/settings`} size="xs">
                 Project settings
               </Anchor>
@@ -465,6 +481,8 @@ export function SceneInputsDrawer({
             <Text size="sm" c="dimmed">
               Frames are cropped from the centre and resized to {project.gen_width} x{" "}
               {project.gen_height} for the video model. The previews show exactly that.
+              {isH3 &&
+                ` MiniMax H3 works at its own size, ${h3Size.width} x ${h3Size.height}, so the frames are fitted to that when the clip is made.`}
             </Text>
             <SimpleGrid cols={2} spacing="md">
               <FrameSlot

@@ -535,7 +535,9 @@ def _take_out(take: clips_service.Take, scene: Scene, project: Project) -> TakeO
         target_frames=_int(target),
         duration_s=take.asset.duration_s,
         audio_codec=codec if isinstance(codec, str) else None,
-        clip_mode=video_generator.clip_mode_for(recorded.get("endpoint")),
+        clip_mode=video_generator.clip_mode_for(
+            recorded.get("endpoint"), recorded.get("clip_mode")
+        ),
         video_model=(
             model
             if video_models.is_video_model(model)
@@ -558,14 +560,36 @@ def _scene_source(source: ModelSource) -> str:
     return "global" if source == "regenerate" else source
 
 
-def _model_notes(clip_mode: ClipMode) -> dict[str, str]:
-    """Why a model cannot make a clip of this mode as asked, for each that cannot."""
+def _model_notes(clip_mode: ClipMode, length_s: float) -> dict[str, str]:
+    """Why a model cannot make a clip of this mode as asked, for each that cannot. `length_s` is
+    the scene's length: MiniMax H3 cannot end a scene shorter than its shortest clip on the last
+    frame.
+    """
     notes: dict[str, str] = {}
     for model in video_models.MODEL_IDS:
-        note = video_generator.endpoint_for(model, clip_mode).note
+        note = video_generator.endpoint_for(model, clip_mode, length_s).note
         if note is not None:
             notes[model] = note
     return notes
+
+
+def _preview_prompt(
+    scene: Scene, project: Project, model: VideoModel, clip_mode: ClipMode
+) -> str | None:
+    """The exact text the video model is sent for this scene, or None while it has no
+    description. It is the prompt of the model that makes the clip: a scene that cannot be made
+    by `model` as asked (see `_model_notes`) is previewed for the model that would make it.
+    """
+    maker = video_generator.endpoint_for(model, clip_mode, scene.end_s - scene.start_s).model
+    prompt = scene_prompt.prompt_for(
+        maker,
+        style_prefix=project.style_prefix,
+        description=scene.scene_description,
+        prompt_suffix=project.prompt_suffix,
+        num_frames=clips_service.h3_clip_frames(scene),
+        has_last=clip_mode == "first_and_last",
+    )
+    return prompt.text if prompt is not None else None
 
 
 def _scene_out(
@@ -654,9 +678,7 @@ def _scene_out(
             else None
         ),
         last_frame_prompt_blocked_reason=last_prompt_blocked,
-        prompt=scene_prompt.assemble_prompt(
-            project.style_prefix, scene.scene_description, project.prompt_suffix
-        ),
+        prompt=_preview_prompt(scene, project, effective_model, clip_mode),
         first_frame=_frame_out(project, first_asset, out_of_date=first_out_of_date),
         last_frame=_frame_out(project, last_asset, out_of_date=last_out_of_date),
         first_frame_out_of_date=first_out_of_date,
@@ -714,7 +736,7 @@ def _scene_out(
         effective_video_model_source=cast(
             Literal["scene", "project", "global"], _scene_source(model_source)
         ),
-        video_model_notes=_model_notes(clip_mode),
+        video_model_notes=_model_notes(clip_mode, scene.end_s - scene.start_s),
         selected_clip_asset_id=scene.selected_clip_asset_id,
         target_frames=clips_service.target_frames_for(scene, project),
         clip_job=(

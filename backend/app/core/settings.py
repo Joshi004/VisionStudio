@@ -289,9 +289,13 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "The video model that makes clips when neither the scene nor its project chooses "
             "one (Project settings, and each scene's clip section). Regenerate can also pick "
             "a model for one take. LTX-2.5 cuts between several shots only when the prompt "
-            "says so, and has no negative prompt. A scene that has a last frame is made by the "
-            "chosen model's first-and-last-frame mode. Use two frames of the same place, "
-            "subject and light: very different frames cross-dissolve instead of moving."
+            "says so, and has no negative prompt. MiniMax H3 also has no negative prompt. It "
+            "always runs at 24 fps and in its own size (1344 x 768 or 768 x 1344), makes a "
+            "clip of at least 5.17 s (a shorter scene is trimmed when the video is made) and "
+            "holds 4 or 8 GPUs for each clip, so a clip takes longer to start and to run. A "
+            "scene that has a last frame is made by the chosen model's first-and-last-frame "
+            "mode. Use two frames of the same place, subject and light: very different frames "
+            "cross-dissolve instead of moving."
         ),
         value_type="string",
         default=video_models.DEFAULT_MODEL,
@@ -305,8 +309,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
         label="Default negative prompt (LTX-2.3 only)",
         help=(
             "Sent to LTX-2.3 as its negative prompt whenever a project's own Negative "
-            "prompt (Project settings, Guidelines) is blank. LTX-2.5 has no negative prompt "
-            "and never gets it. New projects also start with this "
+            "prompt (Project settings, Guidelines) is blank. LTX-2.5 and MiniMax H3 have no "
+            "negative prompt and never get it. New projects also start with this "
             "text in their own field. It keeps unwanted background music, speech, on-screen "
             "text and common video artifacts out of the clips. Blank it as well to let the "
             "GPU server's own default apply instead."
@@ -327,9 +331,11 @@ REGISTRY: tuple[SettingSpec, ...] = (
         label="Maximum parallel GPU server jobs",
         help=(
             "How many slots may be in use on your GPU server at the same time, all kinds of job "
-            "together: clips, first and last frames, reference pictures, transcription and "
-            "speech. A job takes one slot, except a MiniMax H3 clip (Video lab), which takes the "
-            "number of GPUs the server gives it (4 or 8), and 4 until the server has said. Each "
+            "together: clips, first and last frames, reference pictures, transcription, speech "
+            "and the language-model calls set to the GPU server's Qwen3.8. A job takes one slot, "
+            "except a MiniMax H3 clip (Video lab), which takes the number of GPUs the server "
+            "gives it (4 or 8), and 4 until the server has said. All Qwen3.8 calls together take "
+            "one slot, because the model answers them all from one GPU. Each "
             "image job loads about 31 GB of model weights first, so pick a number your GPU "
             "server can actually handle. It applies the next time the app looks for work, and "
             "running jobs are not stopped."
@@ -345,7 +351,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
         label="Maximum parallel paid API calls",
         help=(
             "How many calls may run on the paid inference API (Bitdeer) at the same time, all "
-            "kinds together: scene proposals, the cast, descriptions and image prompts. Pick a "
+            "kinds together: scene proposals, the cast, descriptions and image prompts, for the "
+            "roles whose provider is Bitdeer. Pick a "
             "number your plan's rate limit allows. It applies the next time the app looks for "
             "work, and running calls are not stopped."
         ),

@@ -111,7 +111,7 @@ def render_block(
     too_short: list[tuple[Scene, int, int]] = []
     for scene in needed:
         have = _frame_count(selected[scene.id])
-        want = clips.target_frames_for(scene, project)
+        want = clips.frames_needed(selected[scene.id].provenance, scene, project)
         if have is not None and have < want:
             too_short.append((scene, have, want))
     if len(too_short) == 1:
@@ -159,6 +159,9 @@ def build_timeline(
                 "end_s": scene.end_s,
                 "start_frame": frame_counts.boundary_frame(scene.start_s, fps),
                 "frames": frames,
+                # How many frames of the clip file itself cover the scene. It differs from
+                # `frames` for a clip made at another frame rate than the project's (MiniMax H3).
+                "source_frames": clips.frames_needed(selected[scene.id].provenance, scene, project),
                 "asset_id": selected[scene.id].asset.id,
                 "clip_sound": scene.use_clip_sound,
             }

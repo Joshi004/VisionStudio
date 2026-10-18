@@ -19,8 +19,8 @@ function countsText(running: number, queued: number): string {
 
 function PoolCard({ pool }: { pool: PoolCapacity }) {
   // A lower limit never stops a running job, so there can be more slots in use than the limit.
-  // A job usually takes one slot, but a MiniMax H3 clip takes the GPUs the server gave it, so the
-  // slots in use can be more than the number of jobs running.
+  // A job usually takes one slot, but a MiniMax H3 clip takes the GPUs the server gave it, and all
+  // Qwen3.8 calls together take one, so the slots in use can differ from the jobs running.
   const percent = pool.limit > 0 ? Math.min(100, (pool.slots_used / pool.limit) * 100) : 0;
   return (
     <Paper withBorder p="sm" radius="md">

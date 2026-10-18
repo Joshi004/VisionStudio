@@ -160,6 +160,29 @@ def target_frames_for(scene: Scene, project: Project) -> int:
     return frame_counts.target_frames(scene.start_s, scene.end_s, project.fps)
 
 
+def take_fps(provenance: dict[str, Any], project: Project) -> int:
+    """The frame rate a take was made at: always 24 for MiniMax H3, the project's for LTX."""
+    made_by_h3 = provenance.get("video_model") == video_models.H3_MODEL
+    return frame_counts.H3_FPS if made_by_h3 else project.fps
+
+
+def frames_needed(provenance: dict[str, Any], scene: Scene, project: Project) -> int:
+    """How many frames of the take itself cover the scene, counted at the take's own frame rate.
+    It is `target_frames_for` for an LTX take. A MiniMax H3 take is 24 fps whatever the project's
+    rate is, and the render resamples it, so it is compared with the scene's length at 24 fps.
+    """
+    return frame_counts.target_frames(scene.start_s, scene.end_s, take_fps(provenance, project))
+
+
+def h3_clip_frames(scene: Scene) -> int:
+    """The frame count MiniMax H3 is asked for to make this scene's clip: the scene's length at
+    24 fps on H3's `17n + 5` grid, and at least the shortest clip H3 makes. It can be above what
+    H3 makes for a long scene (`frame_counts.H3_MAX_FRAMES`): the job refuses that.
+    """
+    target = frame_counts.target_frames(scene.start_s, scene.end_s, frame_counts.H3_FPS)
+    return frame_counts.h3_scene_num_frames(target)
+
+
 def is_generate_all_candidate(
     scene: Scene, project: Project, *, scenes_blocked: str | None, active: Job | None
 ) -> bool:
@@ -186,7 +209,7 @@ def take_is_too_short(provenance: dict[str, Any], scene: Scene, project: Project
     count = provenance.get("frame_count")
     if isinstance(count, bool) or not isinstance(count, int):
         return False
-    return count < target_frames_for(scene, project)
+    return count < frames_needed(provenance, scene, project)
 
 
 def _was_updated(result: object) -> bool:

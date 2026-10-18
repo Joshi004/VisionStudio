@@ -63,6 +63,7 @@ class ExtractCastHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
+    model_key = MODEL_KEY
 
     async def start(self, job_id: int) -> None:
         async with SessionLocal() as session:

@@ -3,38 +3,43 @@
 Only two things limit how much work can run at once, so only two numbers are enforced, and every
 kind of job shares them:
 
-- **`gpu`**: the in-house GPU server (clips, frames, reference pictures, transcription, speech).
-  Its limit is the `max_parallel_gpu_jobs` setting.
-- **`paid_api`**: the paid inference API (every language model call, and any image call to it).
-  Its limit is the `max_parallel_paid_api_calls` setting.
+- **`gpu`**: the in-house GPU server (clips, frames, reference pictures, transcription, speech,
+  and the language-model calls answered by Qwen3.8). Its limit is the `max_parallel_gpu_jobs`
+  setting.
+- **`paid_api`**: the paid inference API (the language-model calls of every role set to
+  Bitdeer). Its limit is the `max_parallel_paid_api_calls` setting.
 
 A job type has no limit of its own. Which pool a job counts in comes from its handler's
-`provider`, so a new job type joins the right pool without anything else being written.
+`provider`, so a new job type joins the right pool without anything else being written. An
+`llm` job is the exception: it counts where its calls go (`on_qwen38`).
 
 A job whose provider is neither (the `local` ones: the final render and the automatic run) is its
 own pool, counted under its job type, and its handler says how many may run at once.
 
 A job takes one slot of its pool, except a MiniMax H3 clip, which holds 4 or 8 GPUs on one node
 as the server decides from the request's size. It takes the number of GPUs the server reported
-(`server_gpus`), and `H3_MIN_GPUS` until the server has said (`slot_cost`). The limit counts
-slots, not jobs.
+(`server_gpus`), and `H3_MIN_GPUS` until the server has said (`slot_cost`). The Qwen3.8 calls
+answer from one GPU however many run at once, so together they hold `QWEN38_GPUS` slots
+(`slots_in_use`). The limit counts slots, not jobs.
 
 Both settings are read at every tick, so a change on the Settings page applies at once. Running
 jobs are never stopped by a lower number.
 
-This module does not import the handler registry (the registry imports this one): the dispatcher
-and the capacity endpoint pass the handlers in.
+This module does not import the handler registry: the dispatcher and the capacity endpoint pass
+the handlers in.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.providers import video_generator
+from app.providers import qwen38, video_generator
+from app.services import llm_target
 
 if TYPE_CHECKING:
     from app.db.models import Job
@@ -62,6 +67,8 @@ _SETTING_OF_POOL: Final[dict[str, str]] = {
 # size (GPU API 0.15.0). It says which only when it accepts the job, so until it does a clip is
 # counted at the smaller of the two.
 H3_MIN_GPUS: Final = 4
+# The Qwen3.8 text model answers every call at once from the same GPU.
+QWEN38_GPUS: Final = 1
 
 
 def _server_value(job: Job, field: str) -> object:
@@ -114,12 +121,62 @@ def fits(free: int, limit: int, cost: int) -> bool:
 
 
 def pool_of(handler: JobHandler) -> str:
-    """The pool a handler's jobs are counted in. A local handler is its own pool."""
+    """The pool a handler's jobs are counted in when nothing about the job itself changes it
+    (see `job_pool`). A local handler is its own pool.
+    """
     if handler.provider == "gpu":
         return GPU_POOL
     if handler.provider in ("llm", "image"):
         return PAID_API_POOL
     return handler.job_type
+
+
+async def qwen38_model_keys(session: AsyncSession) -> frozenset[str]:
+    """The model settings of the language-model roles whose provider is Qwen3.8 now."""
+    keys: set[str] = set()
+    for model_key in llm_target.MODEL_KEYS:
+        if await llm_target.provider_of(session, model_key) == settings_service.PROVIDER_QWEN38:
+            keys.add(model_key)
+    return frozenset(keys)
+
+
+def on_qwen38(job: Job, handler: JobHandler, qwen38_keys: frozenset[str]) -> bool:
+    """Whether a language-model job's calls go to Qwen3.8 on the GPU server. A running job that
+    has recorded its `endpoint` went where it says, whatever the setting is now. Any other job
+    goes where its role's provider setting says (`qwen38_keys`).
+    """
+    if handler.provider != "llm":
+        return False
+    recorded = job.input if isinstance(job.input, dict) else {}
+    endpoint = recorded.get("endpoint")
+    if job.status == "running" and isinstance(endpoint, str):
+        return endpoint == qwen38.GENERATE_PATH
+    return handler.model_key in qwen38_keys
+
+
+def job_pool(job: Job, handler: JobHandler, qwen38_keys: frozenset[str]) -> str:
+    """The pool one job is counted in: the GPU server's for a Qwen3.8 call, else its handler's."""
+    return GPU_POOL if on_qwen38(job, handler, qwen38_keys) else pool_of(handler)
+
+
+def slots_in_use(
+    running: Iterable[tuple[Job, JobHandler | None]], qwen38_keys: frozenset[str]
+) -> Counter[str]:
+    """The slots the running jobs hold, by pool. Every running Qwen3.8 call together holds
+    `QWEN38_GPUS` of the GPU server's. A job with no handler counts under its job type.
+    """
+    used: Counter[str] = Counter()
+    qwen38_running = False
+    for job, handler in running:
+        if handler is None:
+            used[job.type] += slot_cost(job)
+        elif on_qwen38(job, handler, qwen38_keys):
+            qwen38_running = True
+        else:
+            used[pool_of(handler)] += slot_cost(job)
+    if qwen38_running:
+        used[GPU_POOL] += QWEN38_GPUS
+    return used
 
 
 async def shared_limits(session: AsyncSession) -> dict[str, int]:

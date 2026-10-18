@@ -496,22 +496,13 @@ async def waiting_job_count(session: AsyncSession) -> int:
     return int((await session.execute(statement)).scalar_one())
 
 
-async def active_counts(session: AsyncSession) -> dict[tuple[str, str], int]:
-    """How many jobs are queued and running, by `(job type, status)`, in one query (for the
-    pool counts the Activity page shows).
+async def active_jobs(session: AsyncSession) -> list[Job]:
+    """Every queued and running job (for the pool counts the Activity page shows: which pool a
+    language-model job is in, and how many slots a job takes, depend on the job itself).
     """
     statement = (
-        select(Job.type, Job.status, func.count(Job.id))
-        .where(Job.status.in_(ACTIVE_STATUSES))
-        .group_by(Job.type, Job.status)
+        select(Job).where(Job.status.in_(ACTIVE_STATUSES)).execution_options(populate_existing=True)
     )
-    result = await session.execute(statement)
-    return {(job_type, job_status): int(count) for job_type, job_status, count in result.all()}
-
-
-async def running_jobs(session: AsyncSession) -> list[Job]:
-    """Every running job (for the slots they take: a MiniMax H3 clip takes two)."""
-    statement = select(Job).where(Job.status == "running").execution_options(populate_existing=True)
     return list((await session.execute(statement)).scalars().all())
 
 

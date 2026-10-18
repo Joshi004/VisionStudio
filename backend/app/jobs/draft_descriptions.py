@@ -21,9 +21,11 @@ description without the model), so two failed attempts fail the job. And the sav
 overwrites what the author wrote (`services/descriptions.plan_write`).
 
 The instructions, and everything that depends on the video model, are in
-`services/description_writer.py` and `services/description_profiles.py`. This job stores the
-profile's id and version, a hash of the instructions, and the exact request, so a drafted
-text can always be traced to the prompt that wrote it.
+`services/description_writer.py` and `services/description_profiles.py`. The profile follows
+the project's video model (its own, else the global default): one for the LTX models, one for
+MiniMax H3. This job stores the video model, the profile's id and version, a hash of the
+instructions, and the exact request, so a drafted text can always be traced to the prompt
+that wrote it.
 
 It is a local-style job: everything happens in `start`. There is no provider job id. Logs
 hold the job id, what each attempt did and its token counts, never the prompt or the answer.
@@ -46,9 +48,10 @@ from app.providers import llm
 from app.providers.llm import LlmCallError
 from app.services import description_writer as writer
 from app.services import descriptions as descriptions_service
-from app.services import llm_target, scene_inputs, scene_planner
+from app.services import llm_target, scene_inputs, scene_planner, video_models
+from app.services import projects as projects_service
 from app.services import scenes as scenes_service
-from app.services.description_profiles import ACTIVE_PROFILE, PromptProfile
+from app.services.description_profiles import PromptProfile, profile_for_model
 from app.services.description_writer import CheckedDrafts, SceneToDraft
 
 _logger = logging.getLogger(__name__)
@@ -135,6 +138,7 @@ class DraftDescriptionsHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
+    model_key = DESCRIPTION_MODEL_KEY
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -158,6 +162,13 @@ class DraftDescriptionsHandler(JobHandler):
                 )
                 sent = [writer.to_draft(scene) for scene in scenes]
             target = await llm_target.resolve(session, DESCRIPTION_MODEL_KEY)
+            # The profile follows the project's video model (its own, else the global default).
+            video_model, _ = video_models.resolve(
+                None,
+                None,
+                project.video_model if project is not None else None,
+                await projects_service.default_video_model(session),
+            )
             await session.commit()
 
         if project is None:
@@ -171,7 +182,7 @@ class DraftDescriptionsHandler(JobHandler):
             return
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        profile = ACTIVE_PROFILE
+        profile = profile_for_model(video_model)
         body = writer.build_request(
             project,
             sent,
@@ -182,6 +193,7 @@ class DraftDescriptionsHandler(JobHandler):
         input_hash = scene_planner.request_hash(llm_target.call_url(target), body)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
+            video_model=video_model,
             instructions_sha256=writer.instructions_sha256(body),
             scenes_sent=[_scene_record(scene) for scene in sent],
             server_url=docker_mapped(target.base_url),

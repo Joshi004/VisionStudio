@@ -1,4 +1,4 @@
-"""The `generate_clip` job: one LTX clip (LTX-2.3 or LTX-2.5) for one scene (ANALYSIS.md
+"""The `generate_clip` job: one clip (LTX-2.3, LTX-2.5 or MiniMax H3) for one scene (ANALYSIS.md
 Section 3.3, 5.3, 5.8 and 6.4).
 
 It is a remote job, so the three steps follow `JobHandler`:
@@ -14,9 +14,18 @@ choice in `job.input`, else the scene's, the project's or the app's default:
 `video_models.resolve`), the clip mode (a scene with a last frame is made by keyframe
 interpolation, one without by image-to-video from its first frame:
 `scene_inputs.clip_mode`), the endpoint (`video_generator.endpoint_for`: each model has an
-endpoint for both modes; a pair without one would fall back to LTX-2.3 and the job says so), the
-prompt, the size, the frame count, the seed and the normalised frame or frames from the scene
-and the project as they are then, and stores that in `job.input`. Every later attempt (after
+endpoint for both modes; a pair without one would fall back to LTX-2.3 and the job says so, and
+so does a MiniMax H3 scene with a last frame that is shorter than H3's shortest clip, which LTX-2.5
+makes), the prompt, the size, the frame count, the seed and the normalised frame or frames from the
+scene and the project as they are then, and stores that in `job.input`.
+
+MiniMax H3 differs from LTX in what the request is made of: its own size (1344 x 768 or 768 x 1344
+by the project's orientation, not the project's generation size), a fixed 24 fps whatever the
+project's rate, and the next `17n + 5` frames, at least 124 (`frame_counts.h3_scene_num_frames`). A
+scene too long for H3 (over 345 frames) fails here, before any GPU is used. The prompt is
+the structured one H3 was trained on (`scene_prompt.prompt_for`).
+
+Every later attempt (after
 pre-emption, an expired result or a Resubmit) sends the same stored request to the same
 stored endpoint with the same seed and re-uploads the same files, because "the correct
 response to a pre-emption failure is to resubmit the exact same request unchanged" (the
@@ -127,16 +136,18 @@ class GenerateClipHandler(JobHandler):
         request = recorded.get("request")
         endpoint = recorded.get("endpoint")
         first_id = _sent_asset_id(recorded.get("first_frame"))
+        # One MiniMax H3 endpoint serves both modes, so the mode stored next to it decides there.
+        mode = video_generator.clip_mode_for(endpoint, recorded.get("clip_mode"))
         if (
             not isinstance(request, dict)
             or not isinstance(endpoint, str)
-            or video_generator.clip_mode_for(endpoint) is None
+            or mode is None
             or first_id is None
         ):
             return None
         # Only a keyframe clip has a last frame. A first-frame job stores none.
         last_id: int | None = None
-        if video_generator.clip_mode_for(endpoint) == "first_and_last":
+        if mode == "first_and_last":
             last_id = _sent_asset_id(recorded.get("last_frame"))
             if last_id is None:
                 return None
@@ -167,8 +178,8 @@ class GenerateClipHandler(JobHandler):
 
         The negative prompt is the project's own when it has one, otherwise the app's default
         negative prompt (a global setting). It is stored in the request like everything else,
-        so a later attempt sends the same one. LTX-2.5 has no such field, so its request has
-        none (`video_generator.build_request`).
+        so a later attempt sends the same one. LTX-2.5 and MiniMax H3 have no such field, so
+        their requests have none (`video_generator.build_request`).
 
         The mode comes from the scene's frames as they are now (a last frame attached means
         keyframe interpolation, none means image-to-video from the first frame), and is
@@ -195,44 +206,74 @@ class GenerateClipHandler(JobHandler):
             return None
         # The inputs may have changed since the click (the description, a frame, the cuts).
         block = clips.generation_block(scene, project, scenes_blocked=None, active=None)
-        prompt = scene_prompt.assemble_prompt(
-            project.style_prefix, scene.scene_description, project.prompt_suffix
-        )
         needs_last = mode == "first_and_last"
-        if block is not None or prompt is None or first is None or (needs_last and last is None):
+        if block is not None or first is None or (needs_last and last is None):
             await self._fail(job.id, block or "The scene is not ready any more.")
             return None
         asked = job.input.get("video_model") if isinstance(job.input, dict) else None
         requested_model, model_source = video_models.resolve(
             asked, scene.video_model, project.video_model, default_video_model
         )
-        choice = video_generator.endpoint_for(requested_model, mode)
+        length_s = scene.end_s - scene.start_s
+        choice = video_generator.endpoint_for(requested_model, mode, length_s)
         endpoint = choice.endpoint
+        by_h3 = choice.model == video_models.H3_MODEL
 
-        fps = project.fps
-        target = frame_counts.target_frames(scene.start_s, scene.end_s, fps)
-        num_frames = frame_counts.request_num_frames(target)
+        # What the request is made of depends on the model that makes the clip: MiniMax H3 has
+        # its own size, a fixed 24 fps and its own frame grid.
+        if by_h3:
+            fps = frame_counts.H3_FPS
+            width, height = video_generator.H3_SIZES[project.orientation]
+            target = frame_counts.target_frames(scene.start_s, scene.end_s, fps)
+            num_frames = clips.h3_clip_frames(scene)
+        else:
+            fps = project.fps
+            width, height = project.gen_width, project.gen_height
+            target = frame_counts.target_frames(scene.start_s, scene.end_s, fps)
+            num_frames = frame_counts.request_num_frames(target)
+
         spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
         try:
             if spec is None:
                 raise ValueError(video_generator.no_endpoint_message(endpoint))
-            video_generator.check_frames(num_frames, video_generator.frame_limits(spec, endpoint))
-            video_generator.check_size(project.gen_width, project.gen_height)
+            limits = video_generator.frame_limits(spec, endpoint)  # also checks the endpoint exists
+            if by_h3:
+                if num_frames > frame_counts.H3_MAX_FRAMES:
+                    raise ValueError(
+                        f"This scene is {length_s:.2f} s long, more than the "
+                        f"{frame_counts.H3_MAX_FRAMES / frame_counts.H3_FPS:.1f} s that "
+                        f"{video_models.label(choice.model)} makes in one clip. Change the "
+                        "scene's cuts, or choose another video model for it."
+                    )
+            else:
+                video_generator.check_frames(num_frames, limits)
+            video_generator.check_size(width, height)
         except ValueError as exc:
             await self._fail(job.id, str(exc))
             return None
+
+        result = scene_prompt.prompt_for(
+            choice.model,
+            style_prefix=project.style_prefix,
+            description=scene.scene_description,
+            prompt_suffix=project.prompt_suffix,
+            num_frames=num_frames,
+            has_last=needs_last,
+        )
+        if result is None:
+            await self._fail(job.id, "The scene is not ready any more.")
+            return None
+        prompt = result.text
+        # Why the model or the description is not what was asked for, when either is not.
+        model_note = " ".join(note for note in (choice.note, result.note) if note) or None
 
         first_sent: Asset
         last_sent: Asset | None = None
         async with SessionLocal() as session:
             try:
-                first_sent = await derived_frames.frame_to_send(
-                    session, first, project.gen_width, project.gen_height
-                )
+                first_sent = await derived_frames.frame_to_send(session, first, width, height)
                 if needs_last and last is not None:
-                    last_sent = await derived_frames.frame_to_send(
-                        session, last, project.gen_width, project.gen_height
-                    )
+                    last_sent = await derived_frames.frame_to_send(session, last, width, height)
             except derived_frames.FrameNotUsable as exc:
                 await self._fail(job.id, str(exc))
                 return None
@@ -244,8 +285,8 @@ class GenerateClipHandler(JobHandler):
             endpoint=endpoint,
             prompt=prompt,
             negative_prompt=negative_prompt,
-            width=project.gen_width,
-            height=project.gen_height,
+            width=width,
+            height=height,
             num_frames=num_frames,
             fps=fps,
             seed=secrets.randbelow(_SEED_LIMIT),
@@ -266,7 +307,7 @@ class GenerateClipHandler(JobHandler):
             "video_model": choice.model,
             "video_model_requested": requested_model,
             "video_model_source": model_source,
-            "model_note": choice.note,
+            "model_note": model_note,
             "endpoint": endpoint,
             "request": request,
         }
@@ -545,7 +586,9 @@ class GenerateClipHandler(JobHandler):
             # How the clip was made: the LTX mode the request named (None for LTX-2.3 keyframe
             # interpolation, which has no such field) and from which frames.
             "mode": request.get("mode"),
-            "clip_mode": video_generator.clip_mode_for(recorded.get("endpoint")),
+            "clip_mode": video_generator.clip_mode_for(
+                recorded.get("endpoint"), recorded.get("clip_mode")
+            ),
             "server_url": recorded.get("server_url"),
             "provider_job_id": job.provider_job_id,
             "job_id": job.id,
@@ -555,7 +598,9 @@ class GenerateClipHandler(JobHandler):
             "prompt": request.get("prompt"),
             "negative_prompt": request.get("negative_prompt"),
             "seed": request.get("seed"),
-            "fps": request.get("frame_rate"),
+            # MiniMax H3 has no `frame_rate` field (it is always 24), so the rate it ran at
+            # is the one the job worked with.
+            "fps": request.get("frame_rate") or recorded.get("fps"),
             "num_frames": request.get("num_frames"),
             "target_frames": target,
             "frame_count": probe.frame_count,

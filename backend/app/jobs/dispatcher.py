@@ -11,7 +11,8 @@ the loop:
 
 1. Read the poll interval, the running and the queued jobs, and the limit of each pool. There
    are two shared pools, the GPU server and the paid inference API (`jobs/pools.py`): every
-   kind of job counts in the pool of its provider, and has no limit of its own. A local job
+   kind of job counts in the pool of its provider, and has no limit of its own. A language-model
+   job counts where its calls go, so one answered by Qwen3.8 is in the GPU server's. A local job
    type (the final render, the automatic run) is a pool of its own.
 2. If any GPU job needs the server, check its health and store the result for the banner.
    If it does not answer, GPU jobs wait, and the loop backs off (the wait doubles up to
@@ -33,7 +34,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import Counter
 from collections.abc import Coroutine
 from typing import Any, Final
 
@@ -171,9 +171,10 @@ class _Dispatcher:
             interval = await settings_service.get_int(session, POLL_INTERVAL_KEY)
             running = await self._jobs(session, "running")
             queued = await self._jobs(session, "queued")
-            # By pool: every GPU job shares the GPU server's slots, every paid call the paid
-            # API's, and a local job type has its own.
+            # By pool: every GPU job and Qwen3.8 call shares the GPU server's slots, every paid
+            # call the paid API's, and a local job type has its own.
             limits = await pools.limits(session, handlers.all_handlers())
+            qwen38_keys = await pools.qwen38_model_keys(session)
             await session.commit()  # end the read before any network call
         self._interval_s = float(interval)
 
@@ -210,7 +211,7 @@ class _Dispatcher:
         await self._poll_running(
             [(job, h) for job, h in pollable if not (gpu_blocked and h.provider == "gpu")]
         )
-        await self._start_queued(waiting, running, limits, gpu_blocked)
+        await self._start_queued(waiting, running, limits, qwen38_keys, gpu_blocked)
 
         return self._backoff_s if self._backoff_s > 0 else float(interval)
 
@@ -274,13 +275,17 @@ class _Dispatcher:
         waiting: list[tuple[Job, JobHandler]],
         running: list[Job],
         limits: dict[str, int],
+        qwen38_keys: frozenset[str],
         gpu_blocked: bool,
     ) -> None:
         # The limits count slots: a job takes one, except a MiniMax H3 clip (the GPUs the server
-        # gave it, 4 until it says).
-        used_by_pool: Counter[str] = Counter()
-        for job in running:
-            used_by_pool[handlers.slot_key(job.type)] += pools.slot_cost(job)
+        # gave it, 4 until it says), and the Qwen3.8 calls, which share one.
+        running_with_handlers = [(job, handlers.get_handler(job.type)) for job in running]
+        used_by_pool = pools.slots_in_use(running_with_handlers, qwen38_keys)
+        qwen38_held = any(
+            handler is not None and pools.on_qwen38(job, handler, qwen38_keys)
+            for job, handler in running_with_handlers
+        )
         free = {pool: limit - used_by_pool[pool] for pool, limit in limits.items()}
         # A pool in which a job is waiting for slots lets no later job start in this tick, so a
         # job that needs two slots is not starved by a stream of jobs that need one.
@@ -291,9 +296,21 @@ class _Dispatcher:
             if handler.provider == "gpu" and gpu_blocked:
                 continue  # `_server_answers` already set the phase
 
-            pool = handlers.slot_key(job.type)
-            cost = pools.slot_cost(job)
-            if pool in full_pools or not pools.fits(free.get(pool, 0), limits.get(pool, 0), cost):
+            is_qwen38 = pools.on_qwen38(job, handler, qwen38_keys)
+            if is_qwen38:
+                pool = pools.GPU_POOL
+                cost = 0 if qwen38_held else pools.QWEN38_GPUS
+            else:
+                pool = pools.pool_of(handler)
+                cost = pools.slot_cost(job)
+            if cost == 0:
+                # Joins the GPU the Qwen3.8 calls already hold: only a limit of 0 stops it.
+                blocked = limits.get(pool, 0) == 0
+            else:
+                blocked = pool in full_pools or not pools.fits(
+                    free.get(pool, 0), limits.get(pool, 0), cost
+                )
+            if blocked:
                 full_pools.add(pool)
                 await self._set_queued_phase(
                     job.id, _SLOT_PHASES.get(pool, phases.WAITING_FOR_SLOT)
@@ -312,6 +329,7 @@ class _Dispatcher:
             if not claimed:
                 continue  # cancelled in the meantime
             free[pool] -= cost
+            qwen38_held = qwen38_held or is_qwen38
             self._retry_after.pop(job.id, None)
             self._spawn(job.id, handler.start(job.id))
 

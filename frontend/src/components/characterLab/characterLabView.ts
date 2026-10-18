@@ -419,7 +419,7 @@ export const DEFAULT_TAKE_FORM: TakeFormState = {
   output: "image",
   action: "",
   dialogue: "",
-  videoModel: "ltx-2.5",
+  videoModel: H3_MODEL,
   // On by default; it only applies to a video with dialogue and a visible mouth.
   lipSync: true,
   durationS: "5",

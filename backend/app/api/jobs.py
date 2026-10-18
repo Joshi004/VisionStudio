@@ -183,26 +183,25 @@ async def get_capacity(session: SessionDep) -> JobCapacity:
     are running and waiting for a slot in each, and which kinds of job they are.
     """
     limits = await pools.shared_limits(session)
-    counts = await store.active_counts(session)
+    qwen38_keys = await pools.qwen38_model_keys(session)
+    active = [(job, handlers.get_handler(job.type)) for job in await store.active_jobs(session)]
 
     by_type: dict[str, dict[str, PoolTypeCount]] = {pool: {} for pool in limits}
-    for (job_type, job_status), count in sorted(counts.items()):
-        pool = handlers.slot_key(job_type)
+    for job, handler in sorted(active, key=lambda pair: pair[0].type):
+        pool = job.type if handler is None else pools.job_pool(job, handler, qwen38_keys)
         if pool not in by_type:
             continue  # a local job (the render, the automatic run) is in no shared pool
         entry = by_type[pool].setdefault(
-            job_type, PoolTypeCount(type=cast(JobType, job_type), running=0, queued=0)
+            job.type, PoolTypeCount(type=cast(JobType, job.type), running=0, queued=0)
         )
-        if job_status == "running":
-            entry.running += count
+        if job.status == "running":
+            entry.running += 1
         else:
-            entry.queued += count
+            entry.queued += 1
 
-    slots_used = dict.fromkeys(limits, 0)
-    for job in await store.running_jobs(session):
-        pool = handlers.slot_key(job.type)
-        if pool in slots_used:
-            slots_used[pool] += pools.slot_cost(job)
+    slots_used = pools.slots_in_use(
+        [(job, handler) for job, handler in active if job.status == "running"], qwen38_keys
+    )
 
     return JobCapacity(
         pools=[

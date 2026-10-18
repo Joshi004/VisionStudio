@@ -60,7 +60,8 @@ export function PromptHelper({ durationS, hasFirstFrame, models, onUse }: Prompt
   const [shots, setShots] = useState<string>("3");
   const [note, setNote] = useState("");
   const [jobId, setJobId] = useState<number | null>(null);
-  const [chosenFormat, setChosenFormat] = useState<PromptFormat>("ltx");
+  // MiniMax H3 is the default model, so its format is the one offered first.
+  const [chosenFormat, setChosenFormat] = useState<PromptFormat>("h3");
   const draft = useCreatePromptDraft();
   const job = useJob(jobId);
 
@@ -117,8 +118,8 @@ export function PromptHelper({ durationS, hasFirstFrame, models, onUse }: Prompt
               value={format}
               onChange={(value) => setChosenFormat(value === "h3" ? "h3" : "ltx")}
               data={[
-                { value: "ltx", label: "LTX-2.5 (one paragraph)" },
                 { value: "h3", label: "MiniMax H3 (structured)" },
+                { value: "ltx", label: "LTX-2.5 (one paragraph)" },
               ]}
             />
             <Text size="xs" c="dimmed">

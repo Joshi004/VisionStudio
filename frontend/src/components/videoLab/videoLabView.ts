@@ -105,9 +105,9 @@ export type VideoLabFormState = {
 export const DEFAULT_FORM: VideoLabFormState = {
   kind: "generate",
   prompt: "",
-  // The lab is for comparing, so both LTX models are chosen to begin with. MiniMax H3 holds
-  // several GPUs and takes longer, so it is chosen on purpose.
-  models: ["ltx-2.3", "ltx-2.5"],
+  // MiniMax H3 is the app's default video model, so it is the one chosen to begin with. It holds
+  // several GPUs and takes longer than LTX: add an LTX model to compare the two.
+  models: [H3_MODEL],
   mode: "quality",
   orientation: "portrait",
   durationS: 5,

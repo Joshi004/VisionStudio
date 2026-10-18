@@ -81,7 +81,7 @@ from app.services.video_lab import (
     LabVideoInputError,
     LipSyncForm,
 )
-from app.services.video_models import DEFAULT_MODEL, LabVideoModel, VideoModel, is_video_model
+from app.services.video_models import DEFAULT_LTX_MODEL, LabVideoModel, LtxModel, is_ltx_model
 from app.services.voice_lab import VoiceLabForm, VoiceLabInputError
 
 _logger = logging.getLogger(__name__)
@@ -704,9 +704,11 @@ async def _start_video(session: AsyncSession, take: CharacterTake) -> None:
         take.video_run_id = h3_row.run.id
         return
 
+    # A MiniMax H3 take returned above, so the model here is an LTX one (a take with no model
+    # chosen uses the default LTX model: only the LTX endpoints can lip-sync a speech).
     orientation: video_lab.Orientation = take.orientation
-    video_model: VideoModel = (
-        take.video_model if is_video_model(take.video_model) else DEFAULT_MODEL
+    video_model: LtxModel = (
+        take.video_model if is_ltx_model(take.video_model) else DEFAULT_LTX_MODEL
     )
 
     if not _blank(take.dialogue):

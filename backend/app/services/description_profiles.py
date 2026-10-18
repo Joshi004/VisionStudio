@@ -8,18 +8,22 @@ A *prompt profile* holds the three things that change when the video model chang
 
 Everything else about drafting (the task, the consistency rules, the frame rules, the JSON
 answer, the job, the API and the page) knows nothing about LTX. To use another video model,
-add a profile below and point `ACTIVE_PROFILE` at it.
+add a profile below and choose it in `profile_for_model`.
 
-Four profiles exist. `ltx-2.3-keyframe` (Phase 12) was written for clips made from a first and
+Five profiles exist. `ltx-2.3-keyframe` (Phase 12) was written for clips made from a first and
 a last frame, and stays here unchanged because earlier drafting jobs name it. `ltx-2.3-first-frame`
 (Phase 15) was written for clips that start from a first frame alone, and stays unchanged for the
 same reason. `ltx-first-frame` (Phase 19) writes for LTX-2.3 and LTX-2.5 alike, so a scene's
 prompt can be made with either model and the takes compared, and also stays unchanged. Both
 models read a first-frame prompt the same way (the server's guide and Lightricks' prompting
 guide agree on it), so only the request differs between them, never the prompt.
-`ltx-first-last` (Phase 23) is the active one. It writes for the same two models, and the model
-also decides which scenes get a last frame, and writes it (`writes_last_frame`). A scene with a
-last frame gets the keyframe rules for its video prompt, one without keeps the first-frame rules.
+`ltx-first-last` (Phase 23) writes for the same two models, and the model also decides which
+scenes get a last frame, and writes it (`writes_last_frame`). A scene with a last frame gets the
+keyframe rules for its video prompt, one without keeps the first-frame rules. It is the profile
+of every project whose video model is an LTX model (`ACTIVE_PROFILE`).
+`minimax-h3-scene` writes for MiniMax H3, which reads a different kind of prompt: three named
+fields (`answer_format = "h3_fields"`) instead of one paragraph. It is the profile of every
+project whose video model is MiniMax H3 (`profile_for_model`).
 
 The text here is the lever for better prompts, so a change to it is a change to every future
 draft. Raise `version` whenever any text in a profile changes: the job stores the profile's
@@ -32,7 +36,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
+
+from app.services.video_models import H3_MODEL, VideoModel
 
 # Straight and curly double quotes (LTX lip-syncs quoted speech).
 _DOUBLE_QUOTES: Final = re.compile(r"[\"\u201c\u201d\u201e]")
@@ -80,6 +86,9 @@ class PromptProfile:
     max_last_frame_words: int = 0
     # Extra checks on the video prompt of a scene that has a last frame.
     rules_with_last_frame: tuple[TextRule, ...] = ()
+    # How the model answers with the video prompt: one text ("prose"), or an object with the
+    # three fields MiniMax H3 reads ("h3_fields"), which the app joins into one text.
+    answer_format: Literal["prose", "h3_fields"] = "prose"
 
 
 _LTX_EXAMPLE: Final = json.dumps(
@@ -563,6 +572,332 @@ LTX_FIRST_LAST: Final = PromptProfile(
     ),
 )
 
-# The video adapter the job asks for. `LTX_23_KEYFRAME`, `LTX_23_FIRST_FRAME` and
-# `LTX_FIRST_FRAME` stay above, unchanged, because jobs from Phase 12, 15 and 19 name them.
+# --- MiniMax H3, from a first frame alone or from a first and a last frame -------------------
+
+# Written from the guide the GPU server gives (`GET /v1/guide`) and MiniMax's own "Video Prompt
+# Writing Guide" (github.com/MiniMax-AI/MiniMax-H3, skills/h3-prompt-writing), whose I2VA and
+# FL2VA cases are the model for the two examples below. What differs from the LTX profiles:
+# - the video prompt is three named fields, not one paragraph. `integrated_multimodal_description`
+#   is a timeline of `[Shot N]` blocks; a scene's clip is always ONE shot, because the app makes
+#   the cuts between scenes and lets the system divide a script into shots;
+# - the line that places the frames on the clip (with the clip's own length) is written by the
+#   app (`scene_prompt.py`), never by the model;
+# - the style goes at the start of `[Shot 1]`, and the app writes it there when the project has
+#   one;
+# - the camera is a motion type with an amplitude and a speed, written as an action;
+# - there is no speech: the voiceover is the sound of a narrated video, so no `<d>` tags and no
+#   score (`non_diegetic_music` is `N/A`);
+# - a clip is never shorter than 5.17 s and reaches its last frame at the very end, so a last
+#   frame is only for scenes of 5.2 s or more;
+# - a first-and-last clip names the pictures "Picture 1" and "Picture 2" without angle brackets
+#   (the guide's FL2VA case), a first-frame clip names its picture "<Picture 1>" (I2VA).
+_H3_FRAME_LINE: Final = re.compile(
+    r"For the target video,|How the reference pictures align", re.IGNORECASE
+)
+_H3_SPEECH: Final = re.compile(r"</?d>", re.IGNORECASE)
+_H3_LATER_SHOT: Final = re.compile(r"\[Shot\s+(?:[2-9]|\d{2,})\]", re.IGNORECASE)
+# The joined prompt starts with the field name, then `[Shot 1]`.
+_H3_NOT_SHOT_ONE: Final = re.compile(
+    r"^integrated_multimodal_description:(?!\s*\[Shot 1\])", re.IGNORECASE
+)
+_H3_NO_FIRST_PICTURE: Final = re.compile(r"^(?![\s\S]*\bPicture 1\b)", re.IGNORECASE)
+_H3_NO_LAST_PICTURE: Final = re.compile(r"^(?![\s\S]*\bPicture 2\b)", re.IGNORECASE)
+_H3_OWN_MUSIC: Final = re.compile(r"non_diegetic_music:(?!\s*N/A\b)\s*\S", re.IGNORECASE)
+
+# The two worked scenes are the ones the LTX profile uses, with the same pictures.
+_H3_LAST_FRAME_SCENE: Final = json.loads(_LTX_FIRST_LAST_EXAMPLE_WITH)
+_H3_EXAMPLE_NONE: Final = json.dumps(
+    {
+        "scene": _FIRST_FRAME_ONLY["scene"],
+        "continuity": _FIRST_FRAME_ONLY["continuity"],
+        "first_frame": _FIRST_FRAME_ONLY["first_frame"],
+        "last_frame": None,
+        "video_prompt": {
+            "integrated_multimodal_description": (
+                "[Shot 1] Live-action, cinematic, a close-up at water level frames the cream "
+                "paper boat with the faded blue stripe shown in <Picture 1> at the rim of the "
+                "rain puddle, keeping its look, the wet cobblestones and the flat overcast "
+                "light. A gust of wind pushes the boat off the rim and into the water with a "
+                "soft splash, and it drifts slowly across the puddle, turning a quarter turn as "
+                "ripples spread behind it. It nudges the floating yellow leaf aside, pauses for "
+                "a beat, then comes to rest against the far edge, rocking gently as the last "
+                "ripples fade. The camera pans right with small amplitude at slow speed, "
+                "following the boat until it sits near the centre of the frame."
+            ),
+            "overall_soundscape": (
+                "A faint rain patter on stone and water, with a low gust of wind. The boat "
+                "enters the puddle with a soft splash, and water laps gently against the "
+                "cobblestones."
+            ),
+            "non_diegetic_music": "N/A",
+        },
+    },
+    ensure_ascii=False,
+)
+_H3_EXAMPLE_WITH: Final = json.dumps(
+    {
+        "scene": _H3_LAST_FRAME_SCENE["scene"],
+        "continuity": _H3_LAST_FRAME_SCENE["continuity"],
+        "first_frame": _H3_LAST_FRAME_SCENE["first_frame"],
+        "last_frame": _H3_LAST_FRAME_SCENE["last_frame"],
+        "video_prompt": {
+            "integrated_multimodal_description": (
+                "[Shot 1] Live-action, cinematic, a close-up at moss level begins in the "
+                "position and framing established by Picture 1, with the small brown garden "
+                "snail at the left edge of the flat mossy stone, its antennae raised towards the "
+                "right. The camera holds a static shot as the snail glides slowly across the "
+                "stone, its antennae swaying, and climbs a small ridge. It pauses for a beat, "
+                "antennae turning towards the ferns, then moves on until it settles at the "
+                "centre of the stone, antennae raised and bent towards the ferns, in the pose, "
+                "spacing, and composition established by Picture 2 at the end of the shot."
+            ),
+            "overall_soundscape": (
+                "A faint wet slide of the snail against the moss under a still, damp ambience. "
+                "A distant bird calls once."
+            ),
+            "non_diegetic_music": "N/A",
+        },
+    },
+    ensure_ascii=False,
+)
+
+# The rules both kinds of scene share about the two fields that are not the description.
+_H3_SOUND_RULES: Final = [
+    '"overall_soundscape": 1 to 4 English sentences in one paragraph: the ambience of the '
+    "place, the physical sounds of the actions (footsteps, fabric, water, impacts) and "
+    "non-verbal sounds (wind, rain, breathing). Concrete sources, no speech, no music. Keep it "
+    "natural and quiet: a voiceover is laid over it.",
+    '"non_diegetic_music": exactly "N/A". The video has a voiceover and no score of its own. '
+    "The author's instructions can change this: then 1 to 3 sentences on instruments, tempo "
+    "and volume, never on mood.",
+]
+
+_H3_CAMERA_RULE: Final = (
+    "the camera is written as an action inside the shot, with a motion type, and an amplitude "
+    "and a speed only when they matter. Motion types: static shot, push in, pull out, pan "
+    "left, pan right, truck left, truck right, tilt up, tilt down, pedestal up, pedestal "
+    "down, arc shot, tracking shot, shake slightly. Amplitude: with small amplitude, with "
+    "large amplitude. Speed: at slow speed, at fast speed. For example \u201cThe camera "
+    "pushes in with small amplitude at slow speed toward the folded letter.\u201d, never a "
+    "list of labels."
+)
+
+MINIMAX_H3_SCENE: Final = PromptProfile(
+    id="minimax-h3-scene",
+    version=1,
+    video_model=(
+        "MiniMax H3, from a first frame alone or from a first and a last frame "
+        "(one continuous shot)"
+    ),
+    answer_format="h3_fields",
+    # For a scene WITHOUT a last frame: the guide's I2VA case.
+    video_prompt_rules="\n".join(
+        [
+            'Rules for "video_prompt" in a scene WITHOUT a last frame, the prompt for MiniMax '
+            "H3. H3 was trained on one structured prompt and nothing rewrites yours, so write "
+            "it in that structure. The first frame is given to the model as <Picture 1> and "
+            'the clip starts on it. "video_prompt" is an object with exactly three text '
+            'fields: "integrated_multimodal_description", "overall_soundscape" and '
+            '"non_diegetic_music". The app adds the line that places the picture on the '
+            "clip, with the clip's own length: never write that line.",
+            "",
+            '"integrated_multimodal_description": the main body, 80 to 180 words, in the '
+            "present tense, one paragraph:",
+            '1. One shot. Begin with "[Shot 1]" and never write another shot: no "[Shot 2]", '
+            'no "the camera cuts to", no fade or dissolve, no times. The clip of a scene is '
+            "one continuous shot, and the app makes the cuts between scenes.",
+            '2. Right after "[Shot 1]" come the overall style (for example "Live-action, '
+            'cinematic,") and then the opening composition ("a medium-wide shot frames..."). '
+            "The user message says whether the app writes the style for you. The examples "
+            "below are for a project with no style given, so their [Shot 1] states it.",
+            "3. Anchor, then move: first-frame anchor, then the onset of the action, then its "
+            "continuous development, then the result. Name the main subject as shown in "
+            '<Picture 1> ("the paper boat shown in <Picture 1>") and say in a few words that '
+            "its look, colours and place stay as they are. Never describe the picture again "
+            "in detail: the model sees it, and a second description pulls the video away from "
+            "it. Then say only what happens.",
+            "4. Every sentence has a verb that does something, chronological and literal "
+            "(lifts, turns, drifts). Show feeling through physical cues, never with a label "
+            'such as "sad". Write the pace in: the model adds no pause you do not ask for '
+            '("it pauses for a beat"). About one action for every 2 to 3 seconds of the scene.',
+            "5. Fit the scene's length (the scene list gives its seconds). A clip is never "
+            "shorter than 5.2 seconds, but only as much of it as the scene lasts is shown. "
+            "The main action starts within the first second or two and is finished inside "
+            "the scene's length, so a short scene gets one simple action. Say where the "
+            "action ends, in plain words.",
+            f"6. Camera: one move for the shot, {_H3_CAMERA_RULE} For a calm scene, hold a "
+            "static shot. Vary the move across the video instead of repeating one.",
+            "7. Light: one lighting logic. Say how the light changes only if it does.",
+            "8. No speech. Nobody on screen speaks and the narrator is never seen: no <d> "
+            "tags, no speaker ids such as (S1), no singing, no voiceover lines. A person who "
+            "appears keeps the lips closed. No on-screen text and no double quotes.",
+            "9. A sound that belongs to one action may be written in its sentence (\u201cthe "
+            "broom scrapes over the stone as it sweeps\u201d). The soundscape sums up the rest.",
+            "10. Plain film language and restrained adjectives. No technical specs: no focal "
+            "lengths, f-stops, resolutions or camera model names. The first frame already sets "
+            "the look.",
+            "",
+            *[f"- {rule}" for rule in _H3_SOUND_RULES],
+        ]
+    ),
+    example=_H3_EXAMPLE_NONE,
+    max_video_words=260,
+    rules=(
+        TextRule(
+            _H3_FRAME_LINE,
+            "A line that places the pictures on the clip found. The app writes that line, "
+            "with the clip's own length: leave it out.",
+        ),
+        TextRule(
+            _H3_NOT_SHOT_ONE,
+            "The description does not begin with \u201c[Shot 1]\u201d.",
+        ),
+        TextRule(
+            _H3_LATER_SHOT,
+            "A second shot found. The clip of a scene is one continuous shot: the app makes "
+            "the cuts between scenes.",
+        ),
+        TextRule(
+            _NAMED_CUT,
+            "A cut found (\u201cthe camera cuts to\u201d). The clip of a scene is one "
+            "continuous shot. Use a camera move to change the view.",
+        ),
+        TextRule(
+            _H3_NO_FIRST_PICTURE,
+            "The description does not name the first frame (<Picture 1>). It should start "
+            "from the picture the clip begins on.",
+        ),
+        TextRule(
+            _H3_SPEECH,
+            "Spoken words (<d> tags) found. Nobody on screen speaks: the voiceover is the "
+            "narration.",
+        ),
+        TextRule(
+            _DOUBLE_QUOTES,
+            "Double quotes found. Nobody speaks here and there is no on-screen text.",
+        ),
+        TextRule(
+            _TIMESTAMP,
+            "A time such as \u201c0:03\u201d or \u201c3 seconds\u201d found. A single shot "
+            "has no times, and the clip's length is set by the scene.",
+        ),
+        TextRule(
+            _H3_OWN_MUSIC,
+            "The music field is not \u201cN/A\u201d. The video has a voiceover and no score "
+            "of its own.",
+        ),
+    ),
+    writes_last_frame=True,
+    last_frame_rules="\n".join(
+        [
+            "When to write a last frame",
+            "- A last frame is made later by EDITING the first frame's picture, so it can only "
+            "show the SAME shot a moment later: the same place, light, framing and camera "
+            "position, with the subject changed. Each one costs extra picture-making time, so "
+            "write one only where it makes the clip clearly more controlled. Not every scene "
+            "needs one.",
+            "- MiniMax H3 reaches the last frame at the very end of its clip, and a clip is "
+            "never shorter than 5.2 seconds. Write a last frame only for a scene that lasts "
+            "5.2 seconds or more (the scene list gives the length): a shorter scene would be "
+            "cut off before it reached the last frame.",
+            "- Write one when the scene's ending is a visible change of the subject inside the "
+            "same shot and where the clip ends matters: a thing opens, fills, lands, lights up "
+            "or moves to a new spot; a subject turns or looks somewhere new; a hand reaches "
+            "for something and takes it.",
+            '- Write one when the next scene is "continues_action" and this scene\'s motion can '
+            "end inside the same shot. The app uses this scene's last frame as the next "
+            "scene's first frame, so the cut is seamless.",
+            "- Write one when a recurring subject must look exactly the same at the end as at "
+            "the start through a clear movement (a close-up of a face or of an object that "
+            "moves).",
+            '- Answer null for "last_frame" when the scene is ambient or atmospheric with no '
+            "clear end state (rain, drifting fog, a still landscape, light slowly changing); "
+            "when the camera makes a large move (a pan that reveals a new place, a change from "
+            "wide to close); when the scene is shorter than 5.2 seconds; or when the end would "
+            "show a different place, different light or a different time.",
+            "",
+            'Rules for "last_frame" (a still picture made by editing the first frame)',
+            "- It is the SAME shot as the first frame, one moment after the scene's motion "
+            "ends: the same place, light, framing, camera position and lens look. Only the "
+            "subject changes (its position, state, pose or gaze), or something small enters or "
+            "leaves the frame.",
+            '- 30 to 70 words. Begin with "The same shot", say what is different in concrete '
+            "terms (positions, states, gaze, objects), and end by saying what is unchanged.",
+            "- Name a subject by its world name and keep its identifying details from the "
+            "world description. Never give it another look.",
+            "- It shows where the video prompt's motion ENDS, as a still: the subject in place, "
+            'at rest or in a pause. No motion words ("starts to", "is moving") and no sound.',
+            "- Never change the camera: no zoom, no new angle, no wider or tighter view. If "
+            'the end needs a different framing, answer null for "last_frame" instead.',
+            "- No text, captions, logos or watermarks in the picture.",
+            "",
+            "Scenes that follow each other",
+            '- When scene N has a last frame and scene N+1 is "continues_action", the '
+            "first_frame of scene N+1 must describe exactly the picture of scene N's "
+            "last_frame (word for word where you can, written as a whole picture again), "
+            "because that last frame becomes scene N+1's first frame. Scene N+1's video prompt "
+            "starts from that picture.",
+        ]
+    ),
+    # For a scene WITH a last frame: the guide's FL2VA case.
+    video_prompt_rules_with_last_frame="\n".join(
+        [
+            'Rules for "video_prompt" in a scene WITH a last frame, the prompt for MiniMax '
+            "H3. The clip starts on the first frame (Picture 1, at 0.00 seconds) and ends on "
+            "the last frame (Picture 2, at the very end of the clip). The three fields, the "
+            "style and the rules for sound and music are the same as for a scene without a "
+            "last frame. Never write the line that places the pictures on the clip: the app "
+            "writes it. Only the description differs:",
+            "",
+            '"integrated_multimodal_description": 70 to 160 words, in the present tense, one '
+            "paragraph:",
+            '1. One shot. Begin with "[Shot 1]" and never write another shot, a cut or a '
+            "fade: one continuous shot lets the model move from one picture to the other "
+            "without a break.",
+            '2. Right after "[Shot 1]" come the overall style and the opening composition, '
+            "as for a scene without a last frame.",
+            "3. Describe the PATH between the two pictures, never the two pictures: the state "
+            "of the first frame, then the changes you can see on the way, then the "
+            "differences narrowing, then the state of the last frame. Say that the subject "
+            '"begins in the position and framing established by Picture 1", and end by saying '
+            'it "settles into the pose, spacing, and composition established by Picture 2 at '
+            'the end of the shot". Write them as plain "Picture 1" and "Picture 2", without '
+            "angle brackets. Never describe again what the pictures show.",
+            "4. The last frame is reached at the very end of the clip: the motion carries on "
+            "steadily until then, and nothing happens after it. Every sentence has a verb "
+            "that does something. Write the pace in (\u201cit pauses for a beat\u201d).",
+            "5. Camera: the two pictures are framed alike, so use a static shot or at most one "
+            "very gentle move (a push in or a pull out with small amplitude at slow speed). "
+            "Never a pan, a truck, a tilt, an arc, a tracking shot or a zoom: it makes the "
+            "whole picture slide between the pictures. Write it as an action inside the "
+            "shot.",
+            "6. Light: it is the same in both pictures, so do not describe a change of light.",
+            "7. No speech, no <d> tags, no speaker ids, no singing, no on-screen text and no "
+            "double quotes. Plain film language, no technical specs.",
+        ]
+    ),
+    example_with_last_frame=_H3_EXAMPLE_WITH,
+    last_frame_checks=LTX_FIRST_LAST.last_frame_checks,
+    max_last_frame_words=70,
+    rules_with_last_frame=(
+        TextRule(
+            _H3_NO_LAST_PICTURE,
+            "The description does not name the last frame (Picture 2). With a last frame it "
+            "should end by settling into the pose, spacing and composition of Picture 2.",
+        ),
+        TextRule(
+            _FRAMING_MOVE,
+            "A camera move that changes the framing found (a pan, a pull-back, a zoom). With a "
+            "last frame both pictures are framed alike: use a static shot.",
+        ),
+    ),
+)
+
+# The profile of the LTX models. `LTX_23_KEYFRAME`, `LTX_23_FIRST_FRAME` and `LTX_FIRST_FRAME`
+# stay above, unchanged, because jobs from Phase 12, 15 and 19 name them.
 ACTIVE_PROFILE: Final = LTX_FIRST_LAST
+
+
+def profile_for_model(model: VideoModel) -> PromptProfile:
+    """The profile that writes the descriptions of a project made with `model`."""
+    return MINIMAX_H3_SCENE if model == H3_MODEL else ACTIVE_PROFILE

@@ -41,7 +41,10 @@ from typing import Any, Final
 
 from app.db.models import Project, Scene
 from app.providers import llm
+from app.providers.video_generator import H3_SIZES
+from app.services import lab_prompt_writer
 from app.services.description_profiles import PromptProfile
+from app.services.frame_counts import H3_FPS, H3_MIN_FRAMES
 
 # One request holds every scene, so a long project is refused rather than cut off.
 MAX_SCENES: Final = 40
@@ -145,14 +148,35 @@ def _fixed_field_lines(profile: PromptProfile) -> list[str]:
     return lines
 
 
+def _writes_h3_fields(profile: PromptProfile) -> bool:
+    """Whether the video prompt is answered as an object with MiniMax H3's three fields."""
+    return profile.answer_format == "h3_fields"
+
+
+def _video_prompt_field_line(profile: PromptProfile) -> str:
+    if _writes_h3_fields(profile):
+        return (
+            '- "video_prompt": the prompt for the video model: an object with three text '
+            'fields, "integrated_multimodal_description", "overall_soundscape" and '
+            '"non_diegetic_music" (see the rules for it).'
+        )
+    return '- "video_prompt": the motion prompt.'
+
+
 def _answer_shape_lines(profile: PromptProfile) -> list[str]:
     last = '"last_frame": null, ' if profile.writes_last_frame else ""
+    video_prompt = (
+        '{"integrated_multimodal_description": "...", "overall_soundscape": "...", '
+        '"non_diegetic_music": "..."}'
+        if _writes_h3_fields(profile)
+        else '"..."'
+    )
     return [
         "Answer with one JSON object only, in exactly this form:",
         '{"world": {"subjects": [{"name": "...", "description": "..."}], '
         '"places": [{"name": "...", "description": "..."}]}, '
         '"scenes": [{"scene": 1, "continuity": "new_place", "first_frame": "...", '
-        f'{last}"video_prompt": "..."}}]}}',
+        f'{last}"video_prompt": {video_prompt}}}]}}',
     ]
 
 
@@ -172,7 +196,7 @@ def _system_prompt(profile: PromptProfile) -> str:
             "What you write for every scene",
             '- "first_frame": the still image the clip starts on: the instant just before the '
             "motion begins.",
-            '- "video_prompt": the motion prompt.',
+            _video_prompt_field_line(profile),
             *_last_frame_field_lines(profile),
             '- "continuity": "new_place" (a new place or time), "same_place_new_angle" (the '
             "previous scene's place and subjects, seen from a new angle or distance) or "
@@ -333,6 +357,38 @@ def _quoted(value: str | None, none: str) -> str:
     return text if text else none
 
 
+def _style_lines(style: str, h3: bool) -> list[str]:
+    """What the user message says about the style. For MiniMax H3 the app writes the style right
+    after `[Shot 1]` (`scene_prompt.py`); without one the writer states it there itself.
+    """
+    if not style:
+        if h3:
+            return [
+                "Style of the whole video: none given. Choose one natural look that suits the "
+                "script and keep it for every scene: state it right after \u201c[Shot 1]\u201d "
+                "in the video prompt of every scene (for example \u201cLive-action, "
+                "cinematic,\u201d) and in the first frame descriptions."
+            ]
+        return [
+            "Style of the whole video: none given. Choose one natural look that suits the "
+            "script and keep it for every scene."
+        ]
+    if h3:
+        phrase = style.rstrip(".,;: ")
+        return [
+            f"Style of the whole video: {style}. The app writes \u201c{phrase},\u201d right "
+            "after \u201c[Shot 1]\u201d in the video prompt of every scene, so do not state "
+            "the style there: start the description with the opening composition (for "
+            "example \u201c[Shot 1] a medium-wide shot frames...\u201d). Use the style in the "
+            "first frame descriptions."
+        ]
+    return [
+        f'Style of the whole video: {style}. The app writes "Style: {style}." in front '
+        "of every video prompt, so do not repeat the style there. Use it in the first "
+        "frame descriptions."
+    ]
+
+
 def _user_message(
     project: Project,
     scenes: Sequence[SceneToDraft],
@@ -340,32 +396,40 @@ def _user_message(
     profile: PromptProfile,
 ) -> str:
     style = _quoted(project.style_prefix, "")
+    h3 = _writes_h3_fields(profile)
     lines = [
         f"Project: a {project.orientation} video. The frames are {project.gen_width} x "
         f"{project.gen_height} pixels (width x height) at {project.fps} frames per second. "
         f"Scenes last {project.min_scene_seconds:g} to {project.max_scene_seconds:g} seconds.",
-        "",
     ]
-    if style:
+    if h3:
+        width, height = H3_SIZES[project.orientation]
         lines.append(
-            f'Style of the whole video: {style}. The app writes "Style: {style}." in front '
-            "of every video prompt, so do not repeat the style there. Use it in the first "
-            "frame descriptions."
+            f"MiniMax H3 makes every clip at {width} x {height} pixels and {H3_FPS} frames per "
+            f"second, as one shot of at least {H3_MIN_FRAMES / H3_FPS:.1f} seconds. Only as "
+            "much of a clip as the scene lasts is shown."
+        )
+    lines.append("")
+    lines += _style_lines(style, h3)
+    suffix_place = "every video prompt"
+    if h3:
+        suffix_place = "the integrated_multimodal_description of every video prompt"
+    lines.append(
+        f"Added by the app to the end of {suffix_place} (do not repeat it, and do not "
+        f"contradict it): {_quoted(project.prompt_suffix, 'nothing')}"
+    )
+    if h3:
+        lines.append(
+            "MiniMax H3 has no negative prompt, so what must not appear has to be left out of "
+            "the video prompt itself. The author's list of things to avoid: "
+            f"{_quoted(project.negative_prompt, 'nothing')}"
         )
     else:
         lines.append(
-            "Style of the whole video: none given. Choose one natural look that suits the "
-            "script and keep it for every scene."
+            "Sent to LTX-2.3 as things to avoid (LTX-2.5 has no negative prompt and never sees "
+            "it, so what must not appear has to be left out of the video prompt itself): "
+            f"{_quoted(project.negative_prompt, 'nothing')}"
         )
-    lines.append(
-        "Added by the app to the end of every video prompt (do not repeat it, and do not "
-        f"contradict it): {_quoted(project.prompt_suffix, 'nothing')}"
-    )
-    lines.append(
-        "Sent to LTX-2.3 as things to avoid (LTX-2.5 has no negative prompt and never sees it, "
-        "so what must not appear has to be left out of the video prompt itself): "
-        f"{_quoted(project.negative_prompt, 'nothing')}"
-    )
     instructions = (project.description_instructions or "").strip()
     if instructions:
         lines += [
@@ -517,6 +581,31 @@ def _clean_text(value: object, field: str, warnings: list[str]) -> str | None:
     return cleaned
 
 
+def _h3_video_prompt(value: object, warnings: list[str]) -> str | None:
+    """The video prompt of a profile that answers with MiniMax H3's three fields, joined into
+    the one text a scene stores (`lab_prompt_writer.assemble_h3_prompt`). None, with a warning,
+    when it is not an object with a description and a soundscape.
+    """
+    if value is None:
+        return None
+    joined = lab_prompt_writer.assemble_h3_prompt(value) if isinstance(value, dict) else None
+    if joined is None:
+        warnings.append(
+            'The video prompt had no "integrated_multimodal_description" and '
+            '"overall_soundscape" text and was not used.'
+        )
+        return None
+    return _clean_text(joined, VIDEO_PROMPT, warnings)
+
+
+def _field_text(
+    value: object, field: str, profile: PromptProfile, warnings: list[str]
+) -> str | None:
+    if field == VIDEO_PROMPT and _writes_h3_fields(profile):
+        return _h3_video_prompt(value, warnings)
+    return _clean_text(value, field, warnings)
+
+
 def check_drafts(
     answer: dict[str, Any], scenes: Sequence[SceneToDraft], profile: PromptProfile
 ) -> CheckedDrafts:
@@ -524,6 +613,8 @@ def check_drafts(
 
     - An entry must name a scene of the request, by its number from 1, and only the first
       entry for a scene counts.
+    - Under a profile that answers in `h3_fields` the video prompt is an object with
+      MiniMax H3's three fields, and it is joined into one text before it is checked.
     - A text that is empty, not text, or over the limit is dropped. A text for a field that
       is fixed is dropped too: the author's own text is never replaced. Only the fields of
       `fields_for(profile)` are read, so a last frame is ignored under a profile that does
@@ -549,7 +640,7 @@ def check_drafts(
         texts: dict[str, str | None] = {field: None for field in ALL_FIELDS}
         for field in fields_for(profile):
             if scene.fixed_text(field) is None:
-                texts[field] = _clean_text(entry.get(field), field, warnings)
+                texts[field] = _field_text(entry.get(field), field, profile, warnings)
 
         last_frame = texts[LAST_FRAME]
         if last_frame is not None:

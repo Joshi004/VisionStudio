@@ -35,8 +35,9 @@ class Project(Base):
     __tablename__ = "project"
     __table_args__ = (
         CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
+        # `minimax-h3` since revision 0021 (before it only the labs could use MiniMax H3).
         CheckConstraint(
-            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')",
+            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')",
             name="video_model_valid",
         ),
     )
@@ -61,9 +62,9 @@ class Project(Base):
     # places, look, sound), the counterpart of `cut_instructions`.
     description_instructions: Mapped[str | None] = mapped_column(default=None)
     script_text: Mapped[str | None] = mapped_column(default=None)
-    # Added in Phase 19: the video model that makes this project's clips (`ltx-2.3` or
-    # `ltx-2.5`). NULL means "use the app's default" (the `default_video_model` setting). A
-    # scene's own `video_model` wins over this one.
+    # Added in Phase 19: the video model that makes this project's clips (`ltx-2.3`, `ltx-2.5`
+    # or, since revision 0021, `minimax-h3`). NULL means "use the app's default" (the
+    # `default_video_model` setting). A scene's own `video_model` wins over this one.
     video_model: Mapped[str | None] = mapped_column(default=None)
     language: Mapped[str] = mapped_column(default="en", server_default=text("'en'"))
     # Circular reference with `asset` (DATABASE_STRUCTURE.md Section 3): `asset.project_id`
@@ -161,8 +162,9 @@ class Scene(Base):
             "cast_assignment_source IN ('manual', 'ai')",
             name="cast_assignment_source_valid",
         ),
+        # `minimax-h3` since revision 0021 (before it only the labs could use MiniMax H3).
         CheckConstraint(
-            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5')",
+            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')",
             name="video_model_valid",
         ),
         UniqueConstraint("project_id", "index"),
@@ -494,7 +496,7 @@ class LabVideoRun(Base):
 
     __tablename__ = "lab_video_run"
     __table_args__ = (
-        # Unlike `project` and `scene`, the lab can also use MiniMax H3 (revision 0017).
+        # The lab has taken MiniMax H3 since revision 0017; `project` and `scene` since 0021.
         CheckConstraint(
             "video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')", name="video_model_valid"
         ),

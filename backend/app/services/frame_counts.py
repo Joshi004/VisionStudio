@@ -24,10 +24,13 @@ MIN_NUM_FRAMES: Final = 9
 
 _FRAMES_PER_STEP: Final = 8
 
-# MiniMax H3 (the Video lab and the Character lab's takes) runs at a fixed 24 fps and only
-# decodes `17n + 5` frames. The GPU server's guide documents 124 (5.17 s) to 345 (14.4 s) frames
-# and clamps to that range itself; the app does not enforce it, so the server's real answer shows.
+# MiniMax H3 runs at a fixed 24 fps and only decodes `17n + 5` frames. The GPU server's guide
+# documents 124 (5.17 s) to 345 (14.4 s) frames and clamps to that range itself. The labs do not
+# enforce it, so the server's real answer shows; a scene's clip does (`h3_scene_num_frames`),
+# because a clip that is too short for its scene wastes a GPU run.
 H3_FPS: Final = 24
+H3_MIN_FRAMES: Final = 124
+H3_MAX_FRAMES: Final = 345
 _H3_FRAMES_PER_STEP: Final = 17
 _H3_BASE_FRAMES: Final = 5
 
@@ -66,3 +69,14 @@ def h3_num_frames(target: int) -> int:
     """
     steps = max(1, -(-(target - _H3_BASE_FRAMES) // _H3_FRAMES_PER_STEP))  # ceil without floats
     return _H3_FRAMES_PER_STEP * steps + _H3_BASE_FRAMES
+
+
+def h3_scene_num_frames(target: int) -> int:
+    """The frame count to ask MiniMax H3 for a scene whose length is `target` frames at 24 fps:
+    the smallest `17n + 5` that is at least `target`, and never below `H3_MIN_FRAMES` (a
+    shorter scene still gets the shortest clip H3 makes, and the render trims it).
+
+    The result can be above `H3_MAX_FRAMES` for a long scene. The caller refuses that, with a
+    message that names the scene's length.
+    """
+    return h3_num_frames(max(target, H3_MIN_FRAMES))

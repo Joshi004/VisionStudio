@@ -34,8 +34,6 @@ from typing import ClassVar, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.jobs import pools
-
 RestartRule = Literal["resume", "start_again", "never_rerun"]
 Provider = Literal["gpu", "llm", "image", "local"]
 
@@ -44,6 +42,10 @@ class JobHandler(ABC):
     job_type: ClassVar[str]
     provider: ClassVar[Provider]
     restart_rule: ClassVar[RestartRule]
+    # An `llm` handler only: the model setting of its role (`services/llm_target.py`). Its
+    # provider setting says, before a job starts, whether the job's calls go to the paid API or
+    # to Qwen3.8 on the GPU server, and so which pool the job waits in.
+    model_key: ClassVar[str | None] = None
 
     async def concurrency_limit(self, session: AsyncSession) -> int:
         """How many jobs of this type may be running at once. Only a `local` handler is asked:
@@ -81,11 +83,3 @@ def get_handler(job_type: str) -> JobHandler | None:
 
 def all_handlers() -> list[JobHandler]:
     return list(_registry.values())
-
-
-def slot_key(job_type: str) -> str:
-    """The pool a job type's running slots are counted in: the GPU server's or the paid inference
-    API's (see `pools.py`), else the type itself (a local job).
-    """
-    handler = _registry.get(job_type)
-    return job_type if handler is None else pools.pool_of(handler)

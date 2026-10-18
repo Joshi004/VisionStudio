@@ -1,5 +1,5 @@
-"""The video adapter: LTX-2.3 and LTX-2.5 on the GPU server (ANALYSIS.md Section 5.3, 5.4
-and 6.4).
+"""The video adapter: LTX-2.3, LTX-2.5 and MiniMax H3 on the GPU server (ANALYSIS.md Section
+5.3, 5.4 and 6.4).
 
 `VideoGenerator` is split into steps, because the dispatcher saves the server's job id
 right after submitting and resumes after a restart. Upload, status, download, cancel and
@@ -42,14 +42,18 @@ scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
   on the server (the job still succeeds, without lip sync): `gpu_server.RemoteStatus.lip_sync`
   carries whether it was applied.
 
-- MiniMax H3 (the Video lab and the Character lab's takes, never a scene's clip),
+- MiniMax H3 (a scene's clip, the Video lab and the Character lab's takes),
   `POST /v1/h3/videos/generate`
   (`H3GenerateRequest`): text-to-video, first frame, or first and last frame, all by one
   endpoint. The body has no `frame_rate` (a fixed 24 fps), `mode`, `enhance_prompt` or
   `negative_prompt`; it has an optional `num_inference_steps`. The frames are named as
   `first_frame_asset_id` and `last_frame_asset_id`. The prompt is used exactly as sent and
   was trained in a structured format, with a first line that places the frames
-  (`h3_prompt_prefix`). `lab_endpoint_for` finds it; `ENDPOINTS` (the scenes') never lists it.
+  (`h3_prompt_prefix`). `ENDPOINTS` lists it for both clip modes. Because one endpoint serves both
+  modes, the mode of a recorded H3 clip cannot be read back from its endpoint: it is stored next
+  to it (`clip_mode_for`). A scene that has a last frame but is shorter than the shortest H3 clip
+  (`frame_counts.H3_MIN_FRAMES`, 5.17 s) is made by LTX-2.5 instead, with a note, because H3 lands
+  on the last frame at the very end of a clip that the render would cut before it.
 - MiniMax H3 reference mode, `POST /v1/h3/videos/audio-to-video` (`H3AudioToVideoRequest`):
   up to 9 reference pictures (`image_asset_ids`) and, optionally, audio references
   (`audio_asset_ids`, a list of up to 3, each documented as 2 to 15 s) that the model reads and
@@ -83,9 +87,9 @@ from typing import Any, Final
 from app.core import outbound
 from app.providers import gpu_server
 from app.services import video_models
-from app.services.frame_counts import H3_FPS, MIN_NUM_FRAMES
+from app.services.frame_counts import H3_FPS, H3_MIN_FRAMES, MIN_NUM_FRAMES
 from app.services.scene_inputs import ClipMode
-from app.services.video_models import LabVideoModel, VideoModel
+from app.services.video_models import H3_MODEL, LabVideoModel, LtxModel, VideoModel
 
 KEYFRAME_PATH: Final = "/v1/ltx/videos/keyframe-interpolation"
 GENERATE_PATH: Final = "/v1/ltx/videos/generate"
@@ -97,28 +101,21 @@ LTX25_INTERPOLATE_PATH: Final = "/v1/ltx25/videos/interpolate"
 # are not in `ENDPOINTS` (which is keyed by `ClipMode`, not by "has audio").
 AUDIO_TO_VIDEO_PATH: Final = "/v1/ltx/videos/audio-to-video"
 LTX25_AUDIO_TO_VIDEO_PATH: Final = "/v1/ltx25/videos/audio-to-video"
-# MiniMax H3, used by the Video lab and the Character lab's takes: text, first-frame and
+# MiniMax H3, used by scenes, the Video lab and the Character lab's takes: text, first-frame and
 # first-and-last-frame video by one endpoint, and reference mode (pictures and an audio
 # reference) by the other.
 H3_GENERATE_PATH: Final = "/v1/h3/videos/generate"
 H3_AUDIO_TO_VIDEO_PATH: Final = "/v1/h3/videos/audio-to-video"
-# The audio-to-video endpoint for each video model.
-AUDIO_ENDPOINTS: Final[dict[VideoModel, str]] = {
+# The audio-to-video endpoint for each LTX model (MiniMax H3's reference mode is a different
+# kind of clip, started by `create_h3_reference_run`).
+AUDIO_ENDPOINTS: Final[dict[LtxModel, str]] = {
     "ltx-2.3": AUDIO_TO_VIDEO_PATH,
     "ltx-2.5": LTX25_AUDIO_TO_VIDEO_PATH,
 }
 # Which endpoint makes a clip, by video model and by how the clip is made. A pair that is
-# missing falls back to LTX-2.3 in `endpoint_for`.
+# missing falls back to LTX-2.3 in `endpoint_for`. MiniMax H3 has one endpoint for both modes
+# (and for a text-only clip, which only the Video lab makes).
 ENDPOINTS: Final[dict[tuple[VideoModel, ClipMode], str]] = {
-    ("ltx-2.3", "first_frame"): GENERATE_PATH,
-    ("ltx-2.3", "first_and_last"): KEYFRAME_PATH,
-    ("ltx-2.5", "first_frame"): LTX25_GENERATE_PATH,
-    ("ltx-2.5", "first_and_last"): LTX25_INTERPOLATE_PATH,
-}
-# The same for the Video lab, which can also use MiniMax H3 (one endpoint for both modes, and
-# for a text-only clip). It is a separate map so a scene, which only ever uses `ENDPOINTS`, can
-# never be given an H3 endpoint.
-LAB_ENDPOINTS: Final[dict[tuple[LabVideoModel, ClipMode], str]] = {
     ("ltx-2.3", "first_frame"): GENERATE_PATH,
     ("ltx-2.3", "first_and_last"): KEYFRAME_PATH,
     ("ltx-2.5", "first_frame"): LTX25_GENERATE_PATH,
@@ -153,6 +150,14 @@ _H3_PREFIX: Final = "/v1/h3/"
 H3_MAX_REFERENCE_IMAGES: Final = 9
 H3_MAX_REFERENCE_AUDIOS: Final = 3
 _SIZE_MULTIPLE: Final = 64
+# MiniMax H3, from the GPU server's guide (version 0.13.0). It is trained at 1344 x 768 and
+# 768 x 1344 whatever the project's own size is, so a clip is asked for at these sizes by the
+# project's orientation (both are multiples of 64, so the frame fitting and `check_size` keep
+# working). The render scales the clip to the output size afterwards.
+H3_SIZES: Final[dict[str, tuple[int, int]]] = {
+    "landscape": (1344, 768),
+    "portrait": (768, 1344),
+}
 # What the server's guide says the first line of an H3 prompt must be when frames are given.
 _H3_FIRST_FRAME_LINE: Final = (
     "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) "
@@ -179,12 +184,35 @@ class EndpointChoice:
     note: str | None
 
 
-def endpoint_for(model: VideoModel, mode: ClipMode) -> EndpointChoice:
+def endpoint_for(
+    model: VideoModel, mode: ClipMode, duration_s: float | None = None
+) -> EndpointChoice:
     """The endpoint that makes a clip of this `mode` with `model`.
 
-    Every pair of model and mode has an endpoint today. For a pair that has none, the clip is
-    made by LTX-2.3 and the note says so.
+    `duration_s` is the scene's length. It only matters for MiniMax H3 with a last frame: H3
+    reaches the last frame at the very end of a clip that is at least `H3_MIN_FRAMES` long, so
+    a shorter scene would be cut before the last frame is shown. That clip is made by LTX-2.5
+    instead and the note says so. Left out, the length is not checked.
+
+    Every other pair of model and mode has an endpoint today. For a pair that has none, the
+    clip is made by LTX-2.3 and the note says so.
     """
+    if (
+        model == H3_MODEL
+        and mode == "first_and_last"
+        and duration_s is not None
+        and round(duration_s * H3_FPS) < H3_MIN_FRAMES
+    ):
+        h3_fallback: VideoModel = "ltx-2.5"
+        h3_note = (
+            f"{video_models.label(model)} makes a clip of at least {H3_MIN_FRAMES / H3_FPS:.2f} s "
+            "and reaches the last frame at the very end of it, so this scene "
+            f"({duration_s:.2f} s) would be cut before the last frame is shown. "
+            f"{video_models.label(h3_fallback)} is used for this clip."
+        )
+        return EndpointChoice(
+            endpoint=ENDPOINTS[(h3_fallback, mode)], model=h3_fallback, note=h3_note
+        )
     endpoint = ENDPOINTS.get((model, mode))
     if endpoint is not None:
         return EndpointChoice(endpoint=endpoint, model=model, note=None)
@@ -202,7 +230,7 @@ def lab_endpoint_for(model: LabVideoModel, mode: ClipMode) -> str:
 
     Raises ValueError, with a message for the user, for a pair that has no endpoint.
     """
-    endpoint = LAB_ENDPOINTS.get((model, mode))
+    endpoint = ENDPOINTS.get((model, mode))
     if endpoint is None:
         raise ValueError(f"{video_models.label(model)} has no endpoint for this kind of clip.")
     return endpoint
@@ -215,14 +243,14 @@ def is_h3_endpoint(endpoint: object) -> bool:
     return isinstance(endpoint, str) and endpoint.startswith(_H3_PREFIX)
 
 
-def audio_endpoint_for(model: VideoModel) -> str:
-    """The audio-to-video endpoint of this video model."""
+def audio_endpoint_for(model: LtxModel) -> str:
+    """The audio-to-video endpoint of this LTX model."""
     return AUDIO_ENDPOINTS[model]
 
 
 def model_for(endpoint: object) -> VideoModel | None:
     """The video model a recorded endpoint belongs to, or None for an endpoint that belongs
-    to neither (every older clip names an `/v1/ltx/` path, so it counts as LTX-2.3).
+    to none (every older clip names an `/v1/ltx/` path, so it counts as LTX-2.3).
     """
     if not isinstance(endpoint, str):
         return None
@@ -230,13 +258,23 @@ def model_for(endpoint: object) -> VideoModel | None:
         return "ltx-2.5"
     if endpoint.startswith(_LTX23_PREFIX):
         return "ltx-2.3"
+    if endpoint.startswith(_H3_PREFIX):
+        return H3_MODEL
     return None
 
 
-def clip_mode_for(endpoint: object) -> ClipMode | None:
+def clip_mode_for(endpoint: object, recorded_mode: object = None) -> ClipMode | None:
     """The mode a recorded endpoint stands for, or None for an endpoint this phase does not
     know (a job or a clip from before it never has one).
+
+    A MiniMax H3 endpoint serves both modes, so for it the mode stored next to the endpoint
+    (`recorded_mode`, from the job's input or the clip's provenance) decides, and None is
+    returned when there is none. Every other endpoint stands for exactly one mode.
     """
+    if is_h3_endpoint(endpoint):
+        if recorded_mode == "first_frame" or recorded_mode == "first_and_last":
+            return recorded_mode
+        return None
     for (_model, mode), path in ENDPOINTS.items():
         if endpoint == path:
             return mode
