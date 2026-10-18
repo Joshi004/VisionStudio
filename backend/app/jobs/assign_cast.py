@@ -26,16 +26,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project, Scene
 from app.db.session import SessionLocal
 from app.jobs import llm_call, phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.providers import llm
 from app.services import cast as cast_service
-from app.services import cast_assignment
+from app.services import cast_assignment, llm_target
 from app.services import image_prompts as image_prompts_service
 from app.services import scenes as scenes_service
 from app.services.cast import Cast
@@ -96,8 +94,7 @@ class AssignCastHandler(JobHandler):
                 if project is not None
                 else Cast([], [])
             )
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, MODEL_KEY)
+            target = await llm_target.resolve(session, MODEL_KEY)
             await session.commit()
 
         if project is None or state is None:
@@ -118,20 +115,20 @@ class AssignCastHandler(JobHandler):
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
         body = cast_assignment.build_request(
-            scenes, cast, model=model, instructions=project.description_instructions
+            scenes, cast, model=target.model, instructions=project.description_instructions
         )
         scenes_sent = [_scene_record(scene) for scene in scenes]
         job_input.update(
             scenes_sent=scenes_sent,
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, base_url, body, _reader(scenes, cast), timeout_s=REQUEST_TIMEOUT_S
+            job_id, target, body, _reader(scenes, cast), timeout_s=REQUEST_TIMEOUT_S
         )
         assignments: Assignments | None = outcome.value
         if assignments is None:

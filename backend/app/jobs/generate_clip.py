@@ -321,7 +321,7 @@ class GenerateClipHandler(JobHandler):
                     uploads[0]["remote_asset_id"],
                     uploads[1]["remote_asset_id"] if len(uploads) > 1 else None,
                 )
-                provider_job_id = await video_generator.submit(base_url, plan.endpoint, body)
+                answer = await video_generator.submit(base_url, plan.endpoint, body)
                 break
             except StorageError:
                 await self._fail(job.id, "A frame's file could not be found on disk.")
@@ -345,12 +345,13 @@ class GenerateClipHandler(JobHandler):
             "server_url": docker_mapped(base_url),
             "uploads": uploads,
             "body": body,
+            "submit_answer": answer.to_json(),
         }
         async with SessionLocal() as session:
-            saved = await store.mark_submitted(session, job.id, provider_job_id, submitted)
+            saved = await store.mark_submitted(session, job.id, answer.job_id, submitted)
         if not saved:
             # Cancelled between the submit and here: the server job must be stopped too.
-            await self._cancel_quietly(base_url, provider_job_id)
+            await self._cancel_quietly(base_url, answer.job_id)
 
     async def _give_up_starting(self, job_id: int, exc: GpuCallError) -> None:
         async with SessionLocal() as session:

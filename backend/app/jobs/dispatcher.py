@@ -276,7 +276,8 @@ class _Dispatcher:
         limits: dict[str, int],
         gpu_blocked: bool,
     ) -> None:
-        # The limits count slots: a job takes one, except a MiniMax H3 clip (two GPUs).
+        # The limits count slots: a job takes one, except a MiniMax H3 clip (the GPUs the server
+        # gave it, 4 until it says).
         used_by_pool: Counter[str] = Counter()
         for job in running:
             used_by_pool[handlers.slot_key(job.type)] += pools.slot_cost(job)

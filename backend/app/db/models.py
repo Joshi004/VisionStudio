@@ -525,6 +525,10 @@ class LabVideoRun(Base):
     # Added in revision 0017 (MiniMax H3 reference mode): the pictures the clip was made from,
     # in the order the prompt names them, as a list of {source: "lab" | "asset", id}. Else NULL.
     references: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # Added in revision 0020 (GPU API 0.14.0): the audios of a MiniMax H3 reference clip, in the
+    # order the prompt names them (`<Audio 1>`, ...), as a list of {source: "voice_run" |
+    # "voice", id}. NULL for every other clip and for a reference clip made without audio.
+    audio_references: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # The result, NULL until the job has finished and the clip was stored.
     path: Mapped[str | None] = mapped_column(default=None)
     size_bytes: Mapped[int | None] = mapped_column(default=None)

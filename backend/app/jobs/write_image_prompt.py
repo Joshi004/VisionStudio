@@ -38,17 +38,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project, Scene
 from app.db.session import SessionLocal
 from app.jobs import phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.providers import llm
 from app.providers.llm import LlmCallError
 from app.services import cast as cast_service
-from app.services import description_writer, scene_planner
+from app.services import description_writer, llm_target, scene_planner
 from app.services import image_prompt_writer as writer
 from app.services import image_prompts as prompts_service
 from app.services import scenes as scenes_service
@@ -180,8 +178,7 @@ class WriteImagePromptHandler(JobHandler):
                 scene_cast = (await cast_service.load_scene_casts(session, project.id, [scene]))[
                     scene.id
                 ]
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, IMAGE_PROMPT_MODEL_KEY)
+            target = await llm_target.resolve(session, IMAGE_PROMPT_MODEL_KEY)
             await session.commit()
 
         if project is None or scene is None:
@@ -196,8 +193,8 @@ class WriteImagePromptHandler(JobHandler):
         # pictures, and its prompt is written for that (`QWEN_IMAGE_21_CHARACTER_EDIT`).
         profile = scene_profile(has_references=not scene_cast.is_empty)
         inputs = writer.prompt_inputs(scene, project, source, scene_cast)
-        body = writer.build_request(inputs, model=model, profile=profile)
-        input_hash = scene_planner.request_hash(llm.chat_url(base_url), body)
+        body = writer.build_request(inputs, model=target.model, profile=profile)
+        input_hash = scene_planner.request_hash(llm_target.call_url(target), body)
         scene_sent = _scene_record(scene)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
@@ -209,8 +206,8 @@ class WriteImagePromptHandler(JobHandler):
             source_draft_job_id=source.job_id,
             world_from_job_id=source.world_job_id,
             inputs_sha256=writer.inputs_sha256(inputs),
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
             input_hash=input_hash,
         )
@@ -222,7 +219,7 @@ class WriteImagePromptHandler(JobHandler):
             project_id=project.id,
             scene_id=scene.id,
             profile=profile,
-            base_url=base_url,
+            target=target,
             body=body,
             input_hash=input_hash,
             run_again=job_input.get("run_again") is True,
@@ -243,7 +240,7 @@ class WriteImagePromptHandler(JobHandler):
         project_id: int,
         scene_id: int,
         profile: ImagePromptProfile,
-        base_url: str,
+        target: llm_target.LlmTarget,
         body: dict[str, Any],
         input_hash: str,
         run_again: bool,
@@ -261,18 +258,22 @@ class WriteImagePromptHandler(JobHandler):
                     await self._phase(job_id, phases.REUSING_ANSWER)
                     _logger.info("job %d: reusing the answer stored on job %d", job_id, cached.id)
                     return _Outcome(checked=checked, cache_hit_of_job_id=cached.id)
-        return await self._ask_model(job_id, profile, base_url, body)
+        return await self._ask_model(job_id, profile, target, body)
 
     async def _ask_model(
-        self, job_id: int, profile: ImagePromptProfile, base_url: str, body: dict[str, Any]
+        self,
+        job_id: int,
+        profile: ImagePromptProfile,
+        target: llm_target.LlmTarget,
+        body: dict[str, Any],
     ) -> _Outcome:
         outcome = _Outcome()
         for attempt in range(1, MAX_ATTEMPTS + 1):
             await self._phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
             started = time.monotonic()
             try:
-                result = await llm.complete(
-                    base_url, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
+                result = await llm_target.complete(
+                    target, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
                 )
             except LlmCallError as exc:
                 outcome.failure = _failure_text(exc)

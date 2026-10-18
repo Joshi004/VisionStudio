@@ -7,7 +7,7 @@ import { useNow } from "../../hooks/useNow";
 import { formatDateTime } from "../../format";
 import { H3_MODEL, videoModelLabel } from "../../videoModels";
 import { JobActions } from "../jobs/JobActions";
-import { elapsedText } from "../jobs/jobFormat";
+import { elapsedText, serverEstimateText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { Thumb } from "../imageLab/ReferenceTray";
 import {
@@ -15,6 +15,7 @@ import {
   isReferenceRun,
   negativePromptOf,
   paramsLine,
+  referenceSummary,
   runStats,
 } from "./videoLabView";
 
@@ -53,6 +54,14 @@ function groupRuns(runs: LabVideoRun[]): RunGroup[] {
   return groups;
 }
 
+/** What a waiting or running MiniMax H3 clip shows: the server's own numbers, once it has them. */
+function h3WaitText(run: LabVideoRun): string {
+  const server = serverEstimateText(run.gpus, run.estimated_run_seconds);
+  return server === null
+    ? "MiniMax H3 is a long GPU job. The server's GPUs and estimate show here once it has answered. This page updates by itself."
+    : `The server says: ${server}. This page updates by itself.`;
+}
+
 function RunCard({ run, now }: { run: LabVideoRun; now: number }) {
   const job = run.job;
   const negative = negativePromptOf(run);
@@ -77,7 +86,7 @@ function RunCard({ run, now }: { run: LabVideoRun; now: number }) {
               <Badge
                 variant="light"
                 color="violet"
-                title="Made from reference pictures and an audio reference: the model follows the voice and makes its own sound."
+                title="Made from reference pictures (and voices, when given): the model follows each voice and makes its own sound."
               >
                 reference
               </Badge>
@@ -119,7 +128,7 @@ function RunCard({ run, now }: { run: LabVideoRun; now: number }) {
           isJobActive(job) && (
             <Text size="sm" c="dimmed">
               {run.video_model === H3_MODEL
-                ? "MiniMax H3 holds two GPUs and can take more than 10 minutes. This page updates by itself."
+                ? h3WaitText(run)
                 : "The clip takes 5 to 10 minutes. This page updates by itself."}
             </Text>
           )
@@ -199,7 +208,7 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
                     <Text size="xs" c="dimmed">
                       {paramsLine(first)}
                       {isReferenceRun(first)
-                        ? ` · ${first.references.length} reference ${first.references.length === 1 ? "picture" : "pictures"} and an audio reference`
+                        ? ` · ${referenceSummary(first)}`
                         : isLipSyncRun(first)
                           ? " · lip-sync to a speech"
                           : lastFrame !== null

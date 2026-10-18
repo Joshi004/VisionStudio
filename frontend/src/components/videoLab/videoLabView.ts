@@ -1,8 +1,10 @@
+import type { LibraryCharacter } from "../../api/characterLab";
 import type {
   H3ReferenceRunCreate,
   LabVideoRun,
   LabVideoRunCreate,
 } from "../../api/videoLab";
+import type { Voice } from "../../api/voiceLab";
 import { H3_MODEL, type LabVideoModel } from "../../videoModels";
 import type { ReferenceItem } from "../imageLab/labView";
 
@@ -10,7 +12,8 @@ export type LabMode = "quality" | "fast";
 export type LabOrientation = "portrait" | "landscape";
 /**
  * "generate": one run per chosen model, from the prompt and an optional first and last frame.
- * "h3_reference": one MiniMax H3 clip made from up to 9 pictures and an audio reference.
+ * "h3_reference": one MiniMax H3 clip made from up to 9 pictures (one or two characters, a
+ * scene, other pictures) and 0 to 2 voices.
  */
 export type LabKind = "generate" | "h3_reference";
 
@@ -22,15 +25,47 @@ export const H3_STEPS_MIN = 4;
 export const H3_STEPS_MAX = 100;
 /** `<Picture 1>` to `<Picture 9>`: what the reference endpoint takes. */
 export const H3_MAX_REFERENCES = 9;
+/** One voice for each of the two characters. */
+export const H3_MAX_VOICES = 2;
+export const AMBIENCE_MAX_CHARS = 1000;
 const SEED_LIMIT = 2 ** 31;
 
-/** The audio of a MiniMax H3 reference clip: a Voice lab speech, or a saved voice's recording. */
+/** What a reference picture is for, as the server records it. */
+export type ReferenceRole = NonNullable<H3ReferenceRunCreate["reference_roles"]>[number];
+/** Which character a voice belongs to. */
+export type VoiceOwner = NonNullable<H3ReferenceRunCreate["audio_owners"]>[number];
+
+/** A voice of a MiniMax H3 reference clip: a Voice lab speech, or a saved voice's recording. */
 export type AudioChoice = {
   source: "voice_run" | "voice";
   id: number;
   /** What the picker shows: "voice: Mara" or "speech 12". */
   label: string;
   durationS: number;
+};
+
+/** One character of a reference clip: a picture of them, what to call them, and their voice. */
+export type CharacterSlot = {
+  picture: ReferenceItem | null;
+  /** What the prompt calls them: "Mara". */
+  name: string;
+  /** What they look like and wear, for the prompt's subject_definitions. */
+  description: string;
+  /** Optional: how they sound. Without one, H3 makes up a voice. */
+  voice: AudioChoice | null;
+};
+
+/** The place the clip happens in: a picture of it and a few words. */
+export type SceneSlot = {
+  picture: ReferenceItem | null;
+  description: string;
+};
+
+export const EMPTY_CHARACTER: CharacterSlot = {
+  picture: null,
+  name: "",
+  description: "",
+  voice: null,
 };
 
 export type VideoLabFormState = {
@@ -50,19 +85,28 @@ export type VideoLabFormState = {
   lastFrame: ReferenceItem | null;
   /** MiniMax H3 only. Empty: the pipeline's own default (50 steps). */
   steps: string;
-  /** "h3_reference" only: the pictures, `<Picture 1>` first. */
+  /** "h3_reference" only: Character 1 and Character 2 (always two slots, the second optional). */
+  characters: CharacterSlot[];
+  /** "h3_reference" only: the place. */
+  scene: SceneSlot;
+  /** "h3_reference" only: the sounds of the place, for overall_soundscape. */
+  ambience: string;
+  /** "h3_reference" only: any other pictures (an object, a pet), after the ones above. */
   references: ReferenceItem[];
-  /** "h3_reference" only: the audio reference (`<Audio 1>`). */
-  audio: AudioChoice | null;
-  /** "h3_reference" only: the clip is as long as the audio, instead of `durationS`. */
+  /**
+   * "h3_reference" only: the skeleton the form last put in the prompt. While the prompt is
+   * still exactly this, the skeleton may be made again; once edited, it is never replaced.
+   */
+  skeletonText: string;
+  /** "h3_reference" only: the clip is as long as the first voice (needs a voice). */
   matchAudio: boolean;
 };
 
 export const DEFAULT_FORM: VideoLabFormState = {
   kind: "generate",
   prompt: "",
-  // The lab is for comparing, so both LTX models are chosen to begin with. MiniMax H3 holds two
-  // GPUs and takes longer, so it is chosen on purpose.
+  // The lab is for comparing, so both LTX models are chosen to begin with. MiniMax H3 holds
+  // several GPUs and takes longer, so it is chosen on purpose.
   models: ["ltx-2.3", "ltx-2.5"],
   mode: "quality",
   orientation: "portrait",
@@ -72,8 +116,11 @@ export const DEFAULT_FORM: VideoLabFormState = {
   firstFrame: null,
   lastFrame: null,
   steps: "",
+  characters: [EMPTY_CHARACTER, EMPTY_CHARACTER],
+  scene: { picture: null, description: "" },
+  ambience: "",
   references: [],
-  audio: null,
+  skeletonText: "",
   matchAudio: true,
 };
 
@@ -125,21 +172,149 @@ function seedProblem(state: VideoLabFormState): string | null {
     : null;
 }
 
+/** The form with some fields of one character slot (0 or 1) changed. */
+export function withCharacter(
+  state: VideoLabFormState,
+  index: number,
+  changes: Partial<CharacterSlot>,
+): VideoLabFormState {
+  return {
+    ...state,
+    characters: state.characters.map((slot, position) =>
+      position === index ? { ...slot, ...changes } : slot,
+    ),
+  };
+}
+
+/** The front picture of a library character's current look, as a form item, or null. */
+export function lookPicture(character: LibraryCharacter): ReferenceItem | null {
+  const front = character.current_look?.references.find((reference) => reference.angle === "front");
+  if (
+    front === undefined ||
+    !front.ready ||
+    front.url === null ||
+    front.lab_image_id === null ||
+    front.lab_image_id === undefined
+  ) {
+    return null;
+  }
+  return {
+    source: "lab",
+    id: front.lab_image_id,
+    url: front.url,
+    width: null,
+    height: null,
+    label: `${character.name}'s look`,
+  };
+}
+
+/** Text without the full stops and spaces at its end, so it can be joined with commas. */
+function withoutTrailingStops(text: string): string {
+  return text.replace(/[.\s]+$/, "");
+}
+
+/**
+ * A character slot filled from the library: the look's front picture, the name, a description
+ * from the character's appearance and outfit, and the saved voice when there is one (found in
+ * `voices`, which have the lengths). Null while the character has no ready look.
+ */
+export function slotFromCharacter(character: LibraryCharacter, voices: Voice[]): CharacterSlot | null {
+  const picture = lookPicture(character);
+  if (picture === null) {
+    return null;
+  }
+  const outfit = character.outfit?.trim() ?? "";
+  const description = [
+    withoutTrailingStops(character.appearance),
+    outfit === "" ? "" : `wearing ${withoutTrailingStops(outfit)}`,
+  ]
+    .filter((part) => part !== "")
+    .join(", ");
+  const saved = voices.find((voice) => voice.id === character.voice?.id);
+  return {
+    picture,
+    name: character.name,
+    description,
+    voice:
+      saved === undefined
+        ? null
+        : {
+            source: "voice",
+            id: saved.id,
+            label: `voice: ${saved.name}`,
+            durationS: saved.duration_s,
+          },
+  };
+}
+
+/** A reference picture with what it is for. */
+export type RolePicture = { item: ReferenceItem; role: ReferenceRole };
+/** A voice with the character it belongs to. */
+export type OwnedVoice = { audio: AudioChoice; owner: VoiceOwner };
+
+type CastState = Pick<VideoLabFormState, "characters" | "scene" | "references">;
+
+const CHARACTER_ROLES: VoiceOwner[] = ["character_1", "character_2"];
+
+/**
+ * The pictures in the order they are sent: Character 1, Character 2, the scene, then the others.
+ * The position here is the picture's number in the prompt (`<Picture 1>` is the first).
+ */
+export function referencePictures(state: CastState): RolePicture[] {
+  const pictures: RolePicture[] = [];
+  state.characters.forEach((slot, index) => {
+    if (slot.picture !== null) {
+      pictures.push({ item: slot.picture, role: CHARACTER_ROLES[index] });
+    }
+  });
+  if (state.scene.picture !== null) {
+    pictures.push({ item: state.scene.picture, role: "scene" });
+  }
+  for (const item of state.references) {
+    pictures.push({ item, role: "other" });
+  }
+  return pictures;
+}
+
+/** The voices in the order they are sent (`<Audio 1>` is the first): Character 1's, then 2's. */
+export function referenceVoices(state: Pick<VideoLabFormState, "characters">): OwnedVoice[] {
+  const voices: OwnedVoice[] = [];
+  state.characters.forEach((slot, index) => {
+    if (slot.voice !== null) {
+      voices.push({ audio: slot.voice, owner: CHARACTER_ROLES[index] });
+    }
+  });
+  return voices;
+}
+
+/**
+ * Whether the clip is as long as the first voice: the box is ticked and there is a voice to
+ * measure. Without a voice the length is the one chosen.
+ */
+export function matchesAudio(state: VideoLabFormState): boolean {
+  return state.matchAudio && referenceVoices(state).length > 0;
+}
+
 /** Why a MiniMax H3 reference clip cannot be run, or null when it can. */
 function referenceProblem(state: VideoLabFormState): string | null {
-  if (state.references.length === 0) {
-    return "Choose at least one reference picture.";
+  const pictureCount = referencePictures(state).length;
+  if (pictureCount === 0) {
+    return "Choose at least one picture: a character, the scene or another picture.";
   }
-  if (state.references.length > H3_MAX_REFERENCES) {
-    return `At most ${H3_MAX_REFERENCES} reference pictures.`;
+  if (pictureCount > H3_MAX_REFERENCES) {
+    return `At most ${H3_MAX_REFERENCES} pictures in all.`;
   }
-  if (state.audio === null) {
-    return "Choose an audio reference.";
+  const voiceless = state.characters.findIndex((slot) => slot.voice !== null && slot.picture === null);
+  if (voiceless !== -1) {
+    return `Character ${voiceless + 1} has a voice but no picture. Choose a picture or remove the voice.`;
   }
-  if (!(state.audio.durationS > 0)) {
-    return "The audio reference has no length.";
+  if (referenceVoices(state).some((voice) => !(voice.audio.durationS > 0))) {
+    return "A voice has no length.";
   }
-  if (!state.matchAudio) {
+  if (state.ambience.length > AMBIENCE_MAX_CHARS) {
+    return `The ambience is at most ${AMBIENCE_MAX_CHARS} characters.`;
+  }
+  if (!matchesAudio(state)) {
     const duration = durationOf(state);
     if (duration === null || duration < DURATION_MIN_S || duration > DURATION_MAX_S) {
       return `The length must be from ${DURATION_MIN_S} to ${DURATION_MAX_S} seconds.`;
@@ -195,27 +370,33 @@ export function toRequest(state: VideoLabFormState): LabVideoRunCreate {
 
 /** The reference form as the request the server takes. Call it only when `formProblem` is null. */
 export function toReferenceRequest(state: VideoLabFormState): H3ReferenceRunCreate {
-  if (state.audio === null) {
-    throw new Error("Choose an audio reference first.");
-  }
+  const pictures = referencePictures(state);
+  const voices = referenceVoices(state);
+  const ambience = state.ambience.trim();
   return {
     prompt: state.prompt,
     orientation: state.orientation,
     seed: state.seed.trim() === "" ? null : wholeNumber(state.seed),
-    references: state.references.map((item) => ({ source: item.source, id: item.id })),
-    audio: { source: state.audio.source, id: state.audio.id },
-    match_audio_duration: state.matchAudio,
-    duration_s: state.matchAudio ? null : durationOf(state),
+    references: pictures.map(({ item }) => ({ source: item.source, id: item.id })),
+    reference_roles: pictures.map(({ role }) => role),
+    audios: voices.map(({ audio }) => ({ source: audio.source, id: audio.id })),
+    audio_owners: voices.map(({ owner }) => owner),
+    ambience: ambience === "" ? null : ambience,
+    match_audio_duration: matchesAudio(state),
+    duration_s: matchesAudio(state) ? null : durationOf(state),
     num_inference_steps: stepsOf(state),
   };
 }
 
+// The GPU server decides how many GPUs and how long: the number is shown on the run once the
+// server has answered, so this line says only what is certain beforehand.
 const H3_COST_TEXT =
-  "MiniMax H3 is a GPU job that holds two GPUs (two slots) and can take more than 10 minutes.";
+  "MiniMax H3 is a GPU job that holds 4 or 8 GPUs (the server says which once it accepts the run) and can take more than 10 minutes.";
 
 /**
  * What a click costs, for the line under the button: "5 to 10 minutes on one GPU" for an LTX
- * run, doubled for two, and MiniMax H3's two GPUs and longer wait said on their own.
+ * run, doubled for two, and MiniMax H3's GPUs (the server's choice) and longer wait said on
+ * their own.
  */
 export function costText(models: LabVideoModel[]): string {
   const h3 = models.includes(H3_MODEL);
@@ -237,37 +418,108 @@ export function referenceCostText(): string {
   return `One run: ${H3_COST_TEXT}`;
 }
 
+/** A picture's place in the prompt: `<Subject n>` and `<Picture n>` share the number. */
+type NumberedPicture = { role: ReferenceRole; number: number };
+
+/** "Mara, a tall woman in a red coat", or the blank for whoever it is. */
+function whoText(name: string, description: string): string {
+  const parts = [name.trim(), description.trim()].filter((part) => part !== "");
+  return parts.length === 0 ? "[who they are, and what they look like and wear]" : parts.join(", ");
+}
+
+/** The label the guide gives a speaker: Character 1 is S1, Character 2 is S2. */
+function speakerOf(role: ReferenceRole): string {
+  return role === "character_2" ? "S2" : "S1";
+}
+
 /**
- * The six-part prompt of a MiniMax H3 reference clip with its blanks, for `pictureCount`
- * pictures. The parts and their order are the server's guide's; the words in brackets are for
- * the author to replace. `<Picture n>` and `<Audio 1>` are the labels of the files, in the order
- * they are sent, and `<Subject n>` names a person or thing defined from them.
+ * The six-part prompt of a MiniMax H3 reference clip, filled from the cast: the characters'
+ * names and descriptions, the scene, the ambience and the voices. The parts and their order are
+ * the server's guide's; the words in brackets are for the author to replace.
+ *
+ * `<Picture n>` and `<Subject n>` are numbered alike, in the order the pictures are sent
+ * (Character 1, Character 2, the scene, the others). `<Audio n>` is a voice, in the order the
+ * voices are sent. With pictures alone, each character, place or thing is a subject and no
+ * `<Audio n>` line is written.
  */
-export function referenceSkeleton(pictureCount: number): string {
-  const pictures = Array.from({ length: Math.max(pictureCount, 1) }, (_, index) => index + 1);
+export function referenceSkeleton(
+  state: Pick<VideoLabFormState, "characters" | "scene" | "ambience" | "references">,
+): string {
+  const numbered: NumberedPicture[] = referencePictures(state).map(({ role }, index) => ({
+    role,
+    number: index + 1,
+  }));
+  // A form with no picture yet still gets one line to fill in.
+  const pictures: NumberedPicture[] = numbered.length > 0 ? numbered : [{ role: "other", number: 1 }];
+  const characters = pictures.filter(
+    (picture) => picture.role === "character_1" || picture.role === "character_2",
+  );
+  const scene = pictures.find((picture) => picture.role === "scene");
+  // The people the story is about; with no character, the first picture stands in.
+  const actors = characters.length > 0 ? characters : pictures.slice(0, 1);
+  // Each voice with the picture of the character it belongs to.
+  const voiced = referenceVoices(state).flatMap((voice, index) => {
+    const owner = pictures.find((picture) => picture.role === voice.owner);
+    return owner === undefined ? [] : [{ audioNumber: index + 1, owner }];
+  });
+
+  function subjectLine({ role, number }: NumberedPicture): string {
+    const link = `shown in <Picture ${number}>.`;
+    if (role === "character_1" || role === "character_2") {
+      const slot = state.characters[role === "character_1" ? 0 : 1];
+      return `<Subject ${number}> is ${whoText(slot.name, slot.description)}, ${link}`;
+    }
+    if (role === "scene") {
+      const place = state.scene.description.trim() || "[what the place looks like]";
+      return `<Subject ${number}> is the place where it happens: ${place}, ${link}`;
+    }
+    return `<Subject ${number}> is [who or what], ${link}`;
+  }
+  function retentionLine({ role, number }: NumberedPicture): string {
+    const kept =
+      role === "scene"
+        ? "partially_preserved - the place, its layout, light and mood"
+        : "fully_preserved - [what must stay the same]";
+    return `<Subject ${number}> (appears in [Shot 1]): ${kept}.`;
+  }
+
+  const summaryTag = voiced.length > 0 ? "[reference generation + audio reference]" : "[reference generation]";
+  const names = actors.map((actor) => `<Subject ${actor.number}>`).join(" and ");
+  const setting = scene === undefined ? "" : `, in <Subject ${scene.number}>`;
+  const look =
+    scene === undefined
+      ? "[live-action, the light and the look]"
+      : `[live-action, the light and the look], set in <Subject ${scene.number}>`;
+  const actions = actors.map((actor) => `<Subject ${actor.number}> (${speakerOf(actor.role)}) [does something].`);
+  const speech = voiced.map(
+    ({ audioNumber, owner }) =>
+      `<Subject ${owner.number}> (${speakerOf(owner.role)}) says, using the voice timbre referenced from <Audio ${audioNumber}>, <d>[English] [the words].</d>`,
+  );
+
   return [
     "subject_definitions:",
-    ...pictures.map(
-      (number) => `<Subject ${number}> is [who or what], shown in <Picture ${number}>.`,
+    ...pictures.map(subjectLine),
+    ...voiced.map(
+      ({ audioNumber, owner }) =>
+        `<Audio ${audioNumber}> is the voice-timbre reference for <Subject ${owner.number}> (${speakerOf(owner.role)}).`,
     ),
-    "<Audio 1> is the voice-timbre reference for <Subject 1> (S1).",
     "",
     "summary:",
-    "[reference generation + audio reference] <Subject 1> [what happens, and where].",
+    `${summaryTag} ${names} [what happens]${setting}.`,
     "",
     "retention_analysis:",
-    ...pictures.map(
-      (number) =>
-        `<Subject ${number}> (appears in [Shot 1]): fully_preserved - [what must stay the same].`,
+    ...pictures.map(retentionLine),
+    ...voiced.map(
+      ({ audioNumber, owner }) =>
+        `<Audio ${audioNumber}>: reference - the voice timbre guides <Subject ${owner.number}>'s delivery without copying the recording.`,
     ),
-    "<Audio 1>: reference - the voice timbre guides the delivery without copying the recording.",
     "",
     "detailed_description:",
-    "The target video is [live-action, the light and the look].",
-    "[Shot 1] [Shot size and angle], <Subject 1> (S1) [does something]. [Camera move.] They say, using the voice timbre referenced from <Audio 1>, <d>[English] [the words].</d>",
+    `The target video is ${look}.`,
+    `[Shot 1] [Shot size and angle], ${actions.join(" ")} [Camera move.] ${speech.join(" ")}`.trimEnd(),
     "",
     "overall_soundscape:",
-    "[1 to 4 sentences: ambience and physical sounds, no dialogue.]",
+    state.ambience.trim() || "[1 to 4 sentences: ambience and physical sounds, no dialogue.]",
     "",
     "non_diegetic_music:",
     "N/A",
@@ -315,10 +567,24 @@ export function runStats(run: LabVideoRun): string {
   if (run.duration_s !== null) {
     parts.push(`${run.duration_s.toFixed(2)} s`);
   }
+  // MiniMax H3 only: the GPUs the server said it used.
+  if (run.gpus !== null) {
+    parts.push(`${run.gpus} GPUs`);
+  }
   if (run.url !== null) {
     parts.push(run.audio_codec !== null ? `sound: ${run.audio_codec}` : "no sound");
   }
   return parts.join(" · ");
+}
+
+/** The length of each audio a run sent: a reference clip's list, or a lip-sync take's one. */
+function audioSecondsOf(run: LabVideoRun): number[] {
+  const list = listParam(run, "audio_durations_s");
+  if (list !== null) {
+    return list.filter((value): value is number => typeof value === "number");
+  }
+  const single = numberParam(run, "audio_duration_s");
+  return single === null ? [] : [single];
 }
 
 /** The settings a group of runs was made with, as a short line. */
@@ -340,9 +606,9 @@ export function paramsLine(run: LabVideoRun): string {
         : `${duration.toFixed(2)} s requested`,
     );
   }
-  const audioSeconds = numberParam(run, "audio_duration_s");
-  if (audioSeconds !== null) {
-    parts.push(`audio ${audioSeconds.toFixed(2)} s`);
+  const audioSeconds = audioSecondsOf(run);
+  if (audioSeconds.length > 0) {
+    parts.push(`audio ${audioSeconds.map((seconds) => `${seconds.toFixed(2)} s`).join(" + ")}`);
   }
   const frames = numberParam(run, "num_frames");
   if (frames !== null) {
@@ -364,7 +630,16 @@ export function negativePromptOf(run: LabVideoRun): string | null {
   return textParam(run, "negative_prompt");
 }
 
-/** Whether a run is a MiniMax H3 reference clip: pictures and an audio reference, no frames. */
+/** "3 pictures, 2 voices" or "1 picture, no voice": what a reference run was made from. */
+export function referenceSummary(run: LabVideoRun): string {
+  const pictures = run.references.length;
+  const voices = run.audio_references.length;
+  const pictureText = `${pictures} ${pictures === 1 ? "picture" : "pictures"}`;
+  const voiceText = voices === 0 ? "no voice" : `${voices} ${voices === 1 ? "voice" : "voices"}`;
+  return `${pictureText}, ${voiceText}`;
+}
+
+/** Whether a run is a MiniMax H3 reference clip: pictures and optional voices, no frames. */
 export function isReferenceRun(run: LabVideoRun): boolean {
   return run.video_model === H3_MODEL && run.references.length > 0;
 }
@@ -403,26 +678,74 @@ export function stateFromRuns(runs: LabVideoRun[]): VideoLabFormState {
   if (!isReferenceRun(first)) {
     return base;
   }
-  const audio = first.audio_input;
-  const audioSeconds = numberParam(first, "audio_duration_s");
   return {
     ...base,
     kind: "h3_reference",
     models: [H3_MODEL],
-    references: first.references
-      .map((picture) => referenceOf(picture))
-      .filter((item): item is ReferenceItem => item !== null),
-    audio:
-      audio === null || audioSeconds === null
-        ? null
-        : {
-            source: audio.source,
-            id: audio.id,
-            label: audio.source === "voice" ? `voice ${audio.id}` : `speech ${audio.id}`,
-            durationS: audioSeconds,
-          },
+    ...castFromRun(first),
+    ambience: textParam(first, "ambience") ?? "",
     matchAudio: first.params.match_audio_duration === true,
   };
+}
+
+/** The list a run's params hold under `key`, or null when it has none. */
+function listParam(run: LabVideoRun, key: string): unknown[] | null {
+  const value = run.params[key];
+  return Array.isArray(value) ? value : null;
+}
+
+/**
+ * The characters, scene and other pictures of a reference run, put back where they were. A run
+ * made before the roles were recorded has none: its first picture is Character 1, its first
+ * voice is that character's, and the rest are other pictures.
+ */
+function castFromRun(
+  run: LabVideoRun,
+): Pick<VideoLabFormState, "characters" | "scene" | "references"> {
+  const roles = listParam(run, "reference_roles");
+  const owners = listParam(run, "audio_owners");
+  const durations = listParam(run, "audio_durations_s") ?? [numberParam(run, "audio_duration_s")];
+
+  const characters = [EMPTY_CHARACTER, EMPTY_CHARACTER];
+  let scene: SceneSlot = DEFAULT_FORM.scene;
+  const references: ReferenceItem[] = [];
+  run.references.forEach((picture, index) => {
+    const item = referenceOf(picture);
+    if (item === null) {
+      return;
+    }
+    const role = roles === null ? (index === 0 ? "character_1" : "other") : roles[index];
+    if (role === "character_1" || role === "character_2") {
+      const slot = role === "character_1" ? 0 : 1;
+      characters[slot] = { ...characters[slot], picture: item };
+    } else if (role === "scene") {
+      scene = { ...scene, picture: item };
+    } else {
+      references.push(item);
+    }
+  });
+
+  run.audio_references.forEach((audio, index) => {
+    const seconds = durations[index];
+    if (typeof seconds !== "number") {
+      return;
+    }
+    const owner = owners === null ? CHARACTER_ROLES[index] : owners[index];
+    if (owner !== "character_1" && owner !== "character_2") {
+      return;
+    }
+    const slot = owner === "character_1" ? 0 : 1;
+    characters[slot] = {
+      ...characters[slot],
+      voice: {
+        source: audio.source,
+        id: audio.id,
+        label: audio.source === "voice" ? `voice ${audio.id}` : `speech ${audio.id}`,
+        durationS: seconds,
+      },
+    };
+  });
+  return { characters, scene, references };
 }
 
 /** A frame a run used as a form item, only while its image still exists. */

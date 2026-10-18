@@ -51,9 +51,12 @@ scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
   was trained in a structured format, with a first line that places the frames
   (`h3_prompt_prefix`). `lab_endpoint_for` finds it; `ENDPOINTS` (the scenes') never lists it.
 - MiniMax H3 reference mode, `POST /v1/h3/videos/audio-to-video` (`H3AudioToVideoRequest`):
-  up to 9 reference pictures (`image_asset_ids`) and one audio reference (`audio_asset_id`,
-  2 to 15 s) that the model reads and then makes its own soundtrack from, unlike the LTX
-  audio-to-video endpoints, which mux the speech in unchanged. `with_h3_references` adds both.
+  up to 9 reference pictures (`image_asset_ids`) and, optionally, audio references
+  (`audio_asset_ids`, a list of up to 3, each documented as 2 to 15 s) that the model reads and
+  then makes its own soundtrack from, unlike the LTX audio-to-video endpoints, which mux the
+  speech in unchanged. Since version 0.14.0 of the server's guide the field is the list
+  `audio_asset_ids`: the old single `audio_asset_id` is refused with a 422.
+  `with_h3_references` adds them. `match_audio_duration` needs at least one audio.
 
 `with_frames` builds the part of the body that names the frames, in the shape the chosen
 endpoint wants. Every pair of (model, clip mode) has an endpoint. `endpoint_for` still falls
@@ -145,8 +148,10 @@ _NEGATIVE_PROMPT_ENDPOINTS: Final = frozenset(
 _LTX23_PREFIX: Final = "/v1/ltx/"
 _LTX25_PREFIX: Final = "/v1/ltx25/"
 _H3_PREFIX: Final = "/v1/h3/"
-# What `/v1/h3/videos/audio-to-video` takes: up to 9 reference pictures (`image_asset_ids`).
+# What `/v1/h3/videos/audio-to-video` takes: up to 9 reference pictures (`image_asset_ids`) and
+# up to 3 audios (`audio_asset_ids`). The Video lab uses at most two audios (one per character).
 H3_MAX_REFERENCE_IMAGES: Final = 9
+H3_MAX_REFERENCE_AUDIOS: Final = 3
 _SIZE_MULTIPLE: Final = 64
 # What the server's guide says the first line of an H3 prompt must be when frames are given.
 _H3_FIRST_FRAME_LINE: Final = (
@@ -204,7 +209,9 @@ def lab_endpoint_for(model: LabVideoModel, mode: ClipMode) -> str:
 
 
 def is_h3_endpoint(endpoint: object) -> bool:
-    """True for the two MiniMax H3 endpoints (whose jobs need two GPUs)."""
+    """True for the two MiniMax H3 endpoints (whose jobs hold 4 or 8 GPUs, as the server sizes
+    them).
+    """
     return isinstance(endpoint, str) and endpoint.startswith(_H3_PREFIX)
 
 
@@ -428,23 +435,30 @@ def with_audio(request: dict[str, Any], audio_remote_id: str) -> dict[str, Any]:
 
 
 def with_h3_references(
-    request: dict[str, Any], image_remote_ids: Sequence[str], audio_remote_id: str
+    request: dict[str, Any],
+    image_remote_ids: Sequence[str],
+    audio_remote_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
     """`request` plus the references of a MiniMax H3 reference clip, for `H3_AUDIO_TO_VIDEO_PATH`.
 
     The pictures are named in the order given, and that order is what the prompt's
-    `<Picture 1>`, `<Picture 2>`, ... mean. The audio is `<Audio 1>`: a reference the model reads,
-    not a soundtrack that is muxed in.
+    `<Picture 1>`, `<Picture 2>`, ... mean. The audios are `<Audio 1>`, `<Audio 2>`, ... in the
+    order given: references the model reads, not a soundtrack that is muxed in. There can be none
+    (the audio is optional), and then no `audio_asset_ids` is sent. The older single
+    `audio_asset_id` is never sent: the server refuses it.
     """
     if not 1 <= len(image_remote_ids) <= H3_MAX_REFERENCE_IMAGES:
         raise ValueError(
             f"A MiniMax H3 reference clip needs 1 to {H3_MAX_REFERENCE_IMAGES} pictures."
         )
-    return {
-        **request,
-        "image_asset_ids": list(image_remote_ids),
-        "audio_asset_id": audio_remote_id,
-    }
+    if len(audio_remote_ids) > H3_MAX_REFERENCE_AUDIOS:
+        raise ValueError(
+            f"A MiniMax H3 reference clip takes at most {H3_MAX_REFERENCE_AUDIOS} audios."
+        )
+    body = {**request, "image_asset_ids": list(image_remote_ids)}
+    if audio_remote_ids:
+        body["audio_asset_ids"] = list(audio_remote_ids)
+    return body
 
 
 def h3_prompt_prefix(num_frames: int, has_first: bool, has_last: bool, prompt: str) -> str:
@@ -497,9 +511,11 @@ async def upload_audio(base_url: str, path: Path, filename: str, mime: str) -> s
     return await gpu_server.upload_file(base_url, path, filename, mime)
 
 
-async def submit(base_url: str, endpoint: str, body: dict[str, Any]) -> str:
-    """Submits the clip to `endpoint` and returns the server's job id."""
-    return await gpu_server.submit_job(base_url, endpoint, body)
+async def submit(base_url: str, endpoint: str, body: dict[str, Any]) -> gpu_server.SubmitAnswer:
+    """Submits the clip to `endpoint` and returns the server's answer: its job id and, for a
+    MiniMax H3 clip, the GPUs it was given and its estimated run time.
+    """
+    return await gpu_server.submit(base_url, endpoint, body)
 
 
 async def status(base_url: str, provider_job_id: str) -> gpu_server.RemoteStatus:

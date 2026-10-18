@@ -43,14 +43,16 @@ type HintInput = {
   kind?: "generate" | "h3_reference";
   /** How many reference pictures a reference clip has (`<Picture 1>` to `<Picture n>`). */
   pictureCount?: number;
+  /** How many voices a reference clip has (`<Audio 1>` to `<Audio n>`), none being fine. */
+  audioCount?: number;
 };
 
 /** Hints for the prompt of a MiniMax H3 reference clip: its six-part format and its labels. */
-function referenceHints(text: string, pictureCount: number): string[] {
+function referenceHints(text: string, pictureCount: number, audioCount: number): string[] {
   const hints: string[] = [];
   if (!H3_REFERENCE_FIELDS.test(text)) {
     hints.push(
-      "MiniMax H3 reference mode was trained on six parts: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape and non_diegetic_music. Use the skeleton button, or write them.",
+      "MiniMax H3 reference mode was trained on six parts: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape and non_diegetic_music. Use the \u201cFill the prompt from the cast\u201d button, or write them.",
     );
   }
   for (let number = 1; number <= pictureCount; number += 1) {
@@ -58,9 +60,16 @@ function referenceHints(text: string, pictureCount: number): string[] {
       hints.push(`<Picture ${number}> is not named in the prompt. Say what it shows and how it is used.`);
     }
   }
-  if (!text.includes("<Audio 1>")) {
+  for (let number = 1; number <= audioCount; number += 1) {
+    if (!text.includes(`<Audio ${number}>`)) {
+      hints.push(
+        `<Audio ${number}> is not named in the prompt. Say how the voice is used: reference (follow its voice and delivery), fully_copy, partially_copy or weak_reference.`,
+      );
+    }
+  }
+  if (audioCount === 0 && text.includes("<Audio")) {
     hints.push(
-      "<Audio 1> is not named in the prompt. Say how the audio is used: reference (follow its voice and delivery), fully_copy, partially_copy or weak_reference.",
+      "The prompt names an <Audio n> but no voice is chosen. Choose a voice for the character, or take the <Audio n> lines out.",
     );
   }
   return hints;
@@ -78,13 +87,14 @@ export function labPromptHints({
   models,
   kind = "generate",
   pictureCount = 0,
+  audioCount = 0,
 }: HintInput): string[] {
   const text = prompt.trim();
   if (text === "") {
     return [];
   }
   if (kind === "h3_reference") {
-    return referenceHints(text, pictureCount);
+    return referenceHints(text, pictureCount, audioCount);
   }
   const hints: string[] = [];
   const hasH3 = models.includes(H3_MODEL);

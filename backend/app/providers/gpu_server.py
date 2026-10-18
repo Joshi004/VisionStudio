@@ -5,7 +5,8 @@ The contract guard (Phase 4) is `contract_guard.py` next to this module. The
 transcription adapter is `transcriber.py`, and the video adapter is `video_generator.py`.
 
 Upload, submit, status, result, cancel and purge work the same for every backend on the
-server (ANALYSIS.md Section 6.1), so they live here once: `upload_file`, `submit_job`,
+server (ANALYSIS.md Section 6.1), so they live here once: `upload_file`, `submit` (the whole
+answer, with the GPUs and estimate a MiniMax H3 job gets) and `submit_job` (only the job id),
 `job_status`, `job_result_json`, `download_result` (a binary result), `cancel_job` and
 `purge_job`. Each takes the base URL to call, which for
 transcription is the transcription URL setting. They raise `GpuCallError` for
@@ -212,6 +213,12 @@ class RemoteStatus:
     # server's guide): {"requested": true, "applied": bool, "error": str | None}. Lip sync can
     # fail silently (the job still succeeds), so `applied` is how a caller finds out.
     lip_sync: dict[str, Any] | None = None
+    # Version 0.15.0 of the server's guide: a backend that sizes each request before it queues
+    # the job (MiniMax H3) says how many GPUs the job was given and about how long it will run
+    # once it starts (the queue wait is not included). None for every other backend. Prefer
+    # `estimated_run_seconds` over `typical_run_seconds` when it is there.
+    gpus: int | None = None
+    estimated_run_seconds: float | None = None
 
     def to_json(self) -> dict[str, Any]:
         """What a job stores as `output.remote` while it runs."""
@@ -225,7 +232,24 @@ class RemoteStatus:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "lip_sync": self.lip_sync,
+            "gpus": self.gpus,
+            "estimated_run_seconds": self.estimated_run_seconds,
         }
+
+
+@dataclass(frozen=True)
+class SubmitAnswer:
+    """The server's answer to a submit: the job id, and (MiniMax H3 only, version 0.15.0 of the
+    server's guide) the GPUs the job was given and its estimated run time in seconds.
+    """
+
+    job_id: str
+    gpus: int | None = None
+    estimated_run_seconds: float | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        """What a job stores on its input as `submit_answer`, next to the exact request."""
+        return {"gpus": self.gpus, "estimated_run_seconds": self.estimated_run_seconds}
 
 
 @dataclass(frozen=True)
@@ -344,10 +368,12 @@ async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> st
     return _remote_id(body, "asset_id", "upload answer")
 
 
-async def submit_job(base_url: str, path: str, body: dict[str, Any]) -> str:
-    """POSTs a generation request and returns the server's job id.
+async def submit(base_url: str, path: str, body: dict[str, Any]) -> SubmitAnswer:
+    """POSTs a generation request and returns the server's whole answer.
 
-    Every backend answers `{job_id, status: "queued"}` (ANALYSIS.md Section 6.1).
+    Every backend answers `{job_id, status: "queued"}` (ANALYSIS.md Section 6.1). A backend that
+    sizes the request first (MiniMax H3) adds `gpus` and `estimated_run_seconds`, which are
+    kept as the server said them and are None for every other backend.
     """
     try:
         response = await outbound.request(
@@ -356,7 +382,18 @@ async def submit_job(base_url: str, path: str, body: dict[str, Any]) -> str:
     except outbound.OutboundError as exc:
         raise _transport_error(exc) from exc
     answer = _json_object(response, "submit answer")
-    return _remote_id(answer, "job_id", "submit answer")
+    return SubmitAnswer(
+        job_id=_remote_id(answer, "job_id", "submit answer"),
+        gpus=_count(answer.get("gpus")),
+        estimated_run_seconds=_seconds(answer.get("estimated_run_seconds")),
+    )
+
+
+async def submit_job(base_url: str, path: str, body: dict[str, Any]) -> str:
+    """POSTs a generation request and returns only the server's job id, for the callers that
+    do not need the GPUs and the estimate (speech, transcription and images).
+    """
+    return (await submit(base_url, path, body)).job_id
 
 
 async def job_status(base_url: str, job_id: str) -> RemoteStatus:
@@ -384,6 +421,8 @@ async def job_status(base_url: str, job_id: str) -> RemoteStatus:
         started_at=_text(body.get("started_at")),
         finished_at=_text(body.get("finished_at")),
         lip_sync=_lip_sync(body.get("lip_sync")),
+        gpus=_count(body.get("gpus")),
+        estimated_run_seconds=_seconds(body.get("estimated_run_seconds")),
     )
 
 
@@ -406,6 +445,13 @@ def _seconds(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value) if value >= 0 else None
+
+
+def _count(value: object) -> int | None:
+    """A whole number of GPUs of at least 1, or None when the server sent nothing usable."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 1 else None
 
 
 async def job_result_json(base_url: str, job_id: str) -> dict[str, Any]:

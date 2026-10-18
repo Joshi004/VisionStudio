@@ -14,8 +14,10 @@ A job type has no limit of its own. Which pool a job counts in comes from its ha
 A job whose provider is neither (the `local` ones: the final render and the automatic run) is its
 own pool, counted under its job type, and its handler says how many may run at once.
 
-A job takes one slot of its pool, except a MiniMax H3 clip, which holds two GPUs on one node and
-so takes `H3_SLOT_COST` (`slot_cost`). The limit counts slots, not jobs.
+A job takes one slot of its pool, except a MiniMax H3 clip, which holds 4 or 8 GPUs on one node
+as the server decides from the request's size. It takes the number of GPUs the server reported
+(`server_gpus`), and `H3_MIN_GPUS` until the server has said (`slot_cost`). The limit counts
+slots, not jobs.
 
 Both settings are read at every tick, so a change on the Settings page applies at once. Running
 jobs are never stopped by a lower number.
@@ -56,16 +58,50 @@ _SETTING_OF_POOL: Final[dict[str, str]] = {
 }
 
 
-# A MiniMax H3 job reserves two H100s on one node.
-H3_SLOT_COST: Final = 2
+# A MiniMax H3 job reserves 4 or 8 H100s on one node, chosen by the server from the request's
+# size (GPU API 0.15.0). It says which only when it accepts the job, so until it does a clip is
+# counted at the smaller of the two.
+H3_MIN_GPUS: Final = 4
+
+
+def _server_value(job: Job, field: str) -> object:
+    """A number the server said about a job: from its last status answer (`output.remote`), else
+    from its submit answer (`input.submit_answer`). None until the server has said.
+    """
+    for container, key in ((job.output, "remote"), (job.input, "submit_answer")):
+        answer = container.get(key) if isinstance(container, dict) else None
+        value = answer.get(field) if isinstance(answer, dict) else None
+        if value is not None:
+            return value
+    return None
+
+
+def server_gpus(job: Job) -> int | None:
+    """How many GPUs the server said it gave a job. None until the server has said, and for
+    every backend that does not size its jobs.
+    """
+    gpus = _server_value(job, "gpus")
+    return gpus if isinstance(gpus, int) and not isinstance(gpus, bool) and gpus >= 1 else None
+
+
+def server_estimate_seconds(job: Job) -> float | None:
+    """About how long the server said a job will run once it starts (the queue wait is not
+    included). None until the server has said, and for every backend that does not size its jobs.
+    """
+    seconds = _server_value(job, "estimated_run_seconds")
+    if isinstance(seconds, bool) or not isinstance(seconds, int | float):
+        return None
+    return float(seconds) if seconds >= 0 else None
 
 
 def slot_cost(job: Job) -> int:
-    """How many slots of its pool a job takes: `H3_SLOT_COST` for a MiniMax H3 clip (its endpoint
-    is recorded on the job's input), else 1.
+    """How many slots of its pool a job takes: the GPUs the server gave it when it said so, else
+    `H3_MIN_GPUS` for a MiniMax H3 clip (its endpoint is recorded on the job's input), else 1.
     """
     recorded = job.input if isinstance(job.input, dict) else {}
-    return H3_SLOT_COST if video_generator.is_h3_endpoint(recorded.get("endpoint")) else 1
+    if not video_generator.is_h3_endpoint(recorded.get("endpoint")):
+        return 1
+    return server_gpus(job) or H3_MIN_GPUS
 
 
 def fits(free: int, limit: int, cost: int) -> bool:

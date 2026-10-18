@@ -71,14 +71,36 @@ export function formatElapsed(totalSeconds: number): string {
   return minutesRest === 0 ? `${hours} h` : `${hours} h ${minutesRest} min`;
 }
 
+/** A rough length of time: rounded to the minute from two minutes up, so it does not look exact. */
+function roughElapsed(seconds: number): string {
+  return formatElapsed(seconds < 120 ? seconds : Math.round(seconds / 60) * 60);
+}
+
 /** "typically about 12 min", from the server's usual run time. Empty when it is not known. */
 export function typicalText(typicalSeconds: number | null): string {
   if (typicalSeconds === null || typicalSeconds <= 0) {
     return "";
   }
-  // A few minutes is a rough figure: round it to the minute so it does not look exact.
-  const rounded = typicalSeconds < 120 ? typicalSeconds : Math.round(typicalSeconds / 60) * 60;
-  return `typically about ${formatElapsed(rounded)}`;
+  return `typically about ${roughElapsed(typicalSeconds)}`;
+}
+
+/**
+ * What the GPU server said about a job when it took it: "4 GPUs, about 12 min to run". The
+ * estimate leaves out the wait in the server's own queue. Null when the server said neither,
+ * so the caller can say it is still waiting for the answer.
+ */
+export function serverEstimateText(
+  gpus: number | null,
+  estimatedRunSeconds: number | null,
+): string | null {
+  const parts: string[] = [];
+  if (gpus !== null) {
+    parts.push(`${gpus} GPUs`);
+  }
+  if (estimatedRunSeconds !== null && estimatedRunSeconds > 0) {
+    parts.push(`about ${roughElapsed(estimatedRunSeconds)} to run`);
+  }
+  return parts.length === 0 ? null : parts.join(", ");
 }
 
 type Timed = Pick<JobSummary, "status" | "created_at" | "started_at" | "finished_at">;

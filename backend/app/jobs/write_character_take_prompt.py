@@ -29,16 +29,14 @@ import logging
 import time
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.providers import llm
 from app.services import character_take_prompt_writer as writer
-from app.services import character_takes, description_writer
+from app.services import character_takes, description_writer, llm_target
 
 _logger = logging.getLogger(__name__)
 
@@ -79,8 +77,7 @@ class WriteCharacterTakePromptHandler(JobHandler):
                 return
             job_input: dict[str, Any] = dict(job.input)
             inputs = job_input.get("inputs")
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, DESCRIPTION_MODEL_KEY)
+            target = await llm_target.resolve(session, DESCRIPTION_MODEL_KEY)
             await session.commit()
 
         if not isinstance(inputs, dict) or not isinstance(inputs.get("needed"), list):
@@ -89,18 +86,18 @@ class WriteCharacterTakePromptHandler(JobHandler):
         needed = frozenset(inputs["needed"])
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        body = writer.build_request(inputs, model=model)
+        body = writer.build_request(inputs, model=target.model)
         job_input.update(
             instructions_sha256=description_writer.instructions_sha256(body),
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, base_url, body, _reader(inputs), timeout_s=REQUEST_TIMEOUT_S
+            job_id, target, body, _reader(inputs), timeout_s=REQUEST_TIMEOUT_S
         )
         checked: writer.CheckedTakePrompts | None = outcome.value
         if checked is None:

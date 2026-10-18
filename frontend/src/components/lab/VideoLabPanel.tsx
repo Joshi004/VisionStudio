@@ -25,7 +25,8 @@ type VideoLabPanelProps = {
 /**
  * The Video lab tab: trying a prompt on LTX-2.3, LTX-2.5 and MiniMax H3 side by side, trying the
  * multi-shot prompts only LTX-2.5 can cut, and making a MiniMax H3 clip from reference pictures
- * and a voice. Each run is a paid GPU job of 5 to 10 minutes or more (MiniMax H3 holds two GPUs)
+ * (one or two characters, a scene) and optional voices. Each run is a paid GPU job of 5 to 10
+ * minutes or more (MiniMax H3 holds the 4 or 8 GPUs the server reports, and shows its estimate)
  * that shares the GPU slots of the scene clips. Every run is kept with its exact settings, so
  * clips can be compared later. It belongs to no project and changes none.
  */
@@ -54,7 +55,7 @@ export function VideoLabPanel({ form, onFormChange }: VideoLabPanelProps) {
         can cut between two to four shots inside one clip when the prompt names each cut in a
         sentence, LTX-2.3 always makes one continuous shot, and MiniMax H3 makes its own sound with
         the picture and reads a structured prompt. Each run is a paid GPU job of 5 to 10 minutes
-        (MiniMax H3: more, on two GPUs), and it belongs to no project. To make a character speak a
+        (MiniMax H3: more, on the GPUs the server chooses), and it belongs to no project. To make a character speak a
         line in its own voice, use the Characters tab.
       </Text>
 

@@ -286,6 +286,8 @@ relevant rules into the profiles rather than calling the cluster for them.
 
 ### 4.6 GPU capacity: one H3 job uses two GPUs
 
+> **Superseded by section 8.** The server now says how many GPUs a H3 job takes (4 or 8), and the app counts that.
+
 `jobs/pools.py` counts every GPU job as one slot of `max_parallel_gpu_jobs`. With the limit at 4, four
 H3 jobs would hold 8 GPUs. The simplest fix is a per-job slot cost (H3 = 2, everything else = 1),
 read from the job's endpoint when the dispatcher counts running jobs. The new `PoolCapacityPanel.tsx`
@@ -293,6 +295,8 @@ should show slots used, not jobs. The two "GPUs" are reserved on one node, so an
 wait in the Slurm queue longer than an LTX job. `GET /v1/partitions` (section 5) can show that.
 
 ### 4.7 `POST /v1/h3/videos/audio-to-video` (reference mode)
+
+> **Changed in 0.14 and 0.15, see section 8.** The audio is optional and is now a list (`audio_asset_ids`).
 
 This is a different tool from LTX audio-to-video:
 
@@ -389,6 +393,50 @@ These are not new in 0.13.0, but none are wired in today.
 - **Licence:** where will H3 output be published? That decides whether H3 can be offered at all.
 - **H3 in scenes:** fall back to LTX-2.5 for short first-and-last scenes (proposed), or force
   `min_scene_seconds >= 5.2` on projects that use H3?
+
+---
+
+## 8. 0.14 / 0.15: optional audio, a list of audios, GPUs and an estimate from the server (done)
+
+Read on 2026-10-18 from `GET /v1/guide?format=json` (`api_version` 0.15.0).
+
+### 8.1 What changed upstream
+
+| Change | Version | Effect |
+|---|---|---|
+| `audio_asset_id` (one) became **`audio_asset_ids`** (a list, up to 3) on `POST /v1/h3/videos/audio-to-video`. The old field is rejected with 422. | 0.14 | Every H3 reference request we sent before would now fail. This was a **required fix**, not only a feature. |
+| **Audio is optional.** At least one of `image_asset_ids` (up to 9) or `video_asset_ids` (up to 3) is needed; 12 references in all. | 0.14 | Pictures alone are enough. With pictures only, the prompt defines one `<Subject N>` per character or place and has no `<Audio N>` lines. |
+| `match_audio_duration` needs at least one audio and measures `audio_asset_ids[0]`. | 0.14 | Without an audio, the length is sent instead. |
+| **`gpus`** (4 or 8 for H3, null for other jobs) and **`estimated_run_seconds`** (queue wait not included) on the submit answer and on `GET /v1/jobs/{id}`. | 0.15 | The server says what a job takes. The guide says to prefer it over `typical_run_seconds`. A request too big for the server is refused with 422 and one sentence. |
+
+### 8.2 What the app does now
+
+| Where | Change |
+|---|---|
+| `providers/gpu_server.py` | `submit()` returns a `SubmitAnswer` (`job_id`, `gpus`, `estimated_run_seconds`). `job_status()` reads both fields. `submit_job()` still returns just the id for callers that want only that. |
+| `providers/video_generator.py` | `with_h3_references` sends `audio_asset_ids`, and only when there is an audio. |
+| `jobs/generate_lab_video.py`, `jobs/generate_clip.py` | Save the submit answer on the job's input (`submit_answer`). The lab handler uploads 0 to 2 audios, in order, and no longer needs one. |
+| `jobs/pools.py` | `slot_cost`: a H3 job counts the GPUs the server reported (from the job's `output.remote` once running, else from `submit_answer`), 4 before the server has said, any other GPU job 1. The local "H3 = 2" figure is gone. |
+| `lab_video_run.audio_references` (migration `0020`) | A JSON list of the audios of a run, filled from `audio_input` for old runs. `audio_input` still holds the first one. |
+| `POST /api/lab/videos/reference-runs` | `audios` (0 to 2), `audio_owners`, `reference_roles` and `ambience` (up to 1,000 characters). The server checks: a voice needs its character's picture, and at most two voices. |
+| `LabVideoRunOut` | `audio_references`, `gpus`, `estimated_run_seconds`. |
+| `CharacterReferenceOut` | `lab_image_id`, so the Video lab can use a library character's picture. |
+| Video lab form | Character 1, Character 2 (optional), Scene, Ambience and Other pictures. Each character has a name, a description and an optional voice. The six-part prompt is made from them, and is the author's to edit. The run list shows "The server says: 4 GPUs, about 12 min to run" once the server has answered. |
+
+### 8.3 Left out on purpose
+
+Reference videos (`video_asset_ids`, `<Video N>`) and a third audio. The form is for one or two characters
+in a scene, and these would only add choices. The Character lab's takes send a single audio, as before,
+through the list field.
+
+### 8.4 Notes
+
+- **Approval is not needed** (section 1). The first GPU job after the update records the 0.15 API and
+  the Settings banner shows the change; approving it is an optional review.
+- **Migration `0020`** runs by itself when the backend container starts (`alembic upgrade head`).
+- A **front picture on a white backdrop** is what a library character gives. That white may show up
+  as the clip's background unless a scene picture or the prompt sets the place. This has **not been
+  tested** here: try it, and tell the model in `retention_analysis` what is kept.
 
 ---
 

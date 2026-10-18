@@ -74,8 +74,9 @@ export function useCreateLabVideoRuns() {
 }
 
 /**
- * Starts one MiniMax H3 reference clip (1 to 9 pictures and an audio reference) and returns at
- * once with that one run. It is a paid GPU job on two GPUs and can take more than 10 minutes.
+ * Starts one MiniMax H3 reference clip (1 to 9 pictures and 0 to 2 voices) and returns at once
+ * with that one run. It is a paid GPU job on 4 or 8 GPUs (the server says which) and can take
+ * more than 10 minutes.
  */
 export function useCreateH3ReferenceRun() {
   const queryClient = useQueryClient();

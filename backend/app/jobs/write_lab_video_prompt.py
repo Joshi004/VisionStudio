@@ -32,16 +32,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
 from app.jobs import phases, store
 from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.providers import llm
 from app.providers.llm import LlmCallError
-from app.services import description_writer
+from app.services import description_writer, llm_target
 from app.services import lab_prompt_writer as writer
 from app.services.lab_prompt_profiles import LabPromptProfile, profile_for
 from app.services.lab_prompt_writer import CheckedPrompt
@@ -118,9 +116,8 @@ class WriteLabVideoPromptHandler(JobHandler):
                 await session.commit()
                 return
             job_input: dict[str, Any] = dict(job.input)
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
             # The same model as the scene descriptions: it writes video prompts too.
-            model = await settings_service.get_str(session, DESCRIPTION_MODEL_KEY)
+            target = await llm_target.resolve(session, DESCRIPTION_MODEL_KEY)
             await session.commit()
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
@@ -130,18 +127,18 @@ class WriteLabVideoPromptHandler(JobHandler):
             return
         # LTX-2.5 unless the request names MiniMax H3 (an older job names no model).
         profile = profile_for(inputs.get("target_model"))
-        body = writer.build_request(inputs, model=model, profile=profile)
+        body = writer.build_request(inputs, model=target.model, profile=profile)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
             instructions_sha256=description_writer.instructions_sha256(body),
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
-        outcome = await self._ask_model(job_id, inputs, profile, base_url, body)
+        outcome = await self._ask_model(job_id, inputs, profile, target, body)
         checked = outcome.checked
         if checked is None:
             await self._fail(job_id, f"The prompt could not be written: {outcome.failure}")
@@ -156,7 +153,7 @@ class WriteLabVideoPromptHandler(JobHandler):
         job_id: int,
         inputs: dict[str, Any],
         profile: LabPromptProfile,
-        base_url: str,
+        target: llm_target.LlmTarget,
         body: dict[str, Any],
     ) -> _Outcome:
         outcome = _Outcome()
@@ -164,8 +161,8 @@ class WriteLabVideoPromptHandler(JobHandler):
             await self._phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
             started = time.monotonic()
             try:
-                result = await llm.complete(
-                    base_url, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
+                result = await llm_target.complete(
+                    target, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
                 )
             except LlmCallError as exc:
                 outcome.failure = _failure_text(exc)

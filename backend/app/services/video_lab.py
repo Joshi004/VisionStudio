@@ -1,9 +1,10 @@
 """The Video lab: try a prompt on LTX-2.3, LTX-2.5 and MiniMax H3, side by side (Phase 19).
 
 MiniMax H3 is a lab-only model: it differs from LTX in its sizes (1344 x 768), its fixed 24 fps,
-its `17n + 5` frame grid, its prompt format and the two GPUs it needs, so `create_runs` works
-all of that out per model. Its reference mode (pictures and an audio reference, no first frame)
-is its own form, `H3ReferenceForm`, started by `create_h3_reference_run`.
+its `17n + 5` frame grid, its prompt format and the 4 or 8 GPUs the server gives it, so
+`create_runs` works all of that out per model. Its reference mode (pictures and optional audio
+references, no first frame) is its own form, `H3ReferenceForm`, started by
+`create_h3_reference_run`.
 
 The lab belongs to no project. A run is a `lab_video` job (`job.project_id` is NULL) that makes
 one clip on one model, and a `lab_video_run` row that holds what the page lists and compares:
@@ -55,6 +56,12 @@ Orientation = Literal["landscape", "portrait"]
 FrameSource = Literal["lab", "asset"]
 # The speech a lip-synced clip matches: a Voice lab run, or a saved voice's recording.
 AudioSource = Literal["voice_run", "voice"]
+# What a picture of a MiniMax H3 reference clip is: one of up to two characters, the scene they
+# are in, or anything else (a prop, a style). It only decides how the page writes the prompt's
+# skeleton and loads a run back into the form: the server sees pictures, not roles.
+ReferenceRole = Literal["character_1", "character_2", "scene", "other"]
+# The character a reference clip's audio is the voice of.
+VoiceOwner = Literal["character_1", "character_2"]
 
 MAX_PROMPT_CHARS: Final = 8000
 NEGATIVE_PROMPT_MAX_CHARS: Final = 2000
@@ -82,6 +89,11 @@ H3_SIZES: Final[dict[Orientation, tuple[int, int]]] = {
 # Denoising steps: 4 to 100, and the pipeline's own default (50) when none is sent.
 H3_STEPS_MIN: Final = 4
 H3_STEPS_MAX: Final = 100
+# The Video lab's reference form has room for two characters, each with an optional voice, so a
+# run has at most two audios (the server takes three).
+H3_MAX_AUDIOS: Final = 2
+# The ambience text goes into the prompt's `overall_soundscape`, which is a few sentences.
+AMBIENCE_MAX_CHARS: Final = 1000
 
 
 class LabVideoInputError(ValueError):
@@ -124,23 +136,33 @@ class AudioRef:
 
 @dataclass(frozen=True)
 class H3ReferenceForm:
-    """A MiniMax H3 reference clip: 1 to 9 pictures and an audio reference, no first frame.
+    """A MiniMax H3 reference clip: 1 to 9 pictures and, optionally, up to two audio references,
+    no first frame.
 
     The pictures are `<Picture 1>`, `<Picture 2>`, ... in the prompt, in this order, and the
-    audio is `<Audio 1>`. The audio is a reference the model reads (its voice, its delivery) and
-    then makes its own soundtrack from. It is not muxed in, unlike a lip-synced LTX clip.
-    The pictures do not set the clip's shape, so `orientation` does.
+    audios are `<Audio 1>`, `<Audio 2>`, in this order. An audio is a reference the model reads
+    (its voice, its delivery) and then makes its own soundtrack from. It is not muxed in, unlike
+    a lip-synced LTX clip. There may be none: the clip then has the model's own sound. The
+    pictures do not set the clip's shape, so `orientation` does.
+
+    `reference_roles` (one for each picture), `audio_owners` (one for each audio) and `ambience`
+    are what the Video lab's form knew when it wrote the prompt. They change nothing that is
+    sent: they are kept on the run so it loads back into the form. Empty (a Character lab take)
+    means "not given": every picture is `other`, and the audios have no owner.
     """
 
     prompt: str
     orientation: Orientation
     seed: int | None
     references: Sequence[FirstFrameRef]
-    audio: AudioRef
-    # True: the clip is as long as the audio. False: it lasts `duration_s`.
+    audios: Sequence[AudioRef]
+    # True: the clip is as long as the first audio (so it needs one). False: it lasts `duration_s`.
     match_audio_duration: bool
     duration_s: float | None = None
     num_inference_steps: int | None = None
+    reference_roles: Sequence[ReferenceRole] = ()
+    audio_owners: Sequence[VoiceOwner] = ()
+    ambience: str | None = None
 
 
 @dataclass(frozen=True)
@@ -249,13 +271,48 @@ def validate_h3_reference_form(form: H3ReferenceForm) -> None:
         raise LabVideoInputError(
             f"Choose 1 to {video_generator.H3_MAX_REFERENCE_IMAGES} reference pictures."
         )
-    if not form.match_audio_duration:
+    _check_h3_cast(form)
+    if form.match_audio_duration:
+        if not form.audios:
+            raise LabVideoInputError(
+                "Add a voice for the clip to match, or choose a length instead."
+            )
+    else:
         if form.duration_s is None:
             raise LabVideoInputError("Choose a length, or let the clip match the audio.")
         _check_duration(form.duration_s)
     _check_h3_steps(form.num_inference_steps)
     if form.seed is not None and not 0 <= form.seed < SEED_LIMIT:
         raise LabVideoInputError(f"The seed must be from 0 to {SEED_LIMIT - 1}.")
+
+
+def _check_h3_cast(form: H3ReferenceForm) -> None:
+    """Raises LabVideoInputError for audios, picture roles or an ambience a reference clip
+    cannot have.
+    """
+    if len(form.audios) > H3_MAX_AUDIOS:
+        raise LabVideoInputError(f"Add at most {H3_MAX_AUDIOS} voices.")
+    if form.ambience is not None and len(form.ambience) > AMBIENCE_MAX_CHARS:
+        raise LabVideoInputError(f"The ambience must be at most {AMBIENCE_MAX_CHARS:,} characters.")
+
+    roles = form.reference_roles
+    if roles and len(roles) != len(form.references):
+        raise LabVideoInputError("Each reference picture needs a role.")
+    names = {"character_1": "Character 1", "character_2": "Character 2", "scene": "the scene"}
+    for role, name in names.items():
+        if list(roles).count(role) > 1:
+            raise LabVideoInputError(f"Only one picture can be {name}.")
+
+    owners = form.audio_owners
+    if owners and len(owners) != len(form.audios):
+        raise LabVideoInputError("Each voice must say which character it belongs to.")
+    if len(set(owners)) != len(owners):
+        raise LabVideoInputError("Each character can have only one voice.")
+    if roles:
+        for owner in owners:
+            if owner not in roles:
+                name = "Character 1" if owner == "character_1" else "Character 2"
+                raise LabVideoInputError(f"{name} has a voice but no picture. Add its picture.")
 
 
 def validate_prompt_draft(
@@ -616,35 +673,36 @@ async def create_h3_reference_run(
     everything together.
 
     The clip is made by `/v1/h3/videos/audio-to-video` from the pictures (`<Picture n>`, in the
-    order given) and the audio reference (`<Audio 1>`). The audio can be any length above 0: the
-    GPU server documents 2 to 15 s, and what it does with another length is shown on the run.
-    The pictures do not set the clip's shape, so the size is the orientation's (1344 x 768 or
-    768 x 1344). The prompt is sent exactly as written: the six-part reference format has no
-    first line for the code to add.
+    order given) and the audio references, if any (`<Audio n>`, in the order given). An audio can
+    be any length above 0: the GPU server documents 2 to 15 s, and what it does with another
+    length is shown on the run. The pictures do not set the clip's shape, so the size is the
+    orientation's (1344 x 768 or 768 x 1344). The prompt is sent exactly as written: the
+    six-part reference format has no first line for the code to add.
 
     With `match_audio_duration` the request says so and sends no `num_frames` (the two exclude
-    each other on the server), so the server decides the clip's length (it documents 124 to 345
-    frames). Otherwise the frame count is the smallest `17n + 5` at least as long as
-    `duration_s`, and the server's frame range is not checked here.
+    each other on the server), so the server decides the clip's length from the first audio (it
+    documents 124 to 345 frames). Otherwise the frame count is the smallest `17n + 5` at least
+    as long as `duration_s`, and the server's frame range is not checked here.
 
     Raises LabVideoInputError.
     """
     validate_h3_reference_form(form)
     for reference in form.references:
         await first_frame_path(session, reference)  # only checks that it exists
-    audio = await audio_file(session, form.audio)
-    if not audio.duration_s > 0:  # written so that NaN is rejected too
-        raise LabVideoInputError("The audio reference has no length.")
+    audios = [await audio_file(session, ref) for ref in form.audios]
+    for number, audio in enumerate(audios, start=1):
+        if not audio.duration_s > 0:  # written so that NaN is rejected too
+            raise LabVideoInputError(f"Voice {number} has no length.")
 
     width, height = H3_SIZES[form.orientation]
     fps = frame_counts.H3_FPS
-    # `validate_h3_reference_form` asks for a length whenever the clip does not match the audio.
-    if form.match_audio_duration or form.duration_s is None:
-        seconds = audio.duration_s
-        target = math.ceil(seconds * fps)  # rounded up, so the audio is never cut
-    else:
+    if form.duration_s is not None and not form.match_audio_duration:
         seconds = form.duration_s
         target = round(seconds * fps)
+    else:
+        # `validate_h3_reference_form` guarantees a first audio when the clip matches the audio.
+        seconds = audios[0].duration_s
+        target = math.ceil(seconds * fps)  # rounded up, so the audio is never cut
     num_frames = frame_counts.h3_num_frames(target)
     seed = form.seed if form.seed is not None else secrets.randbelow(SEED_LIMIT)
     partition = await settings_service.get_str(session, PARTITION_KEY)
@@ -693,10 +751,17 @@ async def create_h3_reference_run(
         "negative_prompt": None,
         "num_inference_steps": form.num_inference_steps,
         "match_audio_duration": form.match_audio_duration,
-        "audio_duration_s": audio.duration_s,
+        # The first audio's length (the older runs' only one), and the length of each audio.
+        "audio_duration_s": audios[0].duration_s if audios else None,
+        "audio_durations_s": [audio.duration_s for audio in audios],
+        # What the form knew when it wrote the prompt, so the run loads back into it. Written in
+        # full: a form that gave no roles has every picture as `other`.
+        "reference_roles": list(form.reference_roles) or ["other"] * len(form.references),
+        "audio_owners": list(form.audio_owners),
+        "ambience": (form.ambience or "").strip() or None,
     }
     reference_json = [{"source": ref.source, "id": ref.id} for ref in form.references]
-    audio_json = {"source": form.audio.source, "id": form.audio.id}
+    audio_jsons = [{"source": ref.source, "id": ref.id} for ref in form.audios]
 
     run = LabVideoRun(
         group_key=secrets.token_hex(8),
@@ -706,8 +771,10 @@ async def create_h3_reference_run(
         params=params,
         first_frame=None,
         last_frame=None,
-        audio_input=audio_json,
+        # The first audio, or NULL: what the page reads for a lip-synced clip's one speech.
+        audio_input=audio_jsons[0] if audio_jsons else None,
         references=reference_json,
+        audio_references=audio_jsons or None,
     )
     session.add(run)
     await session.flush()
@@ -726,9 +793,13 @@ async def create_h3_reference_run(
             "last_frame": None,
             # Uploaded in this order: the order is what `<Picture n>` means in the prompt.
             "references": reference_json,
-            # What the job needs of the audio, copied now like a voice's recording is for a
-            # speech: a later change to the run changes nothing for this clip.
-            "audio": {**audio_json, "path": audio.path, "mime": audio.mime},
+            # What the job needs of each audio (none is allowed), in the order of `<Audio n>`,
+            # copied now like a voice's recording is for a speech: a later change to the run
+            # changes nothing for this clip.
+            "audios": [
+                {**audio_json, "path": audio.path, "mime": audio.mime}
+                for audio_json, audio in zip(audio_jsons, audios, strict=True)
+            ],
         },
         commit=False,
         dedupe=False,
@@ -739,10 +810,9 @@ async def create_h3_reference_run(
     else:
         await session.flush()
     _logger.info(
-        "lab H3 reference run started: run=%d audio=%s:%d pictures=%d match_audio=%s",
+        "lab H3 reference run started: run=%d audios=%d pictures=%d match_audio=%s",
         run.id,
-        form.audio.source,
-        form.audio.id,
+        len(audios),
         len(form.references),
         form.match_audio_duration,
     )

@@ -165,6 +165,9 @@ class CharacterReferenceOut(BaseModel):
     # display; `url` is always there once the angle is ready, even without a cutout.
     cutout_url: str | None
     ready: bool
+    # The Image lab image of the picture as made (the one `url` shows), so another lab can use
+    # it as a `{source: "lab", id}` reference. None until the angle is ready.
+    lab_image_id: int | None = None
 
 
 class LookCandidateOut(BaseModel):
@@ -276,6 +279,7 @@ async def _look_out(session: AsyncSession, look: CharacterLook) -> LookOut:
                 url=media_url(image.path) if image is not None else None,
                 cutout_url=media_url(reference.cutout_path) if reference.cutout_path else None,
                 ready=reference.lab_image_id is not None,
+                lab_image_id=reference.lab_image_id,
             )
         )
     return LookOut(

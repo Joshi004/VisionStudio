@@ -101,7 +101,7 @@ export function AudioReferencePicker({ value, onChange, title, hint }: AudioRefe
         {title ?? "Audio reference"}
       </Text>
       <Select
-        aria-label="Audio reference"
+        aria-label={title ?? "Audio reference"}
         placeholder={
           voices.isLoading || runs.isLoading ? "Loading…" : "Choose a saved voice or a speech"
         }

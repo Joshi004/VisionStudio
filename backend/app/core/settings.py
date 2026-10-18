@@ -107,6 +107,29 @@ GROUP_IMAGE = "Image model"
 GROUP_VIDEO = "Video model"
 GROUP_LIMITS = "Limits"
 
+# Where a language-model role is answered: the paid Bitdeer API (GLM), or the Qwen3.8 text
+# model on your own GPU server. Each of the three roles has its own choice.
+PROVIDER_BITDEER = "bitdeer"
+PROVIDER_QWEN38 = "qwen38"
+LLM_PROVIDER_KEY = "llm_provider"
+DESCRIPTION_PROVIDER_KEY = "description_llm_provider"
+IMAGE_PROMPT_PROVIDER_KEY = "image_prompt_llm_provider"
+
+_PROVIDER_CHOICES: tuple[SettingChoice, ...] = (
+    SettingChoice(PROVIDER_BITDEER, "Bitdeer (the GLM model below)"),
+    SettingChoice(PROVIDER_QWEN38, "GPU server: Qwen3.8-27B (reasoning on)"),
+)
+
+
+def _provider_help(role: str) -> str:
+    return (
+        f"Which language model {role}. Bitdeer uses the URL and model below. GPU server "
+        "uses Qwen3.8-27B on your GPU server (the GPU server URL), with reasoning on. The "
+        "first call after 20 idle minutes waits several minutes while the server starts. "
+        "Answers are limited to 16,384 tokens and the prompt to 32,000 characters."
+    )
+
+
 # The order here is the order on the Settings page. Defaults come from
 # DATABASE_STRUCTURE.md Section 6 and ANALYSIS.md Section 3.1 and 3.7.
 REGISTRY: tuple[SettingSpec, ...] = (
@@ -153,10 +176,11 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="llm_base_url",
         group=GROUP_LLM,
-        label="LLM URL",
+        label="LLM URL (Bitdeer)",
         help=(
-            "OpenAI-compatible address used to propose scene cuts. The Bitdeer key is sent "
-            "only to api-inference.bitdeer.ai, never to another address."
+            "OpenAI-compatible address used by every role set to Bitdeer below. The Bitdeer "
+            "key is sent only to api-inference.bitdeer.ai, never to another address. A role "
+            "set to the GPU server does not use it."
         ),
         value_type="string",
         default="https://api-inference.bitdeer.ai/v1",
@@ -164,10 +188,19 @@ REGISTRY: tuple[SettingSpec, ...] = (
         is_url=True,
     ),
     SettingSpec(
+        key=LLM_PROVIDER_KEY,
+        group=GROUP_LLM,
+        label="Scene planning provider",
+        help=_provider_help("proposes the scene cuts and assigns the cast to scenes"),
+        value_type="string",
+        default=PROVIDER_BITDEER,
+        choices=_PROVIDER_CHOICES,
+    ),
+    SettingSpec(
         key="llm_model",
         group=GROUP_LLM,
-        label="LLM model",
-        help="Model that proposes the scene cuts.",
+        label="LLM model (Bitdeer)",
+        help="Bitdeer model that proposes the scene cuts. Used only when its provider is Bitdeer.",
         value_type="string",
         default="zai-org/GLM-5.3-Flash",
         pattern=TextPattern(
@@ -176,12 +209,25 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key=DESCRIPTION_PROVIDER_KEY,
+        group=GROUP_LLM,
+        label="Description provider",
+        help=_provider_help(
+            "writes the scene and frame descriptions, extracts the cast, and writes the "
+            "Video lab and character take prompts"
+        ),
+        value_type="string",
+        default=PROVIDER_BITDEER,
+        choices=_PROVIDER_CHOICES,
+    ),
+    SettingSpec(
         key="description_llm_model",
         group=GROUP_LLM,
-        label="Description model",
+        label="Description model (Bitdeer)",
         help=(
-            "Model that writes the scene descriptions and frame descriptions. It uses the "
-            "LLM URL above. A larger model writes better, and costs more."
+            "Bitdeer model that writes the scene descriptions and frame descriptions. It uses "
+            "the LLM URL above, and only when its provider is Bitdeer. A larger model writes "
+            "better, and costs more."
         ),
         value_type="string",
         default="zai-org/GLM-5.3",
@@ -191,12 +237,25 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key=IMAGE_PROMPT_PROVIDER_KEY,
+        group=GROUP_LLM,
+        label="Image prompt provider",
+        help=_provider_help(
+            "writes the image prompts for first and last frames, character references and "
+            "character looks"
+        ),
+        value_type="string",
+        default=PROVIDER_BITDEER,
+        choices=_PROVIDER_CHOICES,
+    ),
+    SettingSpec(
         key="image_prompt_llm_model",
         group=GROUP_LLM,
-        label="Image prompt model",
+        label="Image prompt model (Bitdeer)",
         help=(
-            "Model that writes a detailed image prompt for each scene's first frame, one call "
-            "per scene. It uses the LLM URL above."
+            "Bitdeer model that writes a detailed image prompt for each scene's first frame, "
+            "one call per scene. It uses the LLM URL above, and only when its provider is "
+            "Bitdeer."
         ),
         value_type="string",
         default="zai-org/GLM-5.3-Flash",
@@ -269,10 +328,11 @@ REGISTRY: tuple[SettingSpec, ...] = (
         help=(
             "How many slots may be in use on your GPU server at the same time, all kinds of job "
             "together: clips, first and last frames, reference pictures, transcription and "
-            "speech. A job takes one slot, except a MiniMax H3 clip (Video lab), which takes two "
-            "because it needs two GPUs. Each image job loads about 31 GB of model weights "
-            "first, so pick a number your GPU server can actually handle. It applies the next "
-            "time the app looks for work, and running jobs are not stopped."
+            "speech. A job takes one slot, except a MiniMax H3 clip (Video lab), which takes the "
+            "number of GPUs the server gives it (4 or 8), and 4 until the server has said. Each "
+            "image job loads about 31 GB of model weights first, so pick a number your GPU "
+            "server can actually handle. It applies the next time the app looks for work, and "
+            "running jobs are not stopped."
         ),
         value_type="integer",
         default=4,

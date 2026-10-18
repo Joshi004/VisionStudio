@@ -23,16 +23,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project
 from app.db.session import SessionLocal
 from app.jobs import llm_call, phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.providers import llm
 from app.services import cast as cast_service
-from app.services import cast_extraction, scene_planner, transcript_matching
+from app.services import cast_extraction, llm_target, scene_planner, transcript_matching
 from app.services.cast_extraction import CastList
 
 _logger = logging.getLogger(__name__)
@@ -74,8 +72,7 @@ class ExtractCastHandler(JobHandler):
                 return
             job_input: dict[str, Any] = dict(job.input)
             project = await session.get(Project, job.project_id)
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, MODEL_KEY)
+            target = await llm_target.resolve(session, MODEL_KEY)
             await session.commit()
 
         if project is None:
@@ -97,22 +94,22 @@ class ExtractCastHandler(JobHandler):
         await self._phase(job_id, phases.PREPARING_PROMPT)
         body = cast_extraction.build_request(
             script,
-            model=model,
+            model=target.model,
             style=project.style_prefix,
             instructions=project.description_instructions,
         )
         job_input.update(
             # The script the cast was found in, so the page can tell when it has changed since.
             script_sha256=transcript_matching.script_sha256(script),
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, base_url, body, _read_answer, timeout_s=REQUEST_TIMEOUT_S
+            job_id, target, body, _read_answer, timeout_s=REQUEST_TIMEOUT_S
         )
         found = outcome.value
         if found is None:

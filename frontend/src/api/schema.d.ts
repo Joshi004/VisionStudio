@@ -1241,8 +1241,8 @@ export interface paths {
         /**
          * Create Runs
          * @description Starts one run per chosen model. Each is a paid GPU job of 5 to 10 minutes (MiniMax H3
-         *     more: it holds two GPUs). `negative_prompt` and `mode` are ignored for MiniMax H3, and the
-         *     run's `params` show that.
+         *     more: the server gives it 4 or 8 GPUs). `negative_prompt` and `mode` are ignored for
+         *     MiniMax H3, and the run's `params` show that.
          */
         post: operations["create_runs_api_lab_videos_runs_post"];
         delete?: never;
@@ -1262,8 +1262,10 @@ export interface paths {
         put?: never;
         /**
          * Create Reference Run
-         * @description Starts one MiniMax H3 reference clip from 1 to 9 pictures and an audio reference of 2 to
-         *     15 seconds. A paid GPU job that holds two GPUs, and often takes more than 10 minutes.
+         * @description Starts one MiniMax H3 reference clip from 1 to 9 pictures and, optionally, up to two audio
+         *     references (the server documents 2 to 15 seconds each). A paid GPU job: the server decides
+         *     how many GPUs it gets (4 or 8) and says how long it expects it to run, and both are on the
+         *     run's job once it is accepted.
          */
         post: operations["create_reference_run_api_lab_videos_reference_runs_post"];
         delete?: never;
@@ -2115,6 +2117,8 @@ export interface components {
             cutout_url: string | null;
             /** Ready */
             ready: boolean;
+            /** Lab Image Id */
+            lab_image_id?: number | null;
         };
         /** CharactersOut */
         CharactersOut: {
@@ -2473,7 +2477,14 @@ export interface components {
             seed?: number | null;
             /** References */
             references: components["schemas"]["FirstFrameIn"][];
-            audio: components["schemas"]["AudioInputIn"];
+            /** Reference Roles */
+            reference_roles?: ("character_1" | "character_2" | "scene" | "other")[];
+            /** Audios */
+            audios?: components["schemas"]["AudioInputIn"][];
+            /** Audio Owners */
+            audio_owners?: ("character_1" | "character_2")[];
+            /** Ambience */
+            ambience?: string | null;
             /** Match Audio Duration */
             match_audio_duration: boolean;
             /** Duration S */
@@ -2844,7 +2855,13 @@ export interface components {
             /** References */
             references: components["schemas"]["FirstFrameOut"][];
             audio_input: components["schemas"]["AudioInputOut"] | null;
+            /** Audio References */
+            audio_references: components["schemas"]["AudioInputOut"][];
             job: components["schemas"]["JobSummary"] | null;
+            /** Gpus */
+            gpus: number | null;
+            /** Estimated Run Seconds */
+            estimated_run_seconds: number | null;
             /** Url */
             url: string | null;
             /** Size Bytes */
@@ -3852,11 +3869,8 @@ export interface components {
             /** Url */
             url: string | null;
             job: components["schemas"]["JobSummary"] | null;
-            /**
-             * Duration S
-             * @default null
-             */
-            duration_s: number | null;
+            /** Duration S */
+            duration_s?: number | null;
         };
         /** TakesOut */
         TakesOut: {

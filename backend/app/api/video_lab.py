@@ -6,8 +6,9 @@ run carries its job, the same one the Activity page shows). Several models make 
 with the same prompt, first frame, length, recipe and seed, so the clips differ only by the
 model (MiniMax H3 also forces its own size and frame grid).
 
-`POST .../reference-runs` starts one MiniMax H3 reference clip: up to 9 pictures and an audio
-reference instead of a first frame. It answers like `.../runs` does, with the one run.
+`POST .../reference-runs` starts one MiniMax H3 reference clip: up to 9 pictures (each with a
+role: a character, the scene, anything else) and, optionally, up to two audio references
+instead of a first frame. It answers like `.../runs` does, with the one run.
 
 `POST .../prompt-drafts` starts the paid job that writes a multi-shot prompt from an idea. It
 answers with that job; its `output.prompt` is what the page puts in the form.
@@ -32,7 +33,7 @@ from app.api.errors import ErrorResponse
 from app.api.jobs import JobDetail, JobSummary, job_detail, job_summary
 from app.db.models import Asset, LabImage
 from app.db.session import SessionDep
-from app.jobs import dispatcher, store
+from app.jobs import dispatcher, pools, store
 from app.jobs.store import JobRow
 from app.providers import video_generator
 from app.services import video_lab, video_models
@@ -98,10 +99,23 @@ class H3ReferenceRunCreate(BaseModel):
     references: list[FirstFrameIn] = Field(
         min_length=1, max_length=video_generator.H3_MAX_REFERENCE_IMAGES
     )
-    # `<Audio 1>`: any length (the server documents 2 to 15 seconds). A reference the model
-    # reads, not a soundtrack.
-    audio: AudioInputIn
-    # True: the clip is as long as the audio, and `duration_s` is ignored.
+    # What each picture is, one for each of `references`, in the same order: Character 1 and 2,
+    # the scene they are in, or anything else. Left out: every picture is "other". It decides
+    # nothing on the server: the run keeps it so the form can load the run back.
+    reference_roles: list[Literal["character_1", "character_2", "scene", "other"]] = Field(
+        default_factory=list, max_length=video_generator.H3_MAX_REFERENCE_IMAGES
+    )
+    # `<Audio 1>`, `<Audio 2>`: optional (none is fine), any length (the server documents 2 to
+    # 15 seconds). References the model reads, not a soundtrack.
+    audios: list[AudioInputIn] = Field(default_factory=list, max_length=video_lab.H3_MAX_AUDIOS)
+    # Which character each of `audios` is the voice of, in the same order. Left out: none.
+    audio_owners: list[Literal["character_1", "character_2"]] = Field(
+        default_factory=list, max_length=video_lab.H3_MAX_AUDIOS
+    )
+    # The ambience text the prompt's `overall_soundscape` was written from. Kept on the run.
+    ambience: StrictStr | None = None
+    # True: the clip is as long as the first audio (so it needs one), and `duration_s` is
+    # ignored.
     match_audio_duration: StrictBool
     # Needed when `match_audio_duration` is false.
     duration_s: Annotated[float, Field(allow_inf_nan=False)] | None = None
@@ -150,11 +164,20 @@ class LabVideoRunOut(BaseModel):
     # The pictures of a MiniMax H3 reference clip, in the order the prompt names them. Empty for
     # every other clip.
     references: list[FirstFrameOut]
-    # The speech a lip-synced clip matches (the Character lab), or the audio reference of a
-    # MiniMax H3 reference clip. Else None.
+    # The speech a lip-synced clip matches (the Character lab), or the first audio reference of
+    # a MiniMax H3 reference clip. Else None.
     audio_input: AudioInputOut | None
+    # The audios of a MiniMax H3 reference clip, in the order the prompt names them (`<Audio 1>`
+    # first). Empty for every other clip and for a reference clip made without audio.
+    audio_references: list[AudioInputOut]
     # The run's job: its status, phase and error, with cancel and resubmit.
     job: JobSummary | None
+    # What the GPU server said about this run's job (MiniMax H3 only, null before the server has
+    # accepted the job and for every other model): how many GPUs it was given, and about how
+    # many seconds it will run once it starts (the queue wait is not included). Taken as the
+    # server says it, never worked out here.
+    gpus: int | None
+    estimated_run_seconds: float | None
     # The finished clip, from /media (with Range requests, so it seeks). None until then.
     url: str | None
     size_bytes: int | None
@@ -226,6 +249,7 @@ def run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> La
     audio = run.audio
     codec = audio.get("codec") if isinstance(audio, dict) else None
     references = run.references if isinstance(run.references, list) else []
+    audio_references = run.audio_references if isinstance(run.audio_references, list) else []
     return LabVideoRunOut(
         id=run.id,
         created_at=run.created_at,
@@ -245,10 +269,19 @@ def run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> La
             if picture is not None
         ],
         audio_input=audio_input_out(run.audio_input),
+        audio_references=[
+            item
+            for item in (audio_input_out(value) for value in audio_references)
+            if item is not None
+        ],
         job=(
             job_summary(JobRow(job=row.job, project_name=store.NO_PROJECT_NAME, scene_index=None))
             if row.job is not None
             else None
+        ),
+        gpus=pools.server_gpus(row.job) if row.job is not None else None,
+        estimated_run_seconds=(
+            pools.server_estimate_seconds(row.job) if row.job is not None else None
         ),
         url=media_url(run.path) if run.path is not None else None,
         size_bytes=run.size_bytes,
@@ -278,8 +311,8 @@ async def runs_out(session: AsyncSession, rows: list[video_lab.RunRow]) -> list[
 )
 async def create_runs(body: LabVideoRunCreate, session: SessionDep) -> LabVideoRunsOut:
     """Starts one run per chosen model. Each is a paid GPU job of 5 to 10 minutes (MiniMax H3
-    more: it holds two GPUs). `negative_prompt` and `mode` are ignored for MiniMax H3, and the
-    run's `params` show that.
+    more: the server gives it 4 or 8 GPUs). `negative_prompt` and `mode` are ignored for
+    MiniMax H3, and the run's `params` show that.
     """
     form = video_lab.LabVideoForm(
         prompt=body.prompt,
@@ -316,8 +349,10 @@ async def create_runs(body: LabVideoRunCreate, session: SessionDep) -> LabVideoR
     responses=_INVALID,
 )
 async def create_reference_run(body: H3ReferenceRunCreate, session: SessionDep) -> LabVideoRunsOut:
-    """Starts one MiniMax H3 reference clip from 1 to 9 pictures and an audio reference of 2 to
-    15 seconds. A paid GPU job that holds two GPUs, and often takes more than 10 minutes.
+    """Starts one MiniMax H3 reference clip from 1 to 9 pictures and, optionally, up to two audio
+    references (the server documents 2 to 15 seconds each). A paid GPU job: the server decides
+    how many GPUs it gets (4 or 8) and says how long it expects it to run, and both are on the
+    run's job once it is accepted.
     """
     form = video_lab.H3ReferenceForm(
         prompt=body.prompt,
@@ -327,10 +362,13 @@ async def create_reference_run(body: H3ReferenceRunCreate, session: SessionDep) 
             video_lab.FirstFrameRef(source=reference.source, id=reference.id)
             for reference in body.references
         ],
-        audio=video_lab.AudioRef(source=body.audio.source, id=body.audio.id),
+        audios=[video_lab.AudioRef(source=audio.source, id=audio.id) for audio in body.audios],
         match_audio_duration=body.match_audio_duration,
         duration_s=body.duration_s,
         num_inference_steps=body.num_inference_steps,
+        reference_roles=body.reference_roles,
+        audio_owners=body.audio_owners,
+        ambience=body.ambience,
     )
     try:
         row = await video_lab.create_h3_reference_run(session, form)

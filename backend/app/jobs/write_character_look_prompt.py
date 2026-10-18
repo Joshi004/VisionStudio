@@ -33,15 +33,13 @@ import logging
 import time
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.jobs.write_character_reference_prompt import MODEL_KEY
 from app.providers import llm
-from app.services import character_library, character_looks, description_writer
+from app.services import character_library, character_looks, description_writer, llm_target
 from app.services import character_look_prompt_writer as writer
 from app.services import image_prompt_writer as prompt_checks
 from app.services.image_prompt_profiles import (
@@ -117,8 +115,7 @@ class WriteCharacterLookPromptHandler(JobHandler):
                 if isinstance(character_id, int)
                 else None
             )
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, MODEL_KEY)
+            target = await llm_target.resolve(session, MODEL_KEY)
             await session.commit()
 
         if character is None:
@@ -127,9 +124,9 @@ class WriteCharacterLookPromptHandler(JobHandler):
         card = character_library.character_card(character)
 
         if requested == "master":
-            await self._run_master(job_id, job_input, card, base_url, model, started)
+            await self._run_master(job_id, job_input, card, target, started)
         elif requested == "audition":
-            await self._run_audition(job_id, job_input, card, base_url, model, started)
+            await self._run_audition(job_id, job_input, card, target, started)
         else:
             await self._fail(job_id, _NO_REQUEST, requested=requested)
 
@@ -140,8 +137,7 @@ class WriteCharacterLookPromptHandler(JobHandler):
         job_id: int,
         job_input: dict[str, Any],
         card: str,
-        base_url: str,
-        model: str,
+        target: llm_target.LlmTarget,
         started: float,
     ) -> None:
         await self._phase(job_id, phases.PREPARING_PROMPT)
@@ -151,19 +147,19 @@ class WriteCharacterLookPromptHandler(JobHandler):
             else ACTIVE_CHARACTER_SHEET_PROFILE
         )
         inputs = writer.prompt_inputs(card)
-        body = writer.build_master_request(inputs, model=model, profile=profile)
+        body = writer.build_master_request(inputs, model=target.model, profile=profile)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
             instructions_sha256=description_writer.instructions_sha256(body),
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, base_url, body, _master_reader(profile), timeout_s=REQUEST_TIMEOUT_S
+            job_id, target, body, _master_reader(profile), timeout_s=REQUEST_TIMEOUT_S
         )
         checked: CheckedPrompt | None = outcome.value
         if checked is None:
@@ -207,24 +203,23 @@ class WriteCharacterLookPromptHandler(JobHandler):
         job_id: int,
         job_input: dict[str, Any],
         card: str,
-        base_url: str,
-        model: str,
+        target: llm_target.LlmTarget,
         started: float,
     ) -> None:
         await self._phase(job_id, phases.PREPARING_PROMPT)
         inputs = writer.prompt_inputs(card)
-        body = writer.build_audition_request(inputs, model=model)
+        body = writer.build_audition_request(inputs, model=target.model)
         job_input.update(
             instructions_sha256=description_writer.instructions_sha256(body),
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, base_url, body, _audition_reader, timeout_s=REQUEST_TIMEOUT_S
+            job_id, target, body, _audition_reader, timeout_s=REQUEST_TIMEOUT_S
         )
         checked: writer.CheckedLine | None = outcome.value
         if checked is None:

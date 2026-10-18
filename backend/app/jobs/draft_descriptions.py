@@ -37,18 +37,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project, Scene
 from app.db.session import SessionLocal
 from app.jobs import phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.providers import llm
 from app.providers.llm import LlmCallError
 from app.services import description_writer as writer
 from app.services import descriptions as descriptions_service
-from app.services import scene_inputs, scene_planner
+from app.services import llm_target, scene_inputs, scene_planner
 from app.services import scenes as scenes_service
 from app.services.description_profiles import ACTIVE_PROFILE, PromptProfile
 from app.services.description_writer import CheckedDrafts, SceneToDraft
@@ -159,8 +157,7 @@ class DraftDescriptionsHandler(JobHandler):
                     scenes, plan_job=state.job, stale_reasons=state.stale_reasons
                 )
                 sent = [writer.to_draft(scene) for scene in scenes]
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, DESCRIPTION_MODEL_KEY)
+            target = await llm_target.resolve(session, DESCRIPTION_MODEL_KEY)
             await session.commit()
 
         if project is None:
@@ -179,16 +176,16 @@ class DraftDescriptionsHandler(JobHandler):
             project,
             sent,
             writer.script_paragraphs(project.script_text),
-            model=model,
+            model=target.model,
             profile=profile,
         )
-        input_hash = scene_planner.request_hash(llm.chat_url(base_url), body)
+        input_hash = scene_planner.request_hash(llm_target.call_url(target), body)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
             instructions_sha256=writer.instructions_sha256(body),
             scenes_sent=[_scene_record(scene) for scene in sent],
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
             input_hash=input_hash,
         )
@@ -200,7 +197,7 @@ class DraftDescriptionsHandler(JobHandler):
             project_id=project.id,
             sent=sent,
             profile=profile,
-            base_url=base_url,
+            target=target,
             body=body,
             input_hash=input_hash,
             run_again=job_input.get("run_again") is True,
@@ -224,7 +221,7 @@ class DraftDescriptionsHandler(JobHandler):
         project_id: int,
         sent: list[SceneToDraft],
         profile: PromptProfile,
-        base_url: str,
+        target: llm_target.LlmTarget,
         body: dict[str, Any],
         input_hash: str,
         run_again: bool,
@@ -242,14 +239,14 @@ class DraftDescriptionsHandler(JobHandler):
                     await self._phase(job_id, phases.REUSING_ANSWER)
                     _logger.info("job %d: reusing the answer stored on job %d", job_id, cached.id)
                     return _Outcome(checked=checked, cache_hit_of_job_id=cached.id)
-        return await self._ask_model(job_id, sent, profile, base_url, body)
+        return await self._ask_model(job_id, sent, profile, target, body)
 
     async def _ask_model(
         self,
         job_id: int,
         sent: list[SceneToDraft],
         profile: PromptProfile,
-        base_url: str,
+        target: llm_target.LlmTarget,
         body: dict[str, Any],
     ) -> _Outcome:
         outcome = _Outcome()
@@ -257,8 +254,8 @@ class DraftDescriptionsHandler(JobHandler):
             await self._phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
             started = time.monotonic()
             try:
-                result = await llm.complete(
-                    base_url, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
+                result = await llm_target.complete(
+                    target, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
                 )
             except LlmCallError as exc:
                 outcome.failure = _failure_text(exc)

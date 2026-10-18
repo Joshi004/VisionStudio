@@ -26,17 +26,15 @@ import logging
 import time
 from typing import Any, Final
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Project
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.plan_scenes import LLM_URL_KEY
 from app.providers import llm
 from app.services import cast as cast_service
 from app.services import cast_reference_prompt_writer as writer
-from app.services import description_writer, scene_planner
+from app.services import description_writer, llm_target, scene_planner
 from app.services import image_prompt_writer as prompt_checks
 from app.services.image_prompt_profiles import ImagePromptProfile
 from app.services.image_prompt_writer import CheckedPrompt
@@ -91,8 +89,7 @@ class WriteCharacterReferencePromptHandler(JobHandler):
                 if project is not None and target is not None
                 else None
             )
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, MODEL_KEY)
+            target = await llm_target.resolve(session, MODEL_KEY)
             await session.commit()
 
         if project is None:
@@ -110,21 +107,21 @@ class WriteCharacterReferencePromptHandler(JobHandler):
         await self._phase(job_id, phases.PREPARING_PROMPT)
         profile = writer.profile_for(kind)
         inputs = writer.prompt_inputs(kind, member, project)
-        body = writer.build_request(inputs, model=model, profile=profile)
+        body = writer.build_request(inputs, model=target.model, profile=profile)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
             instructions_sha256=description_writer.instructions_sha256(body),
             inputs_sha256=prompt_checks.inputs_sha256(inputs),
-            input_hash=scene_planner.request_hash(llm.chat_url(base_url), body),
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            input_hash=scene_planner.request_hash(llm_target.call_url(target), body),
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, base_url, body, _reader(profile), timeout_s=REQUEST_TIMEOUT_S
+            job_id, target, body, _reader(profile), timeout_s=REQUEST_TIMEOUT_S
         )
         checked: CheckedPrompt | None = outcome.value
         if checked is None:

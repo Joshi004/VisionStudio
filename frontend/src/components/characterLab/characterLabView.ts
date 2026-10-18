@@ -603,7 +603,7 @@ export function takeCostNote(form: TakeFormState, character: LibraryCharacter): 
     if (fields.h3Speech && form.audioMode === "make") {
       parts.push("one speech");
     }
-    parts.push("one MiniMax H3 clip (5 to 10 minutes or more: it holds two GPUs)");
+    parts.push("one MiniMax H3 clip (5 to 10 minutes or more, on the 4 or 8 GPUs the server picks)");
     const text = joinParts(parts);
     return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
   }

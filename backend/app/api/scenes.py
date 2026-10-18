@@ -28,12 +28,13 @@ from app.api.errors import ErrorResponse
 from app.api.jobs import JobDetail, JobSummary, job_detail, job_summary
 from app.api.projects import load_project
 from app.core import settings as settings_service
+from app.core.urls import docker_mapped
 from app.db.models import Asset, Job, Project, Scene
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.generate_frame import IMAGE_MODE_KEY
-from app.jobs.plan_scenes import LLM_MODEL_KEY, LLM_URL_KEY
+from app.jobs.plan_scenes import LLM_MODEL_KEY
 from app.jobs.pools import MAX_PARALLEL_GPU_KEY
 from app.jobs.store import JobRow
 from app.jobs.write_image_prompt import IMAGE_PROMPT_MODEL_KEY
@@ -45,6 +46,7 @@ from app.services import (
     description_writer,
     frame_images,
     image_models,
+    llm_target,
     scene_cuts,
     scene_inputs,
     scene_planner,
@@ -729,9 +731,14 @@ def _scene_out(
 
 
 async def _llm_info(session: AsyncSession, model_key: str = LLM_MODEL_KEY) -> LlmInfoOut:
-    url = await settings_service.read_setting(session, LLM_URL_KEY)
-    model = await settings_service.get_str(session, model_key)
-    return LlmInfoOut(model=model, will_call=url.will_call)
+    """The model a role will use now, and the address it will really call (Bitdeer or the
+    GPU server, whichever the role's provider setting says).
+    """
+    target = await llm_target.resolve(session, model_key)
+    return LlmInfoOut(
+        model=target.model,
+        will_call=docker_mapped(target.base_url) if target.base_url else None,
+    )
 
 
 @router.post(

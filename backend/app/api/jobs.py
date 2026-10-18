@@ -164,7 +164,7 @@ class PoolCapacity(BaseModel):
     # above it for a while.
     limit: int
     # How many jobs are running, and how many of the `limit` slots they hold. They differ when a
-    # MiniMax H3 clip runs: it is one job but takes two slots (two GPUs).
+    # MiniMax H3 clip runs: it is one job but takes a slot for each GPU the server gave it.
     running: int
     slots_used: int
     queued: int

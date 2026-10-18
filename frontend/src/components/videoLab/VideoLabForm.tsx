@@ -13,22 +13,23 @@ import {
 } from "@mantine/core";
 
 import { H3_MODEL, LAB_VIDEO_MODELS, videoModelLabel, type LabVideoModel } from "../../videoModels";
-import { ReferenceTray } from "../imageLab/ReferenceTray";
-import { AudioReferencePicker } from "./AudioReferencePicker";
 import { FirstFramePicker } from "./FirstFramePicker";
 import { labPromptHints } from "./labPromptHints";
 import { PromptHelper } from "./PromptHelper";
+import { ReferenceComposer } from "./ReferenceComposer";
 import {
   costText,
   DEFAULT_FORM,
   durationLimits,
   durationOf,
   formProblem,
-  H3_MAX_REFERENCES,
   H3_STEPS_MAX,
   H3_STEPS_MIN,
+  matchesAudio,
   referenceCostText,
+  referencePictures,
   referenceSkeleton,
+  referenceVoices,
   shapeLabel,
   usesH3,
   type LabKind,
@@ -60,7 +61,7 @@ function runLabel(state: VideoLabFormState): string {
  * the clip, the seed and an optional first frame and last frame. Several models make several runs
  * that differ only by the model: the same prompt, first frame, length, recipe and seed (MiniMax
  * H3 also has its own size, frame rate and steps). The other mode makes one MiniMax H3 clip from
- * up to 9 reference pictures and an audio reference.
+ * up to 9 pictures (one or two characters, a scene, other pictures) and optional voices.
  */
 export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormProps) {
   const problem = formProblem(state);
@@ -71,13 +72,15 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
     durationS: duration,
     models: isReference ? [H3_MODEL] : state.models,
     kind: state.kind,
-    pictureCount: state.references.length,
+    pictureCount: referencePictures(state).length,
+    audioCount: referenceVoices(state).length,
   });
   const has23 = state.models.includes("ltx-2.3");
   const hasH3 = usesH3(state);
   const hasLtx = !isReference && state.models.some((model) => model !== H3_MODEL);
   const limits = durationLimits();
-  const lengthLocked = isReference && state.matchAudio;
+  const lengthLocked = isReference && matchesAudio(state);
+  const hasVoice = referenceVoices(state).length > 0;
 
   function update(changes: Partial<VideoLabFormState>) {
     onChange((current) => ({ ...current, ...changes }));
@@ -89,27 +92,22 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
         return current;
       }
       // Reference mode needs the six-part prompt: offer its skeleton when nothing is written.
-      const prompt =
-        kind === "h3_reference" && current.prompt.trim() === ""
-          ? referenceSkeleton(current.references.length)
-          : current.prompt;
+      const offerSkeleton = kind === "h3_reference" && current.prompt.trim() === "";
+      const prompt = offerSkeleton ? referenceSkeleton(current) : current.prompt;
       return {
         ...current,
         kind,
         prompt,
+        skeletonText: offerSkeleton ? prompt : current.skeletonText,
         // The reference clip is always MiniMax H3; going back restores the default choice.
         models: kind === "h3_reference" ? [H3_MODEL] : DEFAULT_FORM.models,
       };
     });
   }
 
-  // The skeleton can be put in only while the prompt is empty or is still an untouched
-  // skeleton, so nothing typed is ever overwritten.
-  const skeletonSafe =
-    state.prompt.trim() === "" ||
-    Array.from({ length: H3_MAX_REFERENCES + 1 }, (_, count) => referenceSkeleton(count)).includes(
-      state.prompt,
-    );
+  // The skeleton can be made again only while the prompt is empty or is still exactly the
+  // skeleton the form put in, so nothing typed is ever overwritten.
+  const skeletonSafe = state.prompt.trim() === "" || state.prompt === state.skeletonText;
 
   return (
     <form
@@ -130,16 +128,16 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
             onChange={(value) => changeKind(value === "h3_reference" ? "h3_reference" : "generate")}
             data={[
               { value: "generate", label: "Generate (text, first or last frame)" },
-              { value: "h3_reference", label: "MiniMax H3 reference (pictures + audio)" },
+              { value: "h3_reference", label: "MiniMax H3 reference (characters, scene, voices)" },
             ]}
           />
         </Stack>
 
         {isReference ? (
           <Text size="sm" c="dimmed">
-            Model: <b>MiniMax H3</b>. The pictures show who and what is in the clip, and the audio
-            is a voice reference: H3 follows its voice and delivery, and the words spoken come from
-            the prompt. It makes its own sound, so the recording is not in the clip.
+            Model: <b>MiniMax H3</b>. The pictures show who and what is in the clip. A voice is
+            optional: H3 follows its timbre and delivery, and the words spoken come from the
+            prompt. It makes its own sound, so the recording is not in the clip.
           </Text>
         ) : (
           <Checkbox.Group
@@ -202,7 +200,7 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
             label="Length (seconds)"
             description={
               lengthLocked
-                ? "The length of the audio."
+                ? "The length of the first voice."
                 : `${limits.min} to ${limits.max}. 24 fps.`
             }
             value={state.durationS}
@@ -236,21 +234,16 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
 
         {isReference ? (
           <>
-            <ReferenceTray
-              items={state.references}
-              onChange={(updater) =>
-                onChange((current) => ({ ...current, references: updater(current.references) }))
-              }
-              max={H3_MAX_REFERENCES}
-              title="Reference pictures"
-              itemName={(position) => `<Picture ${position}>`}
-              footnote="Sent as they are stored, in this order: the first is <Picture 1> in the prompt."
-            />
-            <AudioReferencePicker value={state.audio} onChange={(audio) => update({ audio })} />
+            <ReferenceComposer state={state} onChange={onChange} />
             <Checkbox
-              label="Make the clip as long as the audio"
-              description="The GPU server decides the final length: see the measured length on the run. Untick it to choose the length above."
-              checked={state.matchAudio}
+              label="Make the clip as long as the first voice"
+              description={
+                hasVoice
+                  ? "The GPU server decides the final length: see the measured length on the run. Untick it to choose the length above."
+                  : "Needs a voice. Without one, the length above is used."
+              }
+              checked={state.matchAudio && hasVoice}
+              disabled={!hasVoice}
               onChange={(event) => update({ matchAudio: event.currentTarget.checked })}
             />
           </>
@@ -295,7 +288,7 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
             label="Prompt"
             description={
               isReference
-                ? "Six parts: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music. Name each picture as <Picture n> and the audio as <Audio 1>; spoken words go inside <d>[English] …</d>."
+                ? "Six parts: subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music. Name each picture as <Picture n> and each voice as <Audio n>; spoken words go inside <d>[English] …</d>. Fill the blanks in [brackets]."
                 : "One paragraph, present tense. For LTX-2.5 cuts, name each transition in a sentence. MiniMax H3 reads three fields instead; when a first or last frame is given, the app writes the first line that places it."
             }
             value={state.prompt}
@@ -310,13 +303,16 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
                 size="compact-sm"
                 variant="default"
                 disabled={!skeletonSafe}
-                onClick={() => update({ prompt: referenceSkeleton(state.references.length) })}
+                onClick={() => {
+                  const skeleton = referenceSkeleton(state);
+                  update({ prompt: skeleton, skeletonText: skeleton });
+                }}
               >
-                Insert the six-part skeleton
+                Fill the prompt from the cast
               </Button>
               <Text size="xs" c="dimmed">
                 {skeletonSafe
-                  ? "Made for the pictures chosen now."
+                  ? "Made from the characters, scene and ambience above. Press it again after changing them."
                   : "Clear the prompt first: the skeleton never replaces what you wrote."}
               </Text>
             </Group>

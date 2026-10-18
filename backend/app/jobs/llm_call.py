@@ -28,6 +28,7 @@ from app.db.session import SessionLocal
 from app.jobs import phases, store
 from app.providers import llm
 from app.providers.llm import LlmCallError
+from app.services import llm_target
 
 _logger = logging.getLogger(__name__)
 
@@ -78,16 +79,21 @@ def failure_text(exc: LlmCallError) -> str:
 
 
 async def ask_model(
-    job_id: int, base_url: str, body: dict[str, Any], read: ReadAnswer, *, timeout_s: float
+    job_id: int,
+    target: llm_target.LlmTarget,
+    body: dict[str, Any],
+    read: ReadAnswer,
+    *,
+    timeout_s: float,
 ) -> Outcome:
-    """Sends `body` (up to `MAX_ATTEMPTS` times) until `read` accepts an answer."""
+    """Sends `body` to `target` (up to `MAX_ATTEMPTS` times) until `read` accepts an answer."""
     outcome = Outcome()
     for attempt in range(1, MAX_ATTEMPTS + 1):
         await _phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
         started = time.monotonic()
         try:
-            result = await llm.complete(
-                base_url, body, timeout_s=timeout_s, idle_timeout_s=IDLE_TIMEOUT_S
+            result = await llm_target.complete(
+                target, body, timeout_s=timeout_s, idle_timeout_s=IDLE_TIMEOUT_S
             )
         except LlmCallError as exc:
             outcome.failure = failure_text(exc)

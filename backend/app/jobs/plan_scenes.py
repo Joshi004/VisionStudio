@@ -28,7 +28,6 @@ import time
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
-from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Asset, Project, Transcript
 from app.db.session import SessionLocal
@@ -41,7 +40,7 @@ from app.services import first_frames as first_frames_service
 from app.services import image_prompts as image_prompts_service
 from app.services import last_frame_prompts as last_frame_prompts_service
 from app.services import last_frames as last_frames_service
-from app.services import scene_cuts, scene_planner, scene_splitter
+from app.services import llm_target, scene_cuts, scene_planner, scene_splitter
 from app.services import scenes as scenes_service
 from app.services import transcripts as transcripts_service
 from app.services.scene_cuts import SceneSpec
@@ -64,7 +63,6 @@ REQUEST_TIMEOUT_S: Final = 900.0
 IDLE_TIMEOUT_S: Final = 120.0
 RAW_CONTENT_MAX_CHARS: Final = 20_000
 
-LLM_URL_KEY: Final = "llm_base_url"
 LLM_MODEL_KEY: Final = "llm_model"
 
 _ZERO_CHECKS: Final = {"entries": 0, "exact": 0, "moved": 0, "flagged": 0, "dropped": 0}
@@ -176,8 +174,7 @@ class PlanScenesHandler(JobHandler):
                 if project is not None and project.voiceover_asset_id is not None
                 else None
             )
-            base_url = await settings_service.get_str(session, LLM_URL_KEY)
-            model = await settings_service.get_str(session, LLM_MODEL_KEY)
+            target = await llm_target.resolve(session, LLM_MODEL_KEY)
             await session.commit()
 
         if project is None or transcript is None or voiceover is None:
@@ -213,16 +210,16 @@ class PlanScenesHandler(JobHandler):
         min_s, max_s = project.min_scene_seconds, project.max_scene_seconds
         body = scene_planner.build_request(
             words,
-            model=model,
+            model=target.model,
             min_s=min_s,
             max_s=max_s,
             audio_end_s=audio_end_s,
             instructions=project.cut_instructions,
         )
-        input_hash = scene_planner.request_hash(llm.chat_url(base_url), body)
+        input_hash = scene_planner.request_hash(llm_target.call_url(target), body)
         job_input.update(
-            server_url=docker_mapped(base_url),
-            endpoint=llm.CHAT_PATH,
+            server_url=docker_mapped(target.base_url),
+            endpoint=llm_target.endpoint(target),
             request=body,
             input_hash=input_hash,
         )
@@ -233,7 +230,7 @@ class PlanScenesHandler(JobHandler):
             job_id,
             project_id=project.id,
             words=words,
-            base_url=base_url,
+            target=target,
             body=body,
             input_hash=input_hash,
             run_again=job_input.get("run_again") is True,
@@ -282,7 +279,7 @@ class PlanScenesHandler(JobHandler):
         *,
         project_id: int,
         words: list[scene_cuts.Word],
-        base_url: str,
+        target: llm_target.LlmTarget,
         body: dict[str, Any],
         input_hash: str,
         run_again: bool,
@@ -306,10 +303,14 @@ class PlanScenesHandler(JobHandler):
                     unusable_content=None,
                     usage=None,
                 )
-        return await self._ask_model(job_id, words, base_url, body)
+        return await self._ask_model(job_id, words, target, body)
 
     async def _ask_model(
-        self, job_id: int, words: list[scene_cuts.Word], base_url: str, body: dict[str, Any]
+        self,
+        job_id: int,
+        words: list[scene_cuts.Word],
+        target: llm_target.LlmTarget,
+        body: dict[str, Any],
     ) -> _ModelOutcome:
         outcome = _ModelOutcome(
             entries=None,
@@ -324,8 +325,8 @@ class PlanScenesHandler(JobHandler):
             await self._phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
             started = time.monotonic()
             try:
-                result = await llm.complete(
-                    base_url, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
+                result = await llm_target.complete(
+                    target, body, timeout_s=REQUEST_TIMEOUT_S, idle_timeout_s=IDLE_TIMEOUT_S
                 )
             except LlmCallError as exc:
                 outcome.failure = _failure_text(exc)

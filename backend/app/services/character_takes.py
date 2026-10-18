@@ -680,7 +680,7 @@ async def _start_h3_video(
         orientation=orientation,
         seed=take.seed,
         references=pictures,
-        audio=audio,
+        audios=(audio,),
         match_audio_duration=take.match_audio_duration,
         duration_s=None
         if take.match_audio_duration
