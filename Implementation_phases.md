@@ -255,9 +255,8 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 
 **Progress snapshot** (update when a phase changes status):
 
-- Completed: PHASE-001 (2026-10-20; owner confirmed the generations), PHASE-002 (2026-10-20)
-- In progress: PHASE-046 (code complete and migration applied to Docker, 2026-10-20; waiting for the owner's lab spot checks)
-- Ready to start: PHASE-007
+- Completed: PHASE-001 (2026-10-20; owner confirmed the generations), PHASE-002 (2026-10-20), PHASE-046 (2026-10-20; owner verified every lab and the Character lab), PHASE-003 (2026-10-20)
+- Ready to start: PHASE-004, PHASE-007
 - Deferred: PHASE-036 (music generation, after PHASE-045)
 - Current milestone: M0
 
@@ -265,8 +264,8 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 |---|---|---|---|---|
 | PHASE-001 | Validate H3 assumptions in the existing labs (manual) | M0 | — | Completed |
 | PHASE-002 | Shot-duration policy | M0 | (001 recommended) | Completed |
-| PHASE-046 | Retire the narration pipeline | M0 | — | In Progress |
-| PHASE-003 | Story workspace replaces the project page | M0 | 046 | Not Started |
+| PHASE-046 | Retire the narration pipeline | M0 | — | Completed |
+| PHASE-003 | Story workspace replaces the project page | M0 | 046 | Completed |
 | PHASE-004 | Story Bible stage | M1 | 003 | Not Started |
 | PHASE-005 | Character and environment discovery | M1 | 004 | Not Started |
 | PHASE-006 | Scene discovery anchored to the story text | M1 | 004 | Not Started |
@@ -486,7 +485,7 @@ flowchart TD
 
 ### PHASE-046 — Retire the narration pipeline
 
-**Status:** In Progress (code complete and migration `0022` applied to the Docker volume, 2026-10-20; the lab spot checks that need the GPU server are left, see the Completion notes) · **Milestone:** M0 · **Vision:** §21 (transcription leaves the main path), §44; decision D-1 (2026-10-20)
+**Status:** Completed (2026-10-20; code and migration `0022` done earlier the same day, and the owner then verified every lab and the Character lab) · **Milestone:** M0 · **Vision:** §21 (transcription leaves the main path), §44; decision D-1 (2026-10-20)
 
 **Objective.** Remove the voiceover-driven narration pipeline (its UI, API routes, jobs, services, tables and settings) so that every later phase targets story projects only. The labs, the Character Lab and the shared machinery later phases reuse must keep working.
 
@@ -531,10 +530,10 @@ flowchart TD
 - [x] Narration UI, API, jobs and services removed
 - [x] Narration tables, columns and settings removed (migration or new baseline)
 - [x] `DATABASE_STRUCTURE.md` and `README.md` updated
-- [ ] Every lab and the Character Lab verified (Image, Video and Voice labs verified by the owner 2026-10-20; the Character Lab is left; the API lists were checked on the real data)
+- [x] Every lab and the Character Lab verified (Image, Video, Voice and Character labs verified by the owner 2026-10-20; the API lists were checked on the real data)
 - [x] Standard checks (§3.5): ruff, ESLint, `tsc`, `gen:api` and the production build pass, and the migration applied on backend start (`docker compose up --build -d`); the regression spot check is the item above
 
-**Completion notes.** Code done and migration `0022` applied to the Docker volume on 2026-10-20. The phase stays **In Progress** until the owner has run the lab checks that need the GPU server; then mark it Completed.
+**Completion notes.** Code done and migration `0022` applied to the Docker volume on 2026-10-20. The owner then verified every lab and the Character lab the same day, so the phase is Completed.
 
 - **Tag.** `narration-final` at commit `ae4940a` (the owner committed PHASE-002 first, then the tag was made). Read removed code with `git show narration-final:<path>`, for example `git show narration-final:backend/app/services/scenes.py`. The old `DATABASE_STRUCTURE.md` is there too.
 - **Database approach.** One removal migration, `backend/app/db/migrations/versions/0022_retire_narration.py` (revision `0022`, after `0021`). No new baseline and no reset. `upgrade()`: deletes `job` rows whose type is not one of the six lab types; rebuilds `job` in batch mode (drops `scene_id`, `idx_job_scene`, the old `ck_job_type_valid` and `fk_job_scene_id_scene`, adds the new CHECK); drops `scene_character`, `scene`, `character`, `location`, `transcript`; rebuilds `project` without twelve columns; deletes the setting rows `default_video_model`, `default_negative_prompt`, `max_parallel_ffmpeg`. **`downgrade()` raises `NotImplementedError`** (the data cannot be rebuilt). `asset` is untouched: rows and files stay, and its CHECK keeps `voiceover`, `clip`, `final` and `reference`.
@@ -550,14 +549,14 @@ flowchart TD
 - **Checked.** `uv run ruff check .` and `ruff format --check .`; `npm run lint`, `npm run typecheck` and `npm run build`; `alembic upgrade head` on a fresh database (revision `0022`, `PRAGMA foreign_key_check` empty, integrity ok, no narration tables, `job` CHECK holds the six types, `project` has the ten columns); the same migration on a seeded copy of the old schema; an AST scan finds no import of a removed module; an `rg` sweep finds the removed names only in old migrations, docs and the tag (`services/render_commands.py` is kept on purpose); the backend started on a fresh database and answered `GET /api/health` (revision `0022`), project create, list, get and patch, `GET /api/jobs` and `/api/jobs/capacity`, `GET /api/settings`, the Image, Video and Voice lab lists, saved voices, the Character lab list, an Image lab upload and the project-frames picker. The removed routes (`/api/projects/{id}/scenes`, `/transcript`) answer 404.
 - **Applied to the Docker volume (2026-10-20, with the owner's go-ahead).** Order: `docker compose build` first (so a failed build could not take the app down), `docker compose stop backend`, a copy of `/data/app.db` to **`~/visio-studio-backup/app.db`** (outside Docker and the repo; 37,171,200 bytes, `integrity_check` ok, revision `0021`), then `docker compose up --build -d`, whose backend start ran `0022`. Before: 29 projects, 420 scenes, 28 transcripts, 5 characters, 6 locations, 1,780 assets and 1,848 jobs (1,529 narration, 319 lab). After: revision `0022`, `integrity_check` ok, `foreign_key_check` empty, 29 projects, 1,780 assets (untouched), 319 jobs (lab types only: 58 `lab_image`, 100 `lab_video`, 72 `lab_voice`, 5 `write_character_look_prompt`, 82 `write_character_take_prompt`, 2 `write_lab_video_prompt`), and every lab table with the same row count as before (`lab_run` 84, `lab_video_run` 100, `lab_voice_run` 72, `voice` 6, `library_character` 2, `character_take` 79); the narration tables and the three removed setting rows are gone. `GET /` and the project, job, settings, Image, Video and Voice lab, saved voice and Character lab endpoints answered 200 on the real data through `127.0.0.1:5480`, and `/api/projects/1/scenes` answers 404. To undo it: stop the backend and put `~/visio-studio-backup/app.db` back as `/data/app.db` (the volume's media files were never touched). Never `docker compose down -v`.
 - **Verified by the owner (2026-10-20):** the Image lab, the Video lab and the Voice lab work as expected after the migration.
-- **Still the owner's (needs the GPU server, and each is a long or paid run, so no agent started one):** in the Character lab, a look with angles, auditions and one take; and a look at the project list, a project page and the Activity page in the browser. The pages were checked by `tsc`, ESLint and the production build, and their API calls on real data, but not opened in a browser by the agent.
+- **Verified by the owner (2026-10-20, later the same day):** every lab and the Character lab, including the checks that need the GPU server (a look with angles, auditions and one take). No agent started those long or paid runs.
 - **Found, not caused by this phase.** `alembic check` reports `character_take.duration_s` as FLOAT in the models and REAL in the database (migration `0016`); harmless in SQLite. `backend/.venv/bin/alembic` and `uvicorn` have a stale shebang to an old path, so run them as `uv run python -m alembic ...` and `uv run python -m uvicorn ...`. `DATABASE_STRUCTURE.md` §4.13 and §4.14 still describe `lab_character` and `lab_talk_run`, which migration `0016` replaced (noted at the top of that file).
 
 ---
 
 ### PHASE-003 — Story workspace replaces the project page
 
-**Status:** Not Started · **Milestone:** M0 · **Vision:** §1, §38, §44
+**Status:** Completed (2026-10-20) · **Milestone:** M0 · **Vision:** §1, §38, §44
 
 **Objective.** Turn the project page into the story workspace: the user pastes a raw story, sees its estimated length, and sees the pipeline stages (empty for now).
 
@@ -584,14 +583,25 @@ flowchart TD
 **Observable improvements.** The story workspace in the UI.
 
 **Completion checklist.**
-- [ ] Story text field and editor
-- [ ] Word count, estimated length and length warning
-- [ ] Stage placeholders
-- [ ] Reusable artifact viewer component
-- [ ] Provenance convention documented in `DATABASE_STRUCTURE.md`
-- [ ] Standard checks (§3.5)
+- [x] Story text field and editor
+- [x] Word count, estimated length and length warning
+- [x] Stage placeholders
+- [x] Reusable artifact viewer component
+- [x] Provenance convention documented in `DATABASE_STRUCTURE.md`
+- [x] Standard checks (§3.5)
 
-**Completion notes.** _(fill in: where the story text lives, the speech-rate setting, the viewer component name)_
+**Completion notes.** Done 2026-10-20. **No migration** (the revision stays `0022`), so the owner can pick this up with `docker compose up --build -d`; the running containers still serve the old code until then.
+
+- **Where the story text lives (Planning decided: keep the column).** In the existing `project.script_text` column, which PHASE-046 kept for this phase. The column, the API field (`script_text`) and `has_script` on the project list keep their names; only the labels changed ("Story" in the UI, "The story must be at most 100,000 characters." in the 422 message). It is stored exactly as pasted; text of only whitespace is stored as NULL; the hard cap is `SCRIPT_MAX_CHARS` = 100,000 characters. **Later phases read the story from `project.script_text`** (for example PHASE-004's `story_sha256`).
+- **Settings (Planning decided: two global integers in a new `Story` group).** `story_words_per_minute` (default **150**, from 60 to 300) and `story_max_minutes` (default **10**, from 1 to 120; this is D-13). Constants `STORY_WPM_KEY`, `STORY_MAX_MINUTES_KEY` and `GROUP_STORY` are in `backend/app/core/settings.py`. 150 words per minute is a typical narration pace, a starting value and not a measurement. Both appear on the Settings page between "Shot duration" and "Limits".
+- **Length estimate.** `backend/app/services/story_length.py`: `count_words(text)` (`len(text.split())`), `StoryLengthPolicy`, `read_story_length_policy(session)`, `StoryLength` and `story_length(text, policy)`. The estimate is the word count over the pace, in whole seconds, **rounded half up** with integer arithmetic so it matches the browser's `Math.round` (Python's `round()` would differ on exact halves). Later LLM stages can call `story_length` to apply D-13.
+- **API.** `ProjectDetail` (get, create and patch answers) gains `story_length: StoryLengthOut` = `word_count`, `estimated_seconds`, `words_per_minute`, `limit_seconds`, `over_limit`. It is worked out on every read and never stored. `ProjectSummary` is unchanged. `schema.d.ts` was regenerated offline from `app.openapi()` with `openapi-typescript` (the method PHASE-046 recorded), because the running Docker backend still had the old code.
+- **UI** (`frontend/src/components/story/`). `StoryEditor` (story textarea with a Save button, live word count and "about M min S s at W words per minute", and a yellow warning above the limit that never disables Save), `StageList` (the 18 placeholder stages, each marked "Not available yet", from `storyStages.ts`), `ArtifactViewer` (below), and `storyLength.ts` (`countWords`, `estimateSeconds`, `formatDuration`, the same rules as the backend). `ProjectPage` shows the header, `StoryEditor` and `StageList`; the Projects list column "Script" is now "Story".
+- **Viewer component name:** **`ArtifactViewer`** (`frontend/src/components/story/ArtifactViewer.tsx`). Props: `title`, `version`, `source` (`"ai"` or `"manual"`), `jobId` (`number | null`), optional `createdAt`, and `data`. It shows a version badge, a source badge and a "Job N" button that opens the existing `JobDetailDrawer`; a flat object is shown as a key-value table, anything else as formatted JSON. **It is not rendered anywhere yet**, because no artifact exists until PHASE-004; the first stage that stores one should use it.
+- **Provenance convention (D-3)** is written in `DATABASE_STRUCTURE.md` **section 2.1**: `source`, `job_id`, `version` (a new row per regeneration), `inputs` (`story_sha256` plus `[{kind, id, version}]`) and `created_at`; staleness computed on read; AI output never overwrites a manual artifact. The document's update entry, §4.1, §6, §7 and the README were updated too.
+- **Checked.** `ruff check` and `ruff format --check`; `npm run lint`, `typecheck` and `build`. A temporary backend on a fresh database (not the Docker volume) answered 29 API checks, all passed: S2 saved and reloaded unchanged (**59 words, about 24 s** at 150 wpm; the "about 80 words / 32 s" in the plan was an estimate); exactly 1,500 words is 600 s and not over the limit; 1,700 words is 680 s, over the limit, and still saves; 100,001 characters is refused; a whitespace-only story becomes NULL; both settings refuse out-of-range and non-integer values; changing the pace or the limit changes `story_length` and a reset restores the defaults; a half second rounds up to 1. The browser counting code was compared with Python on the same inputs (blank, whitespace, non-breaking space, curly quotes) and agreed. Headless Chrome rendered the S2 project (word count and estimate), a 2,720-word project (18 min 8 s, with the warning), the Projects list ("Story" column), the Settings page ("Story" group) and, as the regression spot check, the Characters tab, the Video tab and the Activity page. Lab endpoints answered 200.
+- **Not exercised in a browser.** Typing into the editor (the live recount while typing, and Save staying enabled above the limit) was not driven by hand; it follows from the code (Save is disabled only when the draft equals the saved text) and from the API checks above. The owner may want to type in a story once.
+- **Deviations.** None from Scope. The estimate in the plan's verification text (80 words) was wrong; the real figure is above.
 
 ---
 
@@ -2371,6 +2381,9 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-20 | PHASE-001 | Completed | V1–V8 run (lab runs 91–100 and one direct 22-frame GPU-server job); Appendix B filled; Q-5 and Q-7 answered; R-1 (short clips do not shorten an H3 job) and R-3 (no white leakage) updated. The owner confirmed by ear and eye that all generations look good and match their descriptions (see the Completion notes). |
 | 2026-10-20 | PHASE-002 | Completed | Four whole-second duration settings (1 / 2 / 10 / 14 s) with an ordering rule, and `services/duration_policy.py` (`read_duration_policy`, `shot_num_frames`). The hard maximum is 14 s, not 15 s, because the server accepts at most 345 frames. |
 | 2026-10-20 | PHASE-046 | In Progress | Code complete: tag `narration-final` (`ae4940a`), migration `0022_retire_narration` (no downgrade), 56 backend modules and 44 frontend files removed, six lab job types left, `RemoteVideoHandler` and `gpu_job.py` split out of the clip handler. `0022` applied to the Docker volume after a backup (`~/visio-studio-backup/app.db`); lab data intact. Left for the owner: the lab and Character lab runs that need the GPU server; then mark Completed. |
+| 2026-10-20 | PHASE-046 | Completed | The owner verified every lab and the Character lab, so the last checklist item is ticked. |
+| 2026-10-20 | PHASE-003 | In Progress | Planned: the story stays in `project.script_text` (no migration); two new Story settings for the speech rate and the length limit. |
+| 2026-10-20 | PHASE-003 | Completed | The project page is the story workspace: `StoryEditor` (live word count and estimate, non-blocking warning above `story_max_minutes`), `StageList` (18 placeholders), `ArtifactViewer` (not used yet). New settings `story_words_per_minute` (150) and `story_max_minutes` (10); `services/story_length.py`; `story_length` on the project answer. Provenance convention (D-3) written as `DATABASE_STRUCTURE.md` §2.1. No migration. |
 
 ---
 

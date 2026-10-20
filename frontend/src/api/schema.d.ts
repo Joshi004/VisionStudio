@@ -55,7 +55,7 @@ export interface paths {
         head?: never;
         /**
          * Update Project
-         * @description Changes the fields that are sent: the name, the sizes, the frame rate and the script.
+         * @description Changes the fields that are sent: the name, the sizes, the frame rate and the story.
          */
         patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
@@ -2012,6 +2012,7 @@ export interface components {
             fps: number;
             /** Script Text */
             script_text: string | null;
+            story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
         ProjectFrameOut: {
@@ -2269,6 +2270,22 @@ export interface components {
             approved: components["schemas"]["ApprovedSummaryOut"] | null;
             pending: components["schemas"]["PendingChangeOut"] | null;
             last_check: components["schemas"]["SourceCheckOut"] | null;
+        };
+        /**
+         * StoryLengthOut
+         * @description The story's size and estimated length, and the pace and limit the estimate used.
+         */
+        StoryLengthOut: {
+            /** Word Count */
+            word_count: number;
+            /** Estimated Seconds */
+            estimated_seconds: number;
+            /** Words Per Minute */
+            words_per_minute: number;
+            /** Limit Seconds */
+            limit_seconds: number;
+            /** Over Limit */
+            over_limit: boolean;
         };
         /** TagGroupOut */
         TagGroupOut: {

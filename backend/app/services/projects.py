@@ -9,8 +9,9 @@ returned as-is in the API's `{"detail": ...}` answers.
 The orientation is fixed once a project exists. The sizes stay editable, but
 both sizes must keep the orientation's shape (ITERATION_1_PHASES.md Phase 3).
 
-A project keeps only its name, orientation, sizes, frame rate and script text. The
-narration pipeline's other settings were retired in PHASE-046.
+A project keeps only its name, orientation, sizes, frame rate and story text (the
+`script_text` column, shown as "Story"). The narration pipeline's other settings were
+retired in PHASE-046.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "out_width": "Output width",
     "out_height": "Output height",
     "fps": "Frame rate",
-    "script_text": "Script",
+    "script_text": "Story",
 }
 _NULLABLE_FIELDS: Final = frozenset(("script_text",))
 
@@ -125,7 +126,7 @@ def validate_project(project: Project) -> None:
         )
 
     if project.script_text is not None and len(project.script_text) > SCRIPT_MAX_CHARS:
-        raise ProjectValidationError(f"The script must be at most {SCRIPT_MAX_CHARS:,} characters.")
+        raise ProjectValidationError(f"The story must be at most {SCRIPT_MAX_CHARS:,} characters.")
 
 
 def _normalise_name(value: str) -> str:
@@ -133,9 +134,9 @@ def _normalise_name(value: str) -> str:
 
 
 def _normalise_script(value: str | None) -> str | None:
-    """Keeps the script exactly as pasted: no trimming, no line-ending changes.
+    """Keeps the story exactly as pasted: no trimming, no line-ending changes.
 
-    Only a script that is nothing but whitespace is stored as NULL.
+    Only a story that is nothing but whitespace is stored as NULL.
     """
     if value is None or not value.strip():
         return None

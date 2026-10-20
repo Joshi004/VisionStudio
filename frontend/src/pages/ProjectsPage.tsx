@@ -35,7 +35,7 @@ export function ProjectsPage() {
               <Table.Th>Name</Table.Th>
               <Table.Th>Orientation</Table.Th>
               <Table.Th>Created</Table.Th>
-              <Table.Th>Script</Table.Th>
+              <Table.Th>Story</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>

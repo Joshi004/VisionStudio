@@ -6,13 +6,16 @@ A two-container app: `frontend` (nginx serving a built React app) and
 What it does today:
 
 - **Projects**: create a project (name, orientation, video size and frame
-  rate) and open it. The story workspace for a project comes in a later
-  phase, so a project page shows only its settings for now.
+  rate) and open it. A project page is the story workspace: paste the story,
+  and see its word count and estimated length (with a warning above the
+  length limit) and the stages of the story pipeline. The stages are
+  placeholders ("Not available yet") until later phases build them.
 - **Labs**: the Image lab, the Voice lab and the Video lab try the GPU
   server's models by hand, and the Character lab makes characters, looks and
   takes. The Activity page lists their background jobs.
 - **Settings**: the GPU server address, the language-model roles, the image
-  mode, the shot-duration limits and the parallel-job limits.
+  mode, the shot-duration limits, the story length estimate (speaking pace and
+  longest story) and the parallel-job limits.
 
 The earlier voiceover-driven narration pipeline (transcription, scenes, clips,
 render, cast, automatic run) was retired in PHASE-046. Its code is kept at the

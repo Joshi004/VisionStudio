@@ -106,7 +106,13 @@ GROUP_GPU = "GPU server"
 GROUP_LLM = "Language model"
 GROUP_IMAGE = "Image model"
 GROUP_DURATION = "Shot duration"
+GROUP_STORY = "Story"
 GROUP_LIMITS = "Limits"
+
+# How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
+# estimated from its word count at a speaking pace; one above the limit is still saved.
+STORY_WPM_KEY = "story_words_per_minute"
+STORY_MAX_MINUTES_KEY = "story_max_minutes"
 
 # The shot-duration policy (PHASE-002). All four values are whole seconds. The hard maximum can
 # never pass the longest clip the GPU server accepts: 345 frames at 24 fps is 14.375 s, so 14.
@@ -377,6 +383,35 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=H3_MAX_WHOLE_SECONDS,
         min_value=1,
         max_value=H3_MAX_WHOLE_SECONDS,
+    ),
+    SettingSpec(
+        key=STORY_WPM_KEY,
+        group=GROUP_STORY,
+        label="Speaking pace (words per minute)",
+        help=(
+            "Used to estimate how long a story will be as a finished video: its number of "
+            "words divided by this pace. 150 is a common pace for narration; it is a starting "
+            "value, not a measurement, so change it to match your voices. It only affects the "
+            "estimate shown on the project page."
+        ),
+        value_type="integer",
+        default=150,
+        min_value=60,
+        max_value=300,
+    ),
+    SettingSpec(
+        key=STORY_MAX_MINUTES_KEY,
+        group=GROUP_STORY,
+        label="Longest story (minutes)",
+        help=(
+            "A story estimated to run longer than this shows a warning on the project page. "
+            "The story is still saved: the warning only says that the planning stages are "
+            "designed for stories of about this length or shorter."
+        ),
+        value_type="integer",
+        default=10,
+        min_value=1,
+        max_value=120,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

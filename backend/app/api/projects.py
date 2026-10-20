@@ -1,7 +1,8 @@
-"""`/api/projects`: projects, their sizes and their script text.
+"""`/api/projects`: projects, their sizes and their story text.
 
-Every edit is a PATCH on the project, so all the rules sit in one function
-(`app/services/projects.py`). The answers never return ORM objects.
+The story is stored in the `script_text` column. Every edit is a PATCH on the project, so all
+the rules sit in one function (`app/services/projects.py`). A project's detail also carries the
+story's estimated length (`app/services/story_length.py`). The answers never return ORM objects.
 
 `load_project`, `content_length` and `require_octet_stream` are shared by the lab
 routers (the Image lab picks a project's frames, and every upload endpoint reads its
@@ -21,6 +22,7 @@ from app.api.errors import ErrorResponse
 from app.db.models import Project
 from app.db.session import SessionDep
 from app.services import projects as projects_service
+from app.services import story_length as story_length_service
 
 router = APIRouter()
 
@@ -62,6 +64,16 @@ class ProjectSummary(BaseModel):
     has_script: bool
 
 
+class StoryLengthOut(BaseModel):
+    """The story's size and estimated length, and the pace and limit the estimate used."""
+
+    word_count: int
+    estimated_seconds: int
+    words_per_minute: int
+    limit_seconds: int
+    over_limit: bool
+
+
 class ProjectDetail(BaseModel):
     id: int
     name: str
@@ -73,6 +85,7 @@ class ProjectDetail(BaseModel):
     out_height: int
     fps: int
     script_text: str | None
+    story_length: StoryLengthOut
 
 
 def _orientation(project: Project) -> Orientation:
@@ -80,7 +93,9 @@ def _orientation(project: Project) -> Orientation:
     return cast(Orientation, project.orientation)
 
 
-def _detail(project: Project) -> ProjectDetail:
+async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
+    policy = await story_length_service.read_story_length_policy(session)
+    length = story_length_service.story_length(project.script_text, policy)
     return ProjectDetail(
         id=project.id,
         name=project.name,
@@ -92,6 +107,13 @@ def _detail(project: Project) -> ProjectDetail:
         out_height=project.out_height,
         fps=project.fps,
         script_text=project.script_text,
+        story_length=StoryLengthOut(
+            word_count=length.word_count,
+            estimated_seconds=length.estimated_seconds,
+            words_per_minute=length.words_per_minute,
+            limit_seconds=length.limit_seconds,
+            over_limit=length.over_limit,
+        ),
     )
 
 
@@ -131,12 +153,12 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
         project = await projects_service.create_project(session, body.name, body.orientation)
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    return _detail(project)
+    return await _detail(session, project)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectDetail, responses=_NOT_FOUND)
 async def get_project(project_id: int, session: SessionDep) -> ProjectDetail:
-    return _detail(await load_project(session, project_id))
+    return await _detail(session, await load_project(session, project_id))
 
 
 @router.patch(
@@ -147,7 +169,7 @@ async def get_project(project_id: int, session: SessionDep) -> ProjectDetail:
 async def update_project(
     project_id: int, body: ProjectUpdate, session: SessionDep
 ) -> ProjectDetail:
-    """Changes the fields that are sent: the name, the sizes, the frame rate and the script."""
+    """Changes the fields that are sent: the name, the sizes, the frame rate and the story."""
     project = await load_project(session, project_id)
     try:
         project = await projects_service.update_project(
@@ -155,7 +177,7 @@ async def update_project(
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    return _detail(project)
+    return await _detail(session, project)
 
 
 def content_length(request: Request) -> int | None:

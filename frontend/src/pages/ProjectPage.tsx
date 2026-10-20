@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
+import { StageList } from "../components/story/StageList";
+import { StoryEditor } from "../components/story/StoryEditor";
 import { capitalise } from "../format";
 
 export function ProjectNotFound() {
@@ -58,7 +60,8 @@ export function ProjectPage() {
             </Button>
           </Group>
 
-          <Text c="dimmed">The story workspace comes in a later phase.</Text>
+          <StoryEditor project={project} />
+          <StageList />
         </>
       )}
     </Stack>
