@@ -108,6 +108,15 @@ async def _update(
     return result.rowcount == 1
 
 
+def _same_target(job: Job, input: dict[str, Any], dedupe_key: str | None) -> bool:
+    """Whether an active job is the one a new job would repeat: any of its type, or (with a
+    `dedupe_key`) the one whose input has the same value under that key.
+    """
+    if dedupe_key is None:
+        return True
+    return isinstance(job.input, dict) and job.input.get(dedupe_key) == input.get(dedupe_key)
+
+
 async def create_job(
     session: AsyncSession,
     *,
@@ -117,11 +126,17 @@ async def create_job(
     input: dict[str, Any],
     commit: bool = True,
     dedupe: bool = True,
+    dedupe_key: str | None = None,
 ) -> tuple[Job, bool]:
     """Creates a queued job, unless one of this type is already active for the project.
     Returns `(job, created)`: the existing job when it was not created.
 
     This is what makes two quick clicks on one button create one job (Section 3.3).
+
+    `dedupe_key` is for a job type that runs once per item of a project (one per character, in
+    PHASE-009): an active job only counts as the same when its `input[dedupe_key]` equals this
+    job's, so two characters run side by side while two presses on one character make one job.
+    Without it, any active job of the type for the project is the same job.
 
     `project_id` is None for a lab's jobs, which belong to no project. They pass
     `dedupe=False`: each click is a paid run of its own (two runs of one prompt with another
@@ -145,7 +160,11 @@ async def create_job(
                 .order_by(Job.id)
                 .execution_options(populate_existing=True)
             )
-            existing = (await session.execute(statement)).scalars().first()
+            active = (await session.execute(statement)).scalars().all()
+            existing = next(
+                (job for job in active if _same_target(job, input, dedupe_key)),
+                None,
+            )
             if existing is not None:
                 if commit:
                     await session.commit()

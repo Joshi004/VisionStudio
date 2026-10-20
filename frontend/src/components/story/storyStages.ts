@@ -39,6 +39,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "character-definitions",
     name: "Character definitions",
     description: "Describes each character in detail and gives them a look and a voice.",
+    available: true,
   },
   {
     id: "environment-definitions",

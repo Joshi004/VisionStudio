@@ -9,6 +9,7 @@ import {
   referencePicture,
   VERSION_CHANGE_LABELS,
 } from "./characterLabView";
+import { CharacterDefinitionView } from "./CharacterDefinitionView";
 
 const PICTURE_STYLE = {
   width: "100%",
@@ -59,6 +60,14 @@ function VersionDetails({ version }: { version: CharacterVersion }) {
         <Row label="Voice" value={version.voice?.name ?? "mute"} />
         <Row label="Voice description" value={version.voice_description} />
       </Stack>
+      {version.definition !== null && (
+        <Stack gap={4}>
+          <Text size="sm" fw={600}>
+            Definition
+          </Text>
+          <CharacterDefinitionView definition={version.definition} />
+        </Stack>
+      )}
       {version.references.length === 0 ? (
         <Text size="xs" c="dimmed">
           No look in this version.

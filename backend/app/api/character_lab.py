@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.character_definitions import CharacterDefinitionOut
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobSummary, job_summary
 from app.api.video_lab import (
@@ -241,6 +242,9 @@ class CharacterOut(BaseModel):
     # Set only for a character the pipeline made from a project's discovered character
     # (PHASE-008). None for a character made in the lab.
     origin: CharacterOriginOut | None
+    # The newest structured definition the Character Definition stage wrote (PHASE-009),
+    # read-only. None until one is written.
+    definition: CharacterDefinitionOut | None
 
 
 class CharactersOut(BaseModel):
@@ -367,6 +371,11 @@ async def _character_out(session: AsyncSession, character: LibraryCharacter) -> 
             if origin_project is not None and character.origin_discovery_id is not None
             else None
         ),
+        definition=(
+            CharacterDefinitionOut.model_validate(character.definition)
+            if character.definition is not None
+            else None
+        ),
     )
 
 
@@ -406,6 +415,11 @@ class CharacterVersionOut(BaseModel):
     # The pictures of that look exactly as this version froze them, in display order. A later
     # redo of an angle does not change them.
     references: list[CharacterReferenceOut]
+    # The structured definition at this version (PHASE-009), and the job that wrote it when the
+    # pipeline made this version. None when the character had no definition, and for a version
+    # made by hand.
+    definition: CharacterDefinitionOut | None
+    job_id: int | None
 
 
 async def _versions_out(
@@ -471,6 +485,12 @@ async def _versions_out(
                 look_id=version.look_id,
                 look_version=look.version if look is not None else None,
                 references=references,
+                definition=(
+                    CharacterDefinitionOut.model_validate(version.definition)
+                    if version.definition is not None
+                    else None
+                ),
+                job_id=version.job_id,
             )
         )
     return out

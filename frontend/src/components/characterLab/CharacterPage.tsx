@@ -3,6 +3,7 @@ import {
   Alert,
   Badge,
   Button,
+  Collapse,
   Grid,
   Group,
   Loader,
@@ -21,7 +22,9 @@ import {
   type CharacterTake,
   type LibraryCharacter,
 } from "../../api/characterLab";
+import type { CharacterDefinition } from "../../api/characterDefinitions";
 import { describeError } from "../../api/errors";
+import { CharacterDefinitionView } from "./CharacterDefinitionView";
 import { CreatePanel } from "./CreatePanel";
 import { LOOK_STEP, PROFILE_STEP, VOICE_STEP, type DrawerStep } from "./CharacterDrawer";
 import {
@@ -66,6 +69,37 @@ function Detail({ label, value }: { label: string; value: string | null }) {
       </Text>
       {value}
     </Text>
+  );
+}
+
+/**
+ * The structured definition (looks, default clothes, voice, behaviour), read only. It is written
+ * by a project's Character definitions stage, never edited here; the profile above is what a
+ * person edits.
+ */
+function DefinitionSection({ definition }: { definition: CharacterDefinition | null }) {
+  const [open, setOpen] = useState(false);
+  if (definition === null) {
+    return (
+      <Text size="xs" c="dimmed">
+        No definition yet. A project&apos;s Character definitions stage writes one.
+      </Text>
+    );
+  }
+  return (
+    <Stack gap="xs">
+      <Group justify="space-between">
+        <Text size="sm" fw={600}>
+          Definition
+        </Text>
+        <Button size="compact-xs" variant="subtle" onClick={() => setOpen((value) => !value)}>
+          {open ? "Hide" : "Show"}
+        </Button>
+      </Group>
+      <Collapse expanded={open}>
+        <CharacterDefinitionView definition={definition} />
+      </Collapse>
+    </Stack>
   );
 }
 
@@ -247,6 +281,8 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
                 <Detail label="Voice description" value={data.voice_description} />
                 <Detail label="Mouth" value={data.has_visible_mouth ? "visible" : "not visible (no lip sync)"} />
               </Stack>
+
+              <DefinitionSection definition={data.definition} />
 
               <UsedByProjects characterId={data.id} />
 

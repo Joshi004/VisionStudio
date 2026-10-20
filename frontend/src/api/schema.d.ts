@@ -308,6 +308,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/character-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Character Definitions */
+        get: operations["get_character_definitions_api_projects__project_id__character_definitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-definitions/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every linked character the pipeline made. A character chosen from the
+         *     library, an archived one and one already being defined are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__character_definitions_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-definitions/{discovery_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the job that defines one character. If it already has a job waiting or running,
+         *     that job's id is returned and no second job is made.
+         */
+        post: operations["run_one_api_projects__project_id__character_definitions__discovery_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -1375,6 +1434,32 @@ export interface components {
             /** Line */
             line: string;
         };
+        /** BehaviorOut */
+        BehaviorOut: {
+            /** Baseline */
+            baseline: string;
+            /** Gesture Style */
+            gesture_style: string;
+        };
+        /** CharacterDefinitionOut */
+        CharacterDefinitionOut: {
+            /** Id */
+            id: string;
+            visual_identity: components["schemas"]["VisualIdentityOut"];
+            default_wardrobe: components["schemas"]["DefaultWardrobeOut"];
+            voice_identity: components["schemas"]["VoiceIdentityOut"];
+            behavior: components["schemas"]["BehaviorOut"];
+            era: components["schemas"]["EraOut"];
+        };
+        /** CharacterDefinitionsOut */
+        CharacterDefinitionsOut: {
+            /** Discovery Version */
+            discovery_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["DefinitionEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
         /**
          * CharacterIn
          * @description The profile step of the drawer. Every field is sent, even when it has not changed.
@@ -1486,6 +1571,7 @@ export interface components {
             /** Version */
             version: number | null;
             origin: components["schemas"]["CharacterOriginOut"] | null;
+            definition: components["schemas"]["CharacterDefinitionOut"] | null;
         };
         /**
          * CharacterPatch
@@ -1577,7 +1663,7 @@ export interface components {
              */
             source: "ai" | "manual";
             /** Changes */
-            changes: ("created" | "profile" | "look" | "voice")[];
+            changes: ("created" | "profile" | "definition" | "look" | "voice")[];
             profile: components["schemas"]["VersionProfileOut"];
             voice: components["schemas"]["VoiceBriefOut"] | null;
             /** Voice Description */
@@ -1588,6 +1674,9 @@ export interface components {
             look_version: number | null;
             /** References */
             references: components["schemas"]["CharacterReferenceOut"][];
+            definition: components["schemas"]["CharacterDefinitionOut"] | null;
+            /** Job Id */
+            job_id: number | null;
         };
         /** CharactersOut */
         CharactersOut: {
@@ -1732,6 +1821,70 @@ export interface components {
             /** Revision */
             revision?: string | null;
         };
+        /** DefaultWardrobeOut */
+        DefaultWardrobeOut: {
+            /** Upper */
+            upper: string;
+            /** Lower */
+            lower: string;
+            /** Footwear */
+            footwear: string;
+        };
+        /**
+         * DefinitionEntryOut
+         * @description One entry of the newest list of characters.
+         */
+        DefinitionEntryOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Character Id */
+            character_id: number | null;
+            /** Character Name */
+            character_name: string | null;
+            /** Pinned Version */
+            pinned_version: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unlinked" | "not_defined" | "defined" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            definition: components["schemas"]["CharacterDefinitionOut"] | null;
+            version: components["schemas"]["DefinitionVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+        };
+        /**
+         * DefinitionVersionOut
+         * @description The version of the library character that holds the definition (the one the project
+         *     pins): the provenance of the definition (D-3).
+         */
+        DefinitionVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** DiffEntryOut */
         DiffEntryOut: {
             /** Path */
@@ -1830,6 +1983,18 @@ export interface components {
              */
             created_at: string;
         };
+        /** EraOut */
+        EraOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "present" | "past" | "future";
+            /** Years */
+            years: number | null;
+            /** Setting */
+            setting: string | null;
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /** Detail */
@@ -1925,7 +2090,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character";
             /**
              * Status
              * @enum {string}
@@ -1978,7 +2143,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character";
             /**
              * Status
              * @enum {string}
@@ -2512,7 +2677,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character";
             /** Running */
             running: number;
             /** Queued */
@@ -2680,6 +2845,26 @@ export interface components {
             /** Delivery Instruction */
             delivery_instruction?: string | null;
         };
+        /** RunAllOut */
+        RunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["SkippedOut"][];
+        };
+        /** RunIn */
+        RunIn: {
+            /**
+             * Confirm Overwrite
+             * @default false
+             */
+            confirm_overwrite: boolean;
+        };
+        /** RunOut */
+        RunOut: {
+            /** Job Id */
+            job_id: number;
+        };
         /** SceneDiscoveryOut */
         SceneDiscoveryOut: {
             /** Version */
@@ -2819,6 +3004,15 @@ export interface components {
             settings: components["schemas"]["SettingItem"][];
             /** Secrets */
             secrets: components["schemas"]["SecretStatus"][];
+        };
+        /** SkippedOut */
+        SkippedOut: {
+            /** Discovery Id */
+            discovery_id: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
         };
         /** SourceApprovalOut */
         SourceApprovalOut: {
@@ -3214,6 +3408,31 @@ export interface components {
             /** Has Visible Mouth */
             has_visible_mouth: boolean;
         };
+        /** VisualIdentityOut */
+        VisualIdentityOut: {
+            /** Apparent Age */
+            apparent_age: number | null;
+            /** Sex */
+            sex: string;
+            /** Species */
+            species: string;
+            /** Has Visible Mouth */
+            has_visible_mouth: boolean;
+            /** Build */
+            build: string;
+            /** Height Character */
+            height_character: string;
+            /** Skin Tone */
+            skin_tone: string;
+            /** Face Shape */
+            face_shape: string;
+            /** Hair */
+            hair: string;
+            /** Eyes */
+            eyes: string;
+            /** Distinctive Features */
+            distinctive_features: string;
+        };
         /** VoiceBrief */
         VoiceBrief: {
             /** Id */
@@ -3253,6 +3472,19 @@ export interface components {
             name: string;
             /** Transcript */
             transcript?: string | null;
+        };
+        /** VoiceIdentityOut */
+        VoiceIdentityOut: {
+            /** Age Character */
+            age_character: string;
+            /** Pitch */
+            pitch: string;
+            /** Texture */
+            texture: string;
+            /** Accent */
+            accent: string;
+            /** Default Energy */
+            default_energy: string;
         };
         /** VoiceOut */
         VoiceOut: {
@@ -4032,6 +4264,131 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_character_definitions_api_projects__project_id__character_definitions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterDefinitionsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__character_definitions_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or list of characters, or the character is not linked, is archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__character_definitions__discovery_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or list of characters, or the character is not linked, is archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

@@ -12,14 +12,21 @@ A version holds:
   definition stages write into it);
 - the **look**: the current look's id and the exact picture of each of its angles
   (`look_references`). A `redo_angle` later updates the look's own `character_reference` row in
-  place, which never touches a snapshot: an old version keeps showing the picture it had.
+  place, which never touches a snapshot: an old version keeps showing the picture it had;
+- the structured **definition** the Character Definition stage wrote (PHASE-009), as the head
+  held it. A lab edit carries it forward unchanged;
+- for a version the pipeline made, its provenance (D-3): `job_id` and `inputs`. A version made
+  by hand has neither.
 
 Archiving is not a version change.
 
 `record_version_if_changed` is the only writer. It builds the snapshot of the character as it is
 now and adds the next version only if that differs from the newest one, so saving the same form
-twice makes no version. It adds and flushes but never commits: the caller commits the change and
-its version together.
+twice makes no version. A pipeline run also passes the `inputs` it was built from: the same
+content built from different inputs (the story changed, and the model happened to give the same
+definition) is a new version, so the version's provenance is never out of date for the run that
+asked. It adds and flushes but never commits: the caller commits the change and its version
+together.
 
 Only a **ready** look is frozen. While the current look is being redone (`making_angles`), its
 pictures are half old and half new, so the newest version's look part is carried forward as it
@@ -64,7 +71,7 @@ PROFILE_FIELDS: Final[tuple[str, ...]] = (
 )
 
 # What a version changed compared with the one before it. `created` is the first version.
-Change = Literal["created", "profile", "look", "voice"]
+Change = Literal["created", "profile", "definition", "look", "voice"]
 
 # Who made the change: a person in the lab, or the pipeline from the model's text.
 Source = Literal["ai", "manual"]
@@ -79,6 +86,7 @@ class Snapshot:
     voice_description: str | None
     look_id: int | None
     look_references: list[dict[str, Any]]
+    definition: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -154,21 +162,34 @@ async def snapshot(
         voice_description=character.voice_description,
         look_id=look_id,
         look_references=look_references,
+        definition=character.definition,
     )
 
 
-def _same(version: LibraryCharacterVersion, current: Snapshot) -> bool:
+def _same(
+    version: LibraryCharacterVersion, current: Snapshot, inputs: dict[str, Any] | None
+) -> bool:
+    """Whether the version already holds what `current` freezes. A run that states its `inputs`
+    also needs the version to have been built from those inputs.
+    """
     return (
         version.profile == current.profile
         and version.voice_id == current.voice_id
         and version.voice_description == current.voice_description
         and version.look_id == current.look_id
         and version.look_references == current.look_references
+        and version.definition == current.definition
+        and (inputs is None or version.inputs == inputs)
     )
 
 
 async def record_version_if_changed(
-    session: AsyncSession, character: LibraryCharacter, *, source: Source = "manual"
+    session: AsyncSession,
+    character: LibraryCharacter,
+    *,
+    source: Source = "manual",
+    job_id: int | None = None,
+    inputs: dict[str, Any] | None = None,
 ) -> LibraryCharacterVersion | None:
     """Adds the character's next version when it differs from the newest one, and returns it;
     returns None when nothing that a version freezes has changed. Flushes (the character must
@@ -176,11 +197,13 @@ async def record_version_if_changed(
 
     `source` is `manual` for a change made by hand in the lab. The pipeline passes `ai` for the
     first version of a character it makes from a discovered character (PHASE-008), whose text
-    came from the model.
+    came from the model, and for a version its Character Definition stage writes (PHASE-009),
+    together with that job's `job_id` and the `inputs` the definition was built from (D-3).
+    With `inputs`, the same content built from other inputs is a new version too.
     """
     newest = await latest_version(session, character.id)
     current = await snapshot(session, character, newest)
-    if newest is not None and _same(newest, current):
+    if newest is not None and _same(newest, current, inputs):
         return None
     version = LibraryCharacterVersion(
         character_id=character.id,
@@ -191,6 +214,9 @@ async def record_version_if_changed(
         voice_description=current.voice_description,
         look_id=current.look_id,
         look_references=current.look_references,
+        definition=current.definition,
+        job_id=job_id,
+        inputs=inputs,
     )
     session.add(version)
     await session.flush()
@@ -208,6 +234,8 @@ def changes_between(
     changes: list[Change] = []
     if previous.profile != current.profile:
         changes.append("profile")
+    if previous.definition != current.definition:
+        changes.append("definition")
     if previous.look_id != current.look_id or previous.look_references != current.look_references:
         changes.append("look")
     if (

@@ -130,6 +130,10 @@ SAVING_ENVIRONMENTS: Final = "saving the environments"
 # `discover_scenes` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_SCENES: Final = "saving the scenes"
 
+# --- Running: character definition (PHASE-009) -------------------------------------------
+# `define_character` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_DEFINITION: Final = "saving the definition"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

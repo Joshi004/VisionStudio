@@ -211,6 +211,7 @@ export function eraText(
 export const VERSION_CHANGE_LABELS: Record<CharacterVersion["changes"][number], string> = {
   created: "Created",
   profile: "Profile",
+  definition: "Definition",
   look: "Look",
   voice: "Voice",
 };

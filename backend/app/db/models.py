@@ -86,12 +86,13 @@ class Job(Base):
     __tablename__ = "job"
     __table_args__ = (
         # The six lab job types, since revision 0022 retired the narration ones, the first
-        # story stage, since revision 0023, the two discovery stages, since revision 0024, and
-        # scene discovery, since revision 0025.
+        # story stage, since revision 0023, the two discovery stages, since revision 0024,
+        # scene discovery, since revision 0025, and character definition, since revision 0028.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
-            "'discover_characters', 'discover_environments', 'discover_scenes')",
+            "'discover_characters', 'discover_environments', 'discover_scenes', "
+            "'define_character')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -537,6 +538,11 @@ class LibraryCharacter(Base):
         ForeignKey("project.id", ondelete="SET NULL"), default=None
     )
     origin_discovery_id: Mapped[str | None] = mapped_column(default=None)
+    # The newest structured definition the Character Definition stage wrote (PHASE-009): the
+    # `Path_ahead.md` Section 11 JSON, with the species, the visible-mouth flag and the era. NULL
+    # until a definition is written. A lab edit of the profile never changes it: it stays as the
+    # record of what the model wrote (editing definitions is PHASE-037).
+    definition: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
 
 
 class CharacterLook(Base):
@@ -785,6 +791,16 @@ class LibraryCharacterVersion(Base):
         ForeignKey("character_look.id", ondelete="SET NULL"), default=None
     )
     look_references: Mapped[Any] = mapped_column(JSON)
+    # The structured definition at this version (PHASE-009), as the head held it. NULL when
+    # the character had none.
+    definition: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # Provenance of a version the pipeline made (D-3): the job that wrote the definition, and
+    # what it was built from (`{"project_id", "discovery_id", "story_sha256", "artifacts",
+    # "entry_sha256"}`). Both are NULL for a version made by hand in the lab.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
 
 
 class ProjectCharacterLink(Base):
