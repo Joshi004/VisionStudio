@@ -50,12 +50,17 @@ function failure(error: unknown, status: number, what: string): ApiError {
 // --- What a look or a take is doing now -------------------------------------------------------
 
 /**
- * Is a look still being made? Its prompt is being written, a candidate is being drawn, or its
- * angles are. The API names no job for an angle, so a look that is `making_angles` counts as
+ * Is a look still being made? It waits for the picture it is drawn from (a look the story
+ * pipeline makes for a younger or older self), its prompt is being written, a candidate is
+ * being drawn, or its angles are. The API names no job for an angle, so a look that is `making_angles` counts as
  * busy until it turns `ready`.
  */
 export function lookIsBusy(look: CharacterLook): boolean {
-  if (look.status === "writing_prompt" || look.status === "making_angles") {
+  if (
+    look.status === "waiting" ||
+    look.status === "writing_prompt" ||
+    look.status === "making_angles"
+  ) {
     return true;
   }
   return look.status === "choosing" && look.candidates.some((candidate) => isJobActive(candidate.job));

@@ -22,8 +22,11 @@ last step is this stage's own change to the pin; a lab edit never moves it.
 - `save_definition` is called by the job and flushes without committing; the job commits it
   together with finishing itself.
 
-Relations between characters are not stored (D-14): the model reads them from the story and the
-other characters, which are part of its input only.
+The relations between the project's characters (`services/character_relations.py`, PHASE-047)
+are part of the model's input: each of the other characters carries what it is to this one
+(`relation_to_this`). A definition records the version of the relations it read and a hash of
+the relations this character is in (`inputs.relations_sha256`), so it is out of date when its
+own relations change. A definition made before relations existed counts as having none.
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from app.jobs import store
 from app.services import (
     character_definition_writer,
     character_links,
+    character_relations,
     character_versions,
     discovery,
     story_bible,
@@ -183,6 +187,17 @@ def _needs_confirmation(entry: EntryState) -> bool:
     return entry.info is not None and entry.info.link.how == "mapped"
 
 
+def _other(other: dict[str, Any], this_id: str, relations: list[dict[str, str]]) -> dict[str, str]:
+    """One of the other characters as the model sees it, with what it is to this one when the
+    project's relations say.
+    """
+    seen = {"id": other["id"], "name": other["name"], "description": other["description"]}
+    relation = character_relations.relation_to(relations, this_id, other["id"])
+    if relation is not None:
+        seen["relation_to_this"] = relation
+    return seen
+
+
 async def _queue(
     session: AsyncSession,
     project: Project,
@@ -191,6 +206,7 @@ async def _queue(
     newest: discovery.Discovery,
     entry: EntryState,
     items: list[dict[str, Any]],
+    relations: character_relations.RelationsState,
 ) -> tuple[Job, bool]:
     """Queues the job for one linked entry, and returns `(job, created)`. `created` is False
     when the entry already has a job waiting or running, which is returned instead.
@@ -199,15 +215,22 @@ async def _queue(
     item = entry.item
     story_hash = story_bible.story_sha256(story)
     entry_hash = entry_sha256(item)
+    artifacts = [
+        {"kind": STORY_BIBLE_KIND, "id": bible.id, "version": bible.version},
+        {"kind": CHARACTER_DISCOVERY_KIND, "id": newest.id, "version": newest.version},
+    ]
+    relations_artifact = character_relations.relations_artifact(relations.version)
+    if relations_artifact is not None:
+        artifacts.append(relations_artifact)
     inputs = {
         "project_id": project.id,
         "discovery_id": item["id"],
         "story_sha256": story_hash,
         "entry_sha256": entry_hash,
-        "artifacts": [
-            {"kind": STORY_BIBLE_KIND, "id": bible.id, "version": bible.version},
-            {"kind": CHARACTER_DISCOVERY_KIND, "id": newest.id, "version": newest.version},
-        ],
+        "relations_sha256": character_relations.entry_relations_sha256(
+            relations.relations, item["id"]
+        ),
+        "artifacts": artifacts,
     }
     return await store.create_job(
         session,
@@ -227,7 +250,7 @@ async def _queue(
                 "description": item["description"],
             },
             "others": [
-                {"id": other["id"], "name": other["name"], "description": other["description"]}
+                _other(other, item["id"], relations.relations)
                 for other in items
                 if other["id"] != item["id"]
             ],
@@ -284,7 +307,8 @@ async def start_run(
             "its appearance, outfit, personality, voice description, age, gender, species and "
             "era, so it has to be confirmed."
         )
-    job, _created = await _queue(session, project, story, bible, newest, entry, items)
+    relations = await character_relations.state(session, project)
+    job, _created = await _queue(session, project, story, bible, newest, entry, items, relations)
     return job
 
 
@@ -296,6 +320,7 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     """
     story, bible = await _require_inputs(session, project)
     newest, items, entries = await _entries(session, project)
+    relations = await character_relations.state(session, project)
     job_ids: list[int] = []
     skipped: list[Skipped] = []
     for entry in entries:
@@ -313,7 +338,7 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
                 )
             )
             continue
-        job, created = await _queue(session, project, story, bible, newest, entry, items)
+        job, created = await _queue(session, project, story, bible, newest, entry, items, relations)
         if created:
             job_ids.append(job.id)
         else:
@@ -338,6 +363,7 @@ def _out_of_date_reasons(
     story: str | None,
     newest_bible_version: int | None,
     item: dict[str, Any],
+    relations_sha256: str,
 ) -> list[str]:
     """Why a definition written for this entry is no longer current, one sentence each."""
     reasons: list[str] = []
@@ -352,6 +378,10 @@ def _out_of_date_reasons(
         reasons.append("The Story Bible has been written again since this definition was made.")
     if inputs.get("entry_sha256") != entry_sha256(item):
         reasons.append("The character's name or description has changed in the list.")
+    # A definition made before relations existed did not record a hash: it read none.
+    recorded_relations = inputs.get("relations_sha256", character_relations.EMPTY_RELATIONS_SHA256)
+    if recorded_relations != relations_sha256:
+        reasons.append("The character's relations have changed since this definition was made.")
     return reasons
 
 
@@ -392,6 +422,7 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
     newest_bible_version = bible.version if bible is not None else None
     links = await character_links.state(session, project.id)
     jobs = await _newest_jobs(session, project.id)
+    relations = (await character_relations.state(session, project)).relations
 
     entries: list[EntryDefinition] = []
     for entry in links.entries:
@@ -417,7 +448,13 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
                 and inputs.get("discovery_id") == item["id"]
             ):
                 version = pinned
-                reasons = _out_of_date_reasons(inputs, story, newest_bible_version, item)
+                reasons = _out_of_date_reasons(
+                    inputs,
+                    story,
+                    newest_bible_version,
+                    item,
+                    character_relations.entry_relations_sha256(relations, item["id"]),
+                )
                 status = "out_of_date" if reasons else "defined"
 
         refusal = _entry_refusal(entry)

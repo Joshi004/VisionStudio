@@ -84,15 +84,19 @@ function CandidateTile({
   );
 }
 
-function ReferenceStrip({
+/**
+ * The five angle pictures of a look. Without `onRedo` there are no Redo buttons (the story
+ * workspace shows the strip with its own).
+ */
+export function ReferenceStrip({
   look,
   onRedo,
-  redoingAngle,
+  redoingAngle = null,
 }: {
   look: CharacterLook;
-  onRedo: (angle: Angle) => void;
+  onRedo?: (angle: Angle) => void;
   /** The angle whose new picture is being started, if any. */
-  redoingAngle: Angle | null;
+  redoingAngle?: Angle | null;
 }) {
   const byAngle = new Map(look.references.map((reference) => [reference.angle, reference]));
   return (
@@ -120,14 +124,16 @@ function ReferenceStrip({
                 Master
               </Badge>
             ) : (
-              <Button
-                size="compact-xs"
-                variant="default"
-                loading={redoingAngle === angle}
-                onClick={() => onRedo(angle)}
-              >
-                Redo
-              </Button>
+              onRedo !== undefined && (
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  loading={redoingAngle === angle}
+                  onClick={() => onRedo(angle)}
+                >
+                  Redo
+                </Button>
+              )
             )}
           </Stack>
         );
@@ -248,6 +254,17 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
             Made from your picture.
           </Text>
         </Group>
+      )}
+
+      {latest?.status === "waiting" && (
+        <Paper withBorder p="sm" radius="md">
+          <Group gap="sm">
+            <Loader size="sm" />
+            <Text size="sm">
+              Waiting for the picture of another character in the story to be ready...
+            </Text>
+          </Group>
+        </Paper>
       )}
 
       {latest?.status === "writing_prompt" && (

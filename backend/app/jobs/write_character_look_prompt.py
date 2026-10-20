@@ -44,6 +44,7 @@ from app.services import image_prompt_writer as prompt_checks
 from app.services.image_prompt_profiles import (
     ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE,
     ACTIVE_CHARACTER_SHEET_PROFILE,
+    ACTIVE_CHARACTER_SHEET_SAME_PERSON_PROFILE,
     ImagePromptProfile,
 )
 from app.services.image_prompt_writer import CheckedPrompt
@@ -56,6 +57,36 @@ REQUEST_TIMEOUT_S: Final = 300.0
 
 _NO_CHARACTER = "The character no longer exists."
 _NO_REQUEST = "This job does not say what to write."
+
+
+def _relation_line(relation: object) -> str | None:
+    """How image 1 is related to the character, in words, from the `relation` the story
+    pipeline put on the job (PHASE-047), or None when the job has none or it is malformed.
+    `relation` is `{"kind", "base_age", "age"}`: `kind` is `younger_self`, `older_self` or
+    `twin`, and the ages are whole numbers or None.
+    """
+    if not isinstance(relation, dict):
+        return None
+    kind = relation.get("kind")
+    base_age = relation.get("base_age")
+    age = relation.get("age")
+    if kind == "twin":
+        return (
+            "Image 1 shows this character's identical twin. The picture to make shows this "
+            "character."
+        )
+    if kind not in ("younger_self", "older_self"):
+        return None
+    if isinstance(base_age, int) and isinstance(age, int):
+        return (
+            f"Image 1 shows this same person at {base_age} years old. The picture to make "
+            f"shows them at {age} years old."
+        )
+    word = "younger" if kind == "younger_self" else "older"
+    return (
+        f"Image 1 shows this same person at another age. The picture to make shows them "
+        f"{word} than in image 1."
+    )
 
 
 def _master_reader(profile: ImagePromptProfile) -> llm_call.ReadAnswer:
@@ -142,12 +173,20 @@ class WriteCharacterLookPromptHandler(JobHandler):
         started: float,
     ) -> None:
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        profile = (
-            ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE
-            if job_input.get("reference_image_id") is not None
-            else ACTIVE_CHARACTER_SHEET_PROFILE
+        relation_line = _relation_line(job_input.get("relation"))
+        if relation_line is not None and job_input.get("reference_image_id") is not None:
+            profile = ACTIVE_CHARACTER_SHEET_SAME_PERSON_PROFILE
+        elif job_input.get("reference_image_id") is not None:
+            profile = ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE
+        else:
+            profile = ACTIVE_CHARACTER_SHEET_PROFILE
+            relation_line = None
+        resemblance = job_input.get("resemblance")
+        inputs = writer.prompt_inputs(
+            card,
+            relation_line=relation_line,
+            resemblance=resemblance if isinstance(resemblance, str) else None,
         )
-        inputs = writer.prompt_inputs(card)
         body = writer.build_master_request(inputs, model=target.model, profile=profile)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},

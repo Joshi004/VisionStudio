@@ -6,8 +6,10 @@ from fastapi import APIRouter
 
 from app.api import (
     character_definitions,
+    character_images,
     character_lab,
     character_links,
+    character_relations,
     discovery,
     gpu,
     health,
@@ -28,7 +30,9 @@ api_router.include_router(story_bible.router, tags=["story-bible"])
 api_router.include_router(discovery.router, tags=["discovery"])
 api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(character_links.router, tags=["character-links"])
+api_router.include_router(character_relations.router, tags=["character-relations"])
 api_router.include_router(character_definitions.router, tags=["character-definitions"])
+api_router.include_router(character_images.router, tags=["character-images"])
 api_router.include_router(settings.router, tags=["settings"])
 api_router.include_router(gpu.router, tags=["gpu"])
 api_router.include_router(jobs.router, tags=["jobs"])

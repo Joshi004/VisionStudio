@@ -19,6 +19,16 @@ master (Phase 25).
    (`on_angle_image_stored`, called by the job). Once every one of the five angles has a
    picture, the look is `ready`, and becomes the character's current look if it had none.
 
+**A look the story pipeline makes** (PHASE-010, `start_look(automatic=...)`) follows the same
+steps with two differences: it makes one candidate, and `on_candidate_image_stored` takes it as
+the master as soon as its picture is stored (D-5), so nobody chooses. When it is ready, the
+character's new version is written with `source = "ai"` and the project's pin moves to it
+(`_pin_pipeline_look`). A look made in the lab never moves a pin.
+
+A pipeline look for a character that is the same person as another (a younger self, an older
+self, a twin; PHASE-047) is made by editing that other character's front picture. While that
+picture does not exist yet the look is `waiting` (no job); `release_look` starts it.
+
 `redo_angle` starts one more edit run for a single angle (not `front`: that is the look's
 master, fixed when it was chosen) and updates its row in place, so the character keeps its old
 picture of that angle until the new one is ready.
@@ -32,9 +42,10 @@ from __future__ import annotations
 import logging
 import secrets
 from collections.abc import AsyncIterator
-from typing import Final
+from dataclasses import dataclass
+from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
@@ -46,6 +57,8 @@ from app.db.models import (
     LabImage,
     LabRun,
     LibraryCharacter,
+    LibraryCharacterVersion,
+    ProjectCharacterLink,
 )
 from app.db.session import SessionLocal
 from app.db.types import utcnow
@@ -68,13 +81,29 @@ _logger = logging.getLogger(__name__)
 # A standing figure is taller than wide, the same shape the project cast's own character
 # reference uses.
 MASTER_SHAPE: Final = "2:3"
+# A look made in the Character Lab makes four candidates to choose a master from.
 CANDIDATE_COUNT: Final = 4
+# A look the story pipeline makes by itself (PHASE-010, D-5) makes one, and takes it as the
+# master with nobody choosing.
+AUTOMATIC_CANDIDATE_COUNT: Final = 1
 
 
 class CharacterLookError(ValueError):
     """Something the request gets wrong, or a step that cannot start now. The message is
     meant for the user (HTTP 422).
     """
+
+
+@dataclass(frozen=True)
+class AutomaticLook:
+    """What marks a look as made by the story pipeline for a project (PHASE-010): the
+    project, the discovered character's slug id in it, and the D-3 provenance recorded on the
+    look. Its master is chosen automatically and, once it is ready, the project's pin moves.
+    """
+
+    project_id: int
+    discovery_id: str
+    inputs: dict[str, Any]
 
 
 # A fixed instruction per angle, applied by editing the master picture. Written to match the
@@ -139,27 +168,71 @@ async def _next_version(session: AsyncSession, character_id: int) -> int:
 
 
 async def start_look(
-    session: AsyncSession, character_id: int, reference_image_id: int | None = None
+    session: AsyncSession,
+    character_id: int,
+    reference_image_id: int | None = None,
+    *,
+    automatic: AutomaticLook | None = None,
+    relation: dict[str, Any] | None = None,
+    resemblance: str | None = None,
+    wait: bool = False,
 ) -> CharacterLook:
     """Starts a new, fresh version of a character's look: a job writes its master prompt
     first. With `reference_image_id` (a lab image: the author's own picture of the character),
-    the candidates are edits of that picture instead of text-to-image pictures. Commits.
-    Raises CharacterLookError.
+    the candidates are edits of that picture instead of text-to-image pictures. With
+    `automatic` (the story pipeline, PHASE-010), the look makes one candidate, takes it as the
+    master, and moves the project's pin when it is ready.
+
+    The story pipeline also passes what it knows about the character's relations (PHASE-047):
+    `relation` (the character is the same person as the one in `reference_image_id`, or its
+    twin: `{"kind", "base_name", "base_age", "age"}`) and `resemblance` (the family likeness,
+    as text). Both go to the prompt job. With `wait`, the look is only recorded, as `waiting`,
+    and no job is made: `release_look` makes it when the picture it is edited from exists.
+    Commits. Raises CharacterLookError.
     """
     character = await session.get(LibraryCharacter, character_id)
     if character is None:
         raise CharacterLookError(f"There is no character {character_id}.")
     if reference_image_id is not None and await session.get(LabImage, reference_image_id) is None:
         raise CharacterLookError(f"There is no lab image {reference_image_id}.")
+    if wait and automatic is None:
+        raise CharacterLookError("Only a look the story pipeline makes can wait.")
+    if automatic is not None:
+        await _replace_waiting_looks(session, automatic)
     version = await _next_version(session, character_id)
     look = CharacterLook(
         character_id=character_id,
         version=version,
-        status="writing_prompt",
+        status="waiting" if wait else "writing_prompt",
         reference_image_id=reference_image_id,
+        project_id=automatic.project_id if automatic is not None else None,
+        discovery_id=automatic.discovery_id if automatic is not None else None,
+        inputs=automatic.inputs if automatic is not None else None,
     )
     session.add(look)
     await session.flush()
+    if not wait:
+        await _queue_prompt_job(session, look, reference_image_id, relation, resemblance)
+    await session.commit()
+    _logger.info(
+        "look %d started: character=%d version=%d reference_image=%s waiting=%s",
+        look.id,
+        character_id,
+        version,
+        reference_image_id,
+        wait,
+    )
+    return look
+
+
+async def _queue_prompt_job(
+    session: AsyncSession,
+    look: CharacterLook,
+    reference_image_id: int | None,
+    relation: dict[str, Any] | None,
+    resemblance: str | None,
+) -> None:
+    """Creates the job that writes the look's master prompt. No commit."""
     job, _created = await store.create_job(
         session,
         project_id=None,
@@ -167,22 +240,67 @@ async def start_look(
         provider="llm",
         input={
             "requested": "master",
-            "character_id": character_id,
+            "character_id": look.character_id,
             "look_id": look.id,
             "reference_image_id": reference_image_id,
+            "relation": relation,
+            "resemblance": resemblance,
         },
         commit=False,
         dedupe=False,
     )
     look.prompt_job_id = job.id
-    await session.commit()
-    _logger.info(
-        "look %d started: character=%d version=%d reference_image=%s",
-        look.id,
-        character_id,
-        version,
-        reference_image_id,
+
+
+async def _replace_waiting_looks(session: AsyncSession, automatic: AutomaticLook) -> None:
+    """A look the pipeline makes again for the same project and character replaces one that
+    is still waiting for its base: the old one would otherwise start later, from an old plan.
+    """
+    statement = select(CharacterLook).where(
+        CharacterLook.project_id == automatic.project_id,
+        CharacterLook.discovery_id == automatic.discovery_id,
+        CharacterLook.status == "waiting",
     )
+    for waiting in (await session.execute(statement)).scalars():
+        waiting.status = "failed"
+        waiting.error = "Replaced by a newer run."
+
+
+async def release_look(
+    session: AsyncSession,
+    look_id: int,
+    *,
+    reference_image_id: int,
+    relation: dict[str, Any],
+    resemblance: str | None,
+    inputs: dict[str, Any],
+) -> CharacterLook | None:
+    """Starts a `waiting` look: its base's picture now exists, so the job that writes its
+    master prompt is made. `inputs` replaces the look's provenance with the one that names the
+    base picture it is made from. Commits. Returns None when the look is no longer waiting
+    (it was replaced, or released already); the claim is made in the database, so two
+    releases can never both start it. Raises CharacterLookError when the picture is gone.
+    """
+    look = await session.get(CharacterLook, look_id)
+    if look is None or look.status != "waiting":
+        await session.commit()
+        return None
+    if await session.get(LabImage, reference_image_id) is None:
+        raise CharacterLookError(f"There is no lab image {reference_image_id}.")
+    claimed = await session.execute(
+        update(CharacterLook)
+        .where(CharacterLook.id == look_id, CharacterLook.status == "waiting")
+        .values(status="writing_prompt")
+    )
+    if claimed.rowcount != 1:
+        await session.rollback()
+        return None
+    look.status = "writing_prompt"
+    look.reference_image_id = reference_image_id
+    look.inputs = inputs
+    await _queue_prompt_job(session, look, reference_image_id, relation, resemblance)
+    await session.commit()
+    _logger.info("look %d released: reference_image=%d", look.id, reference_image_id)
     return look
 
 
@@ -227,7 +345,9 @@ async def on_look_prompt_written(job_id: int) -> bool:
             return False
         look.status = "choosing"
         await session.commit()
-    _logger.info("look %d: master prompt saved, %d candidates started", look.id, CANDIDATE_COUNT)
+    _logger.info(
+        "look %d: master prompt saved, %d candidates started", look.id, _candidate_count(look)
+    )
     return True
 
 
@@ -244,15 +364,60 @@ async def on_look_prompt_failed(job_id: int, error: str) -> None:
         await session.commit()
 
 
+async def on_candidate_image_stored(run_id: int) -> bool:
+    """Called (best effort) once a `lab_image` job has stored its picture. When the picture is
+    the candidate of a look the story pipeline made (`project_id` set) that is waiting for its
+    master (D-5), takes it as the master and starts the other four angles. Returns True when
+    they started. Does nothing (False) for a lab look, whose master a person chooses, and for
+    a run that is no candidate. If the angles cannot be started the look is marked `failed`,
+    so the workspace shows why instead of waiting forever.
+    """
+    async with SessionLocal() as session:
+        statement = select(CharacterLookCandidate).where(
+            CharacterLookCandidate.lab_run_id == run_id
+        )
+        candidate = (await session.execute(statement)).scalars().first()
+        look = await session.get(CharacterLook, candidate.look_id) if candidate else None
+        if candidate is None or look is None or look.project_id is None:
+            await session.commit()
+            return False
+        if look.status != "choosing":
+            await session.commit()
+            return False
+        look_id, candidate_id = look.id, candidate.id
+        await session.commit()
+
+    async with SessionLocal() as session:
+        try:
+            await choose_master(session, look_id, candidate_id)
+        except CharacterLookError as exc:
+            await session.rollback()
+            failed = await session.get(CharacterLook, look_id)
+            if failed is not None and failed.status == "choosing":
+                failed.status = "failed"
+                failed.error = f"The master could not be chosen automatically: {exc}"
+            await session.commit()
+            _logger.warning("look %d: automatic master choice failed: %s", look_id, exc)
+            return False
+    _logger.info("look %d: master chosen automatically: candidate=%d", look_id, candidate_id)
+    return True
+
+
+def _candidate_count(look: CharacterLook) -> int:
+    """One candidate for a look the story pipeline makes, four for one made in the lab."""
+    return AUTOMATIC_CANDIDATE_COUNT if look.project_id is not None else CANDIDATE_COUNT
+
+
 async def _start_candidates(
     session: AsyncSession, look: CharacterLook, reference_image_id: int | None
 ) -> None:
-    """Four text-to-image runs from the master prompt, or, with `reference_image_id`, four
-    edit runs of that picture (the author's own picture of the character).
+    """Text-to-image runs from the master prompt, or, with `reference_image_id`, edit runs of
+    that picture (the author's own picture of the character): four for a lab look, one for a
+    look the story pipeline makes (`_candidate_count`).
     """
     mode = await _image_mode(session)
     prompt = look.prompt or ""
-    for _ in range(CANDIDATE_COUNT):
+    for _ in range(_candidate_count(look)):
         seed = secrets.randbelow(image_models_service.SEED_LIMIT)
         try:
             if reference_image_id is None:
@@ -301,6 +466,17 @@ async def choose_master(session: AsyncSession, look_id: int, candidate_id: int) 
     master_image = (await session.execute(image_statement)).scalars().first()
     if master_image is None:
         raise CharacterLookError("This candidate's picture is gone.")
+
+    # Claimed in the database, so a click in the lab and the automatic choice of a pipeline look
+    # can never both pass the status check above and start the angles twice.
+    claimed = await session.execute(
+        update(CharacterLook)
+        .where(CharacterLook.id == look_id, CharacterLook.status == "choosing")
+        .values(status="making_angles")
+    )
+    if claimed.rowcount != 1:
+        await session.rollback()
+        raise CharacterLookError("This look is not ready to choose a master picture from yet.")
 
     session.add(CharacterReference(look_id=look.id, angle="front", lab_run_id=run.id))
     try:
@@ -466,8 +642,56 @@ async def _maybe_mark_ready(session: AsyncSession, look_id: int) -> None:
     character = await session.get(LibraryCharacter, look.character_id)
     if character is not None:
         character.current_look_id = look.id
-        # A look that finishes, or an angle redone on the current look, is a new version.
-        await character_versions.record_version_if_changed(session, character)
+        # A look the story pipeline made moves the project's pin (its own change, like a
+        # definition). Any other look, or an angle redone on the current look, is a new
+        # version by hand that leaves every pin where it is.
+        if not await _pin_pipeline_look(session, look, character):
+            await character_versions.record_version_if_changed(session, character)
+
+
+async def _pin_pipeline_look(
+    session: AsyncSession, look: CharacterLook, character: LibraryCharacter
+) -> bool:
+    """For a look the story pipeline made, writes the character's next version (`ai`, with the
+    job that wrote the look's prompt) and moves the project's pin to it. Returns False, and
+    does nothing, for a lab look or when the project's link no longer points at this
+    character (it was removed or changed while the look was made).
+
+    The version records the same `inputs` as the version the project pinned, so the Character
+    Definition stage still reads that definition as built from the story and the StoryBible.
+    """
+    if look.project_id is None or look.discovery_id is None:
+        return False
+    link_statement = select(ProjectCharacterLink).where(
+        ProjectCharacterLink.project_id == look.project_id,
+        ProjectCharacterLink.discovery_id == look.discovery_id,
+    )
+    link = (await session.execute(link_statement)).scalars().first()
+    if link is None or link.character_id != character.id:
+        return False
+    pinned_statement = select(LibraryCharacterVersion).where(
+        LibraryCharacterVersion.character_id == character.id,
+        LibraryCharacterVersion.version == link.pinned_version,
+    )
+    pinned = (await session.execute(pinned_statement)).scalars().first()
+    inputs = pinned.inputs if pinned is not None and isinstance(pinned.inputs, dict) else None
+    version = await character_versions.record_version_if_changed(
+        session, character, source="ai", job_id=look.prompt_job_id, inputs=inputs
+    )
+    if version is None:
+        version = await character_versions.latest_version(session, character.id)
+    if version is None:
+        return False
+    link.pinned_version = version.version
+    link.updated_at = utcnow()
+    _logger.info(
+        "look %d: ready for project %d, character %d pinned at version %d",
+        look.id,
+        look.project_id,
+        character.id,
+        version.version,
+    )
+    return True
 
 
 class _Cutout:

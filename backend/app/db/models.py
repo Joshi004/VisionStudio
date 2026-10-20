@@ -87,12 +87,13 @@ class Job(Base):
     __table_args__ = (
         # The six lab job types, since revision 0022 retired the narration ones, the first
         # story stage, since revision 0023, the two discovery stages, since revision 0024,
-        # scene discovery, since revision 0025, and character definition, since revision 0028.
+        # scene discovery, since revision 0025, character definition, since revision 0028, and
+        # relation discovery, since revision 0030.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
-            "'define_character')",
+            "'define_character', 'discover_relations')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -167,7 +168,7 @@ class CharacterDiscovery(Base):
     never changed. `inputs` records the story hash and the StoryBible version the list was made
     from, so "out of date" is worked out when it is read. `content` is
     `{"characters": [{"id", "name", "description"}, ...]}`. Relations between characters are
-    not stored (D-14).
+    not part of this list: they are their own artifact, `CharacterRelations` (D-14, PHASE-047).
     """
 
     __tablename__ = "character_discovery"
@@ -207,6 +208,35 @@ class EnvironmentDiscovery(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     version: Mapped[int]
     source: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class CharacterRelations(Base):
+    """One version of a story project's list of relations between its discovered characters
+    (PHASE-047). The same provenance shape as `CharacterDiscovery`: every run or edit is a new
+    row, and a stored row is never changed. `content` is
+    `{"relations": [{"character", "kind", "of"}, ...]}`: `character` and `of` are slug ids of
+    the discovered characters, and `kind` says what `character` is to `of`
+    (`younger_self`, `older_self`, `twin`, `parent`, `sibling`, `grandparent`).
+    """
+
+    __tablename__ = "character_relations"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_character_relations_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
@@ -552,7 +582,9 @@ class CharacterLook(Base):
 
     `version` numbers a character's looks from 1. `status` moves `writing_prompt` ->
     `choosing` (candidates are ready, waiting for one to be picked as the master) ->
-    `making_angles` -> `ready`, or `failed`. The four candidates to choose the master from are
+    `making_angles` -> `ready`, or `failed`. A look the story pipeline makes for a same-person
+    variant (PHASE-047) starts as `waiting`, held until its base character's images are ready,
+    and then moves to `writing_prompt`. The four candidates to choose the master from are
     `character_look_candidate` rows; the five angle pictures of a ready look are
     `character_reference` rows.
 
@@ -564,10 +596,12 @@ class CharacterLook(Base):
     __tablename__ = "character_look"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('writing_prompt', 'choosing', 'making_angles', 'ready', 'failed')",
+            "status IN ('waiting', 'writing_prompt', 'choosing', 'making_angles', 'ready', "
+            "'failed')",
             name="status_valid",
         ),
         Index("idx_character_look_character", "character_id"),
+        Index("idx_character_look_project", "project_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -588,6 +622,14 @@ class CharacterLook(Base):
     reference_image_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
     )
+    # Only for a look the story pipeline made by itself (PHASE-010): the project and the
+    # discovered character's slug id it was made for, and its provenance (D-3). NULL for a look
+    # made by hand in the Character Lab.
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    discovery_id: Mapped[str | None] = mapped_column(default=None)
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
 
 
 class CharacterLookCandidate(Base):

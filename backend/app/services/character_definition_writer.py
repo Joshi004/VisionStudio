@@ -142,8 +142,11 @@ Rules:
 you can tell them apart and understand how they are related to this one (for example a mother \
 and her son, or one person at two ages). When this character is the same person at another age \
 as one of the others (for example "Young Arjun" next to "Arjun"), make them look like one \
-person at two ages: the same face shape, colouring and build apart from what age changes. Never \
-write relations into the answer.
+person at two ages: the same face shape, colouring and build apart from what age changes. When \
+an other character has "relation_to_this", that relation is established (for example "a parent \
+of this character"): relatives share a family likeness (skin tone, eye colour, face shape), and \
+a character who is the same person at another age keeps that person's face. Never write \
+relations into the answer.
 - The definition is the character's lasting identity, not one moment of the story. Do not \
 describe a mood, an injury, the weather or an event, unless it is a permanent trait. The \
 default wardrobe is what the character most usually wears in the story. When the story does not \
@@ -191,7 +194,8 @@ def build_request(
     (`job.input.request`), so nothing about the call is hidden from the job record.
 
     `entry` is the character to define, `others` the rest of the story's characters (each
-    `{id, name, description}`), `current_profile` the character's profile in the Character Lab as
+    `{id, name, description}`, and `relation_to_this` when the project's relations say what it
+    is to the entry), `current_profile` the character's profile in the Character Lab as
     text (`character_library.character_card`), or None when it has none yet.
     """
     parts = [

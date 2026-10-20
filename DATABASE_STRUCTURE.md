@@ -60,6 +60,10 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-009 character definition, 2026-10-20):** migration `0028`. The fifth story stage: **one model call per linked character writes its structured definition** (`Path_ahead.md` Section 11), which is saved on the library character as a **new version that the project pins**. (1) `library_character` gains a nullable JSON `definition` (the character's current definition, Section 4.22). `library_character_version` gains `definition` (the definition frozen in that version), `job_id` (FK → `job.id`, `SET NULL`: the job that wrote the version; NULL for a manual one) and `inputs` (the D-3 inputs of Section 2.1: the story hash and the StoryBible and character-list versions the definition was made from; NULL for a manual one) (Section 4.27). The definition holds `visual_identity`, `default_wardrobe`, `voice_identity`, `behavior` and `era` (the shape is in Section 5). (2) `job.type` gains `define_character`: the CHECK is rebuilt in batch mode, so `job` now has eleven types. It is **one job per character** (`input.discovery_id` names it), belongs to the project, is `provider='llm'` with the restart rule `never_rerun`, and uses the story model setting (D-12). `jobs/store.create_job` gained an optional `dedupe_key`: a second click for **the same character** returns that character's waiting or running job, while different characters' jobs run side by side when the pool allows. (3) A definition run **overwrites the lab profile fields it fills**: `age`, `gender`, `species`, `has_visible_mouth`, `appearance`, `outfit`, `personality`, `voice_description`, `era_kind`, `era_years` and `era_setting`; it never changes `name` or `notes`. The text written over stays readable in the earlier version. The new version has `source='ai'`, and **the project's pin moves to it** (the pipeline's own change: a lab edit never moves a pin). A later lab edit **carries the definition forward** into its own version, so a hand edit does not lose it. When `record_version_if_changed` is given `inputs`, it also compares them, so the same text made from newer inputs is a new version and the provenance stays current. (4) A character the user **chose from the library** (`project_character_link.how = 'mapped'`) is overwritten only after the request confirms it (`confirm_overwrite`), and "Define all" skips it. (5) Whether a definition is **out of date** is computed on every read from the pinned version's `inputs` (the story text, the newest StoryBible, and the entry's name and description in the list), never stored. (6) No setting is added. New endpoints under `/api/projects/{id}/character-definitions` (read, run all, run one). See Sections 2.1, 3, 4.5, 4.22, 4.27, 5 and 7.
 
+**Update (PHASE-010 canonical character images, 2026-10-20):** migration `0029`. The sixth story stage: **each defined character gets its look made by the pipeline, with nobody choosing a master**, by reusing the Character Lab's look pipeline. (1) `character_look` gains `project_id` (FK → `project.id`, `SET NULL`, indexed by `idx_character_look_project`), `discovery_id` (TEXT, the slug of the discovered character in that project) and `inputs` (JSON, the D-3 provenance: `project_id`, `discovery_id`, `character_version` = the version the project pinned when the look started, and `definition_sha256` = a hash of the definition it was made from) (Section 4.23). All three are NULL for a look made by hand in the lab, and **a non-NULL `project_id` is what makes a look a pipeline look**. (2) **No job type is added and no table**: the work is the lab's own jobs (`write_character_look_prompt`, then `lab_image` runs). (3) A pipeline look makes **one candidate** (a lab look still makes four), and once that picture is stored the look takes it as its master itself (D-5), then makes the four other angles as before. (4) When a pipeline look turns `ready`, in the same transaction that sets the status, `library_character.current_look_id` is set, `library_character_version` gets the next version (`source='ai'`, `job_id` = the look's prompt job, `inputs` = the `inputs` of the version the project pinned, so the Character Definition stage still reads its definition as current) and **the project's pin moves to it** (the pipeline's own change). A look made in the lab still writes a `manual` version and **never moves a pin**; redoing an angle of a pipeline look writes a new `ai` version and moves the pin again. (5) Whether images are `failed` (the look's own status, or the job of its prompt, its candidate or an angle failed) or `out_of_date` (the definition now pinned differs from the one the look recorded) is **computed on every read**, never stored. (6) No setting is added. New endpoints under `/api/projects/{id}/character-images` (read, run all, run one). See Sections 4.23, 5 and 7.
+
+**Update (PHASE-047 character relations, 2026-10-20):** migration `0030`. The project says who is the same person at another age, a twin, or family of whom, and the definitions and the images use it. (1) New table `character_relations` (Section 4.29): the shape of `character_discovery`, one immutable row per version of the project's whole list of relations, found by the `discover_relations` job (`source` `ai`) or saved by the user (`manual`), keyed by the discovery slug ids; **a library character never carries a relation** (D-14, amended). (2) `job.type` gains `discover_relations`: the CHECK is rebuilt in batch mode, so `job` now has twelve types. (3) `character_look.status` gains `waiting` (Section 4.23): a pipeline look for a same-face variant that waits for its base's images; no job exists until it starts. The CHECK is rebuilt in batch mode. (4) The `inputs` of a definition version gain `relations_sha256` and, when the project has relations, a `character_relations` artifact (Section 4.27); the `inputs` of a pipeline look gain `relation_kind`, `base` and `resemblance_sha256` (Section 4.23). A row made before this has none of them and reads as having no relations. The downgrade drops the table, deletes `discover_relations` jobs and `waiting` looks, and restores both CHECKs. No data is touched on upgrade. Section 7 has the new row.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -130,7 +134,7 @@ Rules that go with it:
 
 ## 3. Entity-relationship overview
 
-A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run`, and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
+A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run`, and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
 
 ```mermaid
 erDiagram
@@ -235,6 +239,8 @@ erDiagram
 | `story_bible` | `job_id` | `job.id` | Yes (the `write_story_bible` job that wrote the version; `SET NULL` if that job row is ever removed, and NULL for a manual version). PHASE-004 |
 | `character_discovery` | `project_id` | `project.id` | No (`CASCADE`). PHASE-005 |
 | `character_discovery` | `job_id` | `job.id` | Yes (the `discover_characters` job that wrote the version; `SET NULL` if that job row is ever removed, and NULL for a manual version). PHASE-005 |
+| `character_relations` | `project_id` | `project.id` | No (`CASCADE`). PHASE-047 |
+| `character_relations` | `job_id` | `job.id` | Yes (the `discover_relations` job that wrote the version; `SET NULL`, and NULL for a manual version). PHASE-047 |
 | `environment_discovery` | `project_id` | `project.id` | No (`CASCADE`). PHASE-005 |
 | `environment_discovery` | `job_id` | `job.id` | Yes (the `discover_environments` job that wrote the version; `SET NULL` if that job row is ever removed, and NULL for a manual version). PHASE-005 |
 | `scene_discovery` | `project_id` | `project.id` | No (`CASCADE`). PHASE-006 |
@@ -260,6 +266,7 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `character_look` | `character_id` | `library_character.id` | No (`CASCADE`) |
 | `character_look` | `prompt_job_id` | `job.id` | Yes (the `write_character_look_prompt` job; `SET NULL`) |
 | `character_look` | `reference_image_id` | `lab_image.id` | Yes (the author's own picture the look was started from; `SET NULL`) |
+| `character_look` | `project_id` | `project.id` | Yes (the project the story pipeline made the look for; `SET NULL`). PHASE-010 |
 | `character_look_candidate` | `look_id` | `character_look.id` | No (`CASCADE`) |
 | `character_look_candidate` | `lab_run_id` | `lab_run.id` | Yes (`SET NULL`) |
 | `character_reference` | `look_id` | `character_look.id` | No (`CASCADE`) |
@@ -369,13 +376,13 @@ CREATE TABLE asset (
 
 ### 4.5 `job`
 
-Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, and migration `0028` (PHASE-009) added `define_character`. (Source: Section 3.3, 4.2, 4.3.)
+Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, and migration `0030` (PHASE-047) added `discover_relations`. (Source: Section 3.3, 4.2, 4.3.)
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
-| `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
+| `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047), which the Activity page shows under the project's name |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -394,7 +401,7 @@ Every unit of background work. This is where running-job information lives, so a
 CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character')),
+    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -777,6 +784,7 @@ CREATE INDEX idx_story_bible_project   ON story_bible (project_id);
 CREATE INDEX idx_scene_discovery_project ON scene_discovery (project_id);
 CREATE INDEX idx_library_character_created ON library_character (created_at);
 CREATE INDEX idx_character_look_character ON character_look (character_id);
+CREATE INDEX idx_character_look_project ON character_look (project_id);
 CREATE INDEX idx_character_look_candidate_look ON character_look_candidate (look_id);
 CREATE INDEX idx_character_take_character ON character_take (character_id);
 CREATE INDEX idx_character_take_created ON character_take (created_at);
@@ -891,7 +899,7 @@ CREATE TABLE story_bible (
 | `name` | text, 1 to 80 characters |
 | `description` | text, 1 to 300 characters |
 
-Every text is stored on one line (whitespace collapsed). Nothing else is asked for or stored: no appearance, wardrobe, voice or height (the definition stage, PHASE-009, adds those), and **no relation between characters** (D-14). A character at another age ("Young Arjun") is a separate item. An answer that breaks a rule is not stored: the attempt counts as unusable and is retried within the job's two attempts. A bare list is accepted in place of the object.
+Every text is stored on one line (whitespace collapsed). Nothing else is asked for or stored: no appearance, wardrobe, voice or height (the definition stage, PHASE-009, adds those), and **no relation between characters** (a project's relations are their own artifact, Section 4.29, D-14). A character at another age ("Young Arjun") is a separate item. An answer that breaks a rule is not stored: the attempt counts as unusable and is retried within the job's two attempts. A bare list is accepted in place of the object.
 
 ```sql
 CREATE TABLE character_discovery (
@@ -1048,7 +1056,7 @@ CREATE TABLE library_character (
 
 ### 4.23 `character_look`
 
-*Documented in PHASE-007; added by migration `0016`, with `reference_image_id` added by `0018`.* One attempt at a library character's reference pictures: a master picture on a white backdrop, plus four more angles made by editing it. **`version` numbers a character's looks from 1 and is not the character's version** (Section 4.27): a look is one set of pictures, a character version is a snapshot of the whole character. `status` moves `writing_prompt` → `choosing` (the candidates are ready and wait for one to be picked as the master) → `making_angles` → `ready`, or `failed`. The look becomes the character's `current_look_id` each time it turns `ready`. Redoing one angle of a `ready` look sets it back to `making_angles` until the new picture is stored.
+*Documented in PHASE-007; added by migration `0016`, with `reference_image_id` added by `0018` and `project_id`, `discovery_id` and `inputs` added by `0029` (PHASE-010).* One attempt at a library character's reference pictures: a master picture on a white backdrop, plus four more angles made by editing it. **`version` numbers a character's looks from 1 and is not the character's version** (Section 4.27): a look is one set of pictures, a character version is a snapshot of the whole character. `status` starts at `waiting` for a same-face variant the story pipeline makes while its base's images are still being made (PHASE-047; no job exists yet, and it moves to `writing_prompt` by one conditional update when the base's pin has moved, or is replaced by a newer run), then moves `writing_prompt` → `choosing` (the candidates are ready and wait for one to be picked as the master) → `making_angles` → `ready`, or `failed`. The look becomes the character's `current_look_id` each time it turns `ready`. Redoing one angle of a `ready` look sets it back to `making_angles` until the new picture is stored.
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
@@ -1056,11 +1064,14 @@ CREATE TABLE library_character (
 | `created_at` | DATETIME | NOT NULL | now | |
 | `character_id` | INTEGER, FK → `library_character.id` | NOT NULL | — | `ON DELETE CASCADE` |
 | `version` | INTEGER | NOT NULL | — | The look's number within its character: the highest so far plus 1 |
-| `status` | TEXT | NOT NULL | `'writing_prompt'` | `writing_prompt` \| `choosing` \| `making_angles` \| `ready` \| `failed` (`CHECK`) |
+| `status` | TEXT | NOT NULL | `'writing_prompt'` | `waiting` (PHASE-047) \| `writing_prompt` \| `choosing` \| `making_angles` \| `ready` \| `failed` (`CHECK`) |
 | `prompt` | TEXT | NULL | — | The master prompt, once the language model has written it |
 | `prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_character_look_prompt` job. `ON DELETE SET NULL` |
 | `error` | TEXT | NULL | — | Why the look failed |
 | `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The author's own picture the look was started from: its candidates are edits of it. NULL for a look made from the profile alone. `ON DELETE SET NULL` |
+| `project_id` | INTEGER, FK → `project.id` | NULL | — | PHASE-010 (migration `0029`). The project the **story pipeline** made this look for. NULL for a look made in the lab. A look with a `project_id` makes one candidate, chooses its master by itself and, once `ready`, moves that project's pin (Section 7). `ON DELETE SET NULL` (the look then behaves as a lab look) |
+| `discovery_id` | TEXT | NULL | — | PHASE-010. The slug id of the discovered character in that project. Together with `project_id` it finds the `project_character_link` to move |
+| `inputs` | JSON | NULL | — | PHASE-010. The D-3 provenance of a pipeline look: `{"project_id", "discovery_id", "character_version", "definition_sha256"}`. NULL for a lab look. "Out of date" images are worked out by comparing `definition_sha256` with the definition the project pins now |
 
 ```sql
 CREATE TABLE character_look (
@@ -1069,13 +1080,17 @@ CREATE TABLE character_look (
     character_id        INTEGER NOT NULL REFERENCES library_character(id) ON DELETE CASCADE,
     version             INTEGER NOT NULL,
     status              TEXT NOT NULL DEFAULT 'writing_prompt'
-                        CHECK (status IN ('writing_prompt', 'choosing', 'making_angles', 'ready', 'failed')),
+                        CHECK (status IN ('waiting', 'writing_prompt', 'choosing', 'making_angles', 'ready', 'failed')),
     prompt              TEXT,
     prompt_job_id       INTEGER REFERENCES job(id) ON DELETE SET NULL,
     error               TEXT,
-    reference_image_id  INTEGER REFERENCES lab_image(id) ON DELETE SET NULL
+    reference_image_id  INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    project_id          INTEGER REFERENCES project(id) ON DELETE SET NULL,
+    discovery_id        TEXT,
+    inputs              JSON
 );
 CREATE INDEX idx_character_look_character ON character_look (character_id);
+CREATE INDEX idx_character_look_project ON character_look (project_id);
 ```
 
 ### 4.24 `character_look_candidate`
@@ -1231,7 +1246,7 @@ CREATE INDEX idx_character_take_created ON character_take (created_at);
 | `look_references` | JSON | NOT NULL | — | The look's pictures as they were: `[{"angle": "front", "lab_image_id": 41, "cutout_path": "lab/ab12.png" or null}, ...]`, sorted by angle name; `[]` when there is no look. Copied, not linked, so a later redo of an angle (which updates `character_reference` in place) never changes it |
 | `definition` | JSON | NULL | — | PHASE-009. The structured definition the character held at that moment (Section 5, "The character definition"), or NULL when it had none. A version made by a lab edit **carries forward** the definition the character already has |
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | PHASE-009. The `define_character` job that wrote this version. NULL for a version made by hand. `ON DELETE SET NULL` (named `fk_library_character_version_job_id_job`) |
-| `inputs` | JSON | NULL | — | PHASE-009, the D-3 inputs (Section 2.1): `{"project_id", "discovery_id", "story_sha256", "entry_sha256", "artifacts": [{"kind": "story_bible", "id", "version"}, {"kind": "character_discovery", "id", "version"}]}`. `entry_sha256` is the SHA-256 of the entry's name and one-line description as the model saw them. NULL for a version made by hand. It is what "out of date" is worked out from, and it also says which project and which character of its list the definition was written for |
+| `inputs` | JSON | NULL | — | PHASE-009, the D-3 inputs (Section 2.1): `{"project_id", "discovery_id", "story_sha256", "entry_sha256", "artifacts": [{"kind": "story_bible", "id", "version"}, {"kind": "character_discovery", "id", "version"}]}`. `entry_sha256` is the SHA-256 of the entry's name and one-line description as the model saw them. Since PHASE-047 it also has `relations_sha256` (the SHA-256 of the relations that name this character, as the model saw them; a version without it reads as having none) and, when the project had relations, `{"kind": "character_relations", "id", "version"}` in `artifacts`. NULL for a version made by hand. It is what "out of date" is worked out from, and it also says which project and which character of its list the definition was written for |
 
 ```sql
 CREATE TABLE library_character_version (
@@ -1304,9 +1319,64 @@ CREATE TABLE project_character_link (
 CREATE INDEX idx_project_character_link_character ON project_character_link (character_id);
 ```
 
-`UNIQUE (project_id, discovery_id)`: a discovered character is linked once. `UNIQUE (project_id, character_id)`: a project uses a library character for one discovered character only, so "Young Arjun" and "Arjun" stay two characters (D-14: relations are not stored). The two unique keys are named explicitly because both would otherwise get the name `uq_project_character_link_project_id`.
+`UNIQUE (project_id, discovery_id)`: a discovered character is linked once. `UNIQUE (project_id, character_id)`: a project uses a library character for one discovered character only, so "Young Arjun" and "Arjun" stay two characters (D-14: a relation between them is kept on the project, Section 4.29, never on the library character). The two unique keys are named explicitly because both would otherwise get the name `uq_project_character_link_project_id`.
 
 **"A newer version is available"** is worked out on every read (`character_links.LinkInfo.newer_version_available`): the character's newest `library_character_version.version` is higher than `pinned_version`. It is information only and is never stored (Section 2.1). "Used by projects" in the lab is the same table read from the other side (`GET /api/lab/characters/{id}/projects`, `character_links.used_by`).
+
+---
+
+### 4.29 `character_relations`
+
+*Added in PHASE-047 (migration `0030`).* The project's relations between its discovered characters: one row per **version of the whole list of relations**, written by the `discover_relations` job (`ai`) or saved by the user from the Character relations panel (`manual`). It follows Section 2.1 exactly as `character_discovery` does (Section 4.19): a stored row is never changed, a new run or edit adds the next version, and "out of date" is never stored. A relation is kept on the project and keyed by the discovery slug ids, **never on a library character** (D-14, amended), so reusing a library character in another project brings no relation along.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 and so on, per project (`UNIQUE (project_id, version)`) |
+| `source` | TEXT | NOT NULL | — | `ai` \| `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `discover_relations` job. NULL for a manual version. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | `{"story_sha256": "<hex>", "artifacts": [{"kind": "story_bible", "id", "version"}, {"kind": "character_discovery", "id", "version"}]}`: the story and the versions the list was made from (a manual version records the newest at the time of the edit) |
+| `content` | JSON | NOT NULL | — | `{"relations": [ {"character", "kind", "of"}, ... ]}` (see below) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+`content`, checked by `services/character_relation_writer.check_relations` before it is stored (for the model's answer and for the user's edit alike):
+
+```json
+{
+  "relations": [
+    { "character": "young_arjun", "kind": "younger_self", "of": "arjun" },
+    { "character": "mother", "kind": "parent", "of": "arjun" }
+  ]
+}
+```
+
+`{"character": A, "kind": K, "of": B}` reads "A is the K of B", and **B is the base**. Kinds: `younger_self`, `older_self` and `twin` (the same face: the picture is an edit of B's front picture), `parent`, `sibling` and `grandparent` (family: only B's traits are added to the prompt as words). `child` and `grandchild` are accepted and stored swapped (`parent`, `grandparent`).
+
+| Rule | |
+|---|---|
+| ids | `character` and `of` are ids of the newest list of characters (slugs, trimmed and lower-cased first) |
+| self | nobody is related to themselves |
+| pair | one relation per pair of characters; the same fact written both ways (a twin or sibling, or a child and a parent) is kept once |
+| same-face base | a character is the same-face variant of at most one other, and a base is never itself a variant, so there are no chains or loops |
+| size | at most 60 relations |
+
+```sql
+CREATE TABLE character_relations (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    source      TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id      INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs      JSON NOT NULL,
+    content     JSON NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, version)
+);
+CREATE INDEX idx_character_relations_project ON character_relations (project_id);
+```
+
+**Out of date** is never stored. `GET /api/projects/{id}/character-relations` says the newest version is out of date when the story, the Story Bible or the list of characters is newer than `inputs` says, and lists the relations that name a character no longer in the list as `dropped` (they stand for nothing). A definition (Section 4.27) is out of date when the hash of the relations that name its character (`inputs.relations_sha256`) changed; a ready look (Section 4.23) when its relation or its base's front picture changed, or when a relative's traits did.
 
 ---
 
@@ -1633,6 +1703,8 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Make and change a library character (Character lab; versions: PHASE-007) | `POST /api/lab/characters`: `INSERT library_character` and, in the same transaction, `INSERT library_character_version` (version 1). Every later change calls `character_versions.record_version_if_changed` **before its own commit**: it builds a snapshot of the character (the twelve profile fields, `voice_id`, `voice_description`, and the current look with the `lab_image_id` and `cutout_path` of each angle), compares it with the newest version, and does `INSERT library_character_version` (the next number, `source='manual'`) only if something differs. The changes that call it: `PATCH /api/lab/characters/{id}` with profile fields (`UPDATE library_character`), `PUT .../voice` and `PUT .../voice/description` (`UPDATE library_character.voice_id` or `voice_description`), a look turning `ready` (`character_looks._maybe_mark_ready`: `UPDATE character_look.status`, `UPDATE library_character.current_look_id`), and `PUT .../current-look` (`UPDATE library_character.current_look_id` to an earlier `ready` look). **Archiving** (`PATCH` with `archived`) writes no version. **Redo an angle**: `UPDATE character_reference` in place (the old picture stays until the new one is stored), and never a version row; when the look is `ready` again, a new version records the new pictures, and every older version still names the pictures it had. **Take**: `POST .../takes` does `INSERT character_take` with `look_id` = the current look and `character_version` = the newest version number (NULL if none). A version is read, never edited: `GET .../versions` lists them newest first, and what each changed is computed on read. |
 | Link the story's characters to the Character Lab (PHASE-008) | Every action is a database write that is done before the answer (no job, no model call) and commits once. All of them read the newest `character_discovery` row and refuse (422) when there is none or the id is not in it. **Create** (`POST /api/projects/{id}/character-links/{discovery_id}/create`) and **Link all** (`POST .../link-all`, every unlinked entry, in one transaction): `INSERT library_character` (`name` from the discovery, `notes` from its description, empty `species` and `appearance`, `origin_project_id`, `origin_discovery_id`), `INSERT library_character_version` (version 1, `source='ai'`) and `INSERT project_character_link` (`how='created'`, `pinned_version=1`, `discovery_version`). **Map** (`PUT .../{discovery_id}` with `character_id`): refused for a missing or archived character, or one the project already uses for another entry. If the character has no version, `INSERT library_character_version` (version 1) first. Then `INSERT project_character_link` (`how='mapped'`, `pinned_version` = the character's newest version) or, when the entry was already linked to another character, `UPDATE` that row (`character_id`, `pinned_version`, `how`, `updated_at`). Mapping to the character the entry already has changes nothing. **Unlink** (`DELETE .../{discovery_id}`): `DELETE project_character_link`; the library character stays. A unique key broken by a concurrent request rolls the change back with a readable message. **A lab edit never writes to `project_character_link`**: the pin stays, and `GET .../character-links` and `GET /api/lab/characters/{id}/projects` work out "a newer version is available" on every read. **Re-running discovery** writes nothing here: links are found by the slug id, so a kept id keeps its link. |
 | Define the characters (PHASE-009) | `POST /api/projects/{id}/character-definitions/{discovery_id}/run` (one character) or `POST .../run` (Define all): refused with 422 when there is no saved story, no `story_bible` row, a `story_bible` that is out of date with the story, no list of characters, an entry that is not linked to a library character, or a linked character that is archived. A character the user **chose from the library** (`project_character_link.how='mapped'`) is also refused unless the body has `confirm_overwrite: true`, and Define all skips it (it is listed in `skipped` with the reason). Otherwise `INSERT job` (`type='define_character'`, `provider='llm'`, `project_id` set, `dedupe_key='discovery_id'`, `input` = a copy of the story, the StoryBible and list versions, the character's `entry`, the `others` and the `inputs` to record). Nothing is written to `library_character` yet. **Start**: `UPDATE job.input` with the exact request, then the paid call (`jobs/llm_call.ask_model`, at most two attempts, `output` updated after every attempt). On an answer that checks: one transaction does `UPDATE library_character` (the profile fields the definition fills, and `definition`), `INSERT library_character_version` (`source='ai'`, `definition`, `job_id`, `inputs`), `UPDATE project_character_link.pinned_version` to the new number, and finishes the job. The link is read again inside that transaction, so a link removed or moved meanwhile fails the job and writes nothing. `GET .../character-definitions` writes nothing: it reads the newest list with each link, the pinned version, and the newest job of each character, and works out each status (`unlinked`, `not_defined`, `defined`, `out_of_date`) and the reasons on every read |
+| Make the characters' canonical images (PHASE-010) | `POST /api/projects/{id}/character-images/{discovery_id}/run` (one character) or `POST .../run` (Make images for all): refused with 422 when there is no list of characters, an entry that is not linked, a linked character that is archived, an entry with no definition or one that is out of date, or a definition being written. A character the user **chose from the library** (`how='mapped'`) is also refused unless the body has `confirm_overwrite: true`, and Make images for all skips it, as it skips a character whose images are `ready` or already being made. A press for a character whose look is being made returns that look and starts nothing. Otherwise one transaction does `INSERT character_look` (`status='writing_prompt'`, `project_id`, `discovery_id`, `inputs`) and `INSERT job` (`type='write_character_look_prompt'`, `requested='master'`, `project_id` NULL as in the lab, `dedupe=False`), then `UPDATE character_look.prompt_job_id`. The prompt is written from the character's card, which the definition filled. **When the prompt job finishes** (`on_look_prompt_written`): `UPDATE character_look` (`prompt`, `status='choosing'`) and one candidate, `INSERT lab_run` + `INSERT job` (`lab_image`) + `INSERT character_look_candidate` (a lab look makes four). **When the candidate's picture is stored** (`on_candidate_image_stored`, called by the `lab_image` job): the look's status is claimed (`choosing` → `making_angles` in one conditional `UPDATE`), `INSERT character_reference` (`front`) and four angle edit runs (`lab_run` + `lab_image` job + `character_reference`), exactly as a manual choice does. **When the fifth angle's picture is stored** (`_maybe_mark_ready`): `UPDATE character_look.status='ready'`, `UPDATE library_character.current_look_id`, `INSERT library_character_version` (`source='ai'`, `job_id` = the prompt job, `inputs` = the pinned version's `inputs`), `UPDATE project_character_link.pinned_version`, in one transaction. If the link was removed or moved to another character meanwhile, the look is only a lab look: a `manual` version and no pin move. A failed prompt job marks the look `failed` (`error`); a failed candidate or angle job writes nothing here: `GET .../character-images` finds it through the run's job and reports `failed`. **Retry** is a fresh look; **Redo angle** is the lab's own `POST /api/lab/characters/looks/{look_id}/angles/{angle}`. `GET .../character-images` writes nothing: it reads the newest look the pipeline made for each linked character, its candidate and angle jobs, and works out each status (`unavailable`, `none`, `in_progress`, `failed`, `ready`, `out_of_date`), the stage and the reasons on every read |
+| Find and edit the characters' relations (PHASE-047) | `POST /api/projects/{id}/character-relations/run` queues one `discover_relations` job (a second click returns it; refused with 422 when there is no saved story, up-to-date Story Bible or list of characters, and, when the newest version is a manual one, unless the body says `confirm_replace_manual: true`). The job asks the story model once, checks the answer (`check_relations`) and, in the same transaction that marks the job succeeded, adds the next `character_relations` version (`ai`). `PUT .../character-relations` checks the user's whole list the same way and adds a `manual` version. `GET` writes nothing: it reads the newest version and works out `dropped`, `reasons`, `can_run` and `needs_confirmation` on every read. The definition stage then passes each other character's `relation_to_this` to the model. **Make images for all** starts bases first; a same-face variant whose base is being made gets a `waiting` `character_look` and no job. When the base's look turns `ready` and its pin has moved, `character_images.release_waiting` (called from the `lab_image` job's hook) claims the waiting look with one conditional update (`waiting` → `writing_prompt`), sets `reference_image_id` to the base's front picture and queues the prompt job. A variant whose base has no picture and none in progress is refused with 422 |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 

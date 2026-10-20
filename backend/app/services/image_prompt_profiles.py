@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from app.services.text_rules import TextRule
@@ -386,7 +386,111 @@ QWEN_IMAGE_21_CHARACTER_SHEET_FROM_PICTURE: Final = ImagePromptProfile(
 )
 
 
+# A library character's master picture made from the picture of the SAME PERSON at another age,
+# or of an identical twin (PHASE-047): image 1 is the base character's picture, and the card
+# is the character to make. `inputs` hold one more line, `relation_line`, that says how the two
+# are related (written by code from the two definitions, never by a model).
+_CHARACTER_SHEET_SAME_PERSON_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "card": (
+        "Name: Mira.\n"
+        "Age: 9 years old.\n"
+        "Gender: female.\n"
+        "Species: human.\n"
+        "Time: set in the present day.\n"
+        "Appearance: A small, wiry girl with a gap-toothed grin.\n"
+        "Outfit: A yellow hooded raincoat over a striped navy-and-white jumper, rolled-up blue "
+        "jeans and red rubber boots.\n"
+        "Personality: Curious and fearless, always first to splash into a puddle.\n"
+        "Has a visible mouth."
+    ),
+    "relation_line": (
+        "Image 1 shows this same person at 41 years old. The picture to make shows them at 9 "
+        "years old."
+    ),
+}
+
+_CHARACTER_SHEET_SAME_PERSON_EXAMPLE_PROMPT: Final = (
+    "A natural studio photograph of the same person as in image 1 at nine years old, a small, "
+    "wiry girl standing alone and facing the viewer. She keeps the face shape, the shape and "
+    "colour of the eyes, the nose, the mouth and the skin tone of image 1, with the smooth, "
+    "round cheeks, the small frame and the thin dark hair of a child, and her expression is a "
+    "bright, gap-toothed grin. She wears a yellow hooded raincoat, open at the front over a "
+    "striped navy-and-white jumper, rolled-up blue jeans and shiny red rubber boots. She "
+    "stands in a relaxed, neutral pose with her arms slightly away from her body, so the "
+    "raincoat, the jumper and her hands can be seen, and her whole figure from boots to hair "
+    "fills the tall frame, centred, with a little space around her. She is set against a "
+    "plain, seamless white studio backdrop and lit by soft, even light from the front, so the "
+    "white behind her stays clean and bright. The finish keeps the natural photographic look "
+    "of image 1."
+)
+
+_SAME_PERSON_RULES: Final = "\n".join(
+    [
+        'Rules for "image_prompt", the prompt for the image model. The model is shown a '
+        "picture of the SAME PERSON as the character on the card (image 1), or of the "
+        "character's identical twin, and makes from it the reference of the character on the "
+        "card: a single figure on a plain white backdrop, which is cut out afterwards. The "
+        "line 'Relation to image 1' says which of the two it is.",
+        "1. One paragraph of plain English prose, in complete sentences and the present "
+        "tense, 80 to 220 words. No lists, no headings, no labels and no piles of "
+        "comma-separated keywords.",
+        "2. Open with the kind of picture it is, taken from the style (rule 8), and go "
+        "straight to the character: 'the same person as in image 1 at nine years old' for a "
+        "younger or older self, or 'the identical twin of the character in image 1' for a "
+        "twin, standing alone and facing the viewer.",
+        "3. The face stays. Say once, in one sentence, that the character keeps the face "
+        "shape, the shape and colour of the eyes, the nose, the mouth and the skin tone of "
+        "image 1. Never describe those features in other words: words about them can change "
+        "them.",
+        "4. For a younger or older self, then say what the age changes, and only that: the "
+        "skin (smooth or lined), the cheeks, the hair (its fullness and colour, from the "
+        "card), the build and the height (from the card), and the bearing. Give the age in "
+        "years once. For a twin the age does not change: say what the card gives for the "
+        "hair and the bearing, and keep it to that.",
+        "5. The clothes: dress the character in the outfit on the card, head to foot, with "
+        "its colours and materials. The clothes of image 1 are never used. With no outfit on "
+        "the card, choose clothes that fit the character's age and time.",
+        "6. Then the pose and the framing: a relaxed, neutral standing pose with the arms "
+        "slightly away from the body so the clothes and the hands can be seen, the whole "
+        "figure from head to feet in the frame, centred, with a little space around it.",
+        "7. Then the backdrop and the light, in these words or close to them: the character "
+        "is set against a plain, seamless white studio backdrop and lit by soft, even light "
+        "from the front. The backdrop takes the place of whatever is around the character in "
+        "image 1: never describe those surroundings, and say nothing about scenery, "
+        "furniture, a floor or any other object.",
+        "8. Put the style into words as the last sentence: the style the appearance or the "
+        "notes describe (a cartoon, a puppet, a painting) when they describe one, otherwise "
+        "the look of image 1 itself (a photograph stays a photograph, a drawing stays a "
+        "drawing).",
+        "9. Nothing is written in the picture: no text, captions, letters, numbers, signs "
+        "with words, labels, logos, watermarks, borders or split panels. The model draws any "
+        "wording it is given, so do not name any of these, not even to say there are none.",
+        "10. Describe only what is visible. The model has no negative prompt, and naming a "
+        "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
+        "the space instead.",
+        "11. Never write the character's name, and never name a real person or a famous "
+        "figure: refer to the character by its image number.",
+        "12. Concrete nouns and plain adjectives. No quality tags (such as 8k, masterpiece "
+        "or highly detailed) and no camera brand names.",
+    ]
+)
+
+QWEN_IMAGE_21_CHARACTER_SHEET_SAME_PERSON: Final = replace(
+    QWEN_IMAGE_21_CHARACTER_SHEET_FROM_PICTURE,
+    id="qwen-image-2.1-character-sheet-same-person",
+    version=1,
+    image_model="Qwen-Image-2.1 (edit, with the same person's picture)",
+    prompt_rules=_SAME_PERSON_RULES,
+    example_inputs=_CHARACTER_SHEET_SAME_PERSON_EXAMPLE_INPUTS,
+    example_answer=json.dumps(
+        {"image_prompt": _CHARACTER_SHEET_SAME_PERSON_EXAMPLE_PROMPT}, ensure_ascii=False
+    ),
+)
+
+
 # The reference pictures of the cast: a character on a white backdrop, a place as it is.
 ACTIVE_CHARACTER_SHEET_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET
 # A library character's master picture made from the author's own picture of it.
 ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET_FROM_PICTURE
+# A library character's master picture made from a picture of the same person (PHASE-047).
+ACTIVE_CHARACTER_SHEET_SAME_PERSON_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET_SAME_PERSON

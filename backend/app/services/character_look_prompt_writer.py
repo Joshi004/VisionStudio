@@ -41,18 +41,48 @@ def _one_line(value: str) -> str:
 # --- The master look picture's prompt (reuses image_prompt_writer's reader and checks) -----
 
 
-def prompt_inputs(card: str) -> dict[str, Any]:
+def prompt_inputs(
+    card: str, *, relation_line: str | None = None, resemblance: str | None = None
+) -> dict[str, Any]:
     """What the model is told: the character card, as one plain dict (the user message is
-    rendered from it alone).
+    rendered from it alone). The story pipeline adds what the project's relations say
+    (PHASE-047): `relation_line`, how image 1 is related to the character (written by code),
+    and `resemblance`, the family likeness to put into words.
     """
-    return {"card": card}
+    inputs: dict[str, Any] = {"card": card}
+    if relation_line:
+        inputs["relation_line"] = relation_line
+    if resemblance:
+        inputs["resemblance"] = resemblance
+    return inputs
 
 
 def _render_master_inputs(inputs: dict[str, Any]) -> str:
-    return f"Character card:\n{inputs['card']}"
+    lines = [f"Character card:\n{inputs['card']}"]
+    if inputs.get("relation_line"):
+        lines.append(f"Relation to image 1: {inputs['relation_line']}")
+    if inputs.get("resemblance"):
+        lines.append(f"Family likeness: {inputs['resemblance']}")
+    return "\n".join(lines)
 
 
-def _master_system_prompt(profile: ImagePromptProfile) -> str:
+# Said to the model when the user message may carry a "Family likeness" line.
+_FAMILY_LIKENESS_RULE: Final = (
+    "When the input has a 'Family likeness' line, the character is related to the people it "
+    "names: give the character the skin tone, the eye colour and the face shape described "
+    "there, in your own words and in keeping with the character's age, so the family looks "
+    "alike. Do not copy a relative's hair, age or clothes, and never name the relative."
+)
+
+
+def _family_likeness_lines(family_likeness: bool) -> list[str]:
+    """The instruction about a 'Family likeness' line, only when the input has one, so a look
+    without it is written from exactly the instructions it always had.
+    """
+    return [f"- {_FAMILY_LIKENESS_RULE}"] if family_likeness else []
+
+
+def _master_system_prompt(profile: ImagePromptProfile, family_likeness: bool) -> str:
     return "\n".join(
         [
             "You write one prompt for a text-to-image model. The picture it makes is the "
@@ -69,6 +99,7 @@ def _master_system_prompt(profile: ImagePromptProfile) -> str:
             "as 'none given' (a natural, realistic look), unless the appearance itself "
             "describes a stylised look (a cartoon, a puppet, a painting).",
             "- Never write the character's name in the prompt.",
+            *_family_likeness_lines(family_likeness),
             "",
             profile.prompt_rules,
             "",
@@ -113,7 +144,7 @@ _EXAMPLE_MASTER_ANSWER: Final = (
 )
 
 
-def _master_from_picture_system_prompt(profile: ImagePromptProfile) -> str:
+def _master_from_picture_system_prompt(profile: ImagePromptProfile, family_likeness: bool) -> str:
     return "\n".join(
         [
             "You write one prompt for an image-editing model. It is shown the author's own "
@@ -128,6 +159,41 @@ def _master_from_picture_system_prompt(profile: ImagePromptProfile) -> str:
             "appearance, outfit, personality and any other notes. The picture decides who the "
             "character is; the card adds the outfit and, when it describes one, the style. The "
             "personality and the notes only guide the bearing and the expression.",
+            "- Never write the character's name in the prompt.",
+            *_family_likeness_lines(family_likeness),
+            "",
+            profile.prompt_rules,
+            "",
+            "Example (an unrelated character; do not reuse its content):",
+            "Input:",
+            _render_master_inputs(profile.example_inputs),
+            "Answer:",
+            profile.example_answer,
+            "",
+            "Answer with one JSON object only, in exactly this form:",
+            '{"image_prompt": "..."}',
+        ]
+    )
+
+
+def _master_same_person_system_prompt(profile: ImagePromptProfile) -> str:
+    return "\n".join(
+        [
+            "You write one prompt for an image-editing model. It is shown a picture of the "
+            "same person as the character on the card (image 1), at another age, or of the "
+            "character's identical twin, and makes from it the reference picture of the "
+            "character on the card for a library of characters: every picture, scene and "
+            "clip of the character later is made to match it, so it must show clearly how "
+            "the character looks.",
+            "",
+            f"- The image model ({profile.image_model}) sees image 1 and the prompt you write, "
+            "nothing else.",
+            "- You are given a card describing the character on the card (its age, gender, "
+            "species, time, appearance, outfit, personality and any other notes) and a line "
+            "that says how image 1 is related to it. The face comes from image 1 and does not "
+            "change; the card says what the age changes (hair, build, bearing), the outfit "
+            "and, when it describes one, the style. The personality and the notes only guide "
+            "the bearing and the expression.",
             "- Never write the character's name in the prompt.",
             "",
             profile.prompt_rules,
@@ -151,13 +217,19 @@ def build_master_request(
     call is hidden from the job record: this body is stored on the job (`job.input.request`).
 
     A profile that `uses_references` is the one for a look started from the author's own
-    picture: the image model is then shown that picture as image 1.
+    picture: the image model is then shown that picture as image 1. With a `relation_line` in
+    the inputs, image 1 is a picture of the same person (or a twin) and the instructions say so
+    (PHASE-047).
     """
-    if profile.uses_references:
-        system_prompt = _master_from_picture_system_prompt(profile)
+    family_likeness = bool(inputs.get("resemblance"))
+    if profile.uses_references and inputs.get("relation_line"):
+        system_prompt = _master_same_person_system_prompt(profile)
+        task = "Write the image prompt for this character's reference picture, made from image 1."
+    elif profile.uses_references:
+        system_prompt = _master_from_picture_system_prompt(profile, family_likeness)
         task = "Write the image prompt for this character's reference picture, made from image 1."
     else:
-        system_prompt = _master_system_prompt(profile)
+        system_prompt = _master_system_prompt(profile, family_likeness)
         task = "Write the image prompt for this character's reference picture."
     return {
         "model": model,

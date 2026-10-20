@@ -36,6 +36,13 @@ export const STORY_STAGES: readonly StoryStage[] = [
     available: true,
   },
   {
+    id: "character-relations",
+    name: "Character relations",
+    description:
+      "Finds who is the same person at another age, who is a twin, and who is family, so they look alike.",
+    available: true,
+  },
+  {
     id: "character-definitions",
     name: "Character definitions",
     description: "Describes each character in detail and gives them a look and a voice.",

@@ -134,6 +134,10 @@ SAVING_SCENES: Final = "saving the scenes"
 # `define_character` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_DEFINITION: Final = "saving the definition"
 
+# --- Running: character relations (PHASE-047) --------------------------------------------
+# `discover_relations` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_RELATIONS: Final = "saving the relations"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

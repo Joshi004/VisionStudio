@@ -308,6 +308,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/character-relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Character Relations */
+        get: operations["get_character_relations_api_projects__project_id__character_relations_get"];
+        /**
+         * Save Character Relations
+         * @description Saves the whole edited list as the next version, written by the user.
+         */
+        put: operations["save_character_relations_api_projects__project_id__character_relations_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-relations/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Character Relations
+         * @description Starts the job that finds the relations. If one is already waiting or running for the
+         *     project, its id is returned and no second job is made.
+         */
+        post: operations["run_character_relations_api_projects__project_id__character_relations_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/character-definitions": {
         parameters: {
             query?: never;
@@ -361,6 +403,65 @@ export interface paths {
          *     that job's id is returned and no second job is made.
          */
         post: operations["run_one_api_projects__project_id__character_definitions__discovery_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Character Images */
+        get: operations["get_character_images_api_projects__project_id__character_images_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-images/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a look for every defined character the pipeline made that has no images yet or
+         *     whose images are out of date. Every other character is skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__character_images_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-images/{discovery_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the look of one character. If it already has a look being made, that look's id
+         *     is returned and no second look is made.
+         */
+        post: operations["run_one_api_projects__project_id__character_images__discovery_id__run_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1460,6 +1561,13 @@ export interface components {
             /** Blocked Reason */
             blocked_reason: string | null;
         };
+        /** CharacterImagesOut */
+        CharacterImagesOut: {
+            /** Discovery Version */
+            discovery_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["ImageEntryOut"][];
+        };
         /**
          * CharacterIn
          * @description The profile step of the drawer. Every field is sent, even when it has not changed.
@@ -1622,6 +1730,27 @@ export interface components {
             ready: boolean;
             /** Lab Image Id */
             lab_image_id?: number | null;
+        };
+        /** CharacterRelationsOut */
+        CharacterRelationsOut: {
+            /** Discovery Version */
+            discovery_version: number | null;
+            /** Characters */
+            characters: components["schemas"]["RelationCharacterOut"][];
+            latest: components["schemas"]["RelationsVersionOut"] | null;
+            /** Relations */
+            relations: components["schemas"]["RelationOut"][];
+            /** Dropped */
+            dropped: components["schemas"]["RelationOut"][];
+            /** Reasons */
+            reasons: string[];
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
         };
         /**
          * CharacterUsageOut
@@ -2000,6 +2129,16 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** FailedAngleOut */
+        FailedAngleOut: {
+            /**
+             * Angle
+             * @enum {string}
+             */
+            angle: "front" | "three_quarter" | "profile" | "back" | "face";
+            /** Error */
+            error: string | null;
+        };
         /** FirstFrameIn */
         FirstFrameIn: {
             /**
@@ -2073,6 +2212,81 @@ export interface components {
             ffmpeg: components["schemas"]["ToolStatus"];
             ffprobe: components["schemas"]["ToolStatus"];
         };
+        /**
+         * ImageEntryOut
+         * @description One entry of the newest list of characters.
+         */
+        ImageEntryOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Character Id */
+            character_id: number | null;
+            /** Character Name */
+            character_name: string | null;
+            /** Pinned Version */
+            pinned_version: number | null;
+            /**
+             * Definition Status
+             * @enum {string}
+             */
+            definition_status: "unlinked" | "not_defined" | "defined" | "out_of_date";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unavailable" | "none" | "in_progress" | "failed" | "ready" | "out_of_date";
+            /** Stage */
+            stage: ("waiting_for_base" | "writing_prompt" | "making_master" | "making_angles") | null;
+            /** Angles Ready */
+            angles_ready: number;
+            /** Failed Angles */
+            failed_angles: components["schemas"]["FailedAngleOut"][];
+            /** Error */
+            error: string | null;
+            /** Reasons */
+            reasons: string[];
+            look: components["schemas"]["LookOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            made_from: components["schemas"]["MadeFromOut"] | null;
+        };
+        /** ImageRunAllOut */
+        ImageRunAllOut: {
+            /** Look Ids */
+            look_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["ImageSkippedOut"][];
+        };
+        /** ImageRunIn */
+        ImageRunIn: {
+            /**
+             * Confirm Overwrite
+             * @default false
+             */
+            confirm_overwrite: boolean;
+        };
+        /** ImageRunOut */
+        ImageRunOut: {
+            /** Look Id */
+            look_id: number;
+        };
+        /** ImageSkippedOut */
+        ImageSkippedOut: {
+            /** Discovery Id */
+            discovery_id: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
         /** JobCapacity */
         JobCapacity: {
             /** Pools */
@@ -2090,7 +2304,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations";
             /**
              * Status
              * @enum {string}
@@ -2143,7 +2357,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations";
             /**
              * Status
              * @enum {string}
@@ -2554,7 +2768,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "writing_prompt" | "choosing" | "making_angles" | "ready" | "failed";
+            status: "waiting" | "writing_prompt" | "choosing" | "making_angles" | "ready" | "failed";
             /** Prompt */
             prompt: string | null;
             /** Error */
@@ -2566,6 +2780,21 @@ export interface components {
             candidates: components["schemas"]["LookCandidateOut"][];
             /** References */
             references: components["schemas"]["CharacterReferenceOut"][];
+        };
+        /**
+         * MadeFromOut
+         * @description The character a same-face variant is drawn from (PHASE-047).
+         */
+        MadeFromOut: {
+            /** Discovery Id */
+            discovery_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "younger_self" | "older_self" | "twin";
         };
         /** MapIn */
         MapIn: {
@@ -2677,7 +2906,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations";
             /** Running */
             running: number;
             /** Queued */
@@ -2829,6 +3058,77 @@ export interface components {
             seed?: number | null;
             /** Steps */
             steps?: number | null;
+        };
+        /** RelationCharacterOut */
+        RelationCharacterOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /** RelationIn */
+        RelationIn: {
+            /** Character */
+            character: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "younger_self" | "older_self" | "twin" | "parent" | "sibling" | "grandparent" | "child" | "grandchild";
+            /** Of */
+            of: string;
+        };
+        /**
+         * RelationOut
+         * @description `character` is the `kind` of `of`: "young_arjun" is the "younger_self" of "arjun".
+         */
+        RelationOut: {
+            /** Character */
+            character: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "younger_self" | "older_self" | "twin" | "parent" | "sibling" | "grandparent";
+            /** Of */
+            of: string;
+        };
+        /** RelationRunIn */
+        RelationRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /** RelationRunOut */
+        RelationRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** RelationsSaveIn */
+        RelationsSaveIn: {
+            /** Relations */
+            relations: components["schemas"]["RelationIn"][];
+        };
+        /** RelationsVersionOut */
+        RelationsVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * RerunIn
@@ -4268,6 +4568,134 @@ export interface operations {
             };
         };
     };
+    get_character_relations_api_projects__project_id__character_relations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterRelationsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_character_relations_api_projects__project_id__character_relations_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelationsSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterRelationsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or list of characters, or the relations are not valid, or the newest ones need confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_character_relations_api_projects__project_id__character_relations_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RelationRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelationRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or list of characters, or the relations are not valid, or the newest ones need confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_character_definitions_api_projects__project_id__character_definitions_get: {
         parameters: {
             query?: never;
@@ -4383,6 +4811,131 @@ export interface operations {
                 };
             };
             /** @description There is no saved story, up-to-date Story Bible or list of characters, or the character is not linked, is archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_character_images_api_projects__project_id__character_images_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterImagesOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__character_images_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no list of characters, or the character is not linked, not defined, out of date, archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__character_images__discovery_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ImageRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no list of characters, or the character is not linked, not defined, out of date, archived, or needs confirming. */
             422: {
                 headers: {
                     [name: string]: unknown;

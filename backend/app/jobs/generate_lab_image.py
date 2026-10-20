@@ -15,9 +15,10 @@ it as a lab image, marks the `lab_run` row `succeeded` and finishes the job. A j
 is cancelled leaves its run `running`: the page reads the job's status as well.
 
 A picture made for the Character lab (Phase 25) best-effort nudges what it belongs to along
-once it is stored: a look's angle reference (`character_looks.on_angle_image_stored`) or a
-take's own picture (`character_takes.on_image_stored`). A plain Image lab run is neither and
-both are no-ops for it.
+once it is stored: a look's angle reference (`character_looks.on_angle_image_stored`), the
+candidate of a look the story pipeline made (`character_looks.on_candidate_image_stored`, which
+chooses the master by itself) or a take's own picture (`character_takes.on_image_stored`). A
+plain Image lab run is none of these and all are no-ops for it.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from app.jobs import dispatcher, phases, store
 from app.jobs.gpu_job import GPU_URL_KEY
 from app.jobs.remote_image import RemoteImageHandler
 from app.providers import image_generator
-from app.services import character_looks, character_takes, frame_images, image_lab
+from app.services import character_images, character_looks, character_takes, frame_images, image_lab
 from app.services.frame_images import FrameRejected
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -219,9 +220,13 @@ class GenerateLabImageHandler(RemoteImageHandler):
         """
         try:
             await character_looks.on_angle_image_stored(run_id)
+            # A look the story pipeline made takes its one candidate as the master by itself.
+            angles_started = await character_looks.on_candidate_image_stored(run_id)
             started = await character_takes.on_image_stored(run_id)
+            # A look that finished may be the picture another character's look waits for.
+            released = await character_images.on_angle_image_stored(run_id)
         except Exception:
             _logger.exception("job %d: the character lab could not continue", job_id)
             return
-        if started:
+        if started or angles_started or released:
             dispatcher.nudge()

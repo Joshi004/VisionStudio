@@ -99,7 +99,7 @@ EraKind = Literal["present", "past", "future"]
 Framing = Literal["close_up", "medium", "wide"]
 Orientation = Literal["portrait", "landscape"]
 Angle = Literal["front", "three_quarter", "profile", "back", "face"]
-LookStatus = Literal["writing_prompt", "choosing", "making_angles", "ready", "failed"]
+LookStatus = Literal["waiting", "writing_prompt", "choosing", "making_angles", "ready", "failed"]
 Output = Literal["image", "audio", "video"]
 RunStep = Literal["all", "image", "last_frame", "voice", "video"]
 Step = Literal["prompts", "image", "last_frame", "voice", "video"]
@@ -260,7 +260,7 @@ class OptionsOut(BaseModel):
 _ANGLE_ORDER: Final[tuple[Angle, ...]] = character_library.ANGLES
 
 
-async def _look_out(session: AsyncSession, look: CharacterLook) -> LookOut:
+async def look_out(session: AsyncSession, look: CharacterLook) -> LookOut:
     prompt_job = await session.get(Job, look.prompt_job_id) if look.prompt_job_id else None
     candidates = await character_looks.candidates_for(session, look.id)
     references = await character_looks.references_for_look(session, look.id)
@@ -359,7 +359,7 @@ async def _character_out(session: AsyncSession, character: LibraryCharacter) -> 
         has_visible_mouth=character.has_visible_mouth,
         voice=VoiceBriefOut(id=voice.id, name=voice.name) if voice is not None else None,
         voice_description=character.voice_description,
-        current_look=await _look_out(session, current_look) if current_look is not None else None,
+        current_look=await look_out(session, current_look) if current_look is not None else None,
         archived=character.archived,
         version=newest_version.version if newest_version is not None else None,
         origin=(
@@ -697,7 +697,7 @@ async def start_look(character_id: CharacterId, session: SessionDep) -> LookOut:
     except CharacterLookError as exc:
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
-    return await _look_out(session, look)
+    return await look_out(session, look)
 
 
 class LookFromPictureIn(BaseModel):
@@ -725,14 +725,14 @@ async def start_look_from_picture(
     except CharacterLookError as exc:
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
-    return await _look_out(session, look)
+    return await look_out(session, look)
 
 
 @router.get("/lab/characters/{character_id}/looks", response_model=list[LookOut])
 async def list_looks(character_id: CharacterId, session: SessionDep) -> list[LookOut]:
     """Every look of this character, newest version first."""
     looks = await character_looks.list_looks(session, character_id)
-    return [await _look_out(session, look) for look in looks]
+    return [await look_out(session, look) for look in looks]
 
 
 @router.get("/lab/characters/looks/{look_id}", response_model=LookOut, responses=_NOT_FOUND)
@@ -740,7 +740,7 @@ async def get_look(look_id: LookId, session: SessionDep) -> LookOut:
     look = await character_looks.get_look(session, look_id)
     if look is None:
         raise _missing(f"There is no look {look_id}.")
-    return await _look_out(session, look)
+    return await look_out(session, look)
 
 
 class ChooseMasterIn(BaseModel):
@@ -762,7 +762,7 @@ async def choose_master(look_id: LookId, body: ChooseMasterIn, session: SessionD
     except CharacterLookError as exc:
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
-    return await _look_out(session, look)
+    return await look_out(session, look)
 
 
 @router.post(
@@ -783,7 +783,7 @@ async def redo_angle(look_id: LookId, angle: Angle, session: SessionDep) -> Look
     look = await character_looks.get_look(session, look_id)
     if look is None:
         raise _missing(f"There is no look {look_id}.")
-    return await _look_out(session, look)
+    return await look_out(session, look)
 
 
 class CurrentLookIn(BaseModel):
