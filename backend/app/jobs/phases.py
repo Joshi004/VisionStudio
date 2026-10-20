@@ -120,6 +120,12 @@ SAVING_LOOK_REFERENCE: Final = "saving the reference picture"
 # `write_story_bible` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_STORY_BIBLE: Final = "saving the Story Bible"
 
+# --- Running: character and environment discovery (PHASE-005) ----------------------------
+# `discover_characters` and `discover_environments` also use PREPARING_PROMPT and
+# `asking_model` from above.
+SAVING_CHARACTERS: Final = "saving the characters"
+SAVING_ENVIRONMENTS: Final = "saving the environments"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

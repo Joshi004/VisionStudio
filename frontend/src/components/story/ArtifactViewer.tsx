@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Badge, Button, Code, Group, Paper, Stack, Table, Text, Title } from "@mantine/core";
 
 import { formatDateTime } from "../../format";
@@ -15,8 +15,10 @@ type ArtifactViewerProps = {
   /** The job that produced it, or null for a manual edit. */
   jobId: number | null;
   createdAt?: string;
-  /** The artifact itself, as the API returned it. */
-  data: unknown;
+  /** The artifact itself, as the API returned it. Shown as a table or as JSON. */
+  data?: unknown;
+  /** Shown instead of `data` when a stage has a better way to show its result (a list). */
+  children?: ReactNode;
 };
 
 function isPrimitive(value: unknown): value is Primitive {
@@ -78,6 +80,7 @@ export function ArtifactViewer({
   jobId,
   createdAt,
   data,
+  children,
 }: ArtifactViewerProps) {
   const [openJobId, setOpenJobId] = useState<number | null>(null);
 
@@ -105,7 +108,7 @@ export function ArtifactViewer({
             )}
           </Group>
         </Group>
-        <ArtifactData data={data} />
+        {children ?? <ArtifactData data={data} />}
       </Stack>
       <JobDetailDrawer jobId={openJobId} onClose={() => setOpenJobId(null)} />
     </Paper>

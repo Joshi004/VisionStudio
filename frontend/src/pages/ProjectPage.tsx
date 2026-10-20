@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
+import { DiscoveryPanel } from "../components/story/DiscoveryPanel";
 import { StageList } from "../components/story/StageList";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
 import { StoryEditor } from "../components/story/StoryEditor";
@@ -63,6 +64,16 @@ export function ProjectPage() {
 
           <StoryEditor project={project} />
           <StoryBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
+          <DiscoveryPanel
+            projectId={project.id}
+            kind="characters"
+            hasStory={project.script_text !== null}
+          />
+          <DiscoveryPanel
+            projectId={project.id}
+            kind="environments"
+            hasStory={project.script_text !== null}
+          />
           <StageList />
         </>
       )}

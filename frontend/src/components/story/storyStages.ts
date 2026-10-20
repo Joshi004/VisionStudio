@@ -21,11 +21,13 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "character-discovery",
     name: "Character discovery",
     description: "Finds the characters the story needs.",
+    available: true,
   },
   {
     id: "environment-discovery",
     name: "Environment discovery",
     description: "Finds the places the story happens in.",
+    available: true,
   },
   {
     id: "scene-discovery",

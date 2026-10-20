@@ -15,7 +15,7 @@ export type StoryBibleVersion = components["schemas"]["StoryBibleVersionOut"];
  * Every Story Bible query of a project starts with this key. It also starts with the project's
  * own key, so saving the story (which refreshes the project) refreshes the "out of date" flag.
  */
-function storyBibleKey(projectId: number) {
+export function storyBibleKey(projectId: number) {
   return [...PROJECTS_KEY, projectId, "story-bible"] as const;
 }
 

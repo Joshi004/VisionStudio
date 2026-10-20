@@ -85,11 +85,12 @@ class Job(Base):
 
     __tablename__ = "job"
     __table_args__ = (
-        # The six lab job types, since revision 0022 retired the narration ones, and the first
-        # story stage, since revision 0023.
+        # The six lab job types, since revision 0022 retired the narration ones, the first
+        # story stage, since revision 0023, and the two discovery stages, since revision 0024.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
-            "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible')",
+            "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
+            "'discover_characters', 'discover_environments')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -148,6 +149,62 @@ class StoryBible(Base):
     version: Mapped[int]
     source: Mapped[str]
     # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class CharacterDiscovery(Base):
+    """One version of a story project's list of discovered characters (PHASE-005).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1) exactly as
+    `StoryBible` does: every run is a new row with the next `version`, and a stored row is
+    never changed. `inputs` records the story hash and the StoryBible version the list was made
+    from, so "out of date" is worked out when it is read. `content` is
+    `{"characters": [{"id", "name", "description"}, ...]}`. Relations between characters are
+    not stored (D-14).
+    """
+
+    __tablename__ = "character_discovery"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_character_discovery_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EnvironmentDiscovery(Base):
+    """One version of a story project's list of discovered environments (PHASE-005). The same
+    shape as `CharacterDiscovery`; `content` is
+    `{"environments": [{"id", "name", "description"}, ...]}`.
+    """
+
+    __tablename__ = "environment_discovery"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_environment_discovery_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )

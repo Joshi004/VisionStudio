@@ -11,8 +11,11 @@ What it does today:
   length limit) and the stages of the story pipeline. The **Story Bible**
   stage works: press Run to have the language model write the story's title,
   genre, tone, visual style and rules, and Re-run for a new version (older
-  versions stay readable). The other stages are placeholders ("Not available
-  yet") until later phases build them.
+  versions stay readable). Once the Story Bible is up to date, the **Characters**
+  and **Environments** stages list the story's characters and places (an id, a
+  name and one line each; the two can run at the same time, and each shows
+  "Out of date" when the story or the Story Bible changes). The other stages are
+  placeholders ("Not available yet") until later phases build them.
 - **Labs**: the Image lab, the Voice lab and the Video lab try the GPU
   server's models by hand, and the Character lab makes characters, looks and
   takes. The Activity page lists their background jobs.
