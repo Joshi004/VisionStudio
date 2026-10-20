@@ -1,0 +1,964 @@
+{
+    "schema_version": "1.0",
+    "project": {
+      "title": "The Last Robot on Earth",
+      "duration_seconds": 60.0,
+      "aspect_ratio": "9:16",
+      "resolution": "1080x1920",
+      "fps": 24,
+      "genre": "emotional cinematic science fiction",
+      "target_platform": "YouTube Shorts",
+      "story_emotion_arc": [
+        "curiosity",
+        "loneliness",
+        "empathy",
+        "hope",
+        "suspense",
+        "uncertainty",
+        "reveal",
+        "warmth"
+      ]
+    },
+    "retention_strategy": {
+      "0_to_3_seconds": "Immediately establish the extraordinary premise: humanity is gone.",
+      "3_to_13_seconds": "Create curiosity around the robot's strange routine while changing visual information every 2 to 3 seconds.",
+      "13_to_22_seconds": "Explain the emotional reason behind the routine and make the audience care about the robot.",
+      "22_to_26_seconds": "Introduce a major pattern interruption: the first signal in decades.",
+      "26_to_40_seconds": "Increase movement, shot frequency and music intensity while giving the audience measurable progress toward the signal.",
+      "40_to_48_seconds": "Remove music and deliberately slow the pacing before the reveal.",
+      "48_to_60_seconds": "Resolve the mystery and reframe the entire story emotionally."
+    },
+    "generation_strategy": {
+      "preferred_mode": "reference-image-to-video",
+      "reason": "A fixed character reference provides substantially better robot consistency than generating every clip independently.",
+      "canonical_character_image_required": true,
+      "canonical_environment_reference_required": true,
+      "preferred_source_clip_duration_seconds": 5,
+      "editing_rule": "Generate longer stable source clips and trim them to the timeline. Do not request complex multi-action clips when separate simple clips can be edited together.",
+      "continuity_rule": "Use the same robot reference image, character embedding, seed family or identity-conditioning mechanism for every shot where the main robot is visible.",
+      "text_rule": "Do not ask the video model to render readable interface text. Add all words, numbers and signal indicators in post-production.",
+      "dialogue_rule": "Neither robot has a moving mouth. Dialogue comes through an internal speaker, avoiding lip-sync generation."
+    },
+    "visual_style": {
+      "look": "photorealistic cinematic science fiction, grounded rather than futuristic fantasy",
+      "world": "large abandoned modern city slowly reclaimed by plants and wildlife",
+      "color_palette": {
+        "beginning": "muted greens, weathered concrete, soft golden sunrise",
+        "loneliness": "desaturated neutral tones",
+        "search": "cool blue night, rain, dark cyan shadows",
+        "reveal": "almost black environment with tiny warm yellow lights",
+        "ending": "warm golden morning light"
+      },
+      "camera_language": "Mostly stable cinematic movement. Slow push-ins during emotional scenes, faster tracking during the search, locked or nearly locked camera during the reveal.",
+      "depth_of_field": "cinematic but not excessively shallow",
+      "motion_blur": "natural",
+      "film_grain": "very subtle"
+    },
+    "characters": {
+      "main_robot": {
+        "id": "ROBOT_A",
+        "description": "Small weathered maintenance robot, approximately 1.2 meters tall, faded off-white metal body, rectangular head, two circular blue optical eyes, compact torso, two functional arms, short sturdy legs, small backpack-shaped battery module, scratched paint, slightly dirty but carefully maintained.",
+        "personality_through_motion": "patient, methodical, gentle, slightly slow, never cartoonishly expressive",
+        "expression_method": "eye brightness, slight head tilts, pauses and body posture",
+        "must_remain_identical": true
+      },
+      "secondary_robot": {
+        "id": "ROBOT_B",
+        "description": "Smaller damaged maintenance robot, approximately 0.8 meters tall, faded rust-orange and beige metal body, two dim yellow optical eyes, visibly older damage, sitting weakly when first discovered.",
+        "voice": "quiet synthetic voice with slight radio distortion",
+        "must_be_visually_distinct_from_main_robot": true
+      }
+    },
+    "global_negative_prompt": [
+      "no living humans",
+      "no crowds",
+      "no zombies",
+      "no weapons",
+      "no humanoid robot faces",
+      "no moving mouths",
+      "no extra arms",
+      "no extra legs",
+      "no duplicated robot",
+      "no changing robot design",
+      "no floating objects",
+      "no excessive camera shake",
+      "no cyberpunk neon city",
+      "no cartoon aesthetic",
+      "no readable AI-generated text",
+      "no exaggerated facial expressions"
+    ],
+    "voice": {
+      "narrator": {
+        "gender": "neutral",
+        "age_character": "adult",
+        "tone": "intimate, calm, slightly mysterious",
+        "delivery": "restrained storytelling rather than movie-trailer narration",
+        "average_words_per_minute": 125,
+        "emotion": "empathetic but never melodramatic"
+      },
+      "secondary_robot": {
+        "line": "Hello?",
+        "delivery": "weak, uncertain, quiet",
+        "effect": "subtle electronic speaker coloration",
+        "important_instruction": "Do not make the voice cute or comedic."
+      }
+    },
+    "music": {
+      "overall_instruction": "Generate one continuous original score so musical continuity survives the edits.",
+      "copyright_requirement": "original composition only",
+      "sections": [
+        {
+          "start": 0.0,
+          "end": 13.5,
+          "description": "Sparse felt piano notes with distant atmospheric synth drone. Approximately 60 BPM. Large amounts of space between notes.",
+          "emotion": "wonder mixed with loneliness"
+        },
+        {
+          "start": 13.5,
+          "end": 22.8,
+          "description": "Introduce a very soft warm pad underneath the piano. No percussion.",
+          "emotion": "nostalgia and sadness"
+        },
+        {
+          "start": 22.8,
+          "end": 25.6,
+          "description": "After the electronic signal sound, introduce a quiet low-frequency rhythmic pulse.",
+          "emotion": "curiosity"
+        },
+        {
+          "start": 25.6,
+          "end": 40.5,
+          "description": "Gradually increase pulse intensity with restrained low synth percussion and subtle rising texture. Do not turn into action-trailer music.",
+          "emotion": "forward movement and suspense"
+        },
+        {
+          "start": 40.5,
+          "end": 48.2,
+          "description": "Music almost completely disappears. Keep only an extremely faint low atmospheric tone.",
+          "emotion": "uncertainty and anticipation"
+        },
+        {
+          "start": 48.2,
+          "end": 60.0,
+          "description": "Return to the original piano motif, now joined by very soft warm strings and a gentle harmonic resolution.",
+          "emotion": "hope without becoming triumphant"
+        }
+      ]
+    },
+    "audio_mix": {
+      "narration_priority": "highest",
+      "music_under_narration_db_reduction": -8,
+      "dialogue_priority": "same as narration",
+      "ambience_priority": "medium",
+      "important_sfx_priority": "high",
+      "master_target_lufs": -14,
+      "rule": "Never allow score or rain to obscure narration or the word Hello."
+    },
+    "timeline": [
+      {
+        "shot_id": "S01",
+        "timeline_start": 0.0,
+        "timeline_end": 3.0,
+        "source_generation_duration": 5.0,
+        "micro_beats": [
+          {
+            "start": 0.0,
+            "end": 1.0,
+            "action": "Begin immediately on a vast abandoned city at sunrise. No fade from black. Vegetation covers buildings and cracked roads."
+          },
+          {
+            "start": 1.0,
+            "end": 2.0,
+            "action": "Camera slowly pushes forward between silent buildings. Rusted vehicles remain motionless below."
+          },
+          {
+            "start": 2.0,
+            "end": 3.0,
+            "action": "A tiny solitary robot becomes visible far below in the center of the street."
+          }
+        ],
+        "visual_prompt": "Vertical cinematic aerial view of a vast abandoned modern city decades after humans disappeared, skyscrapers covered with vines, cracked roads, rusted cars, young trees growing through asphalt, warm sunrise haze, one tiny weathered maintenance robot walking alone far below, photorealistic, restrained post-apocalyptic atmosphere.",
+        "camera": "slow aerial push forward and slight descent",
+        "voiceover": {
+          "start": 0.0,
+          "end": 2.8,
+          "text": "Humanity disappeared thirty-seven years ago."
+        },
+        "sfx": [
+          "soft distant wind",
+          "very faint birds",
+          "subtle city ambience with no traffic"
+        ],
+        "transition_out": "hard_cut",
+        "psychological_purpose": "State the highest-concept idea immediately. The huge environment compared with the tiny robot communicates loneliness before any explanation."
+      },
+      {
+        "shot_id": "S02",
+        "timeline_start": 3.0,
+        "timeline_end": 7.4,
+        "source_generation_duration": 5.0,
+        "micro_beats": [
+          {
+            "start": 3.0,
+            "end": 4.5,
+            "action": "Ground-level rear tracking shot. Robot walks purposefully down the center of the abandoned street."
+          },
+          {
+            "start": 4.5,
+            "end": 6.0,
+            "action": "Robot passes an abandoned bus stop and rusted cars while morning light crosses the street."
+          },
+          {
+            "start": 6.0,
+            "end": 7.4,
+            "action": "Robot approaches an old cafe and reaches for a broom leaning beside the entrance."
+          }
+        ],
+        "visual_prompt": "Ground-level tracking shot behind the same small weathered off-white maintenance robot walking through the abandoned overgrown city toward an old cafe, warm early morning sunlight, enormous empty buildings surrounding the tiny robot, realistic robot motion, photorealistic cinema.",
+        "camera": "slow steady tracking shot from behind at robot height",
+        "voiceover": {
+          "start": 3.0,
+          "end": 7.2,
+          "text": "But every morning, this robot still goes to work."
+        },
+        "sfx": [
+          "soft mechanical footsteps",
+          "distant wind",
+          "subtle servo movement"
+        ],
+        "psychological_purpose": "Creates the central curiosity gap: if humanity has disappeared, why is this robot still working?"
+      },
+      {
+        "shot_id": "S03",
+        "timeline_start": 7.4,
+        "timeline_end": 9.3,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 7.4,
+            "end": 8.2,
+            "action": "Medium shot of robot sweeping dry leaves from the cafe entrance."
+          },
+          {
+            "start": 8.2,
+            "end": 9.3,
+            "action": "Close-up of broom moving leaves neatly away from the doorway."
+          }
+        ],
+        "visual_prompt": "Same maintenance robot carefully sweeping dry leaves from the entrance of an abandoned cafe covered with small vines, methodical gentle motion, morning sunlight, realistic debris physics.",
+        "camera": "medium side angle followed by slight push toward broom",
+        "voiceover": {
+          "start": 7.4,
+          "end": 9.0,
+          "text": "He sweeps the streets."
+        },
+        "sfx": [
+          "broom scraping softly over pavement"
+        ],
+        "psychological_purpose": "A simple understandable action makes the robot feel human without giving it a human face."
+      },
+      {
+        "shot_id": "S04",
+        "timeline_start": 9.3,
+        "timeline_end": 11.2,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 9.3,
+            "end": 10.0,
+            "action": "Robot notices an overturned cafe chair."
+          },
+          {
+            "start": 10.0,
+            "end": 11.2,
+            "action": "Robot gently lifts the chair and places it correctly beside the table."
+          }
+        ],
+        "visual_prompt": "Same robot notices a single overturned metal cafe chair and carefully sets it upright beside an abandoned outdoor table, quiet empty city, small natural movement, photorealistic.",
+        "camera": "static medium shot",
+        "voiceover": {
+          "start": 9.3,
+          "end": 10.9,
+          "text": "Fixes what's broken."
+        },
+        "sfx": [
+          "small metallic chair movement",
+          "quiet servo sound"
+        ],
+        "psychological_purpose": "Shows that the robot is preserving a world nobody is using, strengthening the emotional contradiction."
+      },
+      {
+        "shot_id": "S05",
+        "timeline_start": 11.2,
+        "timeline_end": 13.5,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 11.2,
+            "end": 12.2,
+            "action": "Inside a dusty apartment, robot pulls a curtain open."
+          },
+          {
+            "start": 12.2,
+            "end": 13.5,
+            "action": "Warm sunlight enters the empty room. Everything has been carefully kept in place."
+          }
+        ],
+        "visual_prompt": "Same maintenance robot inside an abandoned but carefully maintained apartment, robot gently opening old curtains, warm sunlight entering dusty room, furniture organized as though its owners might return, subtle dust particles in light.",
+        "camera": "wide interior shot with slow lateral movement",
+        "voiceover": {
+          "start": 11.0,
+          "end": 13.3,
+          "text": "And keeps their homes ready."
+        },
+        "sfx": [
+          "curtain fabric movement",
+          "soft room ambience"
+        ],
+        "psychological_purpose": "Transforms the robot's routine from mechanical work into waiting."
+      },
+      {
+        "shot_id": "S06",
+        "timeline_start": 13.5,
+        "timeline_end": 18.8,
+        "source_generation_duration": 6.0,
+        "micro_beats": [
+          {
+            "start": 13.5,
+            "end": 15.0,
+            "action": "Robot approaches a shelf containing an old photograph and small audio terminal."
+          },
+          {
+            "start": 15.0,
+            "end": 16.6,
+            "action": "Robot gently wipes dust from an old family photograph. Human figures are visible but intentionally not detailed enough to require facial consistency."
+          },
+          {
+            "start": 16.6,
+            "end": 18.3,
+            "action": "Tiny indicator light on the old terminal illuminates while the robot looks toward it."
+          },
+          {
+            "start": 18.3,
+            "end": 18.8,
+            "action": "Robot remains completely still after hearing the recorded instruction."
+          }
+        ],
+        "visual_prompt": "Same robot in quiet abandoned apartment gently wiping dust from a faded family photograph beside a small old audio terminal, human figures in photograph indistinct and softly out of focus, emotional cinematic close-up, warm sunlight, blue robot eyes reflected in glass.",
+        "camera": "slow controlled push-in",
+        "voiceover": {
+          "start": 13.5,
+          "end": 16.5,
+          "text": "Because his final instruction was simple:"
+        },
+        "dialogue": {
+          "speaker": "OLD_RECORDING",
+          "start": 16.7,
+          "end": 18.2,
+          "text": "Wait for us.",
+          "delivery": "soft distant human recording with mild degradation"
+        },
+        "sfx": [
+          "small audio device click",
+          "faint analog recording noise"
+        ],
+        "psychological_purpose": "This is the emotional explanation. The audience now understands that the robot is not cleaning randomly; it believes somebody may return."
+      },
+      {
+        "shot_id": "S07",
+        "timeline_start": 18.8,
+        "timeline_end": 22.8,
+        "source_generation_duration": 5.0,
+        "micro_beats": [
+          {
+            "start": 18.8,
+            "end": 20.0,
+            "action": "Cut to robot sitting alone on the roof edge of a skyscraper at night."
+          },
+          {
+            "start": 20.0,
+            "end": 21.2,
+            "action": "Camera slowly moves behind robot, revealing the enormous dark city."
+          },
+          {
+            "start": 21.2,
+            "end": 22.8,
+            "action": "Robot remains motionless while distant stars are visible above the skyline."
+          }
+        ],
+        "visual_prompt": "Same small maintenance robot sitting alone on edge of abandoned skyscraper at night overlooking enormous unlit city, cool blue moonlight, stars, vines on surrounding buildings, contemplative cinematic composition, photorealistic.",
+        "camera": "very slow push from medium shot toward wider skyline composition",
+        "voiceover": [
+          {
+            "start": 18.8,
+            "end": 20.0,
+            "text": "So he did."
+          },
+          {
+            "start": 20.1,
+            "end": 22.0,
+            "text": "For thirty-seven years."
+          }
+        ],
+        "sfx": [
+          "high-altitude wind"
+        ],
+        "psychological_purpose": "The slower four-second beat lets the emotional premise register before the story abruptly changes direction."
+      },
+      {
+        "shot_id": "S08",
+        "timeline_start": 22.8,
+        "timeline_end": 25.6,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 22.8,
+            "end": 23.5,
+            "action": "A sharp electronic beep breaks the quiet."
+          },
+          {
+            "start": 23.5,
+            "end": 24.2,
+            "action": "Robot's head snaps toward a small receiver on its chest."
+          },
+          {
+            "start": 24.2,
+            "end": 25.0,
+            "action": "Receiver indicator begins flashing."
+          },
+          {
+            "start": 25.0,
+            "end": 25.6,
+            "action": "Robot quickly rises to its feet."
+          }
+        ],
+        "visual_prompt": "Close cinematic view of same robot sitting at night when a small receiver on its chest unexpectedly begins flashing, robot immediately turns toward it and rises, abandoned city behind, realistic restrained movement.",
+        "camera": "medium close-up with fast but stable push toward receiver",
+        "voiceover": [
+          {
+            "start": 22.8,
+            "end": 24.0,
+            "text": "Until tonight."
+          },
+          {
+            "start": 24.2,
+            "end": 25.0,
+            "text": "A signal."
+          }
+        ],
+        "post_production_overlay": {
+          "start": 24.4,
+          "end": 25.6,
+          "text": "SIGNAL DETECTED",
+          "style": "small functional monochrome robot HUD",
+          "instruction": "Add in post-production, not video generation."
+        },
+        "sfx": [
+          "single clear electronic beep",
+          "two quieter confirmation beeps"
+        ],
+        "psychological_purpose": "This is the midpoint re-hook. Sound, movement, lighting and story direction all change simultaneously."
+      },
+      {
+        "shot_id": "S09",
+        "timeline_start": 25.6,
+        "timeline_end": 31.5,
+        "source_generation_duration": 6.0,
+        "micro_beats": [
+          {
+            "start": 25.6,
+            "end": 27.4,
+            "action": "Robot moves quickly through the abandoned street for the first time in the story."
+          },
+          {
+            "start": 27.4,
+            "end": 29.4,
+            "action": "Tracking camera follows as robot passes rusted vehicles and vegetation."
+          },
+          {
+            "start": 29.4,
+            "end": 31.5,
+            "action": "Robot climbs over a broken section of road without stopping."
+          }
+        ],
+        "visual_prompt": "Same small robot moving urgently through abandoned overgrown city at night, leaving normal route behind, passing rusted vehicles and broken roadway, purposeful fast movement but not sprinting unrealistically, cinematic tracking camera, cool blue atmosphere.",
+        "camera": "low rear three-quarter tracking shot",
+        "voiceover": {
+          "start": 25.6,
+          "end": 31.3,
+          "text": "For the first time in decades, he leaves his route and follows it."
+        },
+        "sfx": [
+          "faster metallic footsteps",
+          "servo motors",
+          "wind increasing"
+        ],
+        "psychological_purpose": "After mostly static behavior, movement itself becomes exciting. The visual grammar tells the audience something unprecedented is happening."
+      },
+      {
+        "shot_id": "S10",
+        "timeline_start": 31.5,
+        "timeline_end": 33.1,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 31.5,
+            "end": 33.1,
+            "action": "Extreme wide shot. Tiny robot crosses a huge abandoned intersection surrounded by silent buildings."
+          }
+        ],
+        "visual_prompt": "Extreme wide vertical view of tiny identical maintenance robot crossing gigantic abandoned city intersection at night, enormous dark skyscrapers, vegetation and fog, sense of scale and isolation.",
+        "camera": "locked extreme wide shot",
+        "voiceover": {
+          "start": 31.5,
+          "end": 33.0,
+          "text": "Across the dead city."
+        },
+        "psychological_purpose": "Provides a scale reset after the close tracking shot and prevents visual monotony."
+      },
+      {
+        "shot_id": "S11",
+        "timeline_start": 33.1,
+        "timeline_end": 34.7,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 33.1,
+            "end": 34.7,
+            "action": "Heavy rain begins as robot continues toward destination without slowing."
+          }
+        ],
+        "visual_prompt": "Same robot walking urgently through heavy nighttime rain, water running across scratched metal body, abandoned buildings behind, realistic rainfall, cinematic blue lighting.",
+        "camera": "medium side tracking shot",
+        "voiceover": {
+          "start": 33.1,
+          "end": 34.5,
+          "text": "Through the rain."
+        },
+        "sfx": [
+          "rain",
+          "wet footsteps"
+        ],
+        "psychological_purpose": "Environmental escalation makes the journey feel progressively harder without introducing unnecessary plot complexity."
+      },
+      {
+        "shot_id": "S12",
+        "timeline_start": 34.7,
+        "timeline_end": 36.0,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 34.7,
+            "end": 36.0,
+            "action": "Robot reaches a dark abandoned subway entrance and immediately begins descending."
+          }
+        ],
+        "visual_prompt": "Same robot arriving at abandoned underground metro entrance during rain at night and beginning to descend into darkness, broken sign structures, vegetation around entrance, single headlamp switching on.",
+        "camera": "wide front angle, robot moving toward camera then downward",
+        "voiceover": {
+          "start": 34.8,
+          "end": 35.8,
+          "text": "Underground."
+        },
+        "sfx": [
+          "rain fading as robot descends",
+          "first footsteps echoing underground"
+        ],
+        "psychological_purpose": "Entering an enclosed dark environment visually signals that the story is approaching its answer."
+      },
+      {
+        "shot_id": "S13",
+        "timeline_start": 36.0,
+        "timeline_end": 40.5,
+        "source_generation_duration": 5.0,
+        "micro_beats": [
+          {
+            "start": 36.0,
+            "end": 37.2,
+            "action": "Robot walks through dark metro tunnel using only its headlamp."
+          },
+          {
+            "start": 37.2,
+            "end": 38.4,
+            "action": "Signal indicator visibly pulses faster."
+          },
+          {
+            "start": 38.4,
+            "end": 39.6,
+            "action": "Robot rounds a corner and stops briefly."
+          },
+          {
+            "start": 39.6,
+            "end": 40.5,
+            "action": "Signal reaches maximum strength."
+          }
+        ],
+        "visual_prompt": "Same robot moving through pitch-dark abandoned underground metro tunnel, single white headlamp illuminating wet floor and abandoned luggage, signal receiver blinking increasingly fast, photorealistic suspense, controlled camera.",
+        "camera": "slow frontal tracking backward",
+        "voiceover": {
+          "start": 36.2,
+          "end": 39.7,
+          "text": "Ninety-two percent. Ninety-eight. One hundred."
+        },
+        "post_production_overlays": [
+          {
+            "start": 36.4,
+            "end": 37.5,
+            "text": "92%"
+          },
+          {
+            "start": 37.6,
+            "end": 38.7,
+            "text": "98%"
+          },
+          {
+            "start": 38.8,
+            "end": 40.2,
+            "text": "100%"
+          }
+        ],
+        "sfx": [
+          "electronic pulse accelerating",
+          "echoing footsteps",
+          "water dripping"
+        ],
+        "psychological_purpose": "A numerical progress indicator creates an implicit countdown. Viewers know an answer is approaching and are encouraged to stay."
+      },
+      {
+        "shot_id": "S14",
+        "timeline_start": 40.5,
+        "timeline_end": 42.5,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 40.5,
+            "end": 41.0,
+            "action": "Signal light instantly switches off."
+          },
+          {
+            "start": 41.0,
+            "end": 42.5,
+            "action": "Robot freezes. Headlamp illuminates an empty tunnel ahead."
+          }
+        ],
+        "visual_prompt": "Same robot frozen motionless in dark metro tunnel immediately after signal receiver goes dark, headlamp illuminating apparently empty darkness ahead, suspenseful minimal composition.",
+        "camera": "completely static",
+        "voiceover": {
+          "start": 40.5,
+          "end": 41.8,
+          "text": "Then... nothing."
+        },
+        "music_instruction": "Drop almost all music exactly at 40.5 seconds.",
+        "sfx": [
+          "signal abruptly cuts",
+          "single water drip",
+          "quiet electrical hum"
+        ],
+        "psychological_purpose": "Expectation violation. The audience expected the signal to reveal something at 100 percent, but instead receives silence."
+      },
+      {
+        "shot_id": "S15",
+        "timeline_start": 42.5,
+        "timeline_end": 46.2,
+        "source_generation_duration": 5.0,
+        "micro_beats": [
+          {
+            "start": 42.5,
+            "end": 43.7,
+            "action": "Robot slowly turns its head toward deeper darkness."
+          },
+          {
+            "start": 43.7,
+            "end": 44.7,
+            "action": "Nothing visible yet. Hold longer than feels completely comfortable."
+          },
+          {
+            "start": 44.7,
+            "end": 45.4,
+            "action": "Two extremely dim yellow points appear far inside darkness."
+          },
+          {
+            "start": 45.4,
+            "end": 46.2,
+            "action": "Main robot's blue eyes brighten slightly while yellow lights flicker."
+          }
+        ],
+        "visual_prompt": "Dark abandoned subway station, same robot in foreground slowly looking into almost complete darkness, after a pause two extremely faint yellow robotic eyes appear far away, restrained horror-like suspense without monster imagery, photorealistic.",
+        "camera": "nearly static with extremely slow push-in",
+        "voiceover": {
+          "start": 42.5,
+          "end": 44.5,
+          "text": "And from the darkness..."
+        },
+        "sfx": [
+          "distant water drip",
+          "very faint electrical crackle"
+        ],
+        "psychological_purpose": "The 1.7-second gap after narration creates anticipation. Do not rush this shot; the audience should discover the eyes before the explanation."
+      },
+      {
+        "shot_id": "S16",
+        "timeline_start": 46.2,
+        "timeline_end": 48.2,
+        "source_generation_duration": 4.0,
+        "micro_beats": [
+          {
+            "start": 46.2,
+            "end": 46.7,
+            "action": "Main robot's headlamp gently moves toward the yellow lights."
+          },
+          {
+            "start": 46.7,
+            "end": 47.3,
+            "action": "Light reveals smaller damaged robot sitting against wall."
+          },
+          {
+            "start": 47.3,
+            "end": 48.2,
+            "action": "Smaller robot weakly lifts its head. Yellow eyes brighten slightly."
+          }
+        ],
+        "visual_prompt": "Main robot's headlamp slowly reveals a smaller damaged rust-orange maintenance robot sitting weakly against abandoned metro wall, covered in dust, dim yellow optical eyes, emotional realistic reveal, no humans, no mouth movement.",
+        "camera": "slow reveal using headlamp illumination",
+        "dialogue": {
+          "speaker": "ROBOT_B",
+          "start": 46.8,
+          "end": 47.5,
+          "text": "Hello?"
+        },
+        "music_instruction": "No melody underneath Hello. Let the single word sit almost alone.",
+        "sfx": [
+          "tiny electrical flicker",
+          "quiet station ambience"
+        ],
+        "psychological_purpose": "The entire mystery pays off with one word. Minimal dialogue makes it more emotionally valuable than a long conversation."
+      },
+      {
+        "shot_id": "S17",
+        "timeline_start": 48.2,
+        "timeline_end": 54.8,
+        "source_generation_duration": 7.0,
+        "micro_beats": [
+          {
+            "start": 48.2,
+            "end": 49.2,
+            "action": "Main robot remains still, looking at smaller robot."
+          },
+          {
+            "start": 49.2,
+            "end": 50.5,
+            "action": "Main robot slowly kneels beside smaller robot."
+          },
+          {
+            "start": 50.5,
+            "end": 52.0,
+            "action": "Main robot gently offers one hand."
+          },
+          {
+            "start": 52.0,
+            "end": 53.2,
+            "action": "Smaller robot takes the hand."
+          },
+          {
+            "start": 53.2,
+            "end": 54.8,
+            "action": "Dissolve to morning as both robots emerge from metro entrance together."
+          }
+        ],
+        "visual_prompt": "Emotional restrained interaction between same main robot and smaller damaged robot, main robot kneels and offers hand, smaller robot accepts, transition toward both robots emerging together from subway into warm morning light, cinematic realism.",
+        "camera": "medium two-shot, slow push-in",
+        "voiceover": {
+          "start": 48.2,
+          "end": 54.2,
+          "text": "For thirty-seven years, he thought he was keeping the world alive for humans."
+        },
+        "music_instruction": "Original piano motif quietly returns at 48.2 seconds. Soft warm strings enter around 51 seconds.",
+        "sfx": [
+          "quiet servos",
+          "subtle metal hand contact"
+        ],
+        "psychological_purpose": "After tension, touch provides immediate emotional release. Returning to warm light tells the audience that the story's emotional direction has changed."
+      },
+      {
+        "shot_id": "S18",
+        "timeline_start": 54.8,
+        "timeline_end": 59.2,
+        "source_generation_duration": 5.0,
+        "micro_beats": [
+          {
+            "start": 54.8,
+            "end": 56.0,
+            "action": "Return to the same cafe street seen earlier, now at sunrise."
+          },
+          {
+            "start": 56.0,
+            "end": 57.2,
+            "action": "Main robot sweeps exactly as it did earlier."
+          },
+          {
+            "start": 57.2,
+            "end": 58.2,
+            "action": "Camera reveals smaller robot beside it placing an overturned chair upright."
+          },
+          {
+            "start": 58.2,
+            "end": 59.2,
+            "action": "Both robots pause briefly and look toward each other before continuing."
+          }
+        ],
+        "visual_prompt": "Same abandoned cafe street from beginning in warm sunrise, main off-white robot sweeping while smaller rust-orange robot beside it carefully sets an overturned chair upright, subtle companionship, hopeful photorealistic cinematic scene.",
+        "camera": "medium-wide side shot gradually pulling backward",
+        "voiceover": {
+          "start": 54.8,
+          "end": 59.2,
+          "text": "Maybe he was keeping it alive for whoever came next."
+        },
+        "sfx": [
+          "soft broom sound",
+          "birds slightly more audible than beginning"
+        ],
+        "psychological_purpose": "Visual callback closes the narrative loop. The same routine that looked tragic earlier now has meaning because it is shared."
+      },
+      {
+        "shot_id": "S19",
+        "timeline_start": 59.2,
+        "timeline_end": 60.0,
+        "source_generation_duration": 2.0,
+        "micro_beats": [
+          {
+            "start": 59.2,
+            "end": 60.0,
+            "action": "Camera continues slowly pulling away. Two robots become small figures inside the enormous city. Hold without narration."
+          }
+        ],
+        "visual_prompt": "Wide final view of abandoned green city at warm sunrise with two tiny robots working together near cafe, peaceful hopeful cinematic conclusion.",
+        "camera": "slow pullback",
+        "voiceover": null,
+        "music_instruction": "Allow final piano chord and soft strings to resolve naturally. Do not end with a dramatic boom.",
+        "post_production_overlay": null,
+        "psychological_purpose": "A short silent tail allows the final line to register instead of immediately cutting away, improving emotional aftertaste."
+      }
+    ],
+    "final_narration_script": [
+      {
+        "start": 0.0,
+        "end": 2.8,
+        "text": "Humanity disappeared thirty-seven years ago."
+      },
+      {
+        "start": 3.0,
+        "end": 7.2,
+        "text": "But every morning, this robot still goes to work."
+      },
+      {
+        "start": 7.4,
+        "end": 9.0,
+        "text": "He sweeps the streets."
+      },
+      {
+        "start": 9.3,
+        "end": 10.9,
+        "text": "Fixes what's broken."
+      },
+      {
+        "start": 11.0,
+        "end": 13.3,
+        "text": "And keeps their homes ready."
+      },
+      {
+        "start": 13.5,
+        "end": 16.5,
+        "text": "Because his final instruction was simple:"
+      },
+      {
+        "start": 16.7,
+        "end": 18.2,
+        "speaker": "old_recording",
+        "text": "Wait for us."
+      },
+      {
+        "start": 18.8,
+        "end": 20.0,
+        "text": "So he did."
+      },
+      {
+        "start": 20.1,
+        "end": 22.0,
+        "text": "For thirty-seven years."
+      },
+      {
+        "start": 22.8,
+        "end": 24.0,
+        "text": "Until tonight."
+      },
+      {
+        "start": 24.2,
+        "end": 25.0,
+        "text": "A signal."
+      },
+      {
+        "start": 25.6,
+        "end": 31.3,
+        "text": "For the first time in decades, he leaves his route and follows it."
+      },
+      {
+        "start": 31.5,
+        "end": 33.0,
+        "text": "Across the dead city."
+      },
+      {
+        "start": 33.1,
+        "end": 34.5,
+        "text": "Through the rain."
+      },
+      {
+        "start": 34.8,
+        "end": 35.8,
+        "text": "Underground."
+      },
+      {
+        "start": 36.2,
+        "end": 39.7,
+        "text": "Ninety-two percent. Ninety-eight. One hundred."
+      },
+      {
+        "start": 40.5,
+        "end": 41.8,
+        "text": "Then... nothing."
+      },
+      {
+        "start": 42.5,
+        "end": 44.5,
+        "text": "And from the darkness..."
+      },
+      {
+        "start": 46.8,
+        "end": 47.5,
+        "speaker": "ROBOT_B",
+        "text": "Hello?"
+      },
+      {
+        "start": 48.2,
+        "end": 54.2,
+        "text": "For thirty-seven years, he thought he was keeping the world alive for humans."
+      },
+      {
+        "start": 54.8,
+        "end": 59.2,
+        "text": "Maybe he was keeping it alive for whoever came next."
+      }
+    ],
+    "rendering_rules": {
+      "do_not_generate_titles_inside_video_model": true,
+      "do_not_generate_signal_text_inside_video_model": true,
+      "do_not_generate_lip_sync": true,
+      "maintain_character_reference_across_all_shots": true,
+      "keep_robot_eye_colors_constant": true,
+      "main_robot_eye_color": "blue",
+      "secondary_robot_eye_color": "yellow",
+      "avoid_complex_multi-character_motion_until_final_12_seconds": true,
+      "prefer_hard_cuts_during_search": true,
+      "prefer_slow_visual_transitions_during_emotional_sections": true,
+      "preserve_approximately_1_second_of_silence_around_reveal": true
+    }
+  }

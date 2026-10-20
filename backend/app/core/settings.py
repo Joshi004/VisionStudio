@@ -126,7 +126,8 @@ def _provider_help(role: str) -> str:
         f"Which language model {role}. Bitdeer uses the URL and model below. GPU server "
         "uses Qwen3.8-27B on your GPU server (the GPU server URL), with reasoning on. The "
         "first call after 20 idle minutes waits several minutes while the server starts. "
-        "Answers are limited to 16,384 tokens and the prompt to 32,000 characters."
+        "Answers are limited to 49,152 tokens, reasoning included, and the prompt to 32,000 "
+        "characters."
     )
 
 

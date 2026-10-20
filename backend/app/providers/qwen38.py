@@ -1,4 +1,4 @@
-"""The Qwen3.8 text model on the GPU server (guide 0.16.0, `POST /v1/qwen38/generate`).
+"""The Qwen3.8 text model on the GPU server (guide 0.16.1, `POST /v1/qwen38/generate`).
 
 Unlike Bitdeer, it does not speak the OpenAI chat protocol. It is a normal GPU server job:
 submit the messages, poll `GET /v1/jobs/{id}`, then download the JSON result. `complete` hides
@@ -6,9 +6,10 @@ those three steps and returns the same `llm.ChatResult` as `llm.complete`, so a 
 either one and read the answer the same way.
 
 The jobs build one OpenAI-style request body (model, messages, max_tokens, stream,
-response_format, reasoning_effort). `to_request` keeps the messages and the token limit and
-drops what only Bitdeer understands. Reasoning is always on ("thinking" mode), which is the
-setting the server recommends for planning and writing.
+response_format, reasoning_effort). `to_request` keeps the messages and drops the rest. Reasoning
+is always on ("thinking" mode), which is the setting the server recommends for planning and
+writing. Qwen3.8 reasons far longer than GLM does on the same request, so the job's token limit
+(set for Bitdeer) is not used: every request asks for the server's largest, `MAX_TOKENS_CAP`.
 
 `complete` makes **one** attempt, like `llm.complete`: the retry belongs to the job.
 
@@ -33,7 +34,10 @@ _logger = logging.getLogger(__name__)
 GENERATE_PATH: Final = "/v1/qwen38/generate"
 MODEL_ID: Final = "Qwen/Qwen3.8-27B-FP8"
 # The server refuses more than this, and the limit includes the reasoning tokens.
-MAX_TOKENS_CAP: Final = 16384
+MAX_TOKENS_CAP: Final = 49152
+# The model writes about 70 tokens a second (measured on 2026-10-18), so a full `MAX_TOKENS_CAP`
+# answer takes about 12 minutes. A caller's own time limit is raised to this.
+MIN_GENERATION_S: Final = 900.0
 # The server refuses messages longer than this in total.
 MESSAGES_MAX_CHARS: Final = 32000
 # A stopped server takes 3 to 10 minutes to start, and the job waits `queued` meanwhile.
@@ -58,14 +62,11 @@ def prompt_chars(body: dict[str, Any]) -> int:
 
 def to_request(body: dict[str, Any]) -> dict[str, Any]:
     """The Qwen3.8 request for an OpenAI-style body."""
-    max_tokens = body.get("max_tokens")
-    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
-        max_tokens = MAX_TOKENS_CAP
     return {
         "messages": body["messages"],
         "thinking": True,
         "include_reasoning": False,
-        "max_tokens": min(max_tokens, MAX_TOKENS_CAP),
+        "max_tokens": MAX_TOKENS_CAP,
     }
 
 
@@ -131,7 +132,8 @@ def _read_result(job_id: str, result: dict[str, Any]) -> ChatResult:
 async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> ChatResult:
     """Asks Qwen3.8 on the GPU server and returns its text.
 
-    `timeout_s` is the time the model may take. The wait also allows for a cold server start.
+    `timeout_s` is the time the model may take, at least `MIN_GENERATION_S`. The wait also
+    allows for a cold server start.
     Raises `LlmCallError` for anything that is not a usable answer. An answer with no text is
     returned with `content == ""` so the caller can record its `finish_reason`.
     """
@@ -143,7 +145,7 @@ async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> 
             f"{MESSAGES_MAX_CHARS:,}. Use Bitdeer for this one, or shorten the script.",
         )
 
-    deadline = time.monotonic() + timeout_s + COLD_START_ALLOWANCE_S
+    deadline = time.monotonic() + max(timeout_s, MIN_GENERATION_S) + COLD_START_ALLOWANCE_S
     try:
         job_id = await gpu_server.submit_job(base_url, GENERATE_PATH, to_request(body))
     except GpuCallError as exc:
