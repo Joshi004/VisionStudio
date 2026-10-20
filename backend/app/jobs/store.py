@@ -21,7 +21,7 @@ from typing import Any, cast
 from sqlalchemy import CursorResult, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job, Project, Scene
+from app.db.models import Job, Project
 from app.db.types import UTCDateTime, utcnow
 from app.jobs import phases
 
@@ -37,22 +37,8 @@ VOICE_LAB_NAME = "Voice lab"
 IMAGE_LAB_NAME = "Image lab"
 CHARACTER_LAB_NAME = "Character lab"
 
-# Job types that can be cancelled while they run, because the server has a cancel for them
-# (Phase 9). A transcription cannot yet: its cancel is not built.
-REMOTE_CANCEL_TYPES = frozenset(
-    {
-        "generate_clip",
-        "lab_video",
-        "generate_frame",
-        "generate_last_frame",
-        "lab_image",
-        "generate_character_reference",
-    }
-)
-
-# An automatic run does nothing itself: it only makes other jobs. Stopping it at any time just
-# stops it making more (the jobs it made that have not started are cancelled with it).
-AUTO_RUN_TYPE = "auto_pipeline"
+# Job types that can be cancelled while they run, because the server has a cancel for them.
+REMOTE_CANCEL_TYPES = frozenset({"lab_video", "lab_image"})
 
 # One backend process, so a module lock is enough to make "create, unless one is active" atomic.
 _create_lock = asyncio.Lock()
@@ -73,17 +59,13 @@ class JobRow:
 
     job: Job
     project_name: str
-    scene_index: int | None
 
 
 def can_cancel(job: Job) -> bool:
-    """A job that has not started, one the server no longer knows, an automatic run, or (for
-    the types that have a cancel on the server) a running one that is not yet fetching its
-    result.
+    """A job that has not started, one the server no longer knows, or (for the types that
+    have a cancel on the server) a running one that is not yet fetching its result.
     """
     if job.status == "queued" or is_not_found(job):
-        return True
-    if job.status == "running" and job.type == AUTO_RUN_TYPE:
         return True
     return (
         job.status == "running"
@@ -94,8 +76,7 @@ def can_cancel(job: Job) -> bool:
 
 def needs_remote_cancel(job: Job) -> bool:
     """Is there a job on the server to cancel? Only a running job of a type the server can
-    cancel, that has been submitted, and that the server still knows. (An automatic run keeps
-    a marker in its provider job id: it is not an id on the server.)
+    cancel, that has been submitted, and that the server still knows.
     """
     return (
         job.status == "running"
@@ -127,11 +108,6 @@ async def _update(
     return result.rowcount == 1
 
 
-def _input_holds(job: Job, wanted: dict[str, Any]) -> bool:
-    recorded: Any = job.input if isinstance(job.input, dict) else {}
-    return all(recorded.get(key) == value for key, value in wanted.items())
-
-
 async def create_job(
     session: AsyncSession,
     *,
@@ -139,29 +115,21 @@ async def create_job(
     type: str,
     provider: str,
     input: dict[str, Any],
-    scene_id: int | None = None,
     commit: bool = True,
     dedupe: bool = True,
-    same_input: dict[str, Any] | None = None,
 ) -> tuple[Job, bool]:
-    """Creates a queued job, unless one of this type is already active for the project
-    (or for the scene). Returns `(job, created)`: the existing job when it was not created.
+    """Creates a queued job, unless one of this type is already active for the project.
+    Returns `(job, created)`: the existing job when it was not created.
 
     This is what makes two quick clicks on one button create one job (Section 3.3).
 
-    A job type with one job per cast member (`generate_character_reference`) has no scene to
-    tell its jobs apart by. It passes `same_input`, the keys of its input that name the member,
-    and only an active job whose input holds those same values counts as "already active".
-
-    `project_id` is None only for the Video lab's jobs, which belong to no project. They pass
+    `project_id` is None for a lab's jobs, which belong to no project. They pass
     `dedupe=False`: each click is a paid run of its own (two runs of one prompt with another
     seed, or of one prompt on both models, are what the lab is for), so none is merged into
     an earlier one.
 
     With `commit=False` the job is only flushed, so a caller can create several jobs in one
-    transaction (Generate all) and commit them together. It must hold the database's write
-    lock already (see `scenes_service.lock_scenes`), so nobody else can create a job
-    between the check and the commit.
+    transaction and commit them together.
     """
     async with _create_lock:
         if dedupe:
@@ -173,19 +141,11 @@ async def create_job(
                     else Job.project_id == project_id,
                     Job.type == type,
                     Job.status.in_(ACTIVE_STATUSES),
-                    Job.scene_id.is_(None) if scene_id is None else Job.scene_id == scene_id,
                 )
                 .order_by(Job.id)
                 .execution_options(populate_existing=True)
             )
-            existing = next(
-                (
-                    job
-                    for job in (await session.execute(statement)).scalars()
-                    if same_input is None or _input_holds(job, same_input)
-                ),
-                None,
-            )
+            existing = (await session.execute(statement)).scalars().first()
             if existing is not None:
                 if commit:
                     await session.commit()
@@ -193,7 +153,6 @@ async def create_job(
 
         job = Job(
             project_id=project_id,
-            scene_id=scene_id,
             type=type,
             status="queued",
             phase=phases.WAITING_TO_START,
@@ -291,28 +250,6 @@ async def record_poll(
     await session.commit()
 
 
-async def save_progress(
-    session: AsyncSession,
-    job_id: int,
-    *,
-    phase: str,
-    output: dict[str, Any],
-    provider_job_id: str | None = None,
-) -> bool:
-    """Saves where a long-running job is (an automatic run): its phase and output, in one
-    UPDATE, and notes that it was checked. `provider_job_id`, when given, is the marker that
-    makes the dispatcher check the job every tick.
-
-    Does not commit: the caller commits it together with the jobs the run made in the same
-    step, so a run's output never names a job that was not created, and the other way round.
-    False means the job is no longer running (it was cancelled): the caller rolls back.
-    """
-    values: dict[str, Any] = {"phase": phase, "output": output, "last_checked_at": utcnow()}
-    if provider_job_id is not None:
-        values["provider_job_id"] = provider_job_id
-    return await _update(session, job_id, ("running",), **values)
-
-
 async def merge_output(session: AsyncSession, job_id: int, values: dict[str, Any]) -> None:
     """Adds keys to the output of a job that has finished (succeeded, failed or cancelled):
     what the cleanup or the cancel on the server answered. A new object is assigned.
@@ -387,11 +324,11 @@ async def _load(session: AsyncSession, job_id: int) -> Job | None:
 
 
 async def cancel_job(session: AsyncSession, job_id: int) -> Job:
-    """Cancels a job that has not started, one the server no longer knows, or a running clip
-    job (the caller cancels it on the server first, see `needs_remote_cancel`).
+    """Cancels a job that has not started, one the server no longer knows, or a running image
+    or video job (the caller cancels it on the server first, see `needs_remote_cancel`).
 
-    Any other running job cannot be cancelled: a transcription is already on the GPU server
-    (its cancel is not built), and a call to the language model cannot be taken back.
+    Any other running job cannot be cancelled: a speech is already on the GPU server (its
+    cancel is not built), and a call to the language model cannot be taken back.
     """
     job = await _load(session, job_id)
     if job is None:
@@ -474,18 +411,6 @@ async def latest_job(session: AsyncSession, project_id: int, type: str) -> Job |
     return (await session.execute(statement)).scalars().first()
 
 
-async def latest_jobs_by_scene(session: AsyncSession, project_id: int, type: str) -> dict[int, Job]:
-    """The newest job of a type for each scene of a project (ANALYSIS.md Section 3.4)."""
-    newest = (
-        select(func.max(Job.id))
-        .where(Job.project_id == project_id, Job.type == type, Job.scene_id.is_not(None))
-        .group_by(Job.scene_id)
-    )
-    statement = select(Job).where(Job.id.in_(newest)).execution_options(populate_existing=True)
-    jobs = (await session.execute(statement)).scalars().all()
-    return {job.scene_id: job for job in jobs if job.scene_id is not None}
-
-
 async def waiting_job_count(session: AsyncSession) -> int:
     """GPU jobs that are waiting because the GPU API changed or is not approved (the banner)."""
     statement = select(func.count(Job.id)).where(
@@ -519,23 +444,19 @@ def owner_name(job: Job, project_name: str | None) -> str:
 
 def _rows_statement() -> Any:
     return (
-        select(Job, Project.name, Scene.index)
+        select(Job, Project.name)
         .outerjoin(Project, Project.id == Job.project_id)
-        .outerjoin(Scene, Scene.id == Job.scene_id)
         .execution_options(populate_existing=True)
     )
 
 
 async def list_jobs(session: AsyncSession, *, project_id: int | None, limit: int) -> list[JobRow]:
-    """Jobs with their project and scene names, newest first."""
+    """Jobs with their project names, newest first."""
     statement = _rows_statement().order_by(Job.id.desc()).limit(limit)
     if project_id is not None:
         statement = statement.where(Job.project_id == project_id)
     result = await session.execute(statement)
-    return [
-        JobRow(job=job, project_name=owner_name(job, name), scene_index=index)
-        for job, name, index in result.all()
-    ]
+    return [JobRow(job=job, project_name=owner_name(job, name)) for job, name in result.all()]
 
 
 async def get_job_row(session: AsyncSession, job_id: int) -> JobRow | None:
@@ -543,5 +464,5 @@ async def get_job_row(session: AsyncSession, job_id: int) -> JobRow | None:
     row = result.first()
     if row is None:
         return None
-    job, name, index = row
-    return JobRow(job=job, project_name=owner_name(job, name), scene_index=index)
+    job, name = row
+    return JobRow(job=job, project_name=owner_name(job, name))

@@ -1,16 +1,15 @@
 """Frame counts for clips (ANALYSIS.md Section 5.3 and 5.5). Pure functions, no I/O.
 
-A scene is a stretch of the voiceover, and its clip must cover it exactly. Two numbers
-come out of that:
+A clip must cover the stretch of the video it is for exactly. Two numbers come out of that:
 
-- the *target*: how many frames the scene lasts on the project's fps grid;
-- the *request*: how many frames LTX is asked for, the smallest `8k + 1` at or above the
-  target. The tail is trimmed away at render time (Phase 10), at most 7 frames of it.
+- the *target*: how many frames the stretch lasts on the fps grid;
+- the *request*: how many frames a model is asked for. LTX is asked for the smallest `8k + 1`
+  at or above the target, and MiniMax H3 for the smallest `17n + 5`. The tail is trimmed away
+  at render time.
 
-Scene boundaries are rounded to frame indices first, and a scene's frame count is the
-difference between its two boundaries. Rounding every scene's length on its own would let
-the errors add up over a long video. Phase 10 uses `target_frames` as well, so the render
-and the generation agree on how long a scene is.
+Boundaries are rounded to frame indices first, and a stretch's frame count is the difference
+between its two boundaries. Rounding every length on its own would let the errors add up over
+a long video, so the render and the generation both use `target_frames`.
 """
 
 from __future__ import annotations
@@ -25,11 +24,11 @@ MIN_NUM_FRAMES: Final = 9
 _FRAMES_PER_STEP: Final = 8
 
 # MiniMax H3 runs at a fixed 24 fps and only decodes `17n + 5` frames. The GPU server's guide
-# documents 124 (5.17 s) to 345 (14.4 s) frames and clamps to that range itself. The labs do not
-# enforce it, so the server's real answer shows; a scene's clip does (`h3_scene_num_frames`),
-# because a clip that is too short for its scene wastes a GPU run.
+# documents 124 (5.17 s) to 345 (14.4 s) frames and clamps to that range itself, but PHASE-001
+# showed shorter clips work. The labs do not enforce a minimum, so the server's real answer
+# shows; the shot-duration policy (`duration_policy`) sets the minimum the story pipeline uses.
+# The maximum is the longest clip the server makes.
 H3_FPS: Final = 24
-H3_MIN_FRAMES: Final = 124
 H3_MAX_FRAMES: Final = 345
 _H3_FRAMES_PER_STEP: Final = 17
 _H3_BASE_FRAMES: Final = 5
@@ -69,14 +68,3 @@ def h3_num_frames(target: int) -> int:
     """
     steps = max(1, -(-(target - _H3_BASE_FRAMES) // _H3_FRAMES_PER_STEP))  # ceil without floats
     return _H3_FRAMES_PER_STEP * steps + _H3_BASE_FRAMES
-
-
-def h3_scene_num_frames(target: int) -> int:
-    """The frame count to ask MiniMax H3 for a scene whose length is `target` frames at 24 fps:
-    the smallest `17n + 5` that is at least `target`, and never below `H3_MIN_FRAMES` (a
-    shorter scene still gets the shortest clip H3 makes, and the render trims it).
-
-    The result can be above `H3_MAX_FRAMES` for a long scene. The caller refuses that, with a
-    message that names the scene's length.
-    """
-    return h3_num_frames(max(target, H3_MIN_FRAMES))

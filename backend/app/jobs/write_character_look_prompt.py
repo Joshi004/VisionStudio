@@ -2,9 +2,9 @@
 library character (ANALYSIS.md Phase 25), told apart by `job.input["requested"]`:
 
 - `"master"`: the prompt for a look's master picture (`services/character_looks.start_look`),
-  from the character's card, on the same profile the project's own cast reference uses
+  from the character's card, on the character sheet profile
   (`image_prompt_profiles.ACTIVE_CHARACTER_SHEET_PROFILE`). Reuses `image_prompt_writer.py`'s
-  reader and checks, like `write_character_reference_prompt.py` does. Once saved, the look's
+  reader and checks. Once saved, the look's
   four candidate pictures are started (`character_looks.on_look_prompt_written`); if the model
   fails, the look is marked failed (`character_looks.on_look_prompt_failed`), so the drawer
   shows why instead of waiting forever. A look started from the author's own picture
@@ -15,8 +15,8 @@ library character (ANALYSIS.md Phase 25), told apart by `job.input["requested"]`
   author may edit the line before clicking to make the audition's samples
   (`character_library.start_auditions`), the same as any other step the author may edit first.
 
-Both are a paid call to the language model, so the rules of `write_image_prompt` hold here too
-(they are in `jobs/llm_call.py`): at most 2 attempts, a refusal never retried, every answer
+Both are a paid call to the language model, so the rules in `jobs/llm_call.py` hold here:
+at most 2 attempts, a refusal never retried, every answer
 saved the moment it arrives, and a restart never re-runs it (`never_rerun`). A click writes the
 prompt or the line again even when one exists already (that is what "write again" is for): the
 job type passes `dedupe=False` (`character_library.PROMPT_JOB`'s callers), so two clicks make
@@ -37,9 +37,8 @@ from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.handlers import JobHandler
-from app.jobs.write_character_reference_prompt import MODEL_KEY
 from app.providers import llm
-from app.services import character_library, character_looks, description_writer, llm_target
+from app.services import character_library, character_looks, llm_target
 from app.services import character_look_prompt_writer as writer
 from app.services import image_prompt_writer as prompt_checks
 from app.services.image_prompt_profiles import (
@@ -48,6 +47,7 @@ from app.services.image_prompt_profiles import (
     ImagePromptProfile,
 )
 from app.services.image_prompt_writer import CheckedPrompt
+from app.services.llm_target import IMAGE_PROMPT_MODEL_KEY
 
 _logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class WriteCharacterLookPromptHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "llm"
     restart_rule = "never_rerun"
-    model_key = MODEL_KEY
+    model_key = IMAGE_PROMPT_MODEL_KEY
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -116,7 +116,7 @@ class WriteCharacterLookPromptHandler(JobHandler):
                 if isinstance(character_id, int)
                 else None
             )
-            target = await llm_target.resolve(session, MODEL_KEY)
+            target = await llm_target.resolve(session, IMAGE_PROMPT_MODEL_KEY)
             await session.commit()
 
         if character is None:
@@ -151,7 +151,7 @@ class WriteCharacterLookPromptHandler(JobHandler):
         body = writer.build_master_request(inputs, model=target.model, profile=profile)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
-            instructions_sha256=description_writer.instructions_sha256(body),
+            instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),
             endpoint=llm_target.endpoint(target),
             request=body,
@@ -211,7 +211,7 @@ class WriteCharacterLookPromptHandler(JobHandler):
         inputs = writer.prompt_inputs(card)
         body = writer.build_audition_request(inputs, model=target.model)
         job_input.update(
-            instructions_sha256=description_writer.instructions_sha256(body),
+            instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),
             endpoint=llm_target.endpoint(target),
             request=body,

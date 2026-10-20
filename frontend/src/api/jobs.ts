@@ -5,7 +5,6 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { GPU_KEY } from "./gpu";
 import { ACTIVE_POLL_MS, STATUS_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY } from "./projects";
 import type { components } from "./schema";
 
 export type JobSummary = components["schemas"]["JobSummary"];
@@ -16,11 +15,10 @@ export type PoolCapacity = components["schemas"]["PoolCapacity"];
 /** Every job query starts with this key, so one call refreshes them all. */
 export const JOBS_KEY = ["jobs"] as const;
 
-/** A job action changes jobs, a project's transcription and the banner's waiting count. */
+/** A job action changes jobs and the banner's waiting count. */
 export function invalidateAfterJobAction(queryClient: QueryClient) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: JOBS_KEY }),
-    queryClient.invalidateQueries({ queryKey: PROJECTS_KEY }),
     queryClient.invalidateQueries({ queryKey: GPU_KEY }),
   ]);
 }

@@ -4,8 +4,9 @@
 `VideoGenerator` is split into steps, because the dispatcher saves the server's job id
 right after submitting and resumes after a restart. Upload, status, download, cancel and
 purge are the calls every backend shares (`gpu_server.py`). What is specific to LTX lives
-here. A clip is made by one endpoint, chosen once per job from the video model and the
-scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
+here. A clip is made by one endpoint, chosen from the video model and from how the clip is
+made (`ClipMode`: from a first frame, or from a first and a last frame), by `ENDPOINTS` and
+`lab_endpoint_for`:
 
 - LTX-2.3 keyframe interpolation, `POST /v1/ltx/videos/keyframe-interpolation`
   (`KeyframeInterpolationRequest`), when the scene has a last frame. `with_frames` puts
@@ -51,9 +52,8 @@ scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
   was trained in a structured format, with a first line that places the frames
   (`h3_prompt_prefix`). `ENDPOINTS` lists it for both clip modes. Because one endpoint serves both
   modes, the mode of a recorded H3 clip cannot be read back from its endpoint: it is stored next
-  to it (`clip_mode_for`). A scene that has a last frame but is shorter than the shortest H3 clip
-  (`frame_counts.H3_MIN_FRAMES`, 5.17 s) is made by LTX-2.5 instead, with a note, because H3 lands
-  on the last frame at the very end of a clip that the render would cut before it.
+  to it (`clip_mode_for`). H3 lands on the last frame at the very end of a clip, so a clip that
+  will be trimmed from its tail must not rely on a last frame.
 - MiniMax H3 reference mode, `POST /v1/h3/videos/audio-to-video` (`H3AudioToVideoRequest`):
   up to 9 reference pictures (`image_asset_ids`) and, optionally, audio references
   (`audio_asset_ids`, a list of up to 3, each documented as 2 to 15 s) that the model reads and
@@ -63,11 +63,10 @@ scene's frames (`scene_inputs.clip_mode`), by `endpoint_for`:
   `with_h3_references` adds them. `match_audio_duration` needs at least one audio.
 
 `with_frames` builds the part of the body that names the frames, in the shape the chosen
-endpoint wants. Every pair of (model, clip mode) has an endpoint. `endpoint_for` still falls
-back to LTX-2.3 for a pair that has none, and says so in a note.
+endpoint wants. Every pair of (model, clip mode) has an endpoint.
 
 No body sends `orientation`, `duration_seconds` (the frame count is computed here), `crf`
-(the pipeline's own default applies) or `auto_duration` (the voiceover sets the length).
+(the pipeline's own default applies) or `auto_duration` (the caller sets the length).
 
 - `frame_limits`: the limits the approved OpenAPI document declares for `num_frames` on the
   endpoint in use.
@@ -87,9 +86,8 @@ from typing import Any, Final
 from app.core import outbound
 from app.providers import gpu_server
 from app.services import video_models
-from app.services.frame_counts import H3_FPS, H3_MIN_FRAMES, MIN_NUM_FRAMES
-from app.services.scene_inputs import ClipMode
-from app.services.video_models import H3_MODEL, LabVideoModel, LtxModel, VideoModel
+from app.services.frame_counts import H3_FPS, MIN_NUM_FRAMES
+from app.services.video_models import H3_MODEL, ClipMode, LabVideoModel, LtxModel, VideoModel
 
 KEYFRAME_PATH: Final = "/v1/ltx/videos/keyframe-interpolation"
 GENERATE_PATH: Final = "/v1/ltx/videos/generate"
@@ -171,62 +169,9 @@ _H3_FIRST_AND_LAST_LINE: Final = (
 _H3_SHOT_MARKER = re.compile(r"\[Shot\s+(\d+)\]", re.IGNORECASE)
 
 
-@dataclass(frozen=True)
-class EndpointChoice:
-    """The endpoint a clip is made by, and the model that endpoint belongs to.
-
-    `model` differs from the model asked for when there was no endpoint for it (then `note`
-    says why, in words meant for the user).
-    """
-
-    endpoint: str
-    model: VideoModel
-    note: str | None
-
-
-def endpoint_for(
-    model: VideoModel, mode: ClipMode, duration_s: float | None = None
-) -> EndpointChoice:
-    """The endpoint that makes a clip of this `mode` with `model`.
-
-    `duration_s` is the scene's length. It only matters for MiniMax H3 with a last frame: H3
-    reaches the last frame at the very end of a clip that is at least `H3_MIN_FRAMES` long, so
-    a shorter scene would be cut before the last frame is shown. That clip is made by LTX-2.5
-    instead and the note says so. Left out, the length is not checked.
-
-    Every other pair of model and mode has an endpoint today. For a pair that has none, the
-    clip is made by LTX-2.3 and the note says so.
-    """
-    if (
-        model == H3_MODEL
-        and mode == "first_and_last"
-        and duration_s is not None
-        and round(duration_s * H3_FPS) < H3_MIN_FRAMES
-    ):
-        h3_fallback: VideoModel = "ltx-2.5"
-        h3_note = (
-            f"{video_models.label(model)} makes a clip of at least {H3_MIN_FRAMES / H3_FPS:.2f} s "
-            "and reaches the last frame at the very end of it, so this scene "
-            f"({duration_s:.2f} s) would be cut before the last frame is shown. "
-            f"{video_models.label(h3_fallback)} is used for this clip."
-        )
-        return EndpointChoice(
-            endpoint=ENDPOINTS[(h3_fallback, mode)], model=h3_fallback, note=h3_note
-        )
-    endpoint = ENDPOINTS.get((model, mode))
-    if endpoint is not None:
-        return EndpointChoice(endpoint=endpoint, model=model, note=None)
-    fallback: VideoModel = "ltx-2.3"
-    note = (
-        f"{video_models.label(model)} cannot make a clip from a first and a last frame yet, "
-        f"so {video_models.label(fallback)} is used for this clip."
-    )
-    return EndpointChoice(endpoint=ENDPOINTS[(fallback, mode)], model=fallback, note=note)
-
-
 def lab_endpoint_for(model: LabVideoModel, mode: ClipMode) -> str:
-    """The endpoint the Video lab makes a clip of this `mode` with. Unlike `endpoint_for` there
-    is no fallback to another model: the lab runs exactly the models it was asked for.
+    """The endpoint the Video lab makes a clip of this `mode` with. There is no fallback to
+    another model: the lab runs exactly the models it was asked for.
 
     Raises ValueError, with a message for the user, for a pair that has no endpoint.
     """

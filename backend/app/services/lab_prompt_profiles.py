@@ -7,12 +7,11 @@ prose, and the model only cuts where a sentence names the cut. The rules below c
 server's guide (`GET /v1/guide`, "Multi-shot prompts") and Lightricks' own prompting guide,
 which agree on every point.
 
-A *lab prompt profile* is the same idea as a prompt profile for scene descriptions
-(`description_profiles.py`) and one for image prompts (`image_prompt_profiles.py`): what the
-writer is told about the video model, one worked example, and the checks that tell whether a
-written prompt breaks the rules. The job stores the profile's id and version next to the exact
-request, so an earlier prompt can be compared with a later one. Raise `version` whenever any
-text in a profile changes.
+A *lab prompt profile* is the same idea as a prompt profile for image prompts
+(`image_prompt_profiles.py`): what the writer is told about the video model, one worked
+example, and the checks that tell whether a written prompt breaks the rules. The job stores
+the profile's id and version next to the exact request, so an earlier prompt can be compared
+with a later one. Raise `version` whenever any text in a profile changes.
 
 MiniMax H3 is the other model the lab can write for (`H3_GENERATE`). It is written differently:
 it was trained on a structured prompt (`[Shot N]` blocks with cut times, then a soundscape and a
@@ -32,7 +31,7 @@ import re
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from app.services.description_profiles import TextRule
+from app.services.text_rules import TextRule
 from app.services.video_models import H3_MODEL
 
 # A numbered or labelled shot list: "Shot 2:", "1.", "2)" at the start of a line.

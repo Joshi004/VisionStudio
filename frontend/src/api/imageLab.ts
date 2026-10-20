@@ -180,7 +180,7 @@ export function useRunQwenLab() {
   });
 }
 
-/** Sends the image itself as the request body, as a scene's frame is sent. */
+/** Sends the image itself as the request body. */
 export function useLabUpload() {
   const queryClient = useQueryClient();
   return useMutation({

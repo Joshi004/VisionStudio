@@ -32,7 +32,7 @@ from app.db.models import Asset, Job, LabImage, LabRun
 from app.db.session import SessionLocal
 from app.db.types import utcnow
 from app.jobs import dispatcher, phases, store
-from app.jobs.generate_clip import GPU_URL_KEY
+from app.jobs.gpu_job import GPU_URL_KEY
 from app.jobs.remote_image import RemoteImageHandler
 from app.providers import image_generator
 from app.services import character_looks, character_takes, frame_images, image_lab

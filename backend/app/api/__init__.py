@@ -5,27 +5,15 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api import (
-    auto_pipeline,
-    cast,
     character_lab,
-    clips,
-    first_frames,
     gpu,
     health,
     image_lab,
-    image_prompts,
     jobs,
-    last_frame_prompts,
-    last_frames,
     projects,
-    renders,
-    scene_inputs,
-    scenes,
     settings,
-    transcription,
     video_lab,
     voice_lab,
-    voiceover_generation,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -34,19 +22,7 @@ api_router.include_router(projects.router, tags=["projects"])
 api_router.include_router(settings.router, tags=["settings"])
 api_router.include_router(gpu.router, tags=["gpu"])
 api_router.include_router(jobs.router, tags=["jobs"])
-api_router.include_router(transcription.router, tags=["transcription"])
-api_router.include_router(scenes.router, tags=["scenes"])
-api_router.include_router(scene_inputs.router, tags=["scenes"])
-api_router.include_router(image_prompts.router, tags=["scenes"])
-api_router.include_router(first_frames.router, tags=["scenes"])
-api_router.include_router(last_frame_prompts.router, tags=["scenes"])
-api_router.include_router(last_frames.router, tags=["scenes"])
-api_router.include_router(clips.router, tags=["scenes"])
-api_router.include_router(cast.router, tags=["cast"])
-api_router.include_router(renders.router, tags=["renders"])
-api_router.include_router(auto_pipeline.router, tags=["auto-generate"])
 api_router.include_router(image_lab.router, tags=["image-lab"])
 api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
 api_router.include_router(character_lab.router, tags=["character-lab"])
-api_router.include_router(voiceover_generation.router, tags=["voiceover"])

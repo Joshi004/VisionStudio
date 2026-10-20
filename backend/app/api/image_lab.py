@@ -11,7 +11,7 @@ and the page polls for it. See `services/image_lab.py`.
 
 The other routes read the database only: the history of runs, one run with its request and
 raw answer, the lab's own images (uploads and results), and a project's frames, so they can
-be picked as references. An image is uploaded as the raw request body, like a scene's frame.
+be picked as references. An image is uploaded as the raw request body.
 """
 
 from __future__ import annotations
@@ -174,9 +174,6 @@ class ProjectFrameOut(BaseModel):
     width: int | None
     height: int | None
     size_bytes: int
-    # Where the frame is used now: the scene's number (from 1) and the slot.
-    scene_number: int | None
-    slot: Literal["first", "last"] | None
 
 
 class ProjectFramesOut(BaseModel):
@@ -406,7 +403,7 @@ async def get_run(run_id: RunId, session: SessionDep) -> LabRunOut:
 )
 async def upload_image(request: Request, session: SessionDep) -> LabImageOut:
     """Stores a PNG, JPEG or WebP image sent as the raw request body, so it can be used as a
-    reference. The rules are those of a scene's frame.
+    reference. The type is decided by what the file holds (`services/frame_images.py`).
     """
     require_octet_stream(request)
     # No transaction of this request stays open while the file is received and decoded.
@@ -438,16 +435,14 @@ async def get_project_frames(
     return ProjectFramesOut(
         frames=[
             ProjectFrameOut(
-                asset_id=frame.asset.id,
-                created_at=frame.asset.created_at,
-                source=frame.asset.source,
-                url=media_url(frame.asset.path),
-                mime=frame.asset.mime,
-                width=frame.asset.width,
-                height=frame.asset.height,
-                size_bytes=frame.asset.size_bytes,
-                scene_number=frame.scene_number,
-                slot="first" if frame.slot == "first" else "last" if frame.slot == "last" else None,
+                asset_id=frame.id,
+                created_at=frame.created_at,
+                source=frame.source,
+                url=media_url(frame.path),
+                mime=frame.mime,
+                width=frame.width,
+                height=frame.height,
+                size_bytes=frame.size_bytes,
             )
             for frame in frames
         ]

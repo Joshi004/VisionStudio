@@ -3,13 +3,6 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
-import { AutoPipelineSection } from "../components/projects/AutoPipelineSection";
-import { CastSection } from "../components/projects/CastSection";
-import { RenderSection } from "../components/projects/RenderSection";
-import { ScenesSection } from "../components/projects/ScenesSection";
-import { ScriptSection } from "../components/projects/ScriptSection";
-import { TranscriptSection } from "../components/projects/TranscriptSection";
-import { VoiceoverSection } from "../components/projects/VoiceoverSection";
 import { capitalise } from "../format";
 
 export function ProjectNotFound() {
@@ -56,7 +49,7 @@ export function ProjectPage() {
                 <Badge variant="light">{capitalise(project.orientation)}</Badge>
               </Group>
               <Text size="sm" c="dimmed">
-                Create your frames at {project.gen_width} x {project.gen_height}. The final video is{" "}
+                Generation size {project.gen_width} x {project.gen_height}. The final video is{" "}
                 {project.out_width} x {project.out_height} at {project.fps} fps.
               </Text>
             </Stack>
@@ -65,13 +58,7 @@ export function ProjectPage() {
             </Button>
           </Group>
 
-          <VoiceoverSection project={project} />
-          <ScriptSection project={project} />
-          <AutoPipelineSection project={project} />
-          <TranscriptSection project={project} />
-          <CastSection project={project} />
-          <ScenesSection project={project} />
-          <RenderSection project={project} />
+          <Text c="dimmed">The story workspace comes in a later phase.</Text>
         </>
       )}
     </Stack>

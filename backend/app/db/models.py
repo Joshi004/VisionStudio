@@ -30,16 +30,15 @@ _CURRENT_TIMESTAMP = text("CURRENT_TIMESTAMP")
 
 
 class Project(Base):
-    """One row per video (ANALYSIS.md Section 4.3; DB Section 4.1)."""
+    """One row per project (ANALYSIS.md Section 4.3; DB Section 4.1).
+
+    Since revision 0022 a project keeps only its name, orientation, sizes, frame rate and
+    script text. The columns the narration pipeline used were dropped.
+    """
 
     __tablename__ = "project"
     __table_args__ = (
         CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
-        # `minimax-h3` since revision 0021 (before it only the labs could use MiniMax H3).
-        CheckConstraint(
-            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')",
-            name="video_model_valid",
-        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -51,37 +50,7 @@ class Project(Base):
     out_width: Mapped[int]
     out_height: Mapped[int]
     fps: Mapped[int] = mapped_column(default=24, server_default=text("24"))
-    min_scene_seconds: Mapped[float] = mapped_column(default=2.0, server_default=text("2.0"))
-    max_scene_seconds: Mapped[float] = mapped_column(default=6.0, server_default=text("6.0"))
-    style_prefix: Mapped[str | None] = mapped_column(default=None)
-    prompt_suffix: Mapped[str | None] = mapped_column(default=None)
-    negative_prompt: Mapped[str | None] = mapped_column(default=None)
-    clip_sound_volume: Mapped[float] = mapped_column(default=0.2, server_default=text("0.2"))
-    cut_instructions: Mapped[str | None] = mapped_column(default=None)
-    # Added in Phase 12: wishes for the AI that writes scene descriptions (characters,
-    # places, look, sound), the counterpart of `cut_instructions`.
-    description_instructions: Mapped[str | None] = mapped_column(default=None)
     script_text: Mapped[str | None] = mapped_column(default=None)
-    # Added in Phase 19: the video model that makes this project's clips (`ltx-2.3`, `ltx-2.5`
-    # or, since revision 0021, `minimax-h3`). NULL means "use the app's default" (the
-    # `default_video_model` setting). A scene's own `video_model` wins over this one.
-    video_model: Mapped[str | None] = mapped_column(default=None)
-    language: Mapped[str] = mapped_column(default="en", server_default=text("'en'"))
-    # Circular reference with `asset` (DATABASE_STRUCTURE.md Section 3): `asset.project_id`
-    # points back at this table. `use_alter=True` tells SQLAlchemy's dependency sorter the
-    # cycle is intended, which matters for `alembic revision --autogenerate` (it walks the
-    # ORM metadata and would otherwise raise on the cycle). SQLite has no ALTER TABLE ADD
-    # CONSTRAINT, so the migration still writes this foreign key inline in `CREATE TABLE
-    # project`, created before `asset`; SQLite allows the forward reference and only
-    # checks foreign keys at write time.
-    voiceover_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset.id", ondelete="SET NULL", use_alter=True), default=None
-    )
-    # Added in Phase 21: the saved voice that speaks the script when the voiceover is made by
-    # the app (Breeze TTS) instead of uploaded. NULL: none chosen.
-    voice_id: Mapped[int | None] = mapped_column(
-        ForeignKey("voice.id", ondelete="SET NULL"), default=None
-    )
 
 
 class Asset(Base):
@@ -111,236 +80,15 @@ class Asset(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
-class Transcript(Base):
-    """Word times from the transcription endpoint, matched to the script
-    (ANALYSIS.md Section 4.3 and 5.1; DB Section 4.3).
-    """
-
-    __tablename__ = "transcript"
-    __table_args__ = (Index("idx_transcript_project", "project_id"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
-    provider: Mapped[str]
-    language: Mapped[str]
-    words: Mapped[Any] = mapped_column(JSON)
-    script_words: Mapped[Any] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
-    # Added in Phase 5: which voiceover and which script this transcript was made from, so
-    # the app can tell when either has changed since (the transcript is then out of date).
-    voiceover_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset.id", ondelete="SET NULL"), default=None
-    )
-    script_sha256: Mapped[str]
-
-
-class Scene(Base):
-    """One cut = one clip (ANALYSIS.md Section 4.3, 5.2, 5.7; DB Section 4.4)."""
-
-    __tablename__ = "scene"
-    __table_args__ = (
-        CheckConstraint("cut_source IN ('ai', 'rule', 'manual')", name="cut_source_valid"),
-        CheckConstraint(
-            "scene_description_source IN ('manual', 'ai')", name="scene_description_source_valid"
-        ),
-        CheckConstraint(
-            "first_frame_description_source IN ('manual', 'ai')",
-            name="first_frame_description_source_valid",
-        ),
-        CheckConstraint(
-            "last_frame_description_source IN ('manual', 'ai')",
-            name="last_frame_description_source_valid",
-        ),
-        CheckConstraint(
-            "image_prompt_source IN ('manual', 'ai')", name="image_prompt_source_valid"
-        ),
-        CheckConstraint(
-            "last_frame_prompt_source IN ('manual', 'ai')",
-            name="last_frame_prompt_source_valid",
-        ),
-        CheckConstraint(
-            "cast_assignment_source IN ('manual', 'ai')",
-            name="cast_assignment_source_valid",
-        ),
-        # `minimax-h3` since revision 0021 (before it only the labs could use MiniMax H3).
-        CheckConstraint(
-            "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')",
-            name="video_model_valid",
-        ),
-        UniqueConstraint("project_id", "index"),
-        Index("idx_scene_project", "project_id"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
-    index: Mapped[int] = mapped_column("index")
-    start_s: Mapped[float]
-    end_s: Mapped[float]
-    text: Mapped[str]
-    cut_source: Mapped[str]
-    cut_note: Mapped[str | None] = mapped_column(default=None)
-    scene_description: Mapped[str | None] = mapped_column(default=None)
-    scene_description_source: Mapped[str | None] = mapped_column(default=None)
-    # Added in Phase 12. What the first and last frame should show: written by the AI that
-    # drafts descriptions, or by hand. Since Phase 15 each text has its own source (they
-    # shared one before), and the AI writes only the first: the last-frame description is
-    # for a last frame the author adds by hand. `description_job_id` is the
-    # `draft_descriptions` job that wrote the AI text, so a scene can be traced back to the
-    # exact prompt that produced it.
-    first_frame_description: Mapped[str | None] = mapped_column(default=None)
-    last_frame_description: Mapped[str | None] = mapped_column(default=None)
-    first_frame_description_source: Mapped[str | None] = mapped_column(default=None)
-    last_frame_description_source: Mapped[str | None] = mapped_column(default=None)
-    # `use_alter`: `job.scene_id` points back at this table, the same intended cycle as
-    # project and asset (see `Project.voiceover_asset_id`).
-    description_job_id: Mapped[int | None] = mapped_column(
-        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
-    )
-    # Added in Phase 16: the detailed prompt for the image model that makes the first frame,
-    # written by the AI (one `write_image_prompt` job per scene) or by hand. The job keeps the
-    # exact request and a hash of the inputs, so whether the prompt is out of date is worked
-    # out when it is read, never stored.
-    image_prompt: Mapped[str | None] = mapped_column(default=None)
-    image_prompt_source: Mapped[str | None] = mapped_column(default=None)
-    image_prompt_job_id: Mapped[int | None] = mapped_column(
-        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
-    )
-    # Added in Phase 23: the instruction for the image model's edit that turns the first frame
-    # into the last frame, written by the AI (one `write_last_frame_prompt` job per scene) or
-    # by hand. Same rules as `image_prompt`: whether it is out of date is worked out when it is
-    # read, never stored.
-    last_frame_prompt: Mapped[str | None] = mapped_column(default=None)
-    last_frame_prompt_source: Mapped[str | None] = mapped_column(default=None)
-    last_frame_prompt_job_id: Mapped[int | None] = mapped_column(
-        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
-    )
-    first_frame_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset.id", ondelete="SET NULL"), default=None
-    )
-    last_frame_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset.id", ondelete="SET NULL"), default=None
-    )
-    use_clip_sound: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
-    selected_clip_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset.id", ondelete="SET NULL"), default=None
-    )
-    # Added in Phase 19: the video model that makes this scene's clips. NULL means "use the
-    # project's" (and, when that is NULL too, the app's default).
-    video_model: Mapped[str | None] = mapped_column(default=None)
-    # Added with the project's cast: the place this scene shows (optional), chosen by the AI
-    # (`assign_cast` job) or by hand. The characters it shows are rows of `scene_character`
-    # (none, one or several). Only a scene that names a character or a place is made from their
-    # reference pictures.
-    location_id: Mapped[int | None] = mapped_column(
-        ForeignKey("location.id", ondelete="SET NULL"), default=None
-    )
-    cast_assignment_source: Mapped[str | None] = mapped_column(default=None)
-    cast_assignment_job_id: Mapped[int | None] = mapped_column(
-        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
-    )
-
-
-class Character(Base):
-    """A character of a project's story: who it is, what it looks like and the reference picture
-    that pins the look, so every scene that shows it is made from the same picture. The text is
-    written by the AI that reads the script (`extract_cast` job) and edited by hand. The
-    reference picture is a Qwen image on a plain white backdrop with the backdrop removed
-    (`reference_asset_id`, an asset of kind `reference`). `status` follows its steps: `pending`
-    (nothing yet), `prompted` (the prompt for the picture is written), `ready` (the picture is
-    made) and `failed` (the picture could not be made).
-
-    `voice_description` is only a note for the AI that writes prompts. Nothing speaks: a story is
-    told by its voiceover.
-    """
-
-    __tablename__ = "character"
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('pending', 'prompted', 'ready', 'failed')", name="status_valid"
-        ),
-        Index("idx_character_project", "project_id"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
-    name: Mapped[str]
-    appearance_description: Mapped[str]
-    personality_description: Mapped[str | None] = mapped_column(default=None)
-    voice_description: Mapped[str | None] = mapped_column(default=None)
-    reference_prompt: Mapped[str | None] = mapped_column(default=None)
-    # `use_alter`, written the same way as a place's: `job.scene_id` -> `scene.location_id` ->
-    # `location` -> `job` is a cycle, and the two tables are kept alike.
-    reference_prompt_job_id: Mapped[int | None] = mapped_column(
-        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
-    )
-    reference_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset.id", ondelete="SET NULL"), default=None
-    )
-    status: Mapped[str] = mapped_column(default="pending", server_default=text("'pending'"))
-    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
-
-
-class Location(Base):
-    """A place of a project's story (a palace, a forest): the same as a `Character`, without a
-    personality or a voice.
-    """
-
-    __tablename__ = "location"
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('pending', 'prompted', 'ready', 'failed')", name="status_valid"
-        ),
-        Index("idx_location_project", "project_id"),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
-    name: Mapped[str]
-    appearance_description: Mapped[str]
-    reference_prompt: Mapped[str | None] = mapped_column(default=None)
-    reference_prompt_job_id: Mapped[int | None] = mapped_column(
-        ForeignKey("job.id", ondelete="SET NULL", use_alter=True), default=None
-    )
-    reference_asset_id: Mapped[int | None] = mapped_column(
-        ForeignKey("asset.id", ondelete="SET NULL"), default=None
-    )
-    status: Mapped[str] = mapped_column(default="pending", server_default=text("'pending'"))
-    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
-
-
-class SceneCharacter(Base):
-    """A character a scene shows. A scene shows none, one or several, so the characters are rows
-    here instead of a column of `scene`. `position` is the order of the characters' reference
-    pictures when the scene's first frame is made (0 is image 1), and it is part of what the
-    scene's image prompt is written from. The rows go with the scene or the character
-    (`ON DELETE CASCADE`).
-    """
-
-    __tablename__ = "scene_character"
-    __table_args__ = (Index("idx_scene_character_character", "character_id"),)
-
-    scene_id: Mapped[int] = mapped_column(
-        ForeignKey("scene.id", ondelete="CASCADE"), primary_key=True
-    )
-    character_id: Mapped[int] = mapped_column(
-        ForeignKey("character.id", ondelete="CASCADE"), primary_key=True
-    )
-    position: Mapped[int]
-
-
 class Job(Base):
     """Every unit of background work (ANALYSIS.md Section 3.3, 4.2–4.3; DB Section 4.5)."""
 
     __tablename__ = "job"
     __table_args__ = (
+        # The six lab job types, since revision 0022 retired the narration ones.
         CheckConstraint(
-            "type IN ('transcribe', 'plan_scenes', 'draft_descriptions', "
-            "'write_image_prompt', 'generate_frame', 'generate_clip', 'render_final', "
-            "'lab_video', 'write_lab_video_prompt', 'auto_pipeline', 'lab_voice', "
-            "'generate_voiceover', 'lab_image', 'write_last_frame_prompt', "
-            "'generate_last_frame', 'extract_cast', "
-            "'write_character_reference_prompt', 'generate_character_reference', "
-            "'assign_cast', 'write_character_look_prompt', 'write_character_take_prompt')",
+            "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
+            "'write_character_look_prompt', 'write_character_take_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -349,18 +97,14 @@ class Job(Base):
         ),
         CheckConstraint("provider IN ('gpu', 'llm', 'image', 'local')", name="provider_valid"),
         Index("idx_job_project", "project_id"),
-        Index("idx_job_scene", "scene_id"),
         Index("idx_job_status", "status"),
         Index("idx_job_type_status", "type", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # NULL only for the jobs of the Video lab (Phase 19), which belongs to no project.
+    # NULL for the jobs of the labs (Phase 19), which belong to no project.
     project_id: Mapped[int | None] = mapped_column(
         ForeignKey("project.id", ondelete="CASCADE"), default=None
-    )
-    scene_id: Mapped[int | None] = mapped_column(
-        ForeignKey("scene.id", ondelete="CASCADE"), default=None
     )
     type: Mapped[str]
     status: Mapped[str] = mapped_column(default="queued", server_default=text("'queued'"))
@@ -496,7 +240,7 @@ class LabVideoRun(Base):
 
     __tablename__ = "lab_video_run"
     __table_args__ = (
-        # The lab has taken MiniMax H3 since revision 0017; `project` and `scene` since 0021.
+        # The lab has taken MiniMax H3 since revision 0017.
         CheckConstraint(
             "video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')", name="video_model_valid"
         ),
@@ -667,8 +411,8 @@ class LibraryCharacter(Base):
 
 class CharacterLook(Base):
     """One attempt at a library character's reference pictures (Phase 25): a master picture (on
-    a white backdrop, like a project's cast reference) plus four more angles made by editing it,
-    so every later picture, scene and clip of the character can be made consistent with it.
+    a white backdrop) plus four more angles made by editing it, so every later picture and
+    clip of the character can be made consistent with it.
 
     `version` numbers a character's looks from 1. `status` moves `writing_prompt` ->
     `choosing` (candidates are ready, waiting for one to be picked as the master) ->
@@ -780,7 +524,7 @@ class CharacterTake(Base):
     __tablename__ = "character_take"
     __table_args__ = (
         CheckConstraint("output IN ('image', 'audio', 'video')", name="output_valid"),
-        # A take can use MiniMax H3 too (revision 0019), unlike a project's scenes.
+        # A take can use MiniMax H3 too (revision 0019).
         CheckConstraint(
             "video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')",
             name="video_model_valid",

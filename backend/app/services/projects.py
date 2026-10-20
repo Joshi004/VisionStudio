@@ -1,14 +1,16 @@
 """Projects: creating them, editing them and the rules their values must follow.
 
 ANALYSIS.md Section 4.4 gives the defaults an orientation fills in, and
-Sections 3.7, 5.3 and 5.4 give the rules (generation sizes are multiples of
-64, output sizes are even because H.264 needs it, the minimum scene length is
-below the maximum). All the rules live in `validate_project`, so creating and
-editing share them. The messages are written for the user and are returned
-as-is in the API's `{"detail": ...}` answers.
+Sections 3.7 and 5.3 give the rules (generation sizes are multiples of 64, output
+sizes are even because H.264 needs it). All the rules live in `validate_project`,
+so creating and editing share them. The messages are written for the user and are
+returned as-is in the API's `{"detail": ...}` answers.
 
 The orientation is fixed once a project exists. The sizes stay editable, but
 both sizes must keep the orientation's shape (ITERATION_1_PHASES.md Phase 3).
+
+A project keeps only its name, orientation, sizes, frame rate and script text. The
+narration pipeline's other settings were retired in PHASE-046.
 """
 
 from __future__ import annotations
@@ -20,25 +22,14 @@ from typing import Final
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import settings as settings_service
-from app.db.models import Asset, Project, Voice
-from app.services import video_models
+from app.db.models import Project
 
 LANDSCAPE = "landscape"
 PORTRAIT = "portrait"
 
 DEFAULT_FPS: Final = 24
-DEFAULT_MIN_SCENE_SECONDS: Final = 2.0
-DEFAULT_MAX_SCENE_SECONDS: Final = 6.0
-DEFAULT_CLIP_SOUND_VOLUME: Final = 0.2
-DEFAULT_LANGUAGE: Final = "en"
-# The global setting whose text a new project starts with as its negative prompt.
-DEFAULT_NEGATIVE_PROMPT_KEY: Final = "default_negative_prompt"
-# The global setting that chooses the video model when neither a scene nor its project does.
-DEFAULT_VIDEO_MODEL_KEY: Final = "default_video_model"
 
 NAME_MAX_CHARS: Final = 200
-GUIDELINE_MAX_CHARS: Final = 2000
 SCRIPT_MAX_CHARS: Final = 100_000
 
 SIZE_MIN: Final = 256
@@ -46,8 +37,6 @@ SIZE_MAX: Final = 3840
 GENERATION_SIZE_MULTIPLE: Final = 64
 FPS_MIN: Final = 12
 FPS_MAX: Final = 60
-SCENE_SECONDS_MIN: Final = 0.5
-SCENE_SECONDS_MAX: Final = 20.0
 
 
 @dataclass(frozen=True)
@@ -67,7 +56,7 @@ ORIENTATION_DEFAULTS: Final[Mapping[str, OrientationDefaults]] = {
     PORTRAIT: OrientationDefaults(gen_width=1088, gen_height=1920, out_width=1080, out_height=1920),
 }
 
-# What a PATCH may change. The orientation, the id and the voiceover are not here.
+# What a PATCH may change. The orientation and the id are not here.
 _FIELD_LABELS: Final[Mapping[str, str]] = {
     "name": "Name",
     "gen_width": "Generation width",
@@ -75,26 +64,9 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "out_width": "Output width",
     "out_height": "Output height",
     "fps": "Frame rate",
-    "min_scene_seconds": "Minimum scene length",
-    "max_scene_seconds": "Maximum scene length",
-    "clip_sound_volume": "Clip sound volume",
-    "style_prefix": "Style prefix",
-    "prompt_suffix": "Prompt suffix",
-    "negative_prompt": "Negative prompt",
-    "cut_instructions": "Cut instructions",
-    "description_instructions": "Description instructions",
     "script_text": "Script",
-    "video_model": "Video model",
-    "voice_id": "Voice",
 }
-_GUIDELINE_FIELDS: Final = (
-    "style_prefix",
-    "prompt_suffix",
-    "negative_prompt",
-    "cut_instructions",
-    "description_instructions",
-)
-_NULLABLE_FIELDS: Final = frozenset((*_GUIDELINE_FIELDS, "script_text", "video_model", "voice_id"))
+_NULLABLE_FIELDS: Final = frozenset(("script_text",))
 
 
 class ProjectValidationError(ValueError):
@@ -152,55 +124,18 @@ def validate_project(project: Project) -> None:
             f"{_FIELD_LABELS['fps']} must be a whole number from {FPS_MIN} to {FPS_MAX}."
         )
 
-    for field in ("min_scene_seconds", "max_scene_seconds"):
-        value = getattr(project, field)
-        # Written so that NaN, which compares false to everything, is rejected too.
-        if not SCENE_SECONDS_MIN <= value <= SCENE_SECONDS_MAX:
-            raise ProjectValidationError(
-                f"{_FIELD_LABELS[field]} must be from {SCENE_SECONDS_MIN:g} "
-                f"to {SCENE_SECONDS_MAX:g} seconds."
-            )
-    if project.min_scene_seconds >= project.max_scene_seconds:
-        raise ProjectValidationError("Minimum scene length must be below the maximum.")
-
-    if not 0.0 <= project.clip_sound_volume <= 1.0:
-        raise ProjectValidationError("Clip sound volume must be from 0 to 100 percent.")
-
-    for field in _GUIDELINE_FIELDS:
-        value = getattr(project, field)
-        if value is not None and len(value) > GUIDELINE_MAX_CHARS:
-            raise ProjectValidationError(
-                f"{_FIELD_LABELS[field]} must be at most {GUIDELINE_MAX_CHARS} characters."
-            )
-
     if project.script_text is not None and len(project.script_text) > SCRIPT_MAX_CHARS:
         raise ProjectValidationError(f"The script must be at most {SCRIPT_MAX_CHARS:,} characters.")
-
-    # NULL means "use the app's default video model".
-    if project.video_model is not None and not video_models.is_video_model(project.video_model):
-        raise ProjectValidationError(
-            "Video model must be one of: "
-            + ", ".join(video_models.LABELS[model] for model in video_models.MODEL_IDS)
-            + ", or the app's default."
-        )
 
 
 def _normalise_name(value: str) -> str:
     return value.strip()
 
 
-def _normalise_guideline(value: str | None) -> str | None:
-    """Trims the text, and stores a blank guideline as NULL."""
-    if value is None:
-        return None
-    return value.strip() or None
-
-
 def _normalise_script(value: str | None) -> str | None:
     """Keeps the script exactly as pasted: no trimming, no line-ending changes.
 
-    Blank lines are scene-break hints (ANALYSIS.md Section 5.2). Only a script
-    that is nothing but whitespace is stored as NULL.
+    Only a script that is nothing but whitespace is stored as NULL.
     """
     if value is None or not value.strip():
         return None
@@ -213,15 +148,6 @@ async def create_project(session: AsyncSession, name: str, orientation: str) -> 
         raise ProjectValidationError("Orientation must be landscape or portrait.")
     sizes = ORIENTATION_DEFAULTS[orientation]
 
-    # The app's default negative prompt, so the new project shows it and can edit it. It is
-    # left out when blank, or when it is longer than a project's own field accepts (the
-    # global setting has no length limit, and project creation must not fail because of it).
-    default_negative_prompt = (
-        await settings_service.get_str(session, DEFAULT_NEGATIVE_PROMPT_KEY)
-    ).strip()
-    if len(default_negative_prompt) > GUIDELINE_MAX_CHARS:
-        default_negative_prompt = ""
-
     # Every default is set here, rather than left to the column defaults, because the
     # column defaults only apply at INSERT time and validation runs before that.
     project = Project(
@@ -232,11 +158,6 @@ async def create_project(session: AsyncSession, name: str, orientation: str) -> 
         out_width=sizes.out_width,
         out_height=sizes.out_height,
         fps=DEFAULT_FPS,
-        min_scene_seconds=DEFAULT_MIN_SCENE_SECONDS,
-        max_scene_seconds=DEFAULT_MAX_SCENE_SECONDS,
-        clip_sound_volume=DEFAULT_CLIP_SOUND_VOLUME,
-        negative_prompt=default_negative_prompt or None,
-        language=DEFAULT_LANGUAGE,
     )
     validate_project(project)
     session.add(project)
@@ -248,29 +169,10 @@ async def get_project(session: AsyncSession, project_id: int) -> Project | None:
     return await session.get(Project, project_id)
 
 
-async def default_video_model(session: AsyncSession) -> video_models.VideoModel:
-    """The app's default video model (the global setting). A saved value that is not a known
-    model (the setting is validated, so only an old row could be) counts as the built-in one.
-    """
-    value = await settings_service.get_str(session, DEFAULT_VIDEO_MODEL_KEY)
-    return value if video_models.is_video_model(value) else video_models.DEFAULT_MODEL
-
-
-async def get_voiceover(session: AsyncSession, project: Project) -> Asset | None:
-    if project.voiceover_asset_id is None:
-        return None
-    return await session.get(Asset, project.voiceover_asset_id)
-
-
-async def list_projects(session: AsyncSession) -> list[tuple[Project, Asset | None]]:
-    """All projects, newest first, each with its voiceover asset if it has one."""
-    statement = (
-        select(Project, Asset)
-        .outerjoin(Asset, Project.voiceover_asset_id == Asset.id)
-        .order_by(Project.created_at.desc(), Project.id.desc())
-    )
-    result = await session.execute(statement)
-    return [(project, asset) for project, asset in result.all()]
+async def list_projects(session: AsyncSession) -> list[Project]:
+    """All projects, newest first."""
+    statement = select(Project).order_by(Project.created_at.desc(), Project.id.desc())
+    return list((await session.execute(statement)).scalars())
 
 
 async def update_project(
@@ -284,11 +186,6 @@ async def update_project(
     unknown = [field for field in changes if field not in _FIELD_LABELS]
     if unknown:
         raise ProjectValidationError(f"{unknown[0]} cannot be changed.")
-
-    # The saved voice that speaks the script. NULL means none is chosen.
-    voice_id = changes.get("voice_id")
-    if isinstance(voice_id, int) and await session.get(Voice, voice_id) is None:
-        raise ProjectValidationError(f"There is no saved voice {voice_id}.")
 
     try:
         for field, value in changes.items():
@@ -308,8 +205,6 @@ def _prepare_value(field: str, value: object) -> object:
         raise ProjectValidationError(f"{_FIELD_LABELS[field]} cannot be empty.")
     if field == "name":
         return _normalise_name(str(value))
-    if field in _GUIDELINE_FIELDS:
-        return _normalise_guideline(value if isinstance(value, str) else None)
     if field == "script_text":
         return _normalise_script(value if isinstance(value, str) else None)
     return value

@@ -3,8 +3,8 @@
 Only two things limit how much work can run at once, so only two numbers are enforced, and every
 kind of job shares them:
 
-- **`gpu`**: the in-house GPU server (clips, frames, reference pictures, transcription, speech,
-  and the language-model calls answered by Qwen3.8). Its limit is the `max_parallel_gpu_jobs`
+- **`gpu`**: the in-house GPU server (video, images, reference pictures, speech, and the
+  language-model calls answered by Qwen3.8). Its limit is the `max_parallel_gpu_jobs`
   setting.
 - **`paid_api`**: the paid inference API (the language-model calls of every role set to
   Bitdeer). Its limit is the `max_parallel_paid_api_calls` setting.
@@ -13,8 +13,9 @@ A job type has no limit of its own. Which pool a job counts in comes from its ha
 `provider`, so a new job type joins the right pool without anything else being written. An
 `llm` job is the exception: it counts where its calls go (`on_qwen38`).
 
-A job whose provider is neither (the `local` ones: the final render and the automatic run) is its
-own pool, counted under its job type, and its handler says how many may run at once.
+A job whose provider is neither (a `local` one, such as a render on this machine) is its own
+pool, counted under its job type, and its handler says how many may run at once. No job type
+is local today.
 
 A job takes one slot of its pool, except a MiniMax H3 clip, which holds 4 or 8 GPUs on one node
 as the server decides from the request's size. It takes the number of GPUs the server reported

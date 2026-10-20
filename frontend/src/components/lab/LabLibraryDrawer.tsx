@@ -166,11 +166,7 @@ function ImagesSection({ actions }: { actions: LibraryActions }) {
               <ImageCard
                 key={frame.asset_id}
                 item={referenceFromFrame(frame)}
-                caption={
-                  frame.scene_number !== null
-                    ? `scene ${frame.scene_number}, ${frame.slot}`
-                    : `frame ${frame.asset_id}`
-                }
+                caption={`frame ${frame.asset_id}`}
                 actions={actions}
               />
             ))}

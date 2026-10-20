@@ -1,11 +1,3 @@
-/** "0:05" or "12:34" for a length in seconds. */
-export function formatDuration(seconds: number): string {
-  const whole = Math.round(seconds);
-  const minutes = Math.floor(whole / 60);
-  const rest = whole % 60;
-  return `${minutes}:${String(rest).padStart(2, "0")}`;
-}
-
 export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) {
     return `${Math.max(1, Math.round(bytes / 1024))} KB`;

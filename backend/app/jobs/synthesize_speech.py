@@ -1,8 +1,8 @@
-"""The shared part of the two speech jobs: Breeze TTS on the GPU server (Phase 21).
+"""The shared part of the speech jobs: Breeze TTS on the GPU server (Phase 21).
 
-`lab_voice` (one speech in the Voice lab) and `generate_voiceover` (the voiceover of a project,
-made from its script) differ only in what they do with the finished WAV, so both extend
-`SpeechHandler` and implement `store_result`.
+Speech jobs differ only in what they do with the finished WAV, so each extends
+`SpeechHandler` and implements `store_result` (today only `lab_voice`, one speech in the Voice
+lab; the story pipeline adds more).
 
 It is a remote job, so the three steps follow `JobHandler`:
 
@@ -23,7 +23,7 @@ that is not in it, and the uploaded recording is reused.
 **Nothing is purged before the end**: purging a piece also deletes the uploads no other job
 uses, and the pieces share the recording.
 
-Failure handling follows the transcription job: a dropped connection never fails the job. It
+Failure handling follows the other remote jobs: a dropped connection never fails the job. It
 fails when the server says it failed (other than pre-emption), refuses the request, or returns
 something that cannot be used.
 
@@ -44,8 +44,8 @@ from app.core.urls import docker_mapped
 from app.db.models import Job
 from app.db.session import SessionLocal
 from app.jobs import phases, store
+from app.jobs.gpu_job import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
 from app.jobs.handlers import JobHandler
-from app.jobs.transcribe import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
 from app.providers import gpu_server, speech_synthesizer
 from app.providers.gpu_server import GpuCallError
 from app.services import ffmpeg, speech_audio

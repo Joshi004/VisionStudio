@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { describeError } from "../api/errors";
 import { useProjects } from "../api/projects";
 import { CreateProjectModal } from "../components/projects/CreateProjectModal";
-import { capitalise, formatDuration } from "../format";
+import { capitalise } from "../format";
 
 export function ProjectsPage() {
   const { data, isLoading, isError, error } = useProjects();
@@ -35,7 +35,6 @@ export function ProjectsPage() {
               <Table.Th>Name</Table.Th>
               <Table.Th>Orientation</Table.Th>
               <Table.Th>Created</Table.Th>
-              <Table.Th>Voiceover</Table.Th>
               <Table.Th>Script</Table.Th>
             </Table.Tr>
           </Table.Thead>
@@ -51,11 +50,6 @@ export function ProjectsPage() {
                   <Badge variant="light">{capitalise(project.orientation)}</Badge>
                 </Table.Td>
                 <Table.Td>{new Date(project.created_at).toLocaleString()}</Table.Td>
-                <Table.Td>
-                  {project.voiceover_duration_s === null
-                    ? "—"
-                    : formatDuration(project.voiceover_duration_s)}
-                </Table.Td>
                 <Table.Td>{project.has_script ? "Yes" : "No"}</Table.Td>
               </Table.Tr>
             ))}

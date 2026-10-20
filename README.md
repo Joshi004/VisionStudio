@@ -1,9 +1,23 @@
 # Visio Studio
 
 A two-container app: `frontend` (nginx serving a built React app) and
-`backend` (FastAPI with SQLite on a named volume). This is the Phase 1
-foundation — the app shell, the full database schema, and the security
-baseline. There are no features yet.
+`backend` (FastAPI with SQLite on a named volume).
+
+What it does today:
+
+- **Projects**: create a project (name, orientation, video size and frame
+  rate) and open it. The story workspace for a project comes in a later
+  phase, so a project page shows only its settings for now.
+- **Labs**: the Image lab, the Voice lab and the Video lab try the GPU
+  server's models by hand, and the Character lab makes characters, looks and
+  takes. The Activity page lists their background jobs.
+- **Settings**: the GPU server address, the language-model roles, the image
+  mode, the shot-duration limits and the parallel-job limits.
+
+The earlier voiceover-driven narration pipeline (transcription, scenes, clips,
+render, cast, automatic run) was retired in PHASE-046. Its code is kept at the
+git tag `narration-final`, for example
+`git show narration-final:backend/app/services/scenes.py`.
 
 ## Start
 
@@ -41,6 +55,26 @@ After changing backend or frontend code:
 ```bash
 docker compose up --build -d
 ```
+
+The backend container runs `alembic upgrade head` every time it starts, so a
+rebuild applies any new migration to the database on the `data` volume.
+Migration `0022` (PHASE-046) **permanently deletes** the narration data: the
+scenes, transcripts, cast and every narration job. It cannot be undone, and it
+has no downgrade. Before the first start after pulling it, copy the database
+to a folder outside Docker (stop the backend first, so no write is in
+flight):
+
+```bash
+docker compose stop backend
+mkdir -p ~/visio-studio-backup
+docker compose run --rm --no-deps -v "$HOME/visio-studio-backup:/backup" \
+  --entrypoint sh backend -c 'cp /data/app.db* /backup/'
+ls ~/visio-studio-backup   # app.db must be there before you go on
+docker compose up --build -d
+```
+
+`app.db*` also copies the `-wal` and `-shm` files when they exist. Media files
+are not touched by the migration, so they are not part of this copy.
 
 ## Logs
 

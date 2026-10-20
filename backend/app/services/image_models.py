@@ -28,6 +28,8 @@ LABELS: Final[dict[ImageMode, str]] = {
 }
 # Used when the saved setting is somehow not a known mode.
 DEFAULT_MODE: Final[ImageMode] = "quality"
+# The global setting that holds the mode.
+IMAGE_MODE_KEY: Final = "image_mode"
 
 # What is recorded on an asset that this model made.
 MODEL_ID: Final = "qwen-image-2.1"

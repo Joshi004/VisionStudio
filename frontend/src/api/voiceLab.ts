@@ -4,14 +4,13 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { isValidProjectId, PROJECTS_KEY, uploadError } from "./projects";
+import { uploadError } from "./projects";
 import type { components } from "./schema";
 
 export type VoiceLabRun = components["schemas"]["LabVoiceRunOut"];
 export type VoiceLabRunCreate = components["schemas"]["LabVoiceRunCreate"];
 export type Voice = components["schemas"]["VoiceOut"];
 export type VoiceUpdate = components["schemas"]["VoiceUpdate"];
-export type VoiceoverGeneration = components["schemas"]["VoiceoverGenerationOut"];
 
 /** The backend's own limit. The server stays the judge; this only avoids a pointless upload. */
 export const VOICE_UPLOAD_MAX_MB = 50;
@@ -21,7 +20,7 @@ const PAGE_SIZE = 20;
 /** Every Voice lab query starts with this key. */
 export const VOICE_LAB_KEY = ["lab", "voices"] as const;
 const runsKey = [...VOICE_LAB_KEY, "runs"] as const;
-/** The saved voices. Projects use them too, so it is a key of its own. */
+/** The saved voices. The Character lab uses them too, so it is a key of its own. */
 export const VOICES_KEY = ["voices"] as const;
 
 async function fetchRuns(beforeId: number | undefined) {
@@ -118,8 +117,8 @@ export function useVoices() {
 }
 
 /**
- * Saves a recording as a voice. The recording is the request body, as a voiceover is sent;
- * its name and what it says go in the query.
+ * Saves a recording as a voice. The recording is the request body; its name and what it
+ * says go in the query.
  */
 export function useUploadVoice() {
   const queryClient = useQueryClient();
@@ -185,56 +184,5 @@ export function useUpdateVoice() {
       return data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: VOICES_KEY }),
-  });
-}
-
-// --- A project's voiceover, made from its script ---------------------------------------------
-
-async function fetchGeneration(projectId: number) {
-  const { data, error, response } = await api.GET(
-    "/api/projects/{project_id}/voiceover/generation",
-    { params: { path: { project_id: projectId } } },
-  );
-  if (!data) {
-    throw new ApiError(
-      detailMessage(error, `Could not load the voiceover job (HTTP ${response.status}).`),
-      response.status,
-    );
-  }
-  return data;
-}
-
-/**
- * The newest job that makes the project's voiceover from its script, and whether the
- * voiceover is up to date. It lives under the project's key, so saving the script refreshes
- * it, and it is loaded again every few seconds while the job is waiting or running.
- */
-export function useVoiceoverGeneration(projectId: number) {
-  return useQuery({
-    queryKey: [...PROJECTS_KEY, projectId, "voiceover-generation"],
-    queryFn: () => fetchGeneration(projectId),
-    enabled: isValidProjectId(projectId),
-    refetchInterval: (query) => (isJobActive(query.state.data?.job) ? ACTIVE_POLL_MS : false),
-  });
-}
-
-/** Starts making the voiceover and returns at once. The page follows the job by itself. */
-export function useGenerateVoiceover(projectId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const { data, error, response } = await api.POST(
-        "/api/projects/{project_id}/voiceover/generate",
-        { params: { path: { project_id: projectId } } },
-      );
-      if (!data) {
-        throw new ApiError(
-          detailMessage(error, `Could not start the voiceover (HTTP ${response.status}).`),
-          response.status,
-        );
-      }
-      return data;
-    },
-    onSuccess: () => invalidateAfterJobAction(queryClient),
   });
 }

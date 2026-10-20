@@ -34,15 +34,15 @@ from typing import Any, Final
 
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
-from app.jobs import phases, store
-from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
+from app.jobs import llm_call, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.providers.llm import LlmCallError
-from app.services import description_writer, llm_target
 from app.services import lab_prompt_writer as writer
+from app.services import llm_target
 from app.services.lab_prompt_profiles import LabPromptProfile, profile_for
 from app.services.lab_prompt_writer import CheckedPrompt
+from app.services.llm_target import DESCRIPTION_MODEL_KEY
 
 _logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ class WriteLabVideoPromptHandler(JobHandler):
         body = writer.build_request(inputs, model=target.model, profile=profile)
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
-            instructions_sha256=description_writer.instructions_sha256(body),
+            instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),
             endpoint=llm_target.endpoint(target),
             request=body,

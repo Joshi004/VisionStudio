@@ -28,7 +28,7 @@ from app.core.config import env_value
 from app.core.urls import UrlError, docker_mapped, validate_base_url
 from app.db.models import Setting
 from app.db.types import utcnow
-from app.services import image_models, video_models
+from app.services import image_models
 from app.services.frame_counts import H3_FPS, H3_MAX_FRAMES
 
 _logger = logging.getLogger(__name__)
@@ -105,7 +105,6 @@ class SettingSpec:
 GROUP_GPU = "GPU server"
 GROUP_LLM = "Language model"
 GROUP_IMAGE = "Image model"
-GROUP_VIDEO = "Video model"
 GROUP_DURATION = "Shot duration"
 GROUP_LIMITS = "Limits"
 
@@ -234,8 +233,10 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key=LLM_PROVIDER_KEY,
         group=GROUP_LLM,
-        label="Scene planning provider",
-        help=_provider_help("proposes the scene cuts and assigns the cast to scenes"),
+        label="Planning provider",
+        help=_provider_help(
+            "plans a story. Nothing uses this role yet: only the retired narration pipeline did"
+        ),
         value_type="string",
         default=PROVIDER_BITDEER,
         choices=_PROVIDER_CHOICES,
@@ -244,7 +245,10 @@ REGISTRY: tuple[SettingSpec, ...] = (
         key="llm_model",
         group=GROUP_LLM,
         label="LLM model (Bitdeer)",
-        help="Bitdeer model that proposes the scene cuts. Used only when its provider is Bitdeer.",
+        help=(
+            "Bitdeer model for the planning role. Nothing uses it yet. Used only when its "
+            "provider is Bitdeer."
+        ),
         value_type="string",
         default="zai-org/GLM-5.3-Flash",
         pattern=TextPattern(
@@ -256,10 +260,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         key=DESCRIPTION_PROVIDER_KEY,
         group=GROUP_LLM,
         label="Description provider",
-        help=_provider_help(
-            "writes the scene and frame descriptions, extracts the cast, and writes the "
-            "Video lab and character take prompts"
-        ),
+        help=_provider_help("writes the Video lab and character take prompts"),
         value_type="string",
         default=PROVIDER_BITDEER,
         choices=_PROVIDER_CHOICES,
@@ -269,7 +270,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_LLM,
         label="Description model (Bitdeer)",
         help=(
-            "Bitdeer model that writes the scene descriptions and frame descriptions. It uses "
+            "Bitdeer model that writes the Video lab and character take prompts. It uses "
             "the LLM URL above, and only when its provider is Bitdeer. A larger model writes "
             "better, and costs more."
         ),
@@ -284,10 +285,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         key=IMAGE_PROMPT_PROVIDER_KEY,
         group=GROUP_LLM,
         label="Image prompt provider",
-        help=_provider_help(
-            "writes the image prompts for first and last frames, character references and "
-            "character looks"
-        ),
+        help=_provider_help("writes the image prompts for character looks"),
         value_type="string",
         default=PROVIDER_BITDEER,
         choices=_PROVIDER_CHOICES,
@@ -297,8 +295,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_LLM,
         label="Image prompt model (Bitdeer)",
         help=(
-            "Bitdeer model that writes a detailed image prompt for each scene's first frame, "
-            "one call per scene. It uses the LLM URL above, and only when its provider is "
+            "Bitdeer model that writes the image prompt for a character look. It uses the "
+            "LLM URL above, and only when its provider is "
             "Bitdeer."
         ),
         value_type="string",
@@ -313,8 +311,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_IMAGE,
         label="Image mode",
         help=(
-            "How Qwen-Image-2.1 on your GPU server makes each scene's first frame. Quality uses "
-            "the base model (40 steps) and fast uses the Turbo model (8 steps). Either way an "
+            "How Qwen-Image-2.1 on your GPU server makes the Character lab's pictures. Quality "
+            "uses the base model (40 steps) and fast uses the Turbo model (8 steps). Either way an "
             "image takes a few minutes, because the server loads the model for each one. The two "
             "modes are different models, so the same seed gives a different picture in each. "
             "The Image lab can try both, and Seedream, side by side."
@@ -324,50 +322,6 @@ REGISTRY: tuple[SettingSpec, ...] = (
         choices=tuple(
             SettingChoice(mode, image_models.LABELS[mode]) for mode in image_models.MODE_IDS
         ),
-    ),
-    SettingSpec(
-        key="default_video_model",
-        group=GROUP_VIDEO,
-        label="Default video model",
-        help=(
-            "The video model that makes clips when neither the scene nor its project chooses "
-            "one (Project settings, and each scene's clip section). Regenerate can also pick "
-            "a model for one take. LTX-2.5 cuts between several shots only when the prompt "
-            "says so, and has no negative prompt. MiniMax H3 also has no negative prompt. It "
-            "always runs at 24 fps and in its own size (1344 x 768 or 768 x 1344), makes a "
-            "clip of at least 5.17 s (a shorter scene is trimmed when the video is made) and "
-            "holds 4 or 8 GPUs for each clip, so a clip takes longer to start and to run. A "
-            "scene that has a last frame is made by the chosen model's first-and-last-frame "
-            "mode. Use two frames of the same place, subject and light: very different frames "
-            "cross-dissolve instead of moving."
-        ),
-        value_type="string",
-        default=video_models.DEFAULT_MODEL,
-        choices=tuple(
-            SettingChoice(model, video_models.LABELS[model]) for model in video_models.MODEL_IDS
-        ),
-    ),
-    SettingSpec(
-        key="default_negative_prompt",
-        group=GROUP_VIDEO,
-        label="Default negative prompt (LTX-2.3 only)",
-        help=(
-            "Sent to LTX-2.3 as its negative prompt whenever a project's own Negative "
-            "prompt (Project settings, Guidelines) is blank. LTX-2.5 and MiniMax H3 have no "
-            "negative prompt and never get it. New projects also start with this "
-            "text in their own field. It keeps unwanted background music, speech, on-screen "
-            "text and common video artifacts out of the clips. Blank it as well to let the "
-            "GPU server's own default apply instead."
-        ),
-        value_type="string",
-        default=(
-            "background music, music, soundtrack, score, song, singing, lyrics, jingle, "
-            "narration, voice-over, dialogue, speech, talking, on-screen text, captions, "
-            "subtitles, titles, logo, watermark, blurry, low quality, distorted, warped, "
-            "flickering, glitch, extra limbs, deformed hands, duplicated subject, jump cut, "
-            "scene change"
-        ),
-        allow_blank=True,
     ),
     SettingSpec(
         key=H3_MIN_SHOT_KEY,
@@ -430,7 +384,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         label="Maximum parallel GPU server jobs",
         help=(
             "How many slots may be in use on your GPU server at the same time, all kinds of job "
-            "together: clips, first and last frames, reference pictures, transcription, speech "
+            "together: video, images, reference pictures, speech "
             "and the language-model calls set to the GPU server's Qwen3.8. A job takes one slot, "
             "except a MiniMax H3 clip (Video lab), which takes the number of GPUs the server "
             "gives it (4 or 8), and 4 until the server has said. All Qwen3.8 calls together take "
@@ -450,7 +404,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         label="Maximum parallel paid API calls",
         help=(
             "How many calls may run on the paid inference API (Bitdeer) at the same time, all "
-            "kinds together: scene proposals, the cast, descriptions and image prompts, for the "
+            "kinds together: the Video lab and Character lab prompts, for the "
             "roles whose provider is Bitdeer. Pick a "
             "number your plan's rate limit allows. It applies the next time the app looks for "
             "work, and running calls are not stopped."
@@ -472,17 +426,6 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=15,
         min_value=10,
         max_value=300,
-    ),
-    SettingSpec(
-        key="max_parallel_ffmpeg",
-        group=GROUP_LIMITS,
-        label="Maximum parallel FFmpeg runs",
-        help=(
-            "How many FFmpeg renders may run at the same time. It applies to the next render. "
-            "No range is enforced: you are trusted to pick a number this machine can handle."
-        ),
-        value_type="integer",
-        default=1,
     ),
 )
 

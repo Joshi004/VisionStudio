@@ -2,7 +2,7 @@
 
 The Activity page reads these. The answers never return ORM objects. Cancelling and
 resubmitting are the only actions: starting work belongs to the resource that owns it
-(for example `POST /api/projects/{id}/transcribe`).
+(for example `POST /api/lab/images/runs`).
 """
 
 from __future__ import annotations
@@ -22,32 +22,16 @@ from app.jobs import dispatcher, handlers, pools, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import auto_pipeline as auto_pipeline_service
 
 GPU_URL_KEY = "gpu_api_base_url"
 
 router = APIRouter()
 
 JobType = Literal[
-    "transcribe",
-    "plan_scenes",
-    "draft_descriptions",
-    "write_image_prompt",
-    "generate_frame",
-    "generate_clip",
-    "render_final",
     "lab_video",
     "write_lab_video_prompt",
-    "auto_pipeline",
     "lab_voice",
-    "generate_voiceover",
     "lab_image",
-    "write_last_frame_prompt",
-    "generate_last_frame",
-    "extract_cast",
-    "write_character_reference_prompt",
-    "generate_character_reference",
-    "assign_cast",
     "write_character_look_prompt",
     "write_character_take_prompt",
 ]
@@ -65,11 +49,9 @@ _NOT_ALLOWED = {
 
 class JobSummary(BaseModel):
     id: int
-    # None for the Video lab's jobs, which belong to no project (`project_name` then says so).
+    # None for a lab's jobs, which belong to no project (`project_name` then says so).
     project_id: int | None
     project_name: str
-    scene_id: int | None
-    scene_index: int | None
     type: JobType
     status: JobStatus
     phase: str | None
@@ -98,8 +80,6 @@ def job_summary(row: JobRow) -> JobSummary:
         id=job.id,
         project_id=job.project_id,
         project_name=row.project_name,
-        scene_id=job.scene_id,
-        scene_index=row.scene_index,
         # The database CHECK constraints keep these to the allowed values.
         type=cast(JobType, job.type),
         status=cast(JobStatus, job.status),
@@ -164,7 +144,7 @@ class PoolCapacity(BaseModel):
     # above it for a while.
     limit: int
     # How many jobs are running, and how many of the `limit` slots they hold. They differ when a
-    # MiniMax H3 clip runs: it is one job but takes a slot for each GPU the server gave it.
+    # MiniMax H3 run is going: it is one job but takes a slot for each GPU the server gave it.
     running: int
     slots_used: int
     queued: int
@@ -190,7 +170,7 @@ async def get_capacity(session: SessionDep) -> JobCapacity:
     for job, handler in sorted(active, key=lambda pair: pair[0].type):
         pool = job.type if handler is None else pools.job_pool(job, handler, qwen38_keys)
         if pool not in by_type:
-            continue  # a local job (the render, the automatic run) is in no shared pool
+            continue  # a local job is in no shared pool
         entry = by_type[pool].setdefault(
             job.type, PoolTypeCount(type=cast(JobType, job.type), running=0, queued=0)
         )
@@ -255,9 +235,8 @@ async def _cancel_on_server(base_url: str, provider_job_id: str) -> dict[str, An
     },
 )
 async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
-    """Cancels a job that has not started, one the GPU server no longer knows, a running
-    clip job (which is cancelled on the GPU server first), or an automatic run (with the jobs
-    it made that have not started).
+    """Cancels a job that has not started, one the GPU server no longer knows, or a running
+    image or video job (which is cancelled on the GPU server first).
     """
     job = (await _load_row(session, job_id)).job
     was_not_found = store.is_not_found(job)
@@ -274,11 +253,6 @@ async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
         await store.cancel_job(session, job_id)
     except JobActionError as exc:
         raise HTTPException(exc.status_code, exc.message) from exc
-
-    # A stopped automatic run starts nothing more, so what it made and has not started is
-    # cancelled too. What is already running finishes on its own, and its result stays.
-    if job.type == store.AUTO_RUN_TYPE:
-        await auto_pipeline_service.cancel_queued_children(session, job)
 
     # A job that was still uploading may have been submitted while it was being cancelled.
     # Its start notices (`mark_submitted` fails) and cancels it too; this covers the other order.

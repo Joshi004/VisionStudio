@@ -20,7 +20,7 @@ The steps are the same as for the other language model jobs:
 
 The call is made by `providers/llm.py` and the job that drives it is
 `jobs/write_lab_video_prompt.py`. The system message is the same for every request (only the
-profile changes it), so `description_writer.instructions_sha256` names an instruction set.
+profile changes it), so `llm_call.instructions_sha256` names an instruction set.
 """
 
 from __future__ import annotations

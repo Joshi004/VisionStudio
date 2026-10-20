@@ -9,10 +9,10 @@ For a MiniMax H3 take the model gives the pieces of H3's structured prompt and t
 assembles them, so `output.video_prompt` is the finished text. A take of H3 may also need a
 `last_frame_prompt`, the instruction that edits its first frame into its last.
 
-A paid call, so the rules of `write_image_prompt` hold here too (they are in
-`jobs/llm_call.py`): at most 2 attempts, a refusal never retried, every answer saved the moment
-it arrives, and a restart never re-runs it (`never_rerun`): the take's own "continue" step asks
-again by starting a fresh job, never by resuming this one.
+A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
+retried, every answer saved the moment it arrives, and a restart never re-runs it
+(`never_rerun`): the take's own "continue" step asks again by starting a fresh job, never by
+resuming this one.
 
 Once saved, the take's next step is started if it is set to continue by itself
 (`character_takes.on_prompts_written`). A text the model could not write at all fails the job;
@@ -32,11 +32,11 @@ from typing import Any, Final
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, llm_call, phases, store
-from app.jobs.draft_descriptions import DESCRIPTION_MODEL_KEY
 from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import character_take_prompt_writer as writer
-from app.services import character_takes, description_writer, llm_target
+from app.services import character_takes, llm_target
+from app.services.llm_target import DESCRIPTION_MODEL_KEY
 
 _logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class WriteCharacterTakePromptHandler(JobHandler):
         await self._phase(job_id, phases.PREPARING_PROMPT)
         body = writer.build_request(inputs, model=target.model)
         job_input.update(
-            instructions_sha256=description_writer.instructions_sha256(body),
+            instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),
             endpoint=llm_target.endpoint(target),
             request=body,

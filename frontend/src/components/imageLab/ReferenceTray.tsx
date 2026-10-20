@@ -354,10 +354,7 @@ export function ProjectPicker({ opened, onClose, onPick }: PickerProps) {
               <Stack gap={2}>
                 <Thumb url={frame.url} width={frame.width} height={frame.height} />
                 <Text size="xs" c="dimmed">
-                  {frame.scene_number !== null
-                    ? `scene ${frame.scene_number}, ${frame.slot}`
-                    : `frame ${frame.asset_id}`}{" "}
-                  · {frame.source}
+                  frame {frame.asset_id} · {frame.source}
                 </Text>
               </Stack>
             </UnstyledButton>

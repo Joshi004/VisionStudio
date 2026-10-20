@@ -6,8 +6,8 @@ one the Activity page shows).
 
 A saved voice is a clean recording and its exact transcript. It comes from an upload
 (`POST /api/voices`, the recording as the raw request body, with the name and the transcript in
-the query) or from a run (`POST /api/lab/voices/runs/{id}/save-voice`). The project's voiceover
-and the lab's clone and direction modes use it.
+the query) or from a run (`POST /api/lab/voices/runs/{id}/save-voice`). The lab's clone and
+direction modes use it.
 
 Breeze TTS 2's weights and outputs are licensed for research and non-commercial use only.
 """
@@ -145,13 +145,7 @@ def run_out(row: voice_lab.RunRow) -> LabVoiceRunOut:
         voice=VoiceBrief(id=row.voice.id, name=row.voice.name) if row.voice is not None else None,
         params=run.params if isinstance(run.params, dict) else {},
         job=(
-            job_summary(
-                JobRow(
-                    job=row.job,
-                    project_name=store.owner_name(row.job, None),
-                    scene_index=None,
-                )
-            )
+            job_summary(JobRow(job=row.job, project_name=store.owner_name(row.job, None)))
             if row.job is not None
             else None
         ),

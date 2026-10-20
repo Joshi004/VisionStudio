@@ -60,7 +60,6 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal
 from app.jobs import store
-from app.jobs.generate_frame import IMAGE_MODE_KEY
 from app.services import (
     character_library,
     character_looks,
@@ -73,6 +72,7 @@ from app.services import character_take_prompt_writer as writer
 from app.services import image_models as image_models_service
 from app.services.character_looks import CharacterLookError
 from app.services.image_lab import LabInputError, QwenEditForm, Ref
+from app.services.image_models import IMAGE_MODE_KEY
 from app.services.video_lab import (
     AudioRef,
     FirstFrameRef,

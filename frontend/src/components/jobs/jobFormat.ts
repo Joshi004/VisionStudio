@@ -1,25 +1,10 @@
 import type { JobSummary } from "../../api/jobs";
 
 const TYPE_LABELS: Record<JobSummary["type"], string> = {
-  transcribe: "Transcription",
-  plan_scenes: "Scene proposal",
-  draft_descriptions: "Scene descriptions",
-  write_image_prompt: "Image prompt",
-  generate_frame: "First frame",
-  generate_clip: "Clip generation",
-  render_final: "Final render",
   lab_video: "Video lab clip",
   write_lab_video_prompt: "Video lab prompt",
-  auto_pipeline: "Automatic generation",
   lab_voice: "Voice lab speech",
-  generate_voiceover: "Voiceover from the script",
   lab_image: "Image lab image",
-  write_last_frame_prompt: "Last frame prompt",
-  generate_last_frame: "Last frame",
-  extract_cast: "Characters and places",
-  write_character_reference_prompt: "Reference prompt",
-  generate_character_reference: "Reference picture",
-  assign_cast: "Cast of each scene",
   write_character_look_prompt: "Character look prompt",
   write_character_take_prompt: "Character take prompts",
 };

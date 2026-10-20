@@ -49,11 +49,11 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal
 from app.jobs import store
-from app.jobs.generate_frame import IMAGE_MODE_KEY
 from app.services import background_removal, character_library, frame_images, image_lab
 from app.services import image_models as image_models_service
 from app.services.frame_images import FrameRejected
 from app.services.image_lab import LabInputError, QwenEditForm, QwenLabForm, Ref
+from app.services.image_models import IMAGE_MODE_KEY
 from app.services.storage import StorageError, StoredFile, get_storage
 
 _logger = logging.getLogger(__name__)

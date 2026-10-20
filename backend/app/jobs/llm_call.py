@@ -1,8 +1,9 @@
-"""The paid call to the language model that the cast jobs share (`extract_cast`,
-`write_character_reference_prompt` and `assign_cast`).
+"""The paid call to the language model that the LLM jobs share (the prompt writers of the
+Video lab and the Character Lab, and the story stages that follow).
 
-The rules are those of `plan_scenes` (ANALYSIS.md Section 6.2), written once here because three
-jobs need them:
+The rules are those of the first paid job of the narration pipeline (ANALYSIS.md Section 6.2;
+retired in PHASE-046 and readable at the git tag `narration-final`), written once here
+because every LLM job needs them:
 
 - At most `MAX_ATTEMPTS` attempts, the second only for a rate limit, a server error, no answer,
   or an answer that cannot be used. A refusal (HTTP 400, 401, 403, 404, 422) is never retried.
@@ -18,6 +19,7 @@ afterwards (these jobs differ only there). Nothing here is a handler: the jobs a
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections.abc import Callable
@@ -35,13 +37,19 @@ _logger = logging.getLogger(__name__)
 # One call, and one more if it fails in a way that can pass (ANALYSIS.md Section 5.8, 6.2).
 MAX_ATTEMPTS: Final = 2
 RETRY_DELAY_S: Final = 5.0
-# The longest wait for the first piece of the answer, or between two pieces (see `plan_scenes`).
+# The longest wait for the first piece of the answer, or between two pieces.
 IDLE_TIMEOUT_S: Final = 120.0
 RAW_CONTENT_MAX_CHARS: Final = 20_000
 
 # Reads one answer: `(None, value)` when it can be used, else `(why not, None)`. The reason is
 # shown to the user and kept on the job. `value` is a dataclass or plain JSON, so it can be kept.
 ReadAnswer = Callable[[llm.ChatResult], tuple[str | None, Any]]
+
+
+def instructions_sha256(body: dict[str, Any]) -> str:
+    """The SHA-256 of the request's system message: a name for the instruction set that was used."""
+    system = body["messages"][0]["content"]
+    return "sha256:" + hashlib.sha256(system.encode("utf-8")).hexdigest()
 
 
 @dataclass

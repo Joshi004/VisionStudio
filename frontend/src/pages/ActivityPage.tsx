@@ -70,7 +70,6 @@ export function ActivityPage() {
                 <Table.Th>Job</Table.Th>
                 <Table.Th>Type</Table.Th>
                 <Table.Th>Project</Table.Th>
-                <Table.Th>Scene</Table.Th>
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Created</Table.Th>
                 <Table.Th>Time</Table.Th>
@@ -107,7 +106,6 @@ export function ActivityPage() {
                       </Anchor>
                     )}
                   </Table.Td>
-                  <Table.Td>{job.scene_index === null ? "—" : job.scene_index + 1}</Table.Td>
                   <Table.Td>
                     <JobStatusBadge job={job} />
                   </Table.Td>

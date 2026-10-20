@@ -104,7 +104,7 @@ def _unprocessable(message: str) -> HTTPException:
 def _job_summary(job: Job | None) -> JobSummary | None:
     if job is None:
         return None
-    return job_summary(JobRow(job=job, project_name=store.owner_name(job, None), scene_index=None))
+    return job_summary(JobRow(job=job, project_name=store.owner_name(job, None)))
 
 
 # --- The character's profile and voice -----------------------------------------------------

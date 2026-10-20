@@ -410,7 +410,7 @@ export function costText(models: LabVideoModel[]): string {
 function ltxCostText(count: number, noun: string): string {
   return count === 1
     ? `One ${noun}: a GPU job of 5 to 10 minutes.`
-    : `${count} ${noun}s: ${count} GPU jobs of 5 to 10 minutes each, using the same GPU slots as scene clips.`;
+    : `${count} ${noun}s: ${count} GPU jobs of 5 to 10 minutes each, sharing the GPU job slots.`;
 }
 
 /** What a MiniMax H3 reference clip costs. */

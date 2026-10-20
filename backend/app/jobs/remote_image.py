@@ -1,8 +1,7 @@
-"""The remote steps every Qwen-Image-2.1 job shares: a scene's first frame (`generate_frame`), its
-last frame (`generate_last_frame`) and an Image lab run (`lab_image`). All submit one request to
-the GPU server, wait for it, download one PNG and store it. What differs is only how the request
-is made and what the PNG becomes, so a subclass writes `start` and `store_image`, and everything
-between is here:
+"""The remote steps every Qwen-Image-2.1 job shares (today an Image lab run, `lab_image`). It
+submits one request to the GPU server, waits for it, downloads one PNG and stores it. What
+differs between jobs is only how the request is made and what the PNG becomes, so a subclass
+writes `start` and `store_image`, and everything between is here:
 
 - `submit`: send the request and save the server's job id at once. An edit (which refers to
   reference images) passes `build_body`, which uploads them and makes the body.
@@ -33,13 +32,14 @@ from app.core.urls import docker_mapped
 from app.db.models import Job
 from app.db.session import SessionLocal
 from app.jobs import phases, store
-from app.jobs.generate_clip import (
+from app.jobs.gpu_job import (
     GPU_URL_KEY,
     SERVER_RETRY_DELAY_S,
     after_gone_result,
+    is_preemption,
+    phase_for_poll_error,
 )
 from app.jobs.handlers import JobHandler
-from app.jobs.transcribe import is_preemption, phase_for_poll_error
 from app.providers import image_generator
 from app.providers.gpu_server import GpuCallError
 from app.services.storage import StorageError, get_storage

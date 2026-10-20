@@ -41,7 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Asset, Job, LabImage, LabRun, Scene
+from app.db.models import Asset, Job, LabImage, LabRun
 from app.db.session import SessionLocal
 from app.jobs import store
 from app.providers import contract_guard, image_api, image_generator
@@ -828,40 +828,14 @@ async def reference_details(
     return details
 
 
-@dataclass(frozen=True)
-class ProjectFrame:
-    asset: Asset
-    # The scene number (from 1) and the slot the frame is linked to now, if it is.
-    scene_number: int | None
-    slot: str | None
-
-
-async def project_frames(
-    session: AsyncSession, project_id: int, limit: int = 200
-) -> list[ProjectFrame]:
-    """A project's frame assets, newest first, each with the scene slot it is used in now."""
-    assets = list(
-        (
-            await session.execute(
-                select(Asset)
-                .where(Asset.project_id == project_id, Asset.kind == "frame")
-                .order_by(Asset.id.desc())
-                .limit(limit)
-            )
-        ).scalars()
+async def project_frames(session: AsyncSession, project_id: int, limit: int = 200) -> list[Asset]:
+    """A project's frame assets, newest first. No new frames are made (the narration pipeline
+    that made them is retired), so these are the ones that are left.
+    """
+    statement = (
+        select(Asset)
+        .where(Asset.project_id == project_id, Asset.kind == "frame")
+        .order_by(Asset.id.desc())
+        .limit(limit)
     )
-    links: dict[int, tuple[int, str]] = {}
-    scenes = await session.execute(select(Scene).where(Scene.project_id == project_id))
-    for scene in scenes.scalars():
-        if scene.first_frame_asset_id is not None:
-            links[scene.first_frame_asset_id] = (scene.index + 1, "first")
-        if scene.last_frame_asset_id is not None:
-            links[scene.last_frame_asset_id] = (scene.index + 1, "last")
-    return [
-        ProjectFrame(
-            asset=asset,
-            scene_number=links[asset.id][0] if asset.id in links else None,
-            slot=links[asset.id][1] if asset.id in links else None,
-        )
-        for asset in assets
-    ]
+    return list((await session.execute(statement)).scalars())

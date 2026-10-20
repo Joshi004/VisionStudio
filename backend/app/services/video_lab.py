@@ -42,8 +42,7 @@ from app.providers import contract_guard, video_generator
 from app.services import api_contract, frame_counts, projects, video_models
 from app.services import lab_prompt_writer as prompt_writer
 from app.services.lab_prompt_profiles import profile_for
-from app.services.scene_inputs import ClipMode
-from app.services.video_models import DEFAULT_MODEL, LabVideoModel, LtxModel
+from app.services.video_models import DEFAULT_MODEL, ClipMode, LabVideoModel, LtxModel
 
 _logger = logging.getLogger(__name__)
 

@@ -275,7 +275,7 @@ def run_out(row: video_lab.RunRow, frame_urls: dict[tuple[str, int], str]) -> La
             if item is not None
         ],
         job=(
-            job_summary(JobRow(job=row.job, project_name=store.NO_PROJECT_NAME, scene_index=None))
+            job_summary(JobRow(job=row.job, project_name=store.NO_PROJECT_NAME))
             if row.job is not None
             else None
         ),
@@ -419,4 +419,4 @@ async def create_prompt_draft(body: PromptDraftCreate, session: SessionDep) -> J
     except video_lab.LabVideoInputError as exc:
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
-    return job_detail(JobRow(job=job, project_name=store.NO_PROJECT_NAME, scene_index=None))
+    return job_detail(JobRow(job=job, project_name=store.NO_PROJECT_NAME))

@@ -272,15 +272,13 @@ export function referenceFromImage(image: LabImage): ReferenceItem {
 }
 
 export function referenceFromFrame(frame: ProjectFrame): ReferenceItem {
-  const use =
-    frame.scene_number !== null ? `scene ${frame.scene_number}, ${frame.slot} frame` : frame.source;
   return {
     source: "asset",
     id: frame.asset_id,
     url: frame.url,
     width: frame.width,
     height: frame.height,
-    label: `project frame ${frame.asset_id} (${use})`,
+    label: `project frame ${frame.asset_id} (${frame.source})`,
   };
 }
 

@@ -61,7 +61,6 @@ function JobDetails({ job, now }: { job: JobDetail; now: number }) {
           {job.project_name}
         </Anchor>
       </Field>
-      <Field label="Scene">{job.scene_index === null ? "—" : `Scene ${job.scene_index + 1}`}</Field>
       <Field label="Phase">{job.phase ?? "—"}</Field>
       <Field label="Attempt">{job.attempt}</Field>
       <Field label="Time">{elapsedText(job, now) || "—"}</Field>

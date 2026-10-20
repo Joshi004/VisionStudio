@@ -1,9 +1,8 @@
 """The interface every job type implements, and the registry the dispatcher reads
 (ANALYSIS.md Section 3.3 and 6.4).
 
-The dispatcher loop knows nothing about any one job type. Phases 6, 9 and 10 add a handler
-for `plan_scenes`, `generate_clip` and `render_final` by writing a `JobHandler` subclass
-and registering it in `app/jobs/__init__.py`; the loop is not touched.
+The dispatcher loop knows nothing about any one job type. A new job type is added by writing
+a `JobHandler` subclass and registering it in `app/jobs/__init__.py`; the loop is not touched.
 
 Two kinds of handler share the interface:
 

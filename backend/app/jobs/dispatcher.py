@@ -13,7 +13,7 @@ the loop:
    are two shared pools, the GPU server and the paid inference API (`jobs/pools.py`): every
    kind of job counts in the pool of its provider, and has no limit of its own. A language-model
    job counts where its calls go, so one answered by Qwen3.8 is in the GPU server's. A local job
-   type (the final render, the automatic run) is a pool of its own.
+   type is a pool of its own.
 2. If any GPU job needs the server, check its health and store the result for the banner.
    If it does not answer, GPU jobs wait, and the loop backs off (the wait doubles up to
    120 s, or the poll interval if that is longer).

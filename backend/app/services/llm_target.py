@@ -28,10 +28,14 @@ from app.providers import llm, qwen38
 LLM_URL_KEY: Final = "llm_base_url"
 GPU_URL_KEY: Final = "gpu_api_base_url"
 
+# The model setting of each role. A job names its role with one of these (`JobHandler.model_key`).
+DESCRIPTION_MODEL_KEY: Final = "description_llm_model"
+IMAGE_PROMPT_MODEL_KEY: Final = "image_prompt_llm_model"
+
 _PROVIDER_KEY_OF_MODEL_KEY: Final[dict[str, str]] = {
     "llm_model": settings_service.LLM_PROVIDER_KEY,
-    "description_llm_model": settings_service.DESCRIPTION_PROVIDER_KEY,
-    "image_prompt_llm_model": settings_service.IMAGE_PROMPT_PROVIDER_KEY,
+    DESCRIPTION_MODEL_KEY: settings_service.DESCRIPTION_PROVIDER_KEY,
+    IMAGE_PROMPT_MODEL_KEY: settings_service.IMAGE_PROMPT_PROVIDER_KEY,
 }
 MODEL_KEYS: Final = tuple(_PROVIDER_KEY_OF_MODEL_KEY)
 

@@ -3,13 +3,10 @@ take makes, whether it has dialogue and which video model makes the clip (Phase 
 functions, no I/O.
 
 - `image_prompt`: for an image take, or a video take's first frame. The picture is made by
-  editing the character's own reference pictures (already on a plain white backdrop), the same
-  discipline as a project scene made from its cast's references
-  (`image_prompt_profiles.QWEN_IMAGE_21_CHARACTER_EDIT`), adapted to one character and no scene
-  cast or place.
+  editing the character's own reference pictures (already on a plain white backdrop), with one
+  character and no scene cast or place.
 - `last_frame_prompt`: for a MiniMax H3 video take that makes a last frame. The picture is made
-  by editing the first frame (the same way a project scene's last frame is,
-  `last_frame_prompt_writer`), so this is an edit instruction, not a description.
+  by editing the first frame, so this is an edit instruction, not a description.
 - `video_prompt`: for a video take, what the clip shows over its length: the motion, the camera,
   and the character speaking (when there is dialogue) or not. For LTX it is one short paragraph.
   For MiniMax H3 it is the structured prompt that model was trained on (see below).

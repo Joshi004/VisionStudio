@@ -1,8 +1,8 @@
 """The `lab_video` job: one clip from the Video lab, on one model (Phase 19).
 
-It is a remote job like `generate_clip`, and it is that handler with two differences, so it
-extends it and keeps everything else (polling, pre-emption, the download retry, the cleanup on
-the server, cancelling, the shared slots of the GPU pool, `max_parallel_gpu_jobs`):
+It is a remote job. It extends `RemoteVideoHandler` (`jobs/remote_video.py`), which holds
+everything shared (polling, pre-emption, the download retry, the cleanup on the server,
+cancelling, the shared slots of the GPU pool, `max_parallel_gpu_jobs`), and writes two steps:
 
 - `start`: the request was built and checked when the run was created
   (`services/video_lab.create_runs`) and is stored in `job.input`, together with the endpoint,
@@ -20,7 +20,7 @@ the server, cancelling, the shared slots of the GPU pool, `max_parallel_gpu_jobs
   same seed, because "the correct response to a pre-emption failure is to resubmit the exact
   same request unchanged" (the server's guide).
 - `_check_and_store`: the clip is stored under `media/lab/` and written on the `lab_video_run`
-  row, in one transaction with the finished job. There is no scene to point at a take.
+  row, in one transaction with the finished job.
 
 The job belongs to no project (`job.project_id` is NULL).
 """
@@ -41,7 +41,8 @@ from app.core.urls import docker_mapped
 from app.db.models import Job, LabVideoRun
 from app.db.session import SessionLocal
 from app.jobs import phases, store
-from app.jobs.generate_clip import GPU_URL_KEY, SERVER_RETRY_DELAY_S, GenerateClipHandler
+from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S
+from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
 from app.services import ffmpeg, frame_images, speech_audio, video_lab
@@ -192,7 +193,7 @@ class AudioUnavailable(Exception):
     """The speech of a lip-synced clip cannot be found. The message is for the user."""
 
 
-class GenerateLabVideoHandler(GenerateClipHandler):
+class GenerateLabVideoHandler(RemoteVideoHandler):
     job_type = JOB_TYPE
 
     # --- start: upload the first frame (if any) and submit --------------------------------
@@ -327,7 +328,7 @@ class GenerateLabVideoHandler(GenerateClipHandler):
         """Uploads the first frame (when there is one) and submits. The server's job id is
         saved the moment the submit answers, with nothing that can fail in between.
 
-        The same answers as a scene's clip: 502 at submit is retried once after a pause, 429
+        502 at submit is retried once after a pause, 429
         puts the job back in the queue, a 400 for an unknown asset id uploads the frames again
         once, and 422 or any other refusal fails the job with the server's message.
         """

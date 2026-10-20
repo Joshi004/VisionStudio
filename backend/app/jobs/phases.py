@@ -29,16 +29,13 @@ PAUSED_PREFIX: Final = "paused:"
 
 # --- Running ----------------------------------------------------------------------
 STARTING: Final = "starting"
-UPLOADING_VOICEOVER: Final = "uploading the voiceover"
 SUBMITTING: Final = "submitting"
 QUEUED_ON_CLUSTER: Final = "queued on cluster"
 RUNNING_ON_CLUSTER: Final = "running on cluster"
-DOWNLOADING_TRANSCRIPT: Final = "downloading the transcript"
-MATCHING: Final = "matching to the script"
 SERVER_UNREACHABLE_CHECKING: Final = "GPU server unreachable, checking again"
 NOT_FOUND: Final = "not found on this server"
 
-# --- Running: clip generation (Phase 9) ------------------------------------------------
+# --- Running: video generation (Phase 9) -----------------------------------------------
 PREPARING_FRAMES: Final = "preparing the frames"
 UPLOADING_FRAMES: Final = "uploading the frames"
 DOWNLOADING_CLIP: Final = "downloading the clip"
@@ -46,37 +43,12 @@ CHECKING_CLIP: Final = "checking the clip"
 RESULT_NOT_READY: Final = "the server has not released the clip yet, checking again"
 
 # While a job is in one of these, its result is being fetched and stored: it can no longer
-# be cancelled (the server has already finished it). A first frame's phases are listed with
-# the other first-frame phases further down (`FRAME_FINISHING_PHASES`).
+# be cancelled (the server has already finished it). An image's phases are listed with
+# the other image phases further down (`FRAME_FINISHING_PHASES`).
 CLIP_FINISHING_PHASES: Final = frozenset({DOWNLOADING_CLIP, CHECKING_CLIP})
 
-# --- Running: final render (Phase 10) --------------------------------------------------
-CHECKING_CLIPS: Final = "checking the clips"
-JOINING: Final = "joining the clips and mixing the sound"
-CHECKING_VIDEO: Final = "checking the video"
-SAVING_VIDEO: Final = "saving the video"
-
-# --- Running: scene proposal (Phase 6) ------------------------------------------------
+# --- Running: language model prompts ------------------------------------------------------
 PREPARING_PROMPT: Final = "preparing the prompt"
-REUSING_ANSWER: Final = "reusing the stored answer"
-CHECKING_CUTS: Final = "checking the cuts"
-MODEL_FAILED_SPLITTER: Final = "the language model failed: using the rule-based splitter"
-SAVING_SCENES: Final = "saving the scenes"
-
-# --- Running: scene descriptions (Phase 12) ----------------------------------------------
-# It also uses PREPARING_PROMPT, REUSING_ANSWER and `asking_model` from above.
-CHECKING_DESCRIPTIONS: Final = "checking the descriptions"
-SAVING_DESCRIPTIONS: Final = "saving the descriptions"
-
-# --- Running: image prompts (Phase 16) --------------------------------------------------
-# It also uses PREPARING_PROMPT, REUSING_ANSWER and `asking_model` from above.
-CHECKING_IMAGE_PROMPT: Final = "checking the image prompt"
-SAVING_IMAGE_PROMPT: Final = "saving the image prompt"
-
-# --- Running: last frame prompts (Phase 23) ---------------------------------------------
-# It also uses PREPARING_PROMPT, REUSING_ANSWER and `asking_model` from above.
-CHECKING_LAST_FRAME_PROMPT: Final = "checking the last frame prompt"
-SAVING_LAST_FRAME_PROMPT: Final = "saving the last frame prompt"
 
 # --- Running: the Video lab (Phase 19) ---------------------------------------------------
 # The lab's clips use the clip phases above. Its prompt helper also uses PREPARING_PROMPT and
@@ -105,12 +77,11 @@ def speech_part(label: str, part: int, parts: int) -> str:
     return label if parts <= 1 else f"{label} (part {part} of {parts})"
 
 
-# --- Running: first frames (Phase 17) ---------------------------------------------------
-# The image is made on the GPU server, so a first frame also uses SUBMITTING and the cluster
+# --- Running: images (Phase 17) ---------------------------------------------------------
+# The image is made on the GPU server, so it also uses SUBMITTING and the cluster
 # phases above. Once the server has finished, the image is fetched and stored: the phases below
 # are in `FINISHING_PHASES`, so the job can no longer be cancelled.
-PREPARING_IMAGE_REQUEST: Final = "preparing the image request"
-# An edit (a last frame, Phase 23) uploads the picture it edits first.
+# An edit uploads the picture it edits first.
 UPLOADING_REFERENCE: Final = "uploading the reference image"
 DOWNLOADING_IMAGE: Final = "downloading the image"
 IMAGE_NOT_READY: Final = "the server has not released the image yet, checking again"
@@ -122,13 +93,9 @@ FRAME_FINISHING_PHASES: Final = frozenset(
     {DOWNLOADING_IMAGE, SAVING_IMAGE, FITTING_FRAME, SAVING_FRAME}
 )
 
-# --- Running: the project's cast (characters and places) ---------------------------------
-# The three language model jobs also use PREPARING_PROMPT and `asking_model` from above. A
-# reference picture is made on the GPU server like a first frame, so it also uses SUBMITTING,
+# --- Running: a character's reference picture ----------------------------------------------
+# A reference picture is made on the GPU server like any image, so it also uses SUBMITTING,
 # the cluster phases, DOWNLOADING_IMAGE and SAVING_IMAGE.
-SAVING_CAST: Final = "saving the cast"
-SAVING_REFERENCE_PROMPT: Final = "saving the reference prompt"
-SAVING_CAST_ASSIGNMENT: Final = "saving who is in each scene"
 # A character's picture has its backdrop removed after it is downloaded.
 REMOVING_BACKDROP: Final = "removing the backdrop"
 SAVING_REFERENCE: Final = "saving the reference picture"
@@ -140,7 +107,7 @@ REFERENCE_FINISHING_PHASES: Final = frozenset(
 # --- Running: the Character lab (Phase 25) -----------------------------------------------
 # `write_character_look_prompt` and `write_character_take_prompt` also use PREPARING_PROMPT
 # and `asking_model` from above. A look's angle pictures have their backdrop removed after
-# download, like a project's cast reference, so they also use REMOVING_BACKDROP.
+# download, so they also use REMOVING_BACKDROP.
 CHECKING_LOOK_PROMPT: Final = "checking the look prompt"
 SAVING_LOOK_PROMPT: Final = "saving the look prompt"
 CHECKING_AUDITION_LINE: Final = "checking the audition line"
@@ -162,33 +129,6 @@ CANCELLED: Final = "cancelled"
 
 def preempted(next_attempt: int) -> str:
     return f"pre-empted: submitting again (attempt {next_attempt} of {MAX_ATTEMPTS})"
-
-
-# At most this many running steps are named in an automatic run's phase.
-_AUTO_STEPS_SHOWN = 3
-
-
-def auto_progress(done: int, total: int, running: list[tuple[str, int, int]]) -> str:
-    """Where an automatic run is, now that its steps go on at the same time: "5 of 14 steps
-    done; running: make first frames (4 of 12), write last frame prompts (6 of 12)". `running`
-    holds each step that is going on as `(label, done, count)`, where `count` is the number of
-    targets of the step: a project-level step has one, and shows no count.
-    """
-    text = f"{done} of {total} steps done"
-    if not running:
-        return text
-    named = [
-        f"{label.lower()} ({targets_done} of {count})" if count > 1 else label.lower()
-        for label, targets_done, count in running[:_AUTO_STEPS_SHOWN]
-    ]
-    more = len(running) - _AUTO_STEPS_SHOWN
-    if more > 0:
-        named.append(f"{more} more")
-    return f"{text}; running: {', '.join(named)}"
-
-
-def trimming(number: int, total: int) -> str:
-    return f"trimming clip {number} of {total}"
 
 
 def asking_model(attempt: int, attempts: int) -> str:

@@ -256,8 +256,8 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 **Progress snapshot** (update when a phase changes status):
 
 - Completed: PHASE-001 (2026-10-20; owner confirmed the generations), PHASE-002 (2026-10-20)
-- In progress: none
-- Ready to start: PHASE-046, PHASE-007
+- In progress: PHASE-046 (code complete and migration applied to Docker, 2026-10-20; waiting for the owner's lab spot checks)
+- Ready to start: PHASE-007
 - Deferred: PHASE-036 (music generation, after PHASE-045)
 - Current milestone: M0
 
@@ -265,7 +265,7 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 |---|---|---|---|---|
 | PHASE-001 | Validate H3 assumptions in the existing labs (manual) | M0 | — | Completed |
 | PHASE-002 | Shot-duration policy | M0 | (001 recommended) | Completed |
-| PHASE-046 | Retire the narration pipeline | M0 | — | Not Started |
+| PHASE-046 | Retire the narration pipeline | M0 | — | In Progress |
 | PHASE-003 | Story workspace replaces the project page | M0 | 046 | Not Started |
 | PHASE-004 | Story Bible stage | M1 | 003 | Not Started |
 | PHASE-005 | Character and environment discovery | M1 | 004 | Not Started |
@@ -486,7 +486,7 @@ flowchart TD
 
 ### PHASE-046 — Retire the narration pipeline
 
-**Status:** Not Started · **Milestone:** M0 · **Vision:** §21 (transcription leaves the main path), §44; decision D-1 (2026-10-20)
+**Status:** In Progress (code complete and migration `0022` applied to the Docker volume, 2026-10-20; the lab spot checks that need the GPU server are left, see the Completion notes) · **Milestone:** M0 · **Vision:** §21 (transcription leaves the main path), §44; decision D-1 (2026-10-20)
 
 **Objective.** Remove the voiceover-driven narration pipeline (its UI, API routes, jobs, services, tables and settings) so that every later phase targets story projects only. The labs, the Character Lab and the shared machinery later phases reuse must keep working.
 
@@ -525,16 +525,32 @@ flowchart TD
 **Observable improvements.** A smaller codebase; the project page no longer shows the narration flow.
 
 **Completion checklist.**
-- [ ] Tag created before removal
-- [ ] Inventory of narration modules and their non-narration importers (in the plan)
-- [ ] Shared machinery kept or moved; labs re-pointed
-- [ ] Narration UI, API, jobs and services removed
-- [ ] Narration tables, columns and settings removed (migration or new baseline)
-- [ ] `DATABASE_STRUCTURE.md` and `README.md` updated
-- [ ] Every lab and the Character Lab verified
-- [ ] Standard checks (§3.5)
+- [x] Tag created before removal
+- [x] Inventory of narration modules and their non-narration importers (in the plan)
+- [x] Shared machinery kept or moved; labs re-pointed
+- [x] Narration UI, API, jobs and services removed
+- [x] Narration tables, columns and settings removed (migration or new baseline)
+- [x] `DATABASE_STRUCTURE.md` and `README.md` updated
+- [ ] Every lab and the Character Lab verified (the GPU actions need the GPU server: the owner; the API lists were checked on the real data)
+- [x] Standard checks (§3.5): ruff, ESLint, `tsc`, `gen:api` and the production build pass, and the migration applied on backend start (`docker compose up --build -d`); the regression spot check is the item above
 
-**Completion notes.** _(fill in: tag name, what was kept or moved and where, migration approach, remaining project columns and settings)_
+**Completion notes.** Code done and migration `0022` applied to the Docker volume on 2026-10-20. The phase stays **In Progress** until the owner has run the lab checks that need the GPU server; then mark it Completed.
+
+- **Tag.** `narration-final` at commit `ae4940a` (the owner committed PHASE-002 first, then the tag was made). Read removed code with `git show narration-final:<path>`, for example `git show narration-final:backend/app/services/scenes.py`. The old `DATABASE_STRUCTURE.md` is there too.
+- **Database approach.** One removal migration, `backend/app/db/migrations/versions/0022_retire_narration.py` (revision `0022`, after `0021`). No new baseline and no reset. `upgrade()`: deletes `job` rows whose type is not one of the six lab types; rebuilds `job` in batch mode (drops `scene_id`, `idx_job_scene`, the old `ck_job_type_valid` and `fk_job_scene_id_scene`, adds the new CHECK); drops `scene_character`, `scene`, `character`, `location`, `transcript`; rebuilds `project` without twelve columns; deletes the setting rows `default_video_model`, `default_negative_prompt`, `max_parallel_ffmpeg`. **`downgrade()` raises `NotImplementedError`** (the data cannot be rebuilt). `asset` is untouched: rows and files stay, and its CHECK keeps `voiceover`, `clip`, `final` and `reference`.
+- **`job.type` now.** `lab_image`, `lab_video`, `write_lab_video_prompt`, `lab_voice`, `write_character_look_prompt`, `write_character_take_prompt`. The `job.provider` CHECK is unchanged (`gpu`, `llm`, `image`, `local`; no job uses `image` or `local`). `register_handlers()` registers exactly those six. `GET /api/jobs` summaries no longer have `scene_id` or `scene_index`.
+- **Remaining project columns.** `id`, `name`, `created_at`, `orientation`, `gen_width`, `gen_height`, `out_width`, `out_height`, `fps`, `script_text` (kept for PHASE-003). API: `ProjectCreate` (`name`, `orientation`), `ProjectUpdate` (`name`, the four sizes, `fps`, `script_text`), `ProjectSummary` (`id`, `name`, `orientation`, `created_at`, `has_script`), `ProjectDetail`. `PATCH` refuses removed fields such as `voice_id` (422). Routes: list, create, get, patch.
+- **Settings.** Removed: `default_video_model`, `default_negative_prompt`, `max_parallel_ffmpeg` (and the "Video" group). Kept: `gpu_api_base_url`, `transcription_url`, `gpu_partition`, `llm_base_url`, `llm_provider`, `llm_model`, `description_llm_provider`, `description_llm_model`, `image_prompt_llm_provider`, `image_prompt_llm_model`, `image_mode`, the four `Shot duration` keys, `max_parallel_gpu_jobs`, `max_parallel_paid_api_calls`, `poll_interval_seconds`. **Decision:** `llm_provider` and `llm_model` stay (the owner chose to keep them; PHASE-004 decides their fate), relabelled "Planning provider" and "LLM model (Bitdeer)", with help text that says nothing uses the role yet. The help text of the other kept settings no longer mentions scenes.
+- **Moved or created (neutral names).** `jobs/gpu_job.py` (`GPU_URL_KEY`, `SERVER_RETRY_DELAY_S`, `MAX_RESULT_RETRIES`, `is_preemption`, `phase_for_poll_error`, `after_gone_result`); `jobs/remote_video.py` (`RemoteVideoHandler`, the submit, poll and download base for video jobs; `GenerateLabVideoHandler` now subclasses it instead of `GenerateClipHandler`); `services/text_rules.py` (`TextRule`); `IMAGE_MODE_KEY` is in `services/image_models.py`; `DESCRIPTION_MODEL_KEY` and `IMAGE_PROMPT_MODEL_KEY` in `services/llm_target.py`; `instructions_sha256` in `jobs/llm_call.py`; `ClipMode` in `services/video_models.py`; `classify_audio` and `VoiceInputError` in `services/voices.py`.
+- **Kept untouched for later phases** (nothing outside the labs calls some of them now): `services/frame_images`, `providers/*` (including `transcriber.py`), `services/ffmpeg`, `services/render_commands`, `services/frame_counts` (`h3_num_frames`, `H3_FPS`, `MIN_NUM_FRAMES`, `H3_MAX_FRAMES`), `services/speech_chunks`, `services/speech_audio`, `jobs/llm_call`, `services/llm_target`, `jobs/synthesize_speech`, `services/assets.add_asset` and `jobs/store.latest_job`. **PHASE-002's** `h3_scene_num_frames` and `H3_MIN_FRAMES` (the 5.17 s floor) are gone, as PHASE-002 planned; `video_generator.endpoint_for` and `video_models.resolve` went too.
+- **What was removed.** 56 backend modules (12 routers in `api/`, 17 modules in `jobs/` and 27 in `services/`) and 44 frontend files (34 components of `components/projects/` and 10 `api/*.ts` modules). `components/projects/` keeps `CreateProjectModal.tsx`, `ProjectSettingsForm.tsx` (name and video size only) and `settingsDraft.ts`. The project page is the header, those settings and the line "The story workspace comes in a later phase." (PHASE-003 replaces it). The Activity page lost its Scene column and the job drawer its Scene field.
+- **Image lab.** The "project frames" picker stays (owner decision): `GET /api/lab/images/project-frames?project_id=` returns a project's `frame` assets, newest first, through `services/image_lab.project_frames` (returns `list[Asset]`). `ProjectFrameOut` no longer has `scene_number` or `slot`, and the label is `frame <id>`.
+- **`schema.d.ts`.** Regenerated with `openapi-typescript` from the app's OpenAPI document (`app.openapi()`, the same content as `/api/openapi.json`) instead of from a running server. The Character lab type is now `components["schemas"]["TakeOut"]` (the old `app__api__character_lab__TakeOut` name existed only because two models were called `TakeOut`).
+- **Deviations from the plan.** `PARTITION_KEY` was not copied into `gpu_job.py` (nothing kept uses it). `RemoteVideoHandler._check_and_store` is an `@abstractmethod` rather than a method that raises `NotImplementedError`. `classify_audio` raises `VoiceInputError` instead of a renamed `AudioRejected`. `project_frames` returns `list[Asset]`, with no `ProjectFrame` dataclass. `ProjectsPage` keeps its "Script" column. Five unused Character-lab phase labels in `jobs/phases.py` were left alone (older than this phase).
+- **Checked.** `uv run ruff check .` and `ruff format --check .`; `npm run lint`, `npm run typecheck` and `npm run build`; `alembic upgrade head` on a fresh database (revision `0022`, `PRAGMA foreign_key_check` empty, integrity ok, no narration tables, `job` CHECK holds the six types, `project` has the ten columns); the same migration on a seeded copy of the old schema; an AST scan finds no import of a removed module; an `rg` sweep finds the removed names only in old migrations, docs and the tag (`services/render_commands.py` is kept on purpose); the backend started on a fresh database and answered `GET /api/health` (revision `0022`), project create, list, get and patch, `GET /api/jobs` and `/api/jobs/capacity`, `GET /api/settings`, the Image, Video and Voice lab lists, saved voices, the Character lab list, an Image lab upload and the project-frames picker. The removed routes (`/api/projects/{id}/scenes`, `/transcript`) answer 404.
+- **Applied to the Docker volume (2026-10-20, with the owner's go-ahead).** Order: `docker compose build` first (so a failed build could not take the app down), `docker compose stop backend`, a copy of `/data/app.db` to **`~/visio-studio-backup/app.db`** (outside Docker and the repo; 37,171,200 bytes, `integrity_check` ok, revision `0021`), then `docker compose up --build -d`, whose backend start ran `0022`. Before: 29 projects, 420 scenes, 28 transcripts, 5 characters, 6 locations, 1,780 assets and 1,848 jobs (1,529 narration, 319 lab). After: revision `0022`, `integrity_check` ok, `foreign_key_check` empty, 29 projects, 1,780 assets (untouched), 319 jobs (lab types only: 58 `lab_image`, 100 `lab_video`, 72 `lab_voice`, 5 `write_character_look_prompt`, 82 `write_character_take_prompt`, 2 `write_lab_video_prompt`), and every lab table with the same row count as before (`lab_run` 84, `lab_video_run` 100, `lab_voice_run` 72, `voice` 6, `library_character` 2, `character_take` 79); the narration tables and the three removed setting rows are gone. `GET /` and the project, job, settings, Image, Video and Voice lab, saved voice and Character lab endpoints answered 200 on the real data through `127.0.0.1:5480`, and `/api/projects/1/scenes` answers 404. To undo it: stop the backend and put `~/visio-studio-backup/app.db` back as `/data/app.db` (the volume's media files were never touched). Never `docker compose down -v`.
+- **Still the owner's (needs the GPU server, and each is a long or paid run, so no agent started one):** an Image lab run; a Voice lab run; a Video lab LTX run and an H3 generate and reference run; in the Character lab, a look with angles, auditions and one take; and a look at the project list, a project page and the Activity page in the browser. The pages were checked by `tsc`, ESLint and the production build, and their API calls on real data, but not opened in a browser by the agent.
+- **Found, not caused by this phase.** `alembic check` reports `character_take.duration_s` as FLOAT in the models and REAL in the database (migration `0016`); harmless in SQLite. `backend/.venv/bin/alembic` and `uvicorn` have a stale shebang to an old path, so run them as `uv run python -m alembic ...` and `uv run python -m uvicorn ...`. `DATABASE_STRUCTURE.md` §4.13 and §4.14 still describe `lab_character` and `lab_talk_run`, which migration `0016` replaced (noted at the top of that file).
 
 ---
 
@@ -2353,6 +2369,7 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-20 | — | Owner decisions recorded | Q-1, Q-3, Q-4, Q-9 to Q-13 and Q-16 answered; Q-8 deferred; Q-2 left to the owner. PHASE-046 added; PHASE-036 deferred. |
 | 2026-10-20 | PHASE-001 | Completed | V1–V8 run (lab runs 91–100 and one direct 22-frame GPU-server job); Appendix B filled; Q-5 and Q-7 answered; R-1 (short clips do not shorten an H3 job) and R-3 (no white leakage) updated. The owner confirmed by ear and eye that all generations look good and match their descriptions (see the Completion notes). |
 | 2026-10-20 | PHASE-002 | Completed | Four whole-second duration settings (1 / 2 / 10 / 14 s) with an ordering rule, and `services/duration_policy.py` (`read_duration_policy`, `shot_num_frames`). The hard maximum is 14 s, not 15 s, because the server accepts at most 345 frames. |
+| 2026-10-20 | PHASE-046 | In Progress | Code complete: tag `narration-final` (`ae4940a`), migration `0022_retire_narration` (no downgrade), 56 backend modules and 44 frontend files removed, six lab job types left, `RemoteVideoHandler` and `gpu_job.py` split out of the clip handler. `0022` applied to the Docker volume after a backup (`~/visio-studio-backup/app.db`); lab data intact. Left for the owner: the lab and Character lab runs that need the GPU server; then mark Completed. |
 
 ---
 
