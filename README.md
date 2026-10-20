@@ -13,9 +13,12 @@ What it does today:
   genre, tone, visual style and rules, and Re-run for a new version (older
   versions stay readable). Once the Story Bible is up to date, the **Characters**
   and **Environments** stages list the story's characters and places (an id, a
-  name and one line each; the two can run at the same time, and each shows
-  "Out of date" when the story or the Story Bible changes). The other stages are
-  placeholders ("Not available yet") until later phases build them.
+  name and one line each), and the **Scenes** stage divides the story into its
+  scenes (a title and one line each, plus the exact slice of the story the scene
+  owns, so the slices of all the scenes together are the whole story). The
+  three can run at the same time, and each shows "Out of date" when the story or
+  the Story Bible changes. The other stages are placeholders ("Not available
+  yet") until later phases build them.
 - **Labs**: the Image lab, the Voice lab and the Video lab try the GPU
   server's models by hand, and the Character lab makes characters, looks and
   takes. The Activity page lists their background jobs.

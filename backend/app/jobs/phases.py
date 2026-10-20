@@ -126,6 +126,10 @@ SAVING_STORY_BIBLE: Final = "saving the Story Bible"
 SAVING_CHARACTERS: Final = "saving the characters"
 SAVING_ENVIRONMENTS: Final = "saving the environments"
 
+# --- Running: scene discovery (PHASE-006) ------------------------------------------------
+# `discover_scenes` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_SCENES: Final = "saving the scenes"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

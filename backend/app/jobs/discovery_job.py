@@ -1,18 +1,20 @@
-"""The steps the two discovery jobs share (PHASE-005): `discover_characters` and
-`discover_environments`.
+"""The steps the discovery jobs share (PHASE-005, PHASE-006): `discover_characters`,
+`discover_environments` and `discover_scenes`.
 
 `services/discovery.start_run` creates the job with a copy of the saved story and its hash
 (`input.story_text`, `input.story_sha256`) and the id and version of the StoryBible the run
 reads (`input.story_bible_id`, `input.story_bible_version`). The job loads that StoryBible,
-builds the request (`services/discovery_writer.py`), asks the model, checks the answer, and
-saves it as the project's next version of the list, in the same transaction that marks the job
-succeeded.
+builds the request, asks the model, checks the answer, and saves it as the project's next
+version of the list, in the same transaction that marks the job succeeded.
 
-The two jobs differ only in their `kind`, so each is a few lines in its own module
-(`jobs/discover_characters.py`, `jobs/discover_environments.py`). They have different job
-types on purpose: a project may have one job of each type waiting or running at the same time
-(`store.create_job` merges two clicks of one type), so the two calls run side by side, and
-beside scene discovery (D-15), when the pools allow.
+The jobs differ only in their `kind` and in two steps, so each is a few lines in its own module
+(`jobs/discover_characters.py`, `jobs/discover_environments.py`, `jobs/discover_scenes.py`).
+`build_body` makes the request and `check` turns the model's answer into the stored content: the
+defaults use `services/discovery_writer.py` (characters and environments), and scene discovery
+overrides both with `services/scene_discovery_writer.py`, whose check needs the story. The jobs
+have different job types on purpose: a project may have one job of each type waiting or running
+at the same time (`store.create_job` merges two clicks of one type), so the three calls run side
+by side (D-15) when the pools allow.
 
 The model is the **story role** (`llm_target.STORY_MODEL_KEY`), like every story stage (D-12).
 
@@ -28,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar, Final, cast
 
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
@@ -55,15 +57,26 @@ class DiscoveryHandler(JobHandler):
     restart_rule = "never_rerun"
     model_key = STORY_MODEL_KEY
 
-    kind: ClassVar[writer.Kind]
+    kind: ClassVar[discovery.StageKind]
     saving_phase: ClassVar[str]
 
-    def _read(self, result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
+    def build_body(self, story: str, bible_content: dict[str, Any], model: str) -> dict[str, Any]:
+        """The request body sent to the model. Characters and environments by default."""
+        return writer.build_request(cast(writer.Kind, self.kind), story, bible_content, model=model)
+
+    def check(self, content: str, story: str) -> dict[str, Any]:
+        """The model's text read and checked, as the content that is stored. Raises ValueError,
+        with a message fit for the user, when it cannot be used. Characters and environments
+        by default; the story is not needed for them.
+        """
+        return writer.check_items(cast(writer.Kind, self.kind), writer.parse_answer(content))
+
+    def _read(self, result: llm.ChatResult, story: str) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`."""
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
         try:
-            return None, writer.check_items(self.kind, writer.parse_answer(result.content))
+            return None, self.check(result.content, story)
         except ValueError as exc:
             return str(exc), None
 
@@ -98,7 +111,7 @@ class DiscoveryHandler(JobHandler):
         bible_version = bible.version
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        body = writer.build_request(self.kind, story, bible_content, model=target.model)
+        body = self.build_body(story, bible_content, target.model)
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),
@@ -109,7 +122,11 @@ class DiscoveryHandler(JobHandler):
             await store.update_input(session, job_id, job_input)
 
         outcome = await llm_call.ask_model(
-            job_id, target, body, self._read, timeout_s=REQUEST_TIMEOUT_S
+            job_id,
+            target,
+            body,
+            lambda result: self._read(result, story),
+            timeout_s=REQUEST_TIMEOUT_S,
         )
         content: dict[str, Any] | None = outcome.value
         if content is None:

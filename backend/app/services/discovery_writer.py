@@ -91,11 +91,12 @@ _PROMPTS: Final[dict[Kind, str]] = {
 }
 
 
-def build_request(
-    kind: Kind, story_text: str, bible_content: dict[str, Any], *, model: str
+def build_body(
+    instructions: str, story_text: str, bible_content: dict[str, Any], *, model: str
 ) -> dict[str, Any]:
-    """The exact request body sent to the model. It is stored on the job
-    (`job.input.request`), so nothing about the call is hidden from the job record.
+    """The request body of a discovery call: `instructions` are the system message, and the
+    StoryBible and the raw story are the user message. Scene discovery
+    (`services/scene_discovery_writer.py`) builds its request with this too.
     """
     user_message = (
         "STORY BIBLE (JSON):\n"
@@ -106,7 +107,7 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": _PROMPTS[kind]},
+            {"role": "system", "content": instructions},
             {"role": "user", "content": user_message},
         ],
         "max_tokens": MAX_TOKENS,
@@ -116,6 +117,15 @@ def build_request(
         "response_format": {"type": "json_object"},
         "reasoning_effort": REASONING_EFFORT,
     }
+
+
+def build_request(
+    kind: Kind, story_text: str, bible_content: dict[str, Any], *, model: str
+) -> dict[str, Any]:
+    """The exact request body sent to the model. It is stored on the job
+    (`job.input.request`), so nothing about the call is hidden from the job record.
+    """
+    return build_body(_PROMPTS[kind], story_text, bible_content, model=model)
 
 
 def parse_answer(content: str) -> Any:
@@ -131,7 +141,7 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _text(value: object, field: str, position: int, max_chars: int) -> str:
+def clean_text(value: object, field: str, position: int, max_chars: int) -> str:
     """One piece of text on one line. Raises ValueError when it is not text, is empty, or is
     longer than `max_chars`.
     """
@@ -147,7 +157,7 @@ def _text(value: object, field: str, position: int, max_chars: int) -> str:
     return text
 
 
-def _slug(value: object, position: int) -> str:
+def clean_slug(value: object, position: int) -> str:
     """The item's id, in lower case. Raises ValueError when it is not a usable slug."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'Item {position} of the model\'s answer had no "id".')
@@ -179,15 +189,15 @@ def check_items(kind: Kind, answer: Any) -> dict[str, Any]:
     for position, entry in enumerate(items, start=1):
         if not isinstance(entry, dict):
             raise ValueError(f"Item {position} of the model's answer was not an object.")
-        item_id = _slug(entry.get("id"), position)
+        item_id = clean_slug(entry.get("id"), position)
         if item_id in seen:
             raise ValueError(f'The id "{item_id}" was used for more than one item.')
         seen.add(item_id)
         checked.append(
             {
                 "id": item_id,
-                "name": _text(entry.get("name"), "name", position, NAME_MAX_CHARS),
-                "description": _text(
+                "name": clean_text(entry.get("name"), "name", position, NAME_MAX_CHARS),
+                "description": clean_text(
                     entry.get("description"), "description", position, DESCRIPTION_MAX_CHARS
                 ),
             }

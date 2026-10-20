@@ -1,49 +1,63 @@
-"""A story project's discovered characters and environments: starting the jobs that find them,
-saving their versions, and reading them back (PHASE-005).
+"""A story project's discovered characters, environments and scenes: starting the jobs that
+find them, saving their versions, and reading them back (PHASE-005, PHASE-006).
 
-The two kinds work the same way and differ only in their job type and their table, so one set
-of functions serves both and takes the `kind` (`"characters"` or `"environments"`).
+The three kinds work the same way and differ only in their job type and their table, so one set
+of functions serves all of them and takes the `kind` (`"characters"`, `"environments"` or
+`"scenes"`). The three jobs read the same inputs (the saved story and its up-to-date StoryBible)
+and do not wait for each other (D-15).
 
 Every version is a new row and a stored row is never changed (the artifact provenance
 convention, DATABASE_STRUCTURE.md Section 2.1). Each row records the SHA-256 of the exact story
 it was made from and the StoryBible version it read (`inputs`), so whether it is out of date is
 worked out when it is read (`is_out_of_date`) and never stored.
 
-The request to the model is built in `services/discovery_writer.py`, and the jobs that make the
-call and save the result are `jobs/discover_characters.py` and `jobs/discover_environments.py`.
-This module only creates the jobs and the rows.
+The request to the model is built in `services/discovery_writer.py` (characters and
+environments) or `services/scene_discovery_writer.py` (scenes), and the jobs that make the call
+and save the result are `jobs/discover_characters.py`, `jobs/discover_environments.py` and
+`jobs/discover_scenes.py`. This module only creates the jobs and the rows.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CharacterDiscovery, EnvironmentDiscovery, Job, Project, StoryBible
+from app.db.models import (
+    CharacterDiscovery,
+    EnvironmentDiscovery,
+    Job,
+    Project,
+    SceneDiscovery,
+    StoryBible,
+)
 from app.jobs import store
 from app.services import story_bible
-from app.services.discovery_writer import Kind
 
 SOURCE_AI: Final = "ai"
 BIBLE_KIND: Final = "story_bible"
 
-Discovery = CharacterDiscovery | EnvironmentDiscovery
+# The three discovery stages. `services/discovery_writer.Kind` is the two of them whose answer
+# is a list of `{id, name, description}`; scenes have their own writer.
+StageKind = Literal["characters", "environments", "scenes"]
+
+Discovery = CharacterDiscovery | EnvironmentDiscovery | SceneDiscovery
 
 
 @dataclass(frozen=True)
 class KindSpec:
-    """What differs between the two kinds."""
+    """What differs between the kinds."""
 
     job_type: str
     model: type[Discovery]
 
 
-SPECS: Final[dict[Kind, KindSpec]] = {
+SPECS: Final[dict[StageKind, KindSpec]] = {
     "characters": KindSpec(job_type="discover_characters", model=CharacterDiscovery),
     "environments": KindSpec(job_type="discover_environments", model=EnvironmentDiscovery),
+    "scenes": KindSpec(job_type="discover_scenes", model=SceneDiscovery),
 }
 
 
@@ -51,9 +65,9 @@ class DiscoveryError(ValueError):
     """A request that cannot be done. The message is meant to be shown to the user."""
 
 
-async def start_run(session: AsyncSession, project: Project, kind: Kind) -> Job:
-    """Queues the job that finds the project's characters (or environments) from its saved
-    story and its newest StoryBible, and commits.
+async def start_run(session: AsyncSession, project: Project, kind: StageKind) -> Job:
+    """Queues the job that finds the project's characters (or environments, or scenes) from
+    its saved story and its newest StoryBible, and commits.
 
     The story is copied onto the job (with its hash), and the StoryBible is named by id and
     version, so the version made is tied to what was current when the button was pressed. A
@@ -97,7 +111,7 @@ async def get_bible(session: AsyncSession, project_id: int, bible_id: int) -> St
     return bible
 
 
-async def latest(session: AsyncSession, kind: Kind, project_id: int) -> Discovery | None:
+async def latest(session: AsyncSession, kind: StageKind, project_id: int) -> Discovery | None:
     """The project's newest version, or None when it has none."""
     model = SPECS[kind].model
     statement = (
@@ -106,7 +120,7 @@ async def latest(session: AsyncSession, kind: Kind, project_id: int) -> Discover
     return (await session.execute(statement)).scalars().first()
 
 
-async def list_versions(session: AsyncSession, kind: Kind, project_id: int) -> list[Discovery]:
+async def list_versions(session: AsyncSession, kind: StageKind, project_id: int) -> list[Discovery]:
     """Every version of the project, newest first."""
     model = SPECS[kind].model
     statement = select(model).where(model.project_id == project_id).order_by(model.version.desc())
@@ -114,7 +128,7 @@ async def list_versions(session: AsyncSession, kind: Kind, project_id: int) -> l
 
 
 async def get_version(
-    session: AsyncSession, kind: Kind, project_id: int, version: int
+    session: AsyncSession, kind: StageKind, project_id: int, version: int
 ) -> Discovery | None:
     """One version of the project, or None when there is no such version."""
     model = SPECS[kind].model
@@ -124,7 +138,7 @@ async def get_version(
 
 async def save_version(
     session: AsyncSession,
-    kind: Kind,
+    kind: StageKind,
     *,
     project_id: int,
     job_id: int,

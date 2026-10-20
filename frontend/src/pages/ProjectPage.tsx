@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
 import { DiscoveryPanel } from "../components/story/DiscoveryPanel";
+import { ScenesPanel } from "../components/story/ScenesPanel";
 import { StageList } from "../components/story/StageList";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
 import { StoryEditor } from "../components/story/StoryEditor";
@@ -74,6 +75,7 @@ export function ProjectPage() {
             kind="environments"
             hasStory={project.script_text !== null}
           />
+          <ScenesPanel projectId={project.id} hasStory={project.script_text !== null} />
           <StageList />
         </>
       )}

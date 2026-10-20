@@ -33,6 +33,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "scene-discovery",
     name: "Scene discovery",
     description: "Splits the story into scenes, each one a slice of the original text.",
+    available: true,
   },
   {
     id: "character-definitions",

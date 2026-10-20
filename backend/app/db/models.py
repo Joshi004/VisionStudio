@@ -86,11 +86,12 @@ class Job(Base):
     __tablename__ = "job"
     __table_args__ = (
         # The six lab job types, since revision 0022 retired the narration ones, the first
-        # story stage, since revision 0023, and the two discovery stages, since revision 0024.
+        # story stage, since revision 0023, the two discovery stages, since revision 0024, and
+        # scene discovery, since revision 0025.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
-            "'discover_characters', 'discover_environments')",
+            "'discover_characters', 'discover_environments', 'discover_scenes')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -199,6 +200,35 @@ class EnvironmentDiscovery(Base):
         CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
         UniqueConstraint("project_id", "version"),
         Index("idx_environment_discovery_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SceneDiscovery(Base):
+    """One version of a story project's list of discovered scenes (PHASE-006). The same
+    provenance shape as `CharacterDiscovery`. `content` is
+    `{"scenes": [{"index", "id", "title", "description", "starts_with", "start", "end",
+    "text"}, ...]}`: the model gave `id`, `title`, `description` and `starts_with`, and code set
+    the rest. `text` is `story[start:end]` of the story whose hash is in `inputs`, so the
+    scenes' texts joined in order are that whole story. Scenes carry no character or
+    environment ids (D-15).
+    """
+
+    __tablename__ = "scene_discovery"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_scene_discovery_project", "project_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
