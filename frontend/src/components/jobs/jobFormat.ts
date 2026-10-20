@@ -14,6 +14,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   define_character: "Character definition",
   discover_relations: "Character relations",
   design_voice: "Voice design",
+  write_environment_prompt: "Environment reference prompt",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
@@ -30,6 +31,8 @@ export function labPathFor(type: JobSummary["type"]): string {
     case "write_character_look_prompt":
     case "write_character_take_prompt":
       return "/lab/characters";
+    case "write_environment_prompt":
+      return "/lab/environments";
     default:
       return "/lab/video";
   }

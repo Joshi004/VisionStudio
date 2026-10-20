@@ -1564,6 +1564,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/environments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Environments
+         * @description The newest environments first. Pass the last id you have as `before_id` for the next
+         *     page.
+         */
+        get: operations["list_environments_api_lab_environments_get"];
+        put?: never;
+        /**
+         * Create Environment
+         * @description Saves a new environment's profile, as its version 1. Its picture is made afterwards.
+         */
+        post: operations["create_environment_api_lab_environments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Environment */
+        get: operations["get_environment_api_lab_environments__environment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit Environment
+         * @description Changes the profile, archives or unarchives an environment, or both at once. A change to
+         *     the profile adds a version; archiving does not.
+         */
+        patch: operations["edit_environment_api_lab_environments__environment_id__patch"];
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Versions
+         * @description Every version of this environment, newest first, each with what it changed and its own
+         *     picture. A version is never edited: it is added when the profile changes.
+         */
+        get: operations["list_versions_api_lab_environments__environment_id__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List References
+         * @description Every attempt to make a picture for this environment, newest first.
+         */
+        get: operations["list_references_api_lab_environments__environment_id__references_get"];
+        put?: never;
+        /**
+         * Start Reference
+         * @description Starts an attempt to make a canonical picture for the newest version: a language model
+         *     writes the prompt, then four candidate pictures are made to choose from.
+         */
+        post: operations["start_reference_api_lab_environments__environment_id__references_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/references/{reference_id}/choose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose Reference
+         * @description Makes one candidate the canonical picture of the version this attempt was made for. It
+         *     replaces a picture chosen earlier. Only the newest version can be changed.
+         */
+        post: operations["choose_reference_api_lab_environments_references__reference_id__choose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1921,6 +2035,11 @@ export interface components {
             /** Candidate Id */
             candidate_id: number;
         };
+        /** ChooseReferenceIn */
+        ChooseReferenceIn: {
+            /** Candidate Id */
+            candidate_id: number;
+        };
         /** ConnectionState */
         ConnectionState: {
             last_test: components["schemas"]["ConnectionTest"] | null;
@@ -2214,6 +2333,141 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * EnvironmentIn
+         * @description The create form. Every field is sent, even when it has not changed.
+         */
+        EnvironmentIn: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Era Kind
+             * @default present
+             * @enum {string}
+             */
+            era_kind: "present" | "past" | "future";
+            /** Era Years */
+            era_years?: number | null;
+            /** Era Setting */
+            era_setting?: string | null;
+            /** Atmosphere */
+            atmosphere?: string | null;
+            /** Notes */
+            notes?: string | null;
+        };
+        /** EnvironmentOut */
+        EnvironmentOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Era Kind
+             * @enum {string}
+             */
+            era_kind: "present" | "past" | "future";
+            /** Era Years */
+            era_years: number | null;
+            /** Era Setting */
+            era_setting: string | null;
+            /** Atmosphere */
+            atmosphere: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Archived */
+            archived: boolean;
+            /** Version */
+            version: number | null;
+            image: components["schemas"]["PictureOut"] | null;
+        };
+        /**
+         * EnvironmentPatch
+         * @description What to change in an environment: any profile field, and/or `archived`. A profile field
+         *     that is left out keeps its current value.
+         */
+        EnvironmentPatch: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Era Kind */
+            era_kind?: ("present" | "past" | "future") | null;
+            /** Era Years */
+            era_years?: number | null;
+            /** Era Setting */
+            era_setting?: string | null;
+            /** Atmosphere */
+            atmosphere?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Archived */
+            archived?: boolean | null;
+        };
+        /**
+         * EnvironmentProfileOut
+         * @description The profile as a version froze it.
+         */
+        EnvironmentProfileOut: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Era Kind
+             * @enum {string}
+             */
+            era_kind: "present" | "past" | "future";
+            /** Era Years */
+            era_years: number | null;
+            /** Era Setting */
+            era_setting: string | null;
+            /** Atmosphere */
+            atmosphere: string | null;
+            /** Notes */
+            notes: string | null;
+        };
+        /** EnvironmentVersionOut */
+        EnvironmentVersionOut: {
+            /** Id */
+            id: number;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Changes */
+            changes: ("created" | "profile")[];
+            profile: components["schemas"]["EnvironmentProfileOut"];
+            image: components["schemas"]["PictureOut"] | null;
+        };
+        /** EnvironmentsOut */
+        EnvironmentsOut: {
+            /** Environments */
+            environments: components["schemas"]["EnvironmentOut"][];
+            /** Next Before Id */
+            next_before_id: number | null;
+        };
         /** EraOut */
         EraOut: {
             /**
@@ -2406,7 +2660,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt";
             /**
              * Status
              * @enum {string}
@@ -2459,7 +2713,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt";
             /**
              * Status
              * @enum {string}
@@ -3041,6 +3295,16 @@ export interface components {
             diff: components["schemas"]["ContractDiffOut"];
         };
         /**
+         * PictureOut
+         * @description A canonical picture: the Image lab image and where to show it.
+         */
+        PictureOut: {
+            /** Id */
+            id: number;
+            /** Url */
+            url: string;
+        };
+        /**
          * PoolCapacity
          * @description One of the two shared pools: how many jobs may run in it, and what is in it now.
          */
@@ -3072,7 +3336,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt";
             /** Running */
             running: number;
             /** Queued */
@@ -3224,6 +3488,42 @@ export interface components {
             seed?: number | null;
             /** Steps */
             steps?: number | null;
+        };
+        /** ReferenceCandidateOut */
+        ReferenceCandidateOut: {
+            /** Id */
+            id: number;
+            /** Url */
+            url: string | null;
+            job: components["schemas"]["JobSummary"] | null;
+            /** Chosen */
+            chosen: boolean;
+        };
+        /** ReferenceOut */
+        ReferenceOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Version */
+            version: number;
+            /** Frozen */
+            frozen: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "writing_prompt" | "ready" | "failed";
+            /** Prompt */
+            prompt: string | null;
+            /** Error */
+            error: string | null;
+            prompt_job: components["schemas"]["JobSummary"] | null;
+            /** Candidates */
+            candidates: components["schemas"]["ReferenceCandidateOut"][];
         };
         /** RelationCharacterOut */
         RelationCharacterOut: {
@@ -7508,6 +7808,320 @@ export interface operations {
                 };
             };
             /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_environments_api_lab_environments_get: {
+        parameters: {
+            query?: {
+                include_archived?: boolean;
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_environment_api_lab_environments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentOut"];
+                };
+            };
+            /** @description The request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_environment_api_lab_environments__environment_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentOut"];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_environment_api_lab_environments__environment_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentOut"];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_versions_api_lab_environments__environment_id__versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentVersionOut"][];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_references_api_lab_environments__environment_id__references_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceOut"][];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_reference_api_lab_environments__environment_id__references_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceOut"];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    choose_reference_api_lab_environments_references__reference_id__choose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reference_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChooseReferenceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceOut"];
+                };
+            };
+            /** @description No attempt has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request breaks a rule. */
             422: {
                 headers: {
                     [name: string]: unknown;

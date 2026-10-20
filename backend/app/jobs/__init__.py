@@ -8,7 +8,8 @@
   `lab_voice.py`, `generate_lab_image.py`) and the Character lab
   (`write_character_look_prompt.py`, `write_character_take_prompt.py`) and the story stages
   (`write_story_bible.py`, `discover_characters.py`, `discover_environments.py`,
-  `discover_scenes.py`, `define_character.py`, `discover_relations.py`, `design_voice.py`).
+  `discover_scenes.py`, `define_character.py`, `discover_relations.py`, `design_voice.py`)
+  and the environment library (`write_environment_prompt.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -40,6 +41,7 @@ def register_handlers() -> None:
     from app.jobs.lab_voice import LabVoiceHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
+    from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
 
@@ -56,3 +58,4 @@ def register_handlers() -> None:
     handlers.register(DefineCharacterHandler())
     handlers.register(DiscoverRelationsHandler())
     handlers.register(DesignVoiceHandler())
+    handlers.register(WriteEnvironmentPromptHandler())

@@ -21,9 +21,9 @@ prompt. Raise `version` whenever any text in a profile, or in the generic instru
 exact request, so earlier prompts can be compared with later ones.
 Pure data, no I/O.
 
-The profiles for a scene's first frame, a last-frame edit and a place's reference sheet were
-retired with the narration pipeline (PHASE-046). They are readable at the git tag
-`narration-final`.
+The profiles for a scene's first frame and a last-frame edit were retired with the narration
+pipeline (PHASE-046), and so was the place's reference sheet, which PHASE-012 brought back as
+the environment sheet below. They are readable at the git tag `narration-final`.
 """
 
 from __future__ import annotations
@@ -494,3 +494,106 @@ ACTIVE_CHARACTER_SHEET_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET
 ACTIVE_CHARACTER_SHEET_FROM_PICTURE_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET_FROM_PICTURE
 # A library character's master picture made from a picture of the same person (PHASE-047).
 ACTIVE_CHARACTER_SHEET_SAME_PERSON_PROFILE: Final = QWEN_IMAGE_21_CHARACTER_SHEET_SAME_PERSON
+
+
+# --- Environment reference pictures (PHASE-012) ----------------------------------------------
+#
+# A library environment's canonical picture: one empty, wide establishing view of the place,
+# made by text-to-image at 16:9. It is the old place reference sheet (retired with the
+# narration pipeline, PHASE-046, readable at the git tag `narration-final`), with the inputs
+# changed to the Character lab's environment card. It is not cut out: the place is the
+# background. Like the character profiles it follows the published Qwen guidance and has not
+# been checked against real pictures here: check it and raise `version` when it changes.
+
+_ENVIRONMENT_SHEET_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "card": (
+        "Name: The tea house.\n"
+        "Time: set in the present day.\n"
+        "Description: A low wooden mountain tea house with a steep grey-slate roof and deep "
+        "eaves, standing on a terrace of flat stone slabs beside a gnarled pine. Its sliding "
+        "paper doors are closed and a row of round red paper lanterns hangs under the front "
+        "eave. Pale blue mountain ridges rise behind it into morning mist.\n"
+        "Atmosphere: quiet, cool and still, like the first hour of the day."
+    ),
+}
+
+_ENVIRONMENT_SHEET_EXAMPLE_PROMPT: Final = (
+    "A natural photograph of an empty mountain tea house at dawn, seen as a wide "
+    "establishing view. A low wooden building with a steep grey-slate roof and deep eaves "
+    "stands on a terrace of flat stone slabs, its sliding paper doors closed and a row of "
+    "round red paper lanterns hanging unlit under the front eave. In the foreground a stone "
+    "path winds up from the lower left between clipped green shrubs; in the middle of the "
+    "picture the tea house sits slightly right of centre beside a gnarled pine; behind it, "
+    "pale blue mountain ridges rise one beyond the other into soft mist, filling the upper "
+    "part of the frame. The camera is at eye level with a gentle 35 mm look and a calm, "
+    "balanced composition. Cool, low light from the left runs across the roof and the "
+    "stones, and a thin mist hangs in the valley. The palette is slate grey, soft green, "
+    "pale blue and warm cedar brown, with the red lanterns as the one bright accent. The "
+    "finish is a clean, natural, realistic photograph."
+)
+
+QWEN_IMAGE_21_ENVIRONMENT_SHEET: Final = ImagePromptProfile(
+    id="qwen-image-2.1-environment-sheet",
+    version=1,
+    image_model="Qwen-Image-2.1",
+    prompt_rules="\n".join(
+        [
+            'Rules for "image_prompt", the prompt for the image model. The picture is the '
+            "reference of one place of a library of environments: an empty, wide "
+            "establishing view that every picture and clip set there is made to match.",
+            "1. One paragraph of plain English prose, in complete sentences and the present "
+            "tense, 120 to 220 words. No lists, no headings, no labels and no piles of "
+            "comma-separated keywords.",
+            "2. Open with the kind of picture it is (for example 'A natural photograph of' "
+            "or 'A soft watercolour illustration of') and go straight to the place and its "
+            "main features. With no style given, use a natural photograph, unless the "
+            "description itself describes a stylised look.",
+            "3. Then describe the place from the description you are given: the buildings or "
+            "the landscape, their materials and colours, and the details that make it this "
+            "place and no other. Keep the words of the description where you can, and add "
+            "nothing that changes what the place is. The time the card gives (the present, "
+            "the past or the future) guides what is built and worn, never anything written "
+            "in the picture.",
+            "4. Then say where things sit in the frame (the foreground, the middle and the "
+            "background; left, centre and right; the upper and lower parts of the picture), "
+            "the angle (a wide establishing view at eye level) and the lens look (for "
+            "example '35 mm look'). The frame is wide, so spread the place across it.",
+            "5. Then the light (where it comes from, its direction and quality), the time of "
+            "day, the weather, the colour palette and the mood. Use the atmosphere you are "
+            "given for the mood and the light.",
+            "6. The place stands empty: put no person, animal or vehicle in it, and do not "
+            "mention any.",
+            "7. Put the style into words as the last sentence. With none given, use a "
+            "natural, realistic look.",
+            "8. Nothing is written in the picture: no text, captions, letters, numbers, signs "
+            "with words, labels, posters, screens, pages, logos, watermarks, borders or split "
+            "panels. The model draws any wording it is given, so do not name any of these, "
+            "not even to say there are none, and describe any surface that could carry words "
+            "as plain or blank.",
+            "9. Describe only what is visible. The model has no negative prompt, and naming a "
+            "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
+            "the space instead.",
+            "10. Never write the place's name, and never name a real place or a famous "
+            "building: describe the looks only.",
+            "11. Concrete nouns and plain adjectives. No quality tags (such as 8k, "
+            "masterpiece or highly detailed) and no camera brand names.",
+        ]
+    ),
+    example_inputs=_ENVIRONMENT_SHEET_EXAMPLE_INPUTS,
+    example_answer=json.dumps(
+        {"image_prompt": _ENVIRONMENT_SHEET_EXAMPLE_PROMPT}, ensure_ascii=False
+    ),
+    min_words=120,
+    max_words=220,
+    rules=(
+        *SEEDREAM_50_LITE.rules,
+        TextRule(
+            _NEGATIVE_WORDS,
+            "A negative found (no, not, without, nothing). The image model has no negative "
+            "prompt, and naming a thing can make it appear: say what is there instead.",
+        ),
+    ),
+)
+
+# A library environment's canonical picture: an empty wide view of the place, not cut out.
+ACTIVE_ENVIRONMENT_SHEET_PROFILE: Final = QWEN_IMAGE_21_ENVIRONMENT_SHEET

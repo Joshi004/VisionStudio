@@ -3,6 +3,7 @@ import { Button, Group, Stack, Tabs, Text, Title } from "@mantine/core";
 import { Navigate, useNavigate, useParams } from "react-router";
 
 import { CharacterLabPanel } from "../components/characterLab/CharacterLabPanel";
+import { EnvironmentLabPanel } from "../components/environmentLab/EnvironmentLabPanel";
 import { ImageLabPanel } from "../components/lab/ImageLabPanel";
 import { LabLibraryDrawer, type LibraryActions } from "../components/lab/LabLibraryDrawer";
 import { VideoLabPanel } from "../components/lab/VideoLabPanel";
@@ -21,6 +22,7 @@ import {
 
 const TABS = [
   { value: "characters", label: "Characters" },
+  { value: "environments", label: "Environments" },
   { value: "image", label: "Image" },
   { value: "video", label: "Video" },
   { value: "voice", label: "Voice" },
@@ -36,7 +38,8 @@ function isLabTab(value: string | undefined): value is LabTab {
 
 /**
  * One place for everything that is tried by hand and belongs to no project: the library of
- * characters (Characters), and the three labs it is made of (Image, Video, Voice).
+ * characters (Characters), the library of environments (Environments), and the three labs it
+ * is made of (Image, Video, Voice).
  *
  * The tab is in the address (`/lab/characters`), so a tab can be linked to. The Image, Video
  * and Voice forms are kept here, so changing tabs never loses what you typed, and so the
@@ -92,9 +95,9 @@ export function LabPage() {
           <Title order={2}>Lab</Title>
           <Text size="sm" c="dimmed" maw={760}>
             Try things by hand. Nothing here belongs to a project. Keep a library of characters
-            and make pictures, speech and clips with them, or try the image, video and voice
-            models on their own. The library holds every picture, voice, speech and clip, and can
-            send them to a tab.
+            and make pictures, speech and clips with them, keep a library of places, or try the
+            image, video and voice models on their own. The library holds every picture, voice,
+            speech and clip, and can send them to a tab.
           </Text>
         </Stack>
         <Button variant="default" onClick={() => setLibraryOpen(true)}>
@@ -114,6 +117,9 @@ export function LabPage() {
         {/* Every panel stays mounted, so a result shown on a tab is still there when you return. */}
         <Tabs.Panel value="characters" pt="md">
           <CharacterLabPanel />
+        </Tabs.Panel>
+        <Tabs.Panel value="environments" pt="md">
+          <EnvironmentLabPanel />
         </Tabs.Panel>
         <Tabs.Panel value="image" pt="md">
           <ImageLabPanel form={imageForm} onFormChange={setImageForm} />

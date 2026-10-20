@@ -88,12 +88,14 @@ class Job(Base):
         # The six lab job types, since revision 0022 retired the narration ones, the first
         # story stage, since revision 0023, the two discovery stages, since revision 0024,
         # scene discovery, since revision 0025, character definition, since revision 0028, and
-        # relation discovery, since revision 0030, and voice design, since revision 0031.
+        # relation discovery, since revision 0030, voice design, since revision 0031, and the
+        # environment prompt, since revision 0032.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
-            "'define_character', 'discover_relations', 'design_voice')",
+            "'define_character', 'discover_relations', 'design_voice', "
+            "'write_environment_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -929,3 +931,126 @@ class ProjectCharacterLink(Base):
     discovery_version: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class LibraryEnvironment(Base):
+    """An environment of the Character lab's library (PHASE-012): a reusable, project-independent
+    place an author builds once (profile, canonical reference picture) and a story project can
+    later link to and pin a version of (PHASE-013).
+
+    This is the editable head, like `library_character`. Every change to the profile adds one
+    immutable `library_environment_version` row (`services/environment_versions`). Never
+    deleted, only archived.
+
+    `era_kind`, `era_years` and `era_setting` follow the same rules as a character's. A place
+    has no mouth, species or voice, so the profile is only a description, the era, an optional
+    atmosphere and optional notes.
+    """
+
+    __tablename__ = "library_environment"
+    __table_args__ = (
+        CheckConstraint("era_kind IN ('present', 'past', 'future')", name="era_kind_valid"),
+        Index("idx_library_environment_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    name: Mapped[str]
+    # What the place looks like: the architecture or landscape, materials, colours, details.
+    description: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    era_kind: Mapped[str] = mapped_column(default="present", server_default=text("'present'"))
+    # past or future only: how many years from the present. NULL for "present".
+    era_years: Mapped[int | None] = mapped_column(default=None)
+    # past or future only: what that time looks like here (optional free text).
+    era_setting: Mapped[str | None] = mapped_column(default=None)
+    # The place's usual mood and light, in words (optional).
+    atmosphere: Mapped[str | None] = mapped_column(default=None)
+    notes: Mapped[str | None] = mapped_column(default=None)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+
+
+class LibraryEnvironmentVersion(Base):
+    """One immutable snapshot of a library environment's profile (PHASE-012), plus its canonical
+    reference picture.
+
+    `profile` is the seven profile fields by name and never changes after the row is written.
+    `reference_image_id` is the one exception: the canonical picture the author chose for this
+    version. It is set (and may be replaced) only while the version is the environment's
+    newest; once an edit adds a newer version, this one is frozen and keeps its own picture.
+    An edit never carries the picture forward, because it was made for the old text.
+    Provenance (D-3): `source`, `version` and `created_at`; every change here is made by hand.
+    """
+
+    __tablename__ = "library_environment_version"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("environment_id", "version"),
+        Index("idx_library_environment_version_environment", "environment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    environment_id: Mapped[int] = mapped_column(
+        ForeignKey("library_environment.id", ondelete="CASCADE")
+    )
+    version: Mapped[int]
+    source: Mapped[str] = mapped_column(default="manual", server_default=text("'manual'"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    profile: Mapped[Any] = mapped_column(JSON)
+    reference_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
+
+
+class EnvironmentReference(Base):
+    """One attempt to make the canonical picture of an environment version (PHASE-012): a
+    `write_environment_prompt` job writes the prompt, then four `lab_image` runs make the
+    candidates the author chooses from.
+
+    `status` is `writing_prompt` (the job is writing the prompt), `ready` (the candidates were
+    started; each one's own state is read live from its `lab_run`) or `failed` (`error` says
+    why). The attempt is made for one version (`version_id`), the environment's newest when it
+    started.
+    """
+
+    __tablename__ = "environment_reference"
+    __table_args__ = (
+        CheckConstraint("status IN ('writing_prompt', 'ready', 'failed')", name="status_valid"),
+        Index("idx_environment_reference_environment", "environment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    environment_id: Mapped[int] = mapped_column(
+        ForeignKey("library_environment.id", ondelete="CASCADE")
+    )
+    version_id: Mapped[int] = mapped_column(
+        ForeignKey("library_environment_version.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(
+        default="writing_prompt", server_default=text("'writing_prompt'")
+    )
+    prompt: Mapped[str | None] = mapped_column(default=None)
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    error: Mapped[str | None] = mapped_column(default=None)
+
+
+class EnvironmentReferenceCandidate(Base):
+    """One of the (four) pictures made for an `environment_reference` to choose from
+    (PHASE-012). A pure link to the `lab_run`/`lab_image` that made it: its own status is read
+    from that run, never duplicated here.
+    """
+
+    __tablename__ = "environment_reference_candidate"
+    __table_args__ = (Index("idx_environment_reference_candidate_reference", "reference_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    reference_id: Mapped[int] = mapped_column(
+        ForeignKey("environment_reference.id", ondelete="CASCADE")
+    )
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )

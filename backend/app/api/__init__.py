@@ -11,6 +11,7 @@ from app.api import (
     character_links,
     character_relations,
     discovery,
+    environment_lab,
     gpu,
     health,
     image_lab,
@@ -42,3 +43,4 @@ api_router.include_router(image_lab.router, tags=["image-lab"])
 api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
 api_router.include_router(character_lab.router, tags=["character-lab"])
+api_router.include_router(environment_lab.router, tags=["environment-lab"])
