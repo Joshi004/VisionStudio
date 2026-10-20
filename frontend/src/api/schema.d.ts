@@ -225,6 +225,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/character-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Character Links */
+        get: operations["get_character_links_api_projects__project_id__character_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-links/link-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link All
+         * @description Makes a library character for every unlinked entry of the newest list. When everything
+         *     is linked already, nothing is made.
+         */
+        post: operations["link_all_api_projects__project_id__character_links_link_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-links/{discovery_id}/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Link
+         * @description Makes a new library character from one entry of the newest list and pins its version 1.
+         */
+        post: operations["create_link_api_projects__project_id__character_links__discovery_id__create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-links/{discovery_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Map Link
+         * @description Links one entry of the newest list to an existing library character and pins that
+         *     character's newest version.
+         */
+        put: operations["map_link_api_projects__project_id__character_links__discovery_id__put"];
+        post?: never;
+        /**
+         * Delete Link
+         * @description Removes the link. The library character stays in the Character Lab.
+         */
+        delete: operations["delete_link_api_projects__project_id__character_links__discovery_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -906,6 +989,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/characters/{character_id}/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Character Projects
+         * @description The story projects that use this character, each with the version it pins. Read-only:
+         *     a project's link is changed from the project.
+         */
+        get: operations["list_character_projects_api_lab_characters__character_id__projects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters/{character_id}/looks": {
         parameters: {
             query?: never;
@@ -1311,6 +1415,27 @@ export interface components {
              */
             has_visible_mouth: boolean;
         };
+        /** CharacterLinksOut */
+        CharacterLinksOut: {
+            /** Discovery Version */
+            discovery_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["LinkEntryOut"][];
+            /** Orphaned */
+            orphaned: components["schemas"]["OrphanedLinkOut"][];
+        };
+        /**
+         * CharacterOriginOut
+         * @description The story project and discovered character a library character was made from.
+         */
+        CharacterOriginOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Discovery Id */
+            discovery_id: string;
+        };
         /** CharacterOut */
         CharacterOut: {
             /** Id */
@@ -1360,6 +1485,7 @@ export interface components {
             archived: boolean;
             /** Version */
             version: number | null;
+            origin: components["schemas"]["CharacterOriginOut"] | null;
         };
         /**
          * CharacterPatch
@@ -1410,6 +1536,29 @@ export interface components {
             ready: boolean;
             /** Lab Image Id */
             lab_image_id?: number | null;
+        };
+        /**
+         * CharacterUsageOut
+         * @description One story project that uses the character, and the version it pins.
+         */
+        CharacterUsageOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Discovery Id */
+            discovery_id: string;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "created" | "mapped";
+            /** Pinned Version */
+            pinned_version: number;
+            /** Newest Version */
+            newest_version: number | null;
+            /** Newer Version Available */
+            newer_version_available: boolean;
         };
         /** CharacterVersionOut */
         CharacterVersionOut: {
@@ -2174,6 +2323,44 @@ export interface components {
             /** Duration S */
             duration_s: number | null;
         };
+        /**
+         * LinkEntryOut
+         * @description One entry of the newest discovered list. `link` is None while it is unlinked.
+         */
+        LinkEntryOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            link: components["schemas"]["LinkedCharacterOut"] | null;
+        };
+        /**
+         * LinkedCharacterOut
+         * @description The library character an entry is linked to, and the version the project pins.
+         */
+        LinkedCharacterOut: {
+            /** Character Id */
+            character_id: number;
+            /** Name */
+            name: string;
+            /** Archived */
+            archived: boolean;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "created" | "mapped";
+            /** Pinned Version */
+            pinned_version: number;
+            /** Newest Version */
+            newest_version: number | null;
+            /** Newer Version Available */
+            newer_version_available: boolean;
+            /** Discovery Version */
+            discovery_version: number;
+        };
         /** LookCandidateOut */
         LookCandidateOut: {
             /** Id */
@@ -2215,6 +2402,11 @@ export interface components {
             /** References */
             references: components["schemas"]["CharacterReferenceOut"][];
         };
+        /** MapIn */
+        MapIn: {
+            /** Character Id */
+            character_id: number;
+        };
         /** OpenApiChangesOut */
         OpenApiChangesOut: {
             /** Operations Added */
@@ -2245,6 +2437,33 @@ export interface components {
             genders: string[];
             /** Species */
             species: string[];
+        };
+        /**
+         * OrphanedLinkOut
+         * @description A link whose discovered character is not in the newest list.
+         */
+        OrphanedLinkOut: {
+            /** Character Id */
+            character_id: number;
+            /** Name */
+            name: string;
+            /** Archived */
+            archived: boolean;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "created" | "mapped";
+            /** Pinned Version */
+            pinned_version: number;
+            /** Newest Version */
+            newest_version: number | null;
+            /** Newer Version Available */
+            newer_version_available: boolean;
+            /** Discovery Version */
+            discovery_version: number;
+            /** Discovery Id */
+            discovery_id: string;
         };
         /** PendingChangeOut */
         PendingChangeOut: {
@@ -3593,6 +3812,211 @@ export interface operations {
                 };
             };
             /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_character_links_api_projects__project_id__character_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_all_api_projects__project_id__character_links_link_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered character or library character, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_link_api_projects__project_id__character_links__discovery_id__create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered character or library character, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    map_link_api_projects__project_id__character_links__discovery_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MapIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered character or library character, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_link_api_projects__project_id__character_links__discovery_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project or link. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -4965,6 +5389,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CharacterVersionOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_character_projects_api_lab_characters__character_id__projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterUsageOut"][];
                 };
             };
             /** @description No character, look or take has this id. */

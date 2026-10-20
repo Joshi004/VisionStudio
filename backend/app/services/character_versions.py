@@ -66,6 +66,9 @@ PROFILE_FIELDS: Final[tuple[str, ...]] = (
 # What a version changed compared with the one before it. `created` is the first version.
 Change = Literal["created", "profile", "look", "voice"]
 
+# Who made the change: a person in the lab, or the pipeline from the model's text.
+Source = Literal["ai", "manual"]
+
 
 @dataclass(frozen=True)
 class Snapshot:
@@ -165,11 +168,15 @@ def _same(version: LibraryCharacterVersion, current: Snapshot) -> bool:
 
 
 async def record_version_if_changed(
-    session: AsyncSession, character: LibraryCharacter
+    session: AsyncSession, character: LibraryCharacter, *, source: Source = "manual"
 ) -> LibraryCharacterVersion | None:
     """Adds the character's next version when it differs from the newest one, and returns it;
     returns None when nothing that a version freezes has changed. Flushes (the character must
     already have an id) but does not commit: the caller commits the change with its version.
+
+    `source` is `manual` for a change made by hand in the lab. The pipeline passes `ai` for the
+    first version of a character it makes from a discovered character (PHASE-008), whose text
+    came from the model.
     """
     newest = await latest_version(session, character.id)
     current = await snapshot(session, character, newest)
@@ -178,7 +185,7 @@ async def record_version_if_changed(
     version = LibraryCharacterVersion(
         character_id=character.id,
         version=(newest.version if newest is not None else 0) + 1,
-        source="manual",
+        source=source,
         profile=current.profile,
         voice_id=current.voice_id,
         voice_description=current.voice_description,

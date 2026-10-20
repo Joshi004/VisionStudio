@@ -80,6 +80,15 @@ function CharacterCard({ character, onOpen }: { character: LibraryCharacter; onO
                 archived
               </Badge>
             )}
+            {character.origin !== null && (
+              <Badge
+                variant="light"
+                color="teal"
+                title={`Made from the project ${character.origin.project_name}`}
+              >
+                from project
+              </Badge>
+            )}
           </Group>
         </Stack>
       </UnstyledButton>

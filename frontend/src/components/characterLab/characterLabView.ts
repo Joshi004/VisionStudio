@@ -176,9 +176,13 @@ export function promptHint(take: CharacterTake, key: PromptKey): string {
     : "MiniMax H3's three fields. The line that places the frames on the timeline is added when the clip runs.";
 }
 
-/** "human, 34, female": what to show under a character's name. */
+/**
+ * "human, 34, female": what to show under a character's name. A character the pipeline made
+ * from a discovered character has no species until its definition is written, so an empty one
+ * is left out and the line never starts with a comma.
+ */
 export function characterSubtitle(character: LibraryCharacter): string {
-  const parts = [character.species];
+  const parts = character.species === "" ? [] : [character.species];
   if (character.age !== null) {
     parts.push(`${character.age} years old`);
   }

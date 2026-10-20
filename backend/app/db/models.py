@@ -476,7 +476,11 @@ class LibraryCharacter(Base):
     character an author builds once (profile, look, voice) and then draws on to make audio,
     pictures and clips.
 
-    Unrelated to a project's own cast (`character`/`location`, Phase 24): the two never touch.
+    The narration cast tables (`character`/`location`) that this once stayed apart from are gone
+    (PHASE-046). A story project now links each discovered character to one of these rows and
+    pins one of its versions (`ProjectCharacterLink`, PHASE-008). A character the pipeline made
+    for a project carries that project and the discovered character's id in `origin_project_id`
+    and `origin_discovery_id`; a character made in the lab has neither.
     `species` and `gender` are free text with no fixed list: the API offers whatever the author
     has typed before, as a growing list of suggestions, computed from what every character
     already holds (`services/character_card.suggested_options`).
@@ -526,6 +530,13 @@ class LibraryCharacter(Base):
         ForeignKey("character_look.id", ondelete="SET NULL", use_alter=True), default=None
     )
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Only for a character the pipeline created from a project's discovered character
+    # (PHASE-008): that project, and the discovered character's slug id in it. NULL for a
+    # character made in the lab, and for one whose project was deleted.
+    origin_project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    origin_discovery_id: Mapped[str | None] = mapped_column(default=None)
 
 
 class CharacterLook(Base):
@@ -774,3 +785,43 @@ class LibraryCharacterVersion(Base):
         ForeignKey("character_look.id", ondelete="SET NULL"), default=None
     )
     look_references: Mapped[Any] = mapped_column(JSON)
+
+
+class ProjectCharacterLink(Base):
+    """Links one of a story project's discovered characters to a library character and pins one
+    of that character's versions (PHASE-008).
+
+    `discovery_id` is the slug `id` of the discovered character inside the project's
+    `character_discovery` content. Only that id ties the link to the list, so a re-run of
+    discovery that keeps the id keeps the link. A link whose id is no longer in the newest list
+    is kept and shown as such. `pinned_version` is the number of a `library_character_version`
+    of `character_id`, found by `(character_id, pinned_version)` and not by a foreign key (the
+    way `CharacterTake.character_version` is). The pin never moves because of a lab edit: "a
+    newer version is available" is worked out on read by comparing it with the character's
+    newest version. `how` is `created` (the pipeline made the library character from the
+    discovery entry) or `mapped` (the user chose an existing one). `discovery_version` is the
+    version of the discovered list the link was made from.
+
+    A project links each discovered character once, and uses each library character for at
+    most one discovered character.
+    """
+
+    __tablename__ = "project_character_link"
+    __table_args__ = (
+        CheckConstraint("how IN ('created', 'mapped')", name="how_valid"),
+        UniqueConstraint("project_id", "discovery_id", name="uq_project_character_link_discovery"),
+        UniqueConstraint("project_id", "character_id", name="uq_project_character_link_character"),
+        Index("idx_project_character_link_character", "character_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    discovery_id: Mapped[str]
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("library_character.id", ondelete="CASCADE")
+    )
+    pinned_version: Mapped[int]
+    how: Mapped[str]
+    discovery_version: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

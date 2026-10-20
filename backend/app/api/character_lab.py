@@ -1,8 +1,11 @@
 """`/api/lab/characters`: the Character lab (Phase 25).
 
-A `library_character` is a reusable, project-independent character: a profile, a set of
-white-backdrop reference pictures (a "look"), and an optional voice. It is unrelated to a
-project's own cast (`/api/projects/{id}/cast`): the two are never linked.
+A `library_character` is a reusable character: a profile, a set of white-backdrop reference
+pictures (a "look"), and an optional voice. It belongs to no project. A story project links
+its discovered characters to library characters and pins a version of each
+(`/api/projects/{id}/character-links`, PHASE-008); `GET /{id}/projects` lists the projects that
+use a character, read-only, and a character the pipeline made for a project carries its
+`origin`.
 
 - `POST /looks` starts a new look: a language model writes the master prompt, then four
   candidate pictures are made to choose from (`POST /looks/{id}/master`). `POST
@@ -56,6 +59,7 @@ from app.db.models import (
     LabRun,
     LabVoiceRun,
     LibraryCharacter,
+    Project,
     Voice,
 )
 from app.db.session import SessionDep
@@ -63,6 +67,7 @@ from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.services import (
     character_library,
+    character_links,
     character_looks,
     character_takes,
     character_versions,
@@ -202,6 +207,14 @@ class LookOut(BaseModel):
     references: list[CharacterReferenceOut]
 
 
+class CharacterOriginOut(BaseModel):
+    """The story project and discovered character a library character was made from."""
+
+    project_id: int
+    project_name: str
+    discovery_id: str
+
+
 class CharacterOut(BaseModel):
     id: int
     created_at: datetime
@@ -225,6 +238,9 @@ class CharacterOut(BaseModel):
     # The number of the character's newest version (PHASE-007). None for a character made
     # before versions existed, until its next change.
     version: int | None
+    # Set only for a character the pipeline made from a project's discovered character
+    # (PHASE-008). None for a character made in the lab.
+    origin: CharacterOriginOut | None
 
 
 class CharactersOut(BaseModel):
@@ -316,6 +332,11 @@ async def _character_out(session: AsyncSession, character: LibraryCharacter) -> 
         else None
     )
     newest_version = await character_versions.latest_version(session, character.id)
+    origin_project = (
+        await session.get(Project, character.origin_project_id)
+        if character.origin_project_id is not None
+        else None
+    )
     return CharacterOut(
         id=character.id,
         created_at=character.created_at,
@@ -337,6 +358,15 @@ async def _character_out(session: AsyncSession, character: LibraryCharacter) -> 
         current_look=await _look_out(session, current_look) if current_look is not None else None,
         archived=character.archived,
         version=newest_version.version if newest_version is not None else None,
+        origin=(
+            CharacterOriginOut(
+                project_id=origin_project.id,
+                project_name=origin_project.name,
+                discovery_id=character.origin_discovery_id,
+            )
+            if origin_project is not None and character.origin_discovery_id is not None
+            else None
+        ),
     )
 
 
@@ -580,6 +610,53 @@ async def list_versions(
         raise _missing(f"There is no character {character_id}.")
     entries = await character_versions.list_versions(session, character_id)
     return await _versions_out(session, entries)
+
+
+# --- The projects that use a character (read-only) ---------------------------------------------
+
+
+class CharacterUsageOut(BaseModel):
+    """One story project that uses the character, and the version it pins."""
+
+    project_id: int
+    project_name: str
+    # The project's discovered character this one backs.
+    discovery_id: str
+    # `created`: the pipeline made the character for the project. `mapped`: the user chose it.
+    how: Literal["created", "mapped"]
+    pinned_version: int
+    # The character's newest version, and whether it is later than the pinned one. The pin
+    # does not move because of a lab edit.
+    newest_version: int | None
+    newer_version_available: bool
+
+
+@router.get(
+    "/lab/characters/{character_id}/projects",
+    response_model=list[CharacterUsageOut],
+    responses=_NOT_FOUND,
+)
+async def list_character_projects(
+    character_id: CharacterId, session: SessionDep
+) -> list[CharacterUsageOut]:
+    """The story projects that use this character, each with the version it pins. Read-only:
+    a project's link is changed from the project.
+    """
+    if await character_library.get_character(session, character_id) is None:
+        raise _missing(f"There is no character {character_id}.")
+    usages = await character_links.used_by(session, character_id)
+    return [
+        CharacterUsageOut(
+            project_id=usage.link.project_id,
+            project_name=usage.project_name,
+            discovery_id=usage.link.discovery_id,
+            how=typing_cast(Literal["created", "mapped"], usage.link.how),
+            pinned_version=usage.link.pinned_version,
+            newest_version=usage.newest_version,
+            newer_version_available=usage.newer_version_available,
+        )
+        for usage in usages
+    ]
 
 
 # --- A character's look -------------------------------------------------------------------

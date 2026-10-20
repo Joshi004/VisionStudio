@@ -1,10 +1,11 @@
 """The Character lab's own cast: a global, project-independent library of characters
 (Phase 25).
 
-A `library_character` is never linked to a project's own cast (`character`/`location`): the
-two are unrelated, by design (not touched, not imported, nothing shared). A character is never
-deleted, only archived, like every other row this app keeps (project cast, voices, stored
-files).
+A story project links each of its discovered characters to a `library_character` and pins one
+of its versions (`services/character_links.py`, PHASE-008); `create_from_discovery` makes the
+character for a link. (The narration cast tables this once stayed apart from are gone,
+PHASE-046.) A character is never deleted, only archived, like every other row this app keeps
+(voices, stored files).
 
 `character_card` renders everything the look and take prompt writers need as one block of
 plain English, so there is exactly one place that turns the row's columns into words.
@@ -177,6 +178,50 @@ async def create_character(session: AsyncSession, form: CharacterForm) -> Librar
     return character
 
 
+async def create_from_discovery(
+    session: AsyncSession,
+    *,
+    name: str,
+    description: str,
+    project_id: int,
+    discovery_id: str,
+) -> LibraryCharacter:
+    """Makes a library character from a story project's discovered character (PHASE-008), as
+    its version 1 (`source` is `ai`, because the text came from the model). Flushes but does
+    not commit: the caller commits it together with the link, so a character is never made
+    without its link. Raises CharacterLibraryError.
+
+    The discovery gives only a name and one line. The name becomes the name and the line
+    becomes the notes. The species and the appearance stay empty until the Character
+    Definition stage writes them (PHASE-009), so the lab form's rule that both are given is not
+    applied here (editing the character in the lab still asks for them). The character is
+    marked with the project and the discovered character it came from.
+    """
+    clean_name = _clean(name)
+    if clean_name is None:
+        raise CharacterLibraryError("Give the character a name.")
+    _too_long(clean_name, NAME_MAX_CHARS, "name")
+    notes = _clean(description)
+    _too_long(notes, NOTES_MAX_CHARS, "notes")
+    character = LibraryCharacter(
+        name=clean_name,
+        species="",
+        notes=notes,
+        origin_project_id=project_id,
+        origin_discovery_id=discovery_id,
+    )
+    session.add(character)
+    await session.flush()  # the character's id, for its first version
+    await character_versions.record_version_if_changed(session, character, source="ai")
+    _logger.info(
+        "character %d created from project %d's discovered character %s",
+        character.id,
+        project_id,
+        discovery_id,
+    )
+    return character
+
+
 async def update_character(
     session: AsyncSession, character_id: int, form: CharacterForm
 ) -> LibraryCharacter:
@@ -296,9 +341,13 @@ def character_card(character: LibraryCharacter) -> str:
     ]
     if character.gender:
         lines.append(f"Gender: {character.gender}.")
-    lines.append(f"Species: {character.species}.")
+    # A character the pipeline made from a discovered character has no species or appearance
+    # until its definition is written (PHASE-009): leave the empty lines out of the card.
+    if character.species:
+        lines.append(f"Species: {character.species}.")
     lines.append(f"Time: {_era_text(character)}.")
-    lines.append(f"Appearance: {character.appearance}")
+    if character.appearance:
+        lines.append(f"Appearance: {character.appearance}")
     if character.outfit:
         lines.append(f"Outfit: {character.outfit}")
     if character.personality:

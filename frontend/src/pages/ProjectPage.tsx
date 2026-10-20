@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
+import { CharacterLinksPanel } from "../components/story/CharacterLinksPanel";
 import { DiscoveryPanel } from "../components/story/DiscoveryPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
 import { StageList } from "../components/story/StageList";
@@ -70,6 +71,7 @@ export function ProjectPage() {
             kind="characters"
             hasStory={project.script_text !== null}
           />
+          <CharacterLinksPanel projectId={project.id} />
           <DiscoveryPanel
             projectId={project.id}
             kind="environments"

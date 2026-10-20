@@ -36,6 +36,7 @@ import {
   type TakeFormState,
 } from "./characterLabView";
 import { TakeGallery } from "./TakeGallery";
+import { UsedByProjects } from "./UsedByProjects";
 import { VersionHistory } from "./VersionHistory";
 
 type CharacterPageProps = {
@@ -179,6 +180,15 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
                       archived
                     </Badge>
                   )}
+                  {data.origin !== null && (
+                    <Badge
+                      variant="light"
+                      color="teal"
+                      title={`Made from the character "${data.origin.discovery_id}" of the project ${data.origin.project_name}`}
+                    >
+                      from project: {data.origin.project_name}
+                    </Badge>
+                  )}
                 </Group>
                 <Text size="sm" c="dimmed">
                   {characterSubtitle(data)}
@@ -237,6 +247,8 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
                 <Detail label="Voice description" value={data.voice_description} />
                 <Detail label="Mouth" value={data.has_visible_mouth ? "visible" : "not visible (no lip sync)"} />
               </Stack>
+
+              <UsedByProjects characterId={data.id} />
 
               <VersionHistory characterId={data.id} />
             </Stack>
