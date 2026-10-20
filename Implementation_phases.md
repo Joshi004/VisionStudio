@@ -255,16 +255,16 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 
 **Progress snapshot** (update when a phase changes status):
 
-- Completed: PHASE-001 (2026-10-20; owner confirmed the generations)
+- Completed: PHASE-001 (2026-10-20; owner confirmed the generations), PHASE-002 (2026-10-20)
 - In progress: none
-- Ready to start: PHASE-002, PHASE-046, PHASE-007
+- Ready to start: PHASE-046, PHASE-007
 - Deferred: PHASE-036 (music generation, after PHASE-045)
 - Current milestone: M0
 
 | ID | Title | Milestone | Hard dependencies | Status |
 |---|---|---|---|---|
 | PHASE-001 | Validate H3 assumptions in the existing labs (manual) | M0 | — | Completed |
-| PHASE-002 | Shot-duration policy | M0 | (001 recommended) | Not Started |
+| PHASE-002 | Shot-duration policy | M0 | (001 recommended) | Completed |
 | PHASE-046 | Retire the narration pipeline | M0 | — | Not Started |
 | PHASE-003 | Story workspace replaces the project page | M0 | 046 | Not Started |
 | PHASE-004 | Story Bible stage | M1 | 003 | Not Started |
@@ -443,7 +443,7 @@ flowchart TD
 
 ### PHASE-002 — Shot-duration policy
 
-**Status:** Not Started · **Milestone:** M0 · **Vision:** §4 "Shot duration limits", §22 "Shot duration policy", §29 "Exact durations without drift"
+**Status:** Completed (2026-10-20) · **Milestone:** M0 · **Vision:** §4 "Shot duration limits", §22 "Shot duration policy", §29 "Exact durations without drift"
 
 **Objective.** Define the one configurable duration policy (H3 hard bounds and the planning target range) and the pure frame-count function the story pipeline will use, with no 5.17 s floor.
 
@@ -469,12 +469,18 @@ flowchart TD
 **Observable improvements.** The duration limits are visible and editable in Settings.
 
 **Completion checklist.**
-- [ ] Policy settings defined and validated
-- [ ] Frame-count function with bounds, capped at the server maximum
-- [ ] Docs updated
-- [ ] Standard checks (§3.5)
+- [x] Policy settings defined and validated
+- [x] Frame-count function with bounds, capped at the server maximum
+- [x] Docs updated
+- [x] Standard checks (§3.5)
 
-**Completion notes.** _(fill in when completed: setting keys, function name and module, final default values)_
+**Completion notes.** Done 2026-10-20.
+
+- **Setting keys** (group "Shot duration" on the Settings page, all integers in **whole seconds**, each from 1 to 14): `h3_min_shot_seconds` (default 1), `shot_target_min_seconds` (2), `shot_target_max_seconds` (10), `h3_max_shot_seconds` (14). Defined in `backend/app/core/settings.py`, with the key constants `H3_MIN_SHOT_KEY`, `SHOT_TARGET_MIN_KEY`, `SHOT_TARGET_MAX_KEY`, `H3_MAX_SHOT_KEY`.
+- **Why the maximum is 14 s, not 15 s.** The cap is `H3_MAX_WHOLE_SECONDS = H3_MAX_FRAMES // H3_FPS` = 14 (345 frames is 14.375 s; 15 s needs 362 frames, which V1 did not try). The 1 s minimum (39 frames) was shown safe by PHASE-001 V1.
+- **Ordering rule.** `h3_min <= target_min <= target_max <= h3_max`. `save_setting` refuses a value that breaks it (422 with a message naming the pair; `duration_order_problem`). A reset can still break the order, so the policy checks it again when it is read.
+- **Policy and frame-count function.** `backend/app/services/duration_policy.py`: `read_duration_policy(session)` returns a `DurationPolicy(hard_min_s, hard_max_s, target_min_s, target_max_s)` or raises `DurationPolicyError`; `shot_num_frames(target_s, policy)` refuses a length outside the hard bounds and otherwise returns `h3_num_frames` of the target at 24 fps. Defaults give 39 frames for 1.0 s, 56 for 2.0 s, 73 for 3.0 s and 345 for 14.0 s; 0.5 s and 16 s are refused.
+- **Not touched.** `h3_scene_num_frames`, `H3_MIN_FRAMES` and the narration callers stay until PHASE-046. No migration, API or frontend change.
 
 ---
 
@@ -2346,6 +2352,7 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-19 | — | Document created | 45 phases defined; none started. |
 | 2026-10-20 | — | Owner decisions recorded | Q-1, Q-3, Q-4, Q-9 to Q-13 and Q-16 answered; Q-8 deferred; Q-2 left to the owner. PHASE-046 added; PHASE-036 deferred. |
 | 2026-10-20 | PHASE-001 | Completed | V1–V8 run (lab runs 91–100 and one direct 22-frame GPU-server job); Appendix B filled; Q-5 and Q-7 answered; R-1 (short clips do not shorten an H3 job) and R-3 (no white leakage) updated. The owner confirmed by ear and eye that all generations look good and match their descriptions (see the Completion notes). |
+| 2026-10-20 | PHASE-002 | Completed | Four whole-second duration settings (1 / 2 / 10 / 14 s) with an ordering rule, and `services/duration_policy.py` (`read_duration_policy`, `shot_num_frames`). The hard maximum is 14 s, not 15 s, because the server accepts at most 345 frames. |
 
 ---
 
@@ -2360,3 +2367,4 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-20 | **Relations not stored** (D-14): the optional `related_to` id dropped from PHASE-005; PHASE-009 notes that relations come from the raw story. | Owner decision. |
 | 2026-10-20 | **GLM-5.3 for every story LLM job; stories up to about 10 minutes** (D-12, D-13): one setting, Qwen3.8 not used, R-10 retired; PHASE-003 warns above 10 minutes; segmentation outside this plan. | Owner decision. |
 | 2026-10-20 | **Other answers:** first successful candidate (Q-3); off-screen dialogue sends the audio with an "unseen speaker" prompt (Q-4, PHASE-025 and PHASE-026); a final render means complete (Q-9, PHASE-042); music generation deferred after PHASE-045 (Q-8, PHASE-036 moved to "Deferred"); the new status "Deferred" added. | Owner decisions. |
+| 2026-10-20 | **PHASE-002 completed:** the duration settings are whole seconds and the H3 hard maximum default is 14 s, not 15 s (D-8's "default 1–15 s" is now 1–14 s in practice). | The server accepts at most 345 frames (14.375 s); 15 s would need 362. |

@@ -29,6 +29,7 @@ from app.core.urls import UrlError, docker_mapped, validate_base_url
 from app.db.models import Setting
 from app.db.types import utcnow
 from app.services import image_models, video_models
+from app.services.frame_counts import H3_FPS, H3_MAX_FRAMES
 
 _logger = logging.getLogger(__name__)
 
@@ -105,7 +106,49 @@ GROUP_GPU = "GPU server"
 GROUP_LLM = "Language model"
 GROUP_IMAGE = "Image model"
 GROUP_VIDEO = "Video model"
+GROUP_DURATION = "Shot duration"
 GROUP_LIMITS = "Limits"
+
+# The shot-duration policy (PHASE-002). All four values are whole seconds. The hard maximum can
+# never pass the longest clip the GPU server accepts: 345 frames at 24 fps is 14.375 s, so 14.
+H3_MAX_WHOLE_SECONDS = H3_MAX_FRAMES // H3_FPS
+
+H3_MIN_SHOT_KEY = "h3_min_shot_seconds"
+SHOT_TARGET_MIN_KEY = "shot_target_min_seconds"
+SHOT_TARGET_MAX_KEY = "shot_target_max_seconds"
+H3_MAX_SHOT_KEY = "h3_max_shot_seconds"
+
+# From the smallest value to the largest: each setting must be at or below the next one.
+DURATION_ORDER: tuple[str, ...] = (
+    H3_MIN_SHOT_KEY,
+    SHOT_TARGET_MIN_KEY,
+    SHOT_TARGET_MAX_KEY,
+    H3_MAX_SHOT_KEY,
+)
+
+_DURATION_NAMES: dict[str, str] = {
+    H3_MIN_SHOT_KEY: "the H3 minimum",
+    SHOT_TARGET_MIN_KEY: "the planning target minimum",
+    SHOT_TARGET_MAX_KEY: "the planning target maximum",
+    H3_MAX_SHOT_KEY: "the H3 maximum",
+}
+
+
+def duration_order_problem(values: dict[str, int]) -> str | None:
+    """A message for the first pair of duration settings that is in the wrong order, or None.
+
+    `values` maps every key in `DURATION_ORDER` to its number of seconds.
+    """
+    for lower, upper in zip(DURATION_ORDER, DURATION_ORDER[1:], strict=False):
+        if values[lower] > values[upper]:
+            name = _DURATION_NAMES[lower]
+            return (
+                f"{name[0].upper() + name[1:]} ({values[lower]} s) is above "
+                f"{_DURATION_NAMES[upper]} ({values[upper]} s). Change one of them so that the "
+                "H3 minimum, the target range and the H3 maximum stay in that order."
+            )
+    return None
+
 
 # Where a language-model role is answered: the paid Bitdeer API (GLM), or the Qwen3.8 text
 # model on your own GPU server. Each of the three roles has its own choice.
@@ -325,6 +368,61 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "scene change"
         ),
         allow_blank=True,
+    ),
+    SettingSpec(
+        key=H3_MIN_SHOT_KEY,
+        group=GROUP_DURATION,
+        label="H3 shortest shot (seconds)",
+        help=(
+            "The shortest shot MiniMax H3 may be asked for, in whole seconds. A shot below it "
+            "never reaches generation. It must not be above the planning target minimum."
+        ),
+        value_type="integer",
+        default=1,
+        min_value=1,
+        max_value=H3_MAX_WHOLE_SECONDS,
+    ),
+    SettingSpec(
+        key=SHOT_TARGET_MIN_KEY,
+        group=GROUP_DURATION,
+        label="Planning target: shortest shot (seconds)",
+        help=(
+            "The planning stages are asked for shots of at least this many whole seconds. It "
+            "keeps a margin above the H3 shortest shot. A shot outside the target but inside "
+            "the H3 bounds is flagged for re-planning, not refused."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=1,
+        max_value=H3_MAX_WHOLE_SECONDS,
+    ),
+    SettingSpec(
+        key=SHOT_TARGET_MAX_KEY,
+        group=GROUP_DURATION,
+        label="Planning target: longest shot (seconds)",
+        help=(
+            "The planning stages are asked for shots of at most this many whole seconds. It "
+            "keeps a margin below the H3 longest shot."
+        ),
+        value_type="integer",
+        default=10,
+        min_value=1,
+        max_value=H3_MAX_WHOLE_SECONDS,
+    ),
+    SettingSpec(
+        key=H3_MAX_SHOT_KEY,
+        group=GROUP_DURATION,
+        label="H3 longest shot (seconds)",
+        help=(
+            "The longest shot MiniMax H3 may be asked for, in whole seconds. The GPU server "
+            f"makes at most {H3_MAX_FRAMES} frames ({H3_MAX_FRAMES / H3_FPS:.3f} s), so the "
+            f"highest value is {H3_MAX_WHOLE_SECONDS}. It must not be below the planning target "
+            "maximum."
+        ),
+        value_type="integer",
+        default=H3_MAX_WHOLE_SECONDS,
+        min_value=1,
+        max_value=H3_MAX_WHOLE_SECONDS,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",
@@ -588,10 +686,33 @@ async def _upsert(session: AsyncSession, key: str, value: Any) -> None:
     await session.execute(statement)
 
 
+async def read_duration_values(session: AsyncSession) -> dict[str, int]:
+    """The effective seconds of the four duration settings, keyed by setting key."""
+    rows = await _load_rows(session, DURATION_ORDER)
+    values: dict[str, int] = {}
+    for key in DURATION_ORDER:
+        value = _pick_layer(_BY_KEY[key], rows).value
+        assert isinstance(value, int)
+        values[key] = value
+    return values
+
+
+async def _check_duration_order(session: AsyncSession, key: str, value: str | int) -> None:
+    """Refuses a new duration value that would put the four settings out of order."""
+    assert isinstance(value, int)
+    values = await read_duration_values(session)
+    values[key] = value
+    problem = duration_order_problem(values)
+    if problem is not None:
+        raise SettingValueError(problem)
+
+
 async def save_setting(session: AsyncSession, key: str, raw: object) -> EffectiveSetting:
     """Validates and saves a value, then returns the setting as it now applies."""
     spec = get_spec(key)
     value = validate_value(spec, raw)
+    if key in DURATION_ORDER:
+        await _check_duration_order(session, key, value)
     await _upsert(session, key, value)
     await session.commit()
     _logger.info("setting saved: %s", key)
