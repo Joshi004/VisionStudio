@@ -211,7 +211,7 @@ These are the working assumptions behind the phases. Change one by editing it he
 | D-9 | Clips are requested on H3's `17n + 5` frame grid at or above the target and **trimmed at render time**, as today. | 002, 025, 028 |
 | D-10 | H3 shot audio is used as is. Narration never enters H3. The compiled prompt always disables background music (`non_diegetic_music: N/A`). | 025–028 |
 | D-11 | No automated test suite is added unless explicitly requested (Q-14). Verification is manual plus lint and typecheck, using the sample stories in Appendix A. | All |
-| D-12 | **Every story LLM job uses GLM-5.3** (the full Bitdeer model, not Flash) through one model setting; there are no per-stage or per-area settings for now (decided 2026-10-20, Q-13). Qwen3.8 is not used for story planning. Each stage sets `max_tokens` for its own answer. The context size (the owner expects about 256K tokens) is confirmed against Bitdeer in PHASE-004. | 004 onward |
+| D-12 | **Every story LLM job uses GLM-5.3** (the full Bitdeer model, not Flash) through one model setting; there are no per-stage or per-area settings for now (decided 2026-10-20, Q-13). Qwen3.8 is not used for story planning. Each stage sets `max_tokens` for its own answer. The context size (the owner expects about 256K tokens) is confirmed against Bitdeer in PHASE-004. **Temporary (2026-10-20):** while the Bitdeer API is unavailable, the owner sets the story provider to Qwen3.8 on the Settings page to test the stages (a setting, not a code change; Qwen3.8 refuses more than 32,000 characters of messages, so a story above about 30,000 characters needs Bitdeer). The confirmation of GLM-5.3's limits is still open (PHASE-004). | 004 onward |
 | D-13 | **Story length:** stories of up to about 10 minutes of finished video. Splitting longer stories (for example an hour) into segments is outside this plan (Q-10). | 003, all LLM stages |
 | D-14 | **Relations are not stored.** Relations between characters (mother and son, a younger self) are not kept in the database or in any persistent memory. Prompts understand them from the raw story text, which the definition stages receive (Q-12). | 005, 008, 009 |
 | D-15 | **Scene discovery is independent** of character and environment discovery: it records no character or environment ids, so all three discovery calls can run in parallel. Later stages work out who and where (PHASE-013, PHASE-014) (Q-11). | 006, 013, 014 |
@@ -256,9 +256,10 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 **Progress snapshot** (update when a phase changes status):
 
 - Completed: PHASE-001 (2026-10-20; owner confirmed the generations), PHASE-002 (2026-10-20), PHASE-046 (2026-10-20; owner verified every lab and the Character lab), PHASE-003 (2026-10-20)
-- Ready to start: PHASE-004, PHASE-007
+- In progress: PHASE-004 (code complete 2026-10-20; the owner's S2 run on the rebuilt app and the GLM-5.3 limits from Bitdeer are still open)
+- Ready to start: PHASE-007
 - Deferred: PHASE-036 (music generation, after PHASE-045)
-- Current milestone: M0
+- Current milestone: M1 (M0 is complete)
 
 | ID | Title | Milestone | Hard dependencies | Status |
 |---|---|---|---|---|
@@ -266,7 +267,7 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 | PHASE-002 | Shot-duration policy | M0 | (001 recommended) | Completed |
 | PHASE-046 | Retire the narration pipeline | M0 | — | Completed |
 | PHASE-003 | Story workspace replaces the project page | M0 | 046 | Completed |
-| PHASE-004 | Story Bible stage | M1 | 003 | Not Started |
+| PHASE-004 | Story Bible stage | M1 | 003 | In Progress |
 | PHASE-005 | Character and environment discovery | M1 | 004 | Not Started |
 | PHASE-006 | Scene discovery anchored to the story text | M1 | 004 | Not Started |
 | PHASE-007 | Character versioning in the Character Lab | M2 | — | Not Started |
@@ -611,7 +612,7 @@ flowchart TD
 
 ### PHASE-004 — Story Bible stage
 
-**Status:** Not Started · **Milestone:** M1 · **Vision:** §6
+**Status:** In Progress (code complete 2026-10-20; waiting for the owner to run sample S2 on the rebuilt app and to confirm GLM-5.3's limits with Bitdeer) · **Milestone:** M1 · **Vision:** §6
 
 **Objective.** Deliver the first LLM stage: produce, store and show the StoryBible from the raw story, and establish the stage pattern that later stages copy.
 
@@ -640,15 +641,38 @@ flowchart TD
 **Observable improvements.** The first structured artifact is visible in the story workspace.
 
 **Completion checklist.**
-- [ ] StoryBible storage (D-3) and migration (table and job type)
-- [ ] Request builder, parser and validator
-- [ ] Job handler registered
-- [ ] Story LLM setting (GLM-5.3) and confirmed limits
-- [ ] API and workspace UI (run, status, view, out of date)
-- [ ] Stage pattern noted in Completion notes
-- [ ] Docs updated; standard checks (§3.5)
+- [x] StoryBible storage (D-3) and migration (table and job type)
+- [x] Request builder, parser and validator
+- [x] Job handler registered
+- [x] Story LLM setting (one setting, default GLM-5.3)
+- [ ] GLM-5.3 context and output limits confirmed with Bitdeer (not possible yet: the Bitdeer API is not available; see the notes)
+- [x] API and workspace UI (run, status, view, out of date)
+- [x] Stage pattern noted in Completion notes
+- [x] Docs updated; standard checks (§3.5)
+- [ ] Owner runs sample S2 on the rebuilt app (the Verification criteria above)
 
-**Completion notes.** _(fill in: table, job type, setting key, module names, the stage pattern)_
+**Completion notes.**
+
+- **Table:** `story_bible` (migration `0023_story_bible`, `backend/app/db/migrations/versions/0023_story_bible.py`), one immutable row per version: `id`, `project_id` (FK, cascade), `version` (unique with `project_id`), `source` (`ai` or `manual`), `job_id` (FK, set null), `inputs` (JSON: `{"story_sha256": ..., "artifacts": []}`, D-3), `content` (JSON), `created_at`. Model `StoryBible` in `db/models.py`. Documented in `DATABASE_STRUCTURE.md` §4.18. The same migration adds `write_story_bible` to the `job.type` CHECK (now seven types). The downgrade deletes `write_story_bible` jobs before restoring the six-type CHECK.
+- **Job type:** `write_story_bible` (provider `llm`, `restart_rule = "never_rerun"`; it counts in the GPU pool when the story provider is Qwen3.8 and in the paid-API pool when it is Bitdeer). Job input: `story_text`, `story_sha256`, then (when the handler starts) `instructions_sha256`, `server_url`, `endpoint` and `request`. Job output: the `ask_model` record (attempts, usage), `story_bible_id`, `version`, `seconds`; the content itself lives only in `story_bible`. New phase label `saving the Story Bible`.
+- **Setting (Planning decided: reuse `llm_provider` and `llm_model`).** They are now **the one story LLM setting** (D-12) that every later story stage reads. Relabelled "Story provider" and "Story model (Bitdeer)"; `llm_model` defaults to `zai-org/GLM-5.3`. The key is `STORY_MODEL_KEY` (`"llm_model"`) in `services/llm_target.py`. `description_llm_*` and `image_prompt_llm_*` are untouched (PHASE-046 kept them for the labs). Later story stages must read the target with `llm_target.resolve(session, STORY_MODEL_KEY)` and set `model_key=STORY_MODEL_KEY` on their handler; do not add per-stage model settings (D-12).
+- **Temporary Qwen3.8 testing (owner, 2026-10-20).** The Bitdeer API is not available yet, so the owner switches the story provider to "GPU server: Qwen3.8-27B (reasoning on)" on the Settings page. This is a setting, not a code change; switch it back to Bitdeer when the API is available. Limits of Qwen3.8 that matter here (from `providers/qwen38.py`): it refuses messages longer than 32,000 characters in total, so with this stage's instructions (about 1,800 characters) a story of more than about 30,000 characters (about 5,000 words, far above the 10-minute limit of D-13) is refused with a readable failure on the job; it ignores `response_format` and `max_tokens`; its first call after idle can take 3 to 10 minutes, and the handler waits up to 600 s per attempt, so a very slow cold start can fail (press Re-run; the second call finds the model warm). The quality of the bible may be lower than GLM-5.3's.
+- **Not confirmed: GLM-5.3 context and output limits.** The scope asks Planning to confirm them with Bitdeer, which is not possible while the API is unavailable. The values assumed in code are the owner's expectation of about 256K tokens of context and `MAX_TOKENS = 12000` for this stage's answer (`services/story_bible_writer.py`). **Open:** confirm both when Bitdeer is reachable, then tick the checklist item and update D-12 and Q-10.
+- **Modules.** Backend: `services/story_bible_writer.py` (instructions, `build_request`, `parse_answer`, `check_bible`), `services/story_bible.py` (`start_run`, `latest`, `list_versions`, `get_version`, `save_version`, `is_out_of_date`, `story_sha256`), `jobs/write_story_bible.py` (`WriteStoryBibleHandler`), `api/story_bible.py` (router). Frontend: `api/storyBible.ts` (`useStoryBible`, `useStoryBibleVersion`, `useRunStoryBible`), `components/story/StoryBiblePanel.tsx`. `ArtifactViewer` (PHASE-003) is now used for the result.
+- **Endpoints.** `POST /api/projects/{id}/story-bible/run` (202 `{job_id}`; 404 unknown project; 422 when the project has no story; a second press while a run is queued or running returns the same job); `GET /api/projects/{id}/story-bible` (`{latest, versions, job, out_of_date}`); `GET /api/projects/{id}/story-bible/versions/{version}` (404 if missing).
+- **StoryBible content (code-validated, D-7).** `title` (max 120), `language` (always `en`, set by code, not by the model), `genre` (1 to 4, each max 60), `tone` (1 to 5, each max 60), `visual_style` (max 300), `time_period` (max 120), `storytelling_style.narration` (max 400), `world_rules` (0 to 10, each max 300; a missing list is stored as empty). Lists are de-duplicated ignoring case and extra whitespace is collapsed. An answer cut off at the token limit (`finish_reason = "length"`) or failing these checks is retried once by `ask_model`; if it fails again the job fails with "The Story Bible could not be written: ..." and the reason.
+- **Out of date** is computed on read: the newest version's `inputs.story_sha256` is compared with the hash of the current `project.script_text` (never stored, D-3). A run always uses the story as saved in the project, not the unsaved text in the editor.
+- **Deviations from the plan.** (1) The router is registered in `api/__init__.py` (where all routers are included), not in `main.py`. (2) `idx_story_bible_project` was kept as planned even though the unique constraint on (`project_id`, `version`) already covers lookups by project. (3) `schema.d.ts` was regenerated offline from the app's OpenAPI document (same as PHASE-003 and PHASE-046), not from a running container.
+- **How a stage is built (the pattern PHASE-005 onward copy).**
+  1. **Writer** `services/<stage>_writer.py`: the fixed instructions, limit constants, `MAX_TOKENS`, `build_request(input, *, model)`, `parse_answer(content)` (uses `llm.parse_json_object`, which tolerates code fences) and `check_<artifact>(answer)`, which raises `ValueError` with a readable message. Code sets fixed fields (such as `language`) and normalises text; it never trusts the model's shape.
+  2. **Database service** `services/<stage>.py`: `JOB_TYPE`, `start_run` (reads the inputs, refuses with a readable 422-type error when they are missing, then `store.create_job(..., provider="llm", input={..., "<input>_sha256": ...})`; `dedupe=True` returns the active job on a double press), `latest`, `list_versions`, `get_version`, `save_version` (adds a new row with the next `version`; flushes only, the handler commits) and `is_out_of_date`.
+  3. **Handler** `jobs/<job_type>.py`: a `JobHandler` with `provider = "llm"`, `restart_rule = "never_rerun"` and `model_key = STORY_MODEL_KEY`. `start(job_id)` reads the job input, resolves the target, sets phases, stores the request in `job.input`, calls `ask_model(..., read=...)` where `read` parses and checks the answer, then in **one transaction** calls `save_version` and `store.finish_job` (rolling back if the job is no longer running), or calls `store.fail_job` with a readable message.
+  4. **Registration:** `jobs/__init__.py` (the handler), `jobs/phases.py` (phase label), `JobType` in `api/jobs.py`, `components/jobs/jobFormat.ts` (job type label), `db/models.py` plus a migration (the table and the `job.type` CHECK).
+  5. **API** `api/<stage>.py` with `POST .../run` (create the job, `dispatcher.nudge()`, 202), `GET` (latest, versions, the newest job, out of date) and `GET .../versions/{n}`; include the router in `api/__init__.py`.
+  6. **Frontend:** `api/<stage>.ts` (TanStack Query hooks; poll while the job is active; the run mutation invalidates the stage and job caches), a `components/story/<Stage>Panel.tsx` (Run / Re-run, job status, failure text, "out of date", version picker, `ArtifactViewer`), rendered in `pages/ProjectPage.tsx`, and `available: true` for the stage in `storyStages.ts`.
+  7. **Docs and schema:** `DATABASE_STRUCTURE.md` (table, job input/output, settings), regenerate `schema.d.ts`, this file.
+- **Verification done (2026-10-20, by the agent, without a real model).** The migration applied to a fresh database and the downgrade and upgrade round trip worked; the full flow (no story gives 422; run stores v1; a retried answer; v2 with v1 still readable; editing the story shows out of date; a bad answer fails readably; a refusal is not retried; a double press returns one job) was run end to end with a faked LLM call; ruff check and format, `npm run lint`, `npm run typecheck` and `npm run build` pass; the panel was rendered in headless Chrome against a temporary database (version picker, Re-run, "Out of date" notice, result viewer, the stage marked "Available"). **Not done:** no real Qwen3.8 or Bitdeer call was made, so the owner's S2 run is still needed.
+- **Owner actions.** Rebuild with `docker compose up --build -d` (migration `0023` applies on start; no data is touched). On the Settings page set "Story provider" to "GPU server: Qwen3.8-27B (reasoning on)" while Bitdeer is unavailable. Then open a project, paste S2 (or S1), save it, press Run on the Story Bible, and check: v1 is stored; Re-run makes v2 and v1 is still readable in the version picker; editing and saving the story shows "Out of date". Tick the last checklist item and mark the phase Completed when done.
 
 ---
 
@@ -2384,6 +2408,8 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-20 | PHASE-046 | Completed | The owner verified every lab and the Character lab, so the last checklist item is ticked. |
 | 2026-10-20 | PHASE-003 | In Progress | Planned: the story stays in `project.script_text` (no migration); two new Story settings for the speech rate and the length limit. |
 | 2026-10-20 | PHASE-003 | Completed | The project page is the story workspace: `StoryEditor` (live word count and estimate, non-blocking warning above `story_max_minutes`), `StageList` (18 placeholders), `ArtifactViewer` (not used yet). New settings `story_words_per_minute` (150) and `story_max_minutes` (10); `services/story_length.py`; `story_length` on the project answer. Provenance convention (D-3) written as `DATABASE_STRUCTURE.md` §2.1. No migration. |
+| 2026-10-20 | PHASE-004 | In Progress | Planned: reuse `llm_provider` and `llm_model` as the one story LLM setting; Qwen3.8 is switched on in Settings for testing while Bitdeer is unavailable. |
+| 2026-10-20 | PHASE-004 | In Progress | Code complete: table `story_bible` (migration `0023`), job type `write_story_bible`, `services/story_bible_writer.py`, `services/story_bible.py`, `jobs/write_story_bible.py`, `api/story_bible.py`, `StoryBiblePanel`; settings relabelled "Story provider" and "Story model (Bitdeer)". Checked offline with a faked model call and in headless Chrome. Left open: the owner's S2 run (Qwen3.8 for now) and GLM-5.3's confirmed limits (Bitdeer unavailable). The stage pattern is in the Completion notes. |
 
 ---
 
@@ -2398,4 +2424,5 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-20 | **Relations not stored** (D-14): the optional `related_to` id dropped from PHASE-005; PHASE-009 notes that relations come from the raw story. | Owner decision. |
 | 2026-10-20 | **GLM-5.3 for every story LLM job; stories up to about 10 minutes** (D-12, D-13): one setting, Qwen3.8 not used, R-10 retired; PHASE-003 warns above 10 minutes; segmentation outside this plan. | Owner decision. |
 | 2026-10-20 | **Other answers:** first successful candidate (Q-3); off-screen dialogue sends the audio with an "unseen speaker" prompt (Q-4, PHASE-025 and PHASE-026); a final render means complete (Q-9, PHASE-042); music generation deferred after PHASE-045 (Q-8, PHASE-036 moved to "Deferred"); the new status "Deferred" added. | Owner decisions. |
+| 2026-10-20 | **Temporary Qwen3.8 testing for the story stages (D-12):** a note only; D-12 itself is unchanged (GLM-5.3, one setting). PHASE-004's confirmation of GLM-5.3's limits stays open until the Bitdeer API is available. | Owner: Bitdeer is not available for now. |
 | 2026-10-20 | **PHASE-002 completed:** the duration settings are whole seconds and the H3 hard maximum default is 14 s, not 15 s (D-8's "default 1–15 s" is now 1–14 s in practice). | The server accepts at most 345 frames (14.375 s); 15 s would need 362. |

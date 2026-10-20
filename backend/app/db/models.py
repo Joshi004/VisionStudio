@@ -85,10 +85,11 @@ class Job(Base):
 
     __tablename__ = "job"
     __table_args__ = (
-        # The six lab job types, since revision 0022 retired the narration ones.
+        # The six lab job types, since revision 0022 retired the narration ones, and the first
+        # story stage, since revision 0023.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
-            "'write_character_look_prompt', 'write_character_take_prompt')",
+            "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -122,6 +123,37 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
     last_checked_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+class StoryBible(Base):
+    """One version of a story project's StoryBible (PHASE-004).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run
+    or edit is a new row with the next `version`, and a stored row is never changed. `inputs`
+    records what the version was built from (`story_sha256`, the hash of the exact
+    `project.script_text` the job read), so "out of date" is worked out when it is read.
+    `content` is the bible itself (title, language, genre, tone, visual style, time period,
+    storytelling style and world rules).
+    """
+
+    __tablename__ = "story_bible"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_story_bible_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
 class Setting(Base):

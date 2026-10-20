@@ -239,9 +239,9 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key=LLM_PROVIDER_KEY,
         group=GROUP_LLM,
-        label="Planning provider",
+        label="Story provider",
         help=_provider_help(
-            "plans a story. Nothing uses this role yet: only the retired narration pipeline did"
+            "writes every story stage (the Story Bible, and each story stage after it)"
         ),
         value_type="string",
         default=PROVIDER_BITDEER,
@@ -250,13 +250,14 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="llm_model",
         group=GROUP_LLM,
-        label="LLM model (Bitdeer)",
+        label="Story model (Bitdeer)",
         help=(
-            "Bitdeer model for the planning role. Nothing uses it yet. Used only when its "
-            "provider is Bitdeer."
+            "Bitdeer model that writes every story stage. It uses the LLM URL above, and "
+            "only when the story provider is Bitdeer. The stages need a large model "
+            "(GLM-5.3, not Flash)."
         ),
         value_type="string",
-        default="zai-org/GLM-5.3-Flash",
+        default="zai-org/GLM-5.3",
         pattern=TextPattern(
             regex=r"[A-Za-z0-9._/:-]{1,200}",
             message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
@@ -420,7 +421,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
         help=(
             "How many slots may be in use on your GPU server at the same time, all kinds of job "
             "together: video, images, reference pictures, speech "
-            "and the language-model calls set to the GPU server's Qwen3.8. A job takes one slot, "
+            "and the language-model calls (the story stages included) set to the GPU server's "
+            "Qwen3.8. A job takes one slot, "
             "except a MiniMax H3 clip (Video lab), which takes the number of GPUs the server "
             "gives it (4 or 8), and 4 until the server has said. All Qwen3.8 calls together take "
             "one slot, because the model answers them all from one GPU. Each "
@@ -439,8 +441,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
         label="Maximum parallel paid API calls",
         help=(
             "How many calls may run on the paid inference API (Bitdeer) at the same time, all "
-            "kinds together: the Video lab and Character lab prompts, for the "
-            "roles whose provider is Bitdeer. Pick a "
+            "kinds together: the story stages and the Video lab and Character lab prompts, "
+            "for the roles whose provider is Bitdeer. Pick a "
             "number your plan's rate limit allows. It applies the next time the app looks for "
             "work, and running calls are not stopped."
         ),

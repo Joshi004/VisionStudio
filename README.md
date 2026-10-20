@@ -8,12 +8,17 @@ What it does today:
 - **Projects**: create a project (name, orientation, video size and frame
   rate) and open it. A project page is the story workspace: paste the story,
   and see its word count and estimated length (with a warning above the
-  length limit) and the stages of the story pipeline. The stages are
-  placeholders ("Not available yet") until later phases build them.
+  length limit) and the stages of the story pipeline. The **Story Bible**
+  stage works: press Run to have the language model write the story's title,
+  genre, tone, visual style and rules, and Re-run for a new version (older
+  versions stay readable). The other stages are placeholders ("Not available
+  yet") until later phases build them.
 - **Labs**: the Image lab, the Voice lab and the Video lab try the GPU
   server's models by hand, and the Character lab makes characters, looks and
   takes. The Activity page lists their background jobs.
-- **Settings**: the GPU server address, the language-model roles, the image
+- **Settings**: the GPU server address, the language-model roles (the story
+  stages use the "Story provider" and "Story model"; set the provider to the
+  GPU server's Qwen3.8 to try them while Bitdeer is not available), the image
   mode, the shot-duration limits, the story length estimate (speaking pace and
   longest story) and the parallel-job limits.
 

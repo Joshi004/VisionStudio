@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
 import { StageList } from "../components/story/StageList";
+import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
 import { StoryEditor } from "../components/story/StoryEditor";
 import { capitalise } from "../format";
 
@@ -61,6 +62,7 @@ export function ProjectPage() {
           </Group>
 
           <StoryEditor project={project} />
+          <StoryBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
           <StageList />
         </>
       )}

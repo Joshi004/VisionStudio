@@ -2,6 +2,8 @@ export type StoryStage = {
   id: string;
   name: string;
   description: string;
+  /** True once the stage can be run from the story workspace. Missing means "not yet". */
+  available?: boolean;
 };
 
 /**
@@ -13,6 +15,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "story-bible",
     name: "Story Bible",
     description: "The story's world, tone and rules, written once and shared by every later stage.",
+    available: true,
   },
   {
     id: "character-discovery",

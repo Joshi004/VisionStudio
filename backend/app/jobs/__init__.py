@@ -6,11 +6,12 @@
 - `phases.py`: the phase labels the UI shows.
 - one module per job type: the labs (`generate_lab_video.py`, `write_lab_video_prompt.py`,
   `lab_voice.py`, `generate_lab_image.py`) and the Character lab
-  (`write_character_look_prompt.py`, `write_character_take_prompt.py`).
+  (`write_character_look_prompt.py`, `write_character_take_prompt.py`) and the story stages
+  (`write_story_bible.py`).
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
   and `synthesize_speech.py` (the speech jobs).
-- `llm_call.py`: the paid call the three language model jobs share.
+- `llm_call.py`: the paid call the language model jobs share.
 
 A new job type is a new handler module plus one line in `register_handlers` below. The
 dispatcher loop is not touched.
@@ -32,6 +33,7 @@ def register_handlers() -> None:
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
+    from app.jobs.write_story_bible import WriteStoryBibleHandler
 
     handlers.register(GenerateLabVideoHandler())
     handlers.register(WriteLabVideoPromptHandler())
@@ -39,3 +41,4 @@ def register_handlers() -> None:
     handlers.register(GenerateLabImageHandler())
     handlers.register(WriteCharacterLookPromptHandler())
     handlers.register(WriteCharacterTakePromptHandler())
+    handlers.register(WriteStoryBibleHandler())

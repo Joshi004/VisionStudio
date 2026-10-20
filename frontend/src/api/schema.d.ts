@@ -60,6 +60,61 @@ export interface paths {
         patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/story-bible/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Story Bible
+         * @description Starts the job that writes the next version from the saved story. If one is already
+         *     waiting or running for the project, its id is returned and no second job is made.
+         */
+        post: operations["run_story_bible_api_projects__project_id__story_bible_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-bible": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Story Bible */
+        get: operations["get_story_bible_api_projects__project_id__story_bible_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-bible/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Story Bible Version */
+        get: operations["get_story_bible_version_api_projects__project_id__story_bible_versions__version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -1451,7 +1506,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible";
             /**
              * Status
              * @enum {string}
@@ -1504,7 +1559,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible";
             /**
              * Status
              * @enum {string}
@@ -1968,7 +2023,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible";
             /** Running */
             running: number;
             /** Queued */
@@ -2272,6 +2327,95 @@ export interface components {
             last_check: components["schemas"]["SourceCheckOut"] | null;
         };
         /**
+         * StoryBibleContent
+         * @description The bible itself (`Path_ahead.md` Section 6).
+         */
+        StoryBibleContent: {
+            /** Title */
+            title: string;
+            /** Language */
+            language: string;
+            /** Genre */
+            genre: string[];
+            /** Tone */
+            tone: string[];
+            /** Visual Style */
+            visual_style: string;
+            /** Time Period */
+            time_period: string;
+            storytelling_style: components["schemas"]["StorytellingStyle"];
+            /** World Rules */
+            world_rules: string[];
+        };
+        /**
+         * StoryBibleJobOut
+         * @description The newest `write_story_bible` job of the project, whatever its status.
+         */
+        StoryBibleJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** StoryBibleOut */
+        StoryBibleOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            content: components["schemas"]["StoryBibleContent"];
+        };
+        /** StoryBibleRun */
+        StoryBibleRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** StoryBibleState */
+        StoryBibleState: {
+            latest: components["schemas"]["StoryBibleOut"] | null;
+            /** Versions */
+            versions: components["schemas"]["StoryBibleVersionOut"][];
+            job: components["schemas"]["StoryBibleJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+        };
+        /** StoryBibleVersionOut */
+        StoryBibleVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * StoryLengthOut
          * @description The story's size and estimated length, and the pace and limit the estimate used.
          */
@@ -2286,6 +2430,11 @@ export interface components {
             limit_seconds: number;
             /** Over Limit */
             over_limit: boolean;
+        };
+        /** StorytellingStyle */
+        StorytellingStyle: {
+            /** Narration */
+            narration: string;
         };
         /** TagGroupOut */
         TagGroupOut: {
@@ -2731,6 +2880,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_story_bible_api_projects__project_id__story_bible_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryBibleRun"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story to read. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_story_bible_api_projects__project_id__story_bible_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryBibleState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_story_bible_version_api_projects__project_id__story_bible_versions__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryBibleOut"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

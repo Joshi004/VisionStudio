@@ -2,7 +2,10 @@ import { Badge, Group, Paper, Stack, Text, Title } from "@mantine/core";
 
 import { STORY_STAGES } from "./storyStages";
 
-/** The pipeline's stages, in order. Every stage is a placeholder until its phase is built. */
+/**
+ * The pipeline's stages, in order. A stage is a placeholder until its phase is built; one that
+ * can be run is marked "Available" and has its own panel above this list.
+ */
 export function StageList() {
   return (
     <Paper withBorder p="md" radius="md">
@@ -18,8 +21,12 @@ export function StageList() {
                 {stage.description}
               </Text>
             </Stack>
-            <Badge color="gray" variant="light" style={{ flexShrink: 0 }}>
-              Not available yet
+            <Badge
+              color={stage.available ? "green" : "gray"}
+              variant="light"
+              style={{ flexShrink: 0 }}
+            >
+              {stage.available ? "Available" : "Not available yet"}
             </Badge>
           </Group>
         ))}

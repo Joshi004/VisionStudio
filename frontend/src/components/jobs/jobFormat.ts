@@ -7,6 +7,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   lab_image: "Image lab image",
   write_character_look_prompt: "Character look prompt",
   write_character_take_prompt: "Character take prompts",
+  write_story_bible: "Story Bible",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
