@@ -662,13 +662,51 @@ async def _pin_pipeline_look(
     """
     if look.project_id is None or look.discovery_id is None:
         return False
+    version = await pin_new_version(
+        session,
+        project_id=look.project_id,
+        discovery_id=look.discovery_id,
+        character=character,
+        job_id=look.prompt_job_id,
+    )
+    if version is None:
+        return False
+    _logger.info(
+        "look %d: ready for project %d, character %d pinned at version %d",
+        look.id,
+        look.project_id,
+        character.id,
+        version,
+    )
+    return True
+
+
+async def pin_new_version(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    discovery_id: str,
+    character: LibraryCharacter,
+    job_id: int | None,
+) -> int | None:
+    """Writes the character's next version (`ai`, with `job_id`) from its head as it is now,
+    and moves the project's pin for `discovery_id` to it. This is how a story stage that
+    changes a library character (a look, a voice) makes its change the project's own. Returns
+    the version number the pin now holds, or None, doing nothing, when the project's link no
+    longer points at this character (it was removed or changed meanwhile).
+
+    The version records the same `inputs` as the version the project pinned, so the Character
+    Definition stage still reads that definition as built from the story and the StoryBible.
+    When nothing a version freezes has changed, no version is added and the pin moves to the
+    newest one. Flushes but does not commit.
+    """
     link_statement = select(ProjectCharacterLink).where(
-        ProjectCharacterLink.project_id == look.project_id,
-        ProjectCharacterLink.discovery_id == look.discovery_id,
+        ProjectCharacterLink.project_id == project_id,
+        ProjectCharacterLink.discovery_id == discovery_id,
     )
     link = (await session.execute(link_statement)).scalars().first()
     if link is None or link.character_id != character.id:
-        return False
+        return None
     pinned_statement = select(LibraryCharacterVersion).where(
         LibraryCharacterVersion.character_id == character.id,
         LibraryCharacterVersion.version == link.pinned_version,
@@ -676,22 +714,15 @@ async def _pin_pipeline_look(
     pinned = (await session.execute(pinned_statement)).scalars().first()
     inputs = pinned.inputs if pinned is not None and isinstance(pinned.inputs, dict) else None
     version = await character_versions.record_version_if_changed(
-        session, character, source="ai", job_id=look.prompt_job_id, inputs=inputs
+        session, character, source="ai", job_id=job_id, inputs=inputs
     )
     if version is None:
         version = await character_versions.latest_version(session, character.id)
     if version is None:
-        return False
+        return None
     link.pinned_version = version.version
     link.updated_at = utcnow()
-    _logger.info(
-        "look %d: ready for project %d, character %d pinned at version %d",
-        look.id,
-        look.project_id,
-        character.id,
-        version.version,
-    )
-    return True
+    return version.version
 
 
 class _Cutout:

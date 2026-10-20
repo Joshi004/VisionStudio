@@ -40,6 +40,7 @@ JobType = Literal[
     "discover_scenes",
     "define_character",
     "discover_relations",
+    "design_voice",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

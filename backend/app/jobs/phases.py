@@ -138,6 +138,10 @@ SAVING_DEFINITION: Final = "saving the definition"
 # `discover_relations` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_RELATIONS: Final = "saving the relations"
 
+# --- Running: story voices (PHASE-011) ---------------------------------------------------
+# `design_voice` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_VOICE_DESCRIPTION: Final = "saving the voice description"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

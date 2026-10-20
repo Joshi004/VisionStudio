@@ -7,7 +7,9 @@ import { CharacterDefinitionsPanel } from "../components/story/CharacterDefiniti
 import { CharacterImagesPanel } from "../components/story/CharacterImagesPanel";
 import { CharacterLinksPanel } from "../components/story/CharacterLinksPanel";
 import { CharacterRelationsPanel } from "../components/story/CharacterRelationsPanel";
+import { CharacterVoicesPanel } from "../components/story/CharacterVoicesPanel";
 import { DiscoveryPanel } from "../components/story/DiscoveryPanel";
+import { NarratorVoicePanel } from "../components/story/NarratorVoicePanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
 import { StageList } from "../components/story/StageList";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
@@ -78,6 +80,8 @@ export function ProjectPage() {
           <CharacterRelationsPanel projectId={project.id} />
           <CharacterDefinitionsPanel projectId={project.id} />
           <CharacterImagesPanel projectId={project.id} />
+          <CharacterVoicesPanel projectId={project.id} />
+          <NarratorVoicePanel projectId={project.id} />
           <DiscoveryPanel
             projectId={project.id}
             kind="environments"

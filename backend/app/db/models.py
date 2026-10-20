@@ -88,12 +88,12 @@ class Job(Base):
         # The six lab job types, since revision 0022 retired the narration ones, the first
         # story stage, since revision 0023, the two discovery stages, since revision 0024,
         # scene discovery, since revision 0025, character definition, since revision 0028, and
-        # relation discovery, since revision 0030.
+        # relation discovery, since revision 0030, and voice design, since revision 0031.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
-            "'define_character', 'discover_relations')",
+            "'define_character', 'discover_relations', 'design_voice')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -476,8 +476,12 @@ class LabVoiceRun(Base):
     __tablename__ = "lab_voice_run"
     __table_args__ = (
         CheckConstraint("mode IN ('design', 'clone', 'direction')", name="mode_valid"),
+        CheckConstraint(
+            "subject IS NULL OR subject IN ('character', 'narrator')", name="subject_valid"
+        ),
         Index("idx_lab_voice_run_created", "created_at"),
         Index("idx_lab_voice_run_job", "job_id"),
+        Index("idx_lab_voice_run_project", "project_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -500,6 +504,48 @@ class LabVoiceRun(Base):
     size_bytes: Mapped[int | None] = mapped_column(default=None)
     sha256: Mapped[str | None] = mapped_column(default=None)
     duration_s: Mapped[float | None] = mapped_column(default=None)
+    # Only for a sample the story pipeline made by itself (PHASE-011): the project, what the
+    # voice is for (`character` or `narrator`), the discovered character's slug id, the
+    # `design_voice` job that wrote the description, and the provenance (D-3). NULL for a run
+    # made by hand in a lab.
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    subject: Mapped[str | None] = mapped_column(default=None)
+    discovery_id: Mapped[str | None] = mapped_column(default=None)
+    design_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+
+
+class NarratorVoice(Base):
+    """One version of a story project's narrator voice (PHASE-011). The same provenance shape as
+    `StoryBible`: every derivation or choice is a new row with the next `version`, and a stored
+    row is never changed. `source` is `ai` for a voice derived from the StoryBible's narration
+    style (with the `design_voice` job in `job_id`) and `manual` for a saved voice chosen by
+    hand. `inputs` is `{story_bible_version, narration_sha256}` for an `ai` version.
+    """
+
+    __tablename__ = "narrator_voice"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_narrator_voice_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
 class LibraryCharacter(Base):

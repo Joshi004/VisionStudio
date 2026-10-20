@@ -116,7 +116,7 @@ class LabVoiceRunOut(BaseModel):
     duration_s: float | None
 
 
-def _voice_out(voice: Voice) -> VoiceOut:
+def voice_out(voice: Voice) -> VoiceOut:
     return VoiceOut(
         id=voice.id,
         created_at=voice.created_at,
@@ -223,7 +223,7 @@ async def save_run_as_voice(run_id: RunId, body: VoiceFromRun, session: SessionD
         voice = await voices.create_from_run(session, run_id, body.name, body.transcript)
     except voices.VoiceInputError as exc:
         raise _voice_error(exc) from exc
-    return _voice_out(voice)
+    return voice_out(voice)
 
 
 # --- Saved voices --------------------------------------------------------------------------
@@ -232,7 +232,7 @@ async def save_run_as_voice(run_id: RunId, body: VoiceFromRun, session: SessionD
 @router.get("/voices", response_model=list[VoiceOut])
 async def list_voices(session: SessionDep) -> list[VoiceOut]:
     """The saved voices, newest first."""
-    return [_voice_out(voice) for voice in await voices.list_voices(session)]
+    return [voice_out(voice) for voice in await voices.list_voices(session)]
 
 
 @router.post(
@@ -267,7 +267,7 @@ async def upload_voice(
         )
     except voices.VoiceInputError as exc:
         raise _voice_error(exc) from exc
-    return _voice_out(voice)
+    return voice_out(voice)
 
 
 @router.patch("/voices/{voice_id}", response_model=VoiceOut, responses={**_NOT_FOUND, **_INVALID})
@@ -277,4 +277,4 @@ async def update_voice(voice_id: VoiceId, body: VoiceUpdate, session: SessionDep
         voice = await voices.update_voice(session, voice_id, body.name, body.transcript)
     except voices.VoiceInputError as exc:
         raise _voice_error(exc) from exc
-    return _voice_out(voice)
+    return voice_out(voice)

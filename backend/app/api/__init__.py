@@ -19,6 +19,7 @@ from app.api import (
     scenes,
     settings,
     story_bible,
+    story_voices,
     video_lab,
     voice_lab,
 )
@@ -33,6 +34,7 @@ api_router.include_router(character_links.router, tags=["character-links"])
 api_router.include_router(character_relations.router, tags=["character-relations"])
 api_router.include_router(character_definitions.router, tags=["character-definitions"])
 api_router.include_router(character_images.router, tags=["character-images"])
+api_router.include_router(story_voices.router, tags=["story-voices"])
 api_router.include_router(settings.router, tags=["settings"])
 api_router.include_router(gpu.router, tags=["gpu"])
 api_router.include_router(jobs.router, tags=["jobs"])

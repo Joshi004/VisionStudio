@@ -468,6 +468,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/character-voices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Character Voices */
+        get: operations["get_character_voices_api_projects__project_id__character_voices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-voices/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a voice for every defined character the pipeline made that has none yet, whose
+         *     voice failed or is out of date, and for the narrator when it has none or an out-of-date
+         *     derived one. Every other voice is skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__character_voices_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/character-voices/{discovery_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the voice of one character. If it is already being made, that job's id is
+         *     returned and no second voice is made.
+         */
+        post: operations["run_one_api_projects__project_id__character_voices__discovery_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/narrator-voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Narrator Voice */
+        get: operations["get_narrator_voice_api_projects__project_id__narrator_voice_get"];
+        /**
+         * Choose Narrator Voice
+         * @description Makes a saved voice the narrator's, as a new version chosen by hand.
+         */
+        put: operations["choose_narrator_voice_api_projects__project_id__narrator_voice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/narrator-voice/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Narrator
+         * @description Derives the narrator's voice from the StoryBible. If one is already being made, that
+         *     job's id is returned and no second voice is made.
+         */
+        post: operations["run_narrator_api_projects__project_id__narrator_voice_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -2304,7 +2406,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice";
             /**
              * Status
              * @enum {string}
@@ -2357,7 +2459,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice";
             /**
              * Status
              * @enum {string}
@@ -2801,6 +2903,70 @@ export interface components {
             /** Character Id */
             character_id: number;
         };
+        /** NarratorChooseIn */
+        NarratorChooseIn: {
+            /** Voice Id */
+            voice_id: number;
+        };
+        /** NarratorRunIn */
+        NarratorRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /** NarratorRunOut */
+        NarratorRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** NarratorVersionOut */
+        NarratorVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Job Id */
+            job_id: number | null;
+            /** Story Bible Version */
+            story_bible_version: number | null;
+        };
+        /** NarratorVoiceOut */
+        NarratorVoiceOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unavailable" | "none" | "in_progress" | "failed" | "ready" | "out_of_date";
+            /** Stage */
+            stage: ("writing_description" | "making_sample") | null;
+            version: components["schemas"]["NarratorVersionOut"] | null;
+            voice: components["schemas"]["VoiceOut"] | null;
+            /** Instruction */
+            instruction: string | null;
+            /** Error */
+            error: string | null;
+            /** Reasons */
+            reasons: string[];
+            /** Story Bible Version */
+            story_bible_version: number | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+        };
         /** OpenApiChangesOut */
         OpenApiChangesOut: {
             /** Operations Added */
@@ -2906,7 +3072,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice";
             /** Running */
             running: number;
             /** Queued */
@@ -3470,6 +3636,86 @@ export interface components {
             limit_seconds: number;
             /** Over Limit */
             over_limit: boolean;
+        };
+        /**
+         * StoryVoiceEntryOut
+         * @description One entry of the newest list of characters.
+         */
+        StoryVoiceEntryOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Character Id */
+            character_id: number | null;
+            /** Character Name */
+            character_name: string | null;
+            /** Pinned Version */
+            pinned_version: number | null;
+            /**
+             * Definition Status
+             * @enum {string}
+             */
+            definition_status: "unlinked" | "not_defined" | "defined" | "out_of_date";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unavailable" | "none" | "in_progress" | "failed" | "ready" | "out_of_date";
+            /** Stage */
+            stage: ("writing_description" | "making_sample") | null;
+            /** Instruction */
+            instruction: string | null;
+            voice: components["schemas"]["VoiceOut"] | null;
+            /** Error */
+            error: string | null;
+            /** Reasons */
+            reasons: string[];
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+        };
+        /** StoryVoiceRunAllOut */
+        StoryVoiceRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["StoryVoiceSkippedOut"][];
+        };
+        /** StoryVoiceRunIn */
+        StoryVoiceRunIn: {
+            /**
+             * Confirm Overwrite
+             * @default false
+             */
+            confirm_overwrite: boolean;
+        };
+        /** StoryVoiceRunOut */
+        StoryVoiceRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** StoryVoiceSkippedOut */
+        StoryVoiceSkippedOut: {
+            /** Discovery Id */
+            discovery_id: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
+        /** StoryVoicesOut */
+        StoryVoicesOut: {
+            /** Discovery Version */
+            discovery_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["StoryVoiceEntryOut"][];
         };
         /** StorytellingStyle */
         StorytellingStyle: {
@@ -4936,6 +5182,259 @@ export interface operations {
                 };
             };
             /** @description There is no list of characters, or the character is not linked, not defined, out of date, archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_character_voices_api_projects__project_id__character_voices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryVoicesOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__character_voices_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryVoiceRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is nothing to make a voice for yet, or the voice breaks a rule: not linked, not defined, out of date, archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__character_voices__discovery_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StoryVoiceRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryVoiceRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is nothing to make a voice for yet, or the voice breaks a rule: not linked, not defined, out of date, archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_narrator_voice_api_projects__project_id__narrator_voice_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NarratorVoiceOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    choose_narrator_voice_api_projects__project_id__narrator_voice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NarratorChooseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NarratorVoiceOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is nothing to make a voice for yet, or the voice breaks a rule: not linked, not defined, out of date, archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_narrator_api_projects__project_id__narrator_voice_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["NarratorRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NarratorRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is nothing to make a voice for yet, or the voice breaks a rule: not linked, not defined, out of date, archived, or needs confirming. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -203,10 +203,17 @@ async def create_from_upload(
 
 
 async def create_from_run(
-    session: AsyncSession, run_id: int, name: str, transcript: str | None
+    session: AsyncSession,
+    run_id: int,
+    name: str,
+    transcript: str | None,
+    *,
+    commit: bool = True,
 ) -> Voice:
-    """Saves the speech a Voice lab run made as a voice. Commits. The recording is the run's
-    own file. `transcript` is what the speech says; left out, it is the run's text.
+    """Saves the speech a Voice lab run made as a voice. Commits, unless `commit` is False: the
+    voice is then only flushed, so a caller (the story pipeline) can attach it and commit
+    everything together. The recording is the run's own file. `transcript` is what the speech
+    says; left out, it is the run's text.
     """
     name = clean_name(name)
     run = await session.get(LabVoiceRun, run_id)
@@ -226,7 +233,10 @@ async def create_from_run(
         lab_voice_run_id=run.id,
     )
     session.add(voice)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     _logger.info("voice saved: id=%d from lab run %d", voice.id, run.id)
     return voice
 

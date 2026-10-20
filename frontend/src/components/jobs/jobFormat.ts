@@ -13,6 +13,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   discover_scenes: "Scene discovery",
   define_character: "Character definition",
   discover_relations: "Character relations",
+  design_voice: "Voice design",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

@@ -64,6 +64,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-047 character relations, 2026-10-20):** migration `0030`. The project says who is the same person at another age, a twin, or family of whom, and the definitions and the images use it. (1) New table `character_relations` (Section 4.29): the shape of `character_discovery`, one immutable row per version of the project's whole list of relations, found by the `discover_relations` job (`source` `ai`) or saved by the user (`manual`), keyed by the discovery slug ids; **a library character never carries a relation** (D-14, amended). (2) `job.type` gains `discover_relations`: the CHECK is rebuilt in batch mode, so `job` now has twelve types. (3) `character_look.status` gains `waiting` (Section 4.23): a pipeline look for a same-face variant that waits for its base's images; no job exists until it starts. The CHECK is rebuilt in batch mode. (4) The `inputs` of a definition version gain `relations_sha256` and, when the project has relations, a `character_relations` artifact (Section 4.27); the `inputs` of a pipeline look gain `relation_kind`, `base` and `resemblance_sha256` (Section 4.23). A row made before this has none of them and reads as having no relations. The downgrade drops the table, deletes `discover_relations` jobs and `waiting` looks, and restores both CHECKs. No data is touched on upgrade. Section 7 has the new row.
 
+**Update (PHASE-011 character and narrator voices, 2026-10-20):** migration `0031`. The seventh story stage: **each defined character, and the narrator, gets a saved voice made by the pipeline**, with nobody choosing a sample. (1) `job.type` gains `design_voice`: the CHECK is rebuilt in batch mode, so `job` now has thirteen types. One job writes one voice description (one paid call to the story model); in the same transaction that marks it succeeded it queues **one design-mode Voice lab run**. (2) `lab_voice_run` gains five nullable columns: `project_id` (FK → `project.id`, `SET NULL`, indexed), `subject` (`character` or `narrator`), `discovery_id` (the slug of the discovered character), `design_job_id` (FK → `job.id`, `SET NULL`: the `design_voice` job that wrote the description) and `inputs` (JSON, the D-3 inputs the voice is compared with). A run made by hand has none of the five (Section 4.12). (3) New table `narrator_voice` (Section 4.30): the shape of `story_bible`, one immutable row per derivation (`ai`) or hand choice (`manual`) of the project's narrator voice. (4) When the run's speech is stored, `lab_voice` calls `story_voices.on_voice_finished`, which saves the `voice` row from the run and, for a character, sets `library_character.voice_id`, adds a new `ai` `library_character_version` and moves the project's pin to it (the same way PHASE-010 does for a look). A character has **no** new column: the voice is the library character's own `voice_id`. "Out of date" is never stored: a character voice is compared by `inputs.voice_facts_sha256`, a derived narrator voice by `inputs.narration_sha256`. See Sections 4.2, 4.12, 4.30, 5 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -134,7 +136,7 @@ Rules that go with it:
 
 ## 3. Entity-relationship overview
 
-A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run`, and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
+A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
 
 ```mermaid
 erDiagram
@@ -248,6 +250,11 @@ erDiagram
 | `lab_video_run` | `job_id` | `job.id` | Yes (the `lab_video` job that makes the run's clip; `SET NULL` if that job row is ever removed). Phase 19 |
 | `lab_voice_run` | `job_id` | `job.id` | Yes (the `lab_voice` job that makes the run's speech; `SET NULL` if that job row is ever removed). Phase 21 |
 | `lab_voice_run` | `voice_id` | `voice.id` | Yes (the saved voice that read the text; `SET NULL`). Phase 21 |
+| `lab_voice_run` | `project_id` | `project.id` | Yes (the project the pipeline made the sample for; `SET NULL`; NULL for a run made by hand). PHASE-011 |
+| `lab_voice_run` | `design_job_id` | `job.id` | Yes (the `design_voice` job that wrote the description; `SET NULL`). PHASE-011 |
+| `narrator_voice` | `project_id` | `project.id` | No (`CASCADE`). PHASE-011 |
+| `narrator_voice` | `voice_id` | `voice.id` | Yes (the saved voice; `SET NULL`). PHASE-011 |
+| `narrator_voice` | `job_id` | `job.id` | Yes (the `design_voice` job of an `ai` version; `SET NULL`; NULL for a manual one). PHASE-011 |
 | `lab_character` | `voice_id` | `voice.id` | Yes (the character's default saved voice; `SET NULL`). Phase 24 |
 | `lab_talk_run` | `character_id` | `lab_character.id` | Yes (the cast character the take started from; `SET NULL`). Phase 24 |
 | `lab_talk_run` | `voice_id` | `voice.id` | Yes (the saved voice that reads the line; `SET NULL`). Phase 24 |
@@ -376,13 +383,13 @@ CREATE TABLE asset (
 
 ### 4.5 `job`
 
-Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, and migration `0030` (PHASE-047) added `discover_relations`. (Source: Section 3.3, 4.2, 4.3.)
+Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, and migration `0031` (PHASE-011) added `design_voice`. (Source: Section 3.3, 4.2, 4.3.)
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
-| `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
+| `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047; `design_voice`, PHASE-011), which the Activity page shows under the project's name |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -401,7 +408,7 @@ Every unit of background work. This is where running-job information lives, so a
 CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations')),
+    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -657,6 +664,13 @@ One speech the Voice lab made, or is making (Phase 21). Like `lab_video_run`, th
 | `size_bytes` | INTEGER | NULL | — | |
 | `sha256` | TEXT | NULL | — | |
 | `duration_s` | REAL | NULL | — | As ffprobe reads the file |
+| `project_id` | INTEGER, FK → `project.id` | NULL | — | PHASE-011 (migration `0031`). The project the story pipeline made this sample for. NULL for a run made by hand in the Voice lab or the Character Lab. `ON DELETE SET NULL` (named `fk_lab_voice_run_project_id_project`), indexed by `idx_lab_voice_run_project` |
+| `subject` | TEXT | NULL | — | PHASE-011. `character` or `narrator` (`CHECK`, `ck_lab_voice_run_subject_valid`, NULL allowed): what the pipeline's sample is the voice of. NULL for a run made by hand |
+| `discovery_id` | TEXT | NULL | — | PHASE-011. The slug of the discovered character a `character` sample is for. NULL otherwise |
+| `design_job_id` | INTEGER, FK → `job.id` | NULL | — | PHASE-011. The `design_voice` job that wrote this run's description. `ON DELETE SET NULL` (named `fk_lab_voice_run_design_job_id_job`) |
+| `inputs` | JSON | NULL | — | PHASE-011, the D-3 inputs of the voice that is made from this run: for a character `{"project_id", "discovery_id", "character_id", "character_version", "voice_facts_sha256"}`, for the narrator `{"project_id", "story_bible_version", "narration_sha256"}`. `voice_facts_sha256` and `narration_sha256` are the SHA-256 of the facts the model was shown. NULL for a run made by hand. It is what the voice's "out of date" is worked out from |
+
+A run with `project_id` set is the sample the pipeline made. Its `design_job_id` job wrote `instruction`, and its `text` is the fixed sentence of a character (`voice_design_writer.CHARACTER_LINE`) or the start of the story (at most 300 characters) for the narrator. The saved voice made from it names the run in `voice.lab_voice_run_id`.
 
 ```sql
 CREATE TABLE lab_voice_run (
@@ -671,7 +685,13 @@ CREATE TABLE lab_voice_run (
     path         TEXT,
     size_bytes   INTEGER,
     sha256       TEXT,
-    duration_s   REAL
+    duration_s   REAL,
+    -- PHASE-011 (migration 0031); NULL for a run made by hand
+    project_id    INTEGER REFERENCES project(id) ON DELETE SET NULL,
+    subject       TEXT CHECK (subject IS NULL OR subject IN ('character', 'narrator')),
+    discovery_id  TEXT,
+    design_job_id INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs        JSON
 );
 ```
 
@@ -777,6 +797,7 @@ CREATE INDEX idx_lab_video_run_job     ON lab_video_run (job_id);
 CREATE INDEX idx_voice_created         ON voice (created_at);
 CREATE INDEX idx_lab_voice_run_created ON lab_voice_run (created_at);
 CREATE INDEX idx_lab_voice_run_job     ON lab_voice_run (job_id);
+CREATE INDEX idx_lab_voice_run_project ON lab_voice_run (project_id);
 CREATE INDEX idx_lab_character_created ON lab_character (created_at);
 CREATE INDEX idx_lab_talk_run_created  ON lab_talk_run (created_at);
 CREATE INDEX idx_lab_talk_run_voice_run ON lab_talk_run (voice_run_id);
@@ -1378,6 +1399,38 @@ CREATE INDEX idx_character_relations_project ON character_relations (project_id)
 
 **Out of date** is never stored. `GET /api/projects/{id}/character-relations` says the newest version is out of date when the story, the Story Bible or the list of characters is newer than `inputs` says, and lists the relations that name a character no longer in the list as `dropped` (they stand for nothing). A definition (Section 4.27) is out of date when the hash of the relations that name its character (`inputs.relations_sha256`) changed; a ready look (Section 4.23) when its relation or its base's front picture changed, or when a relative's traits did.
 
+### 4.30 `narrator_voice`
+
+*Added in PHASE-011 (migration `0031`).* One **version of the project's narrator voice**: the saved voice the story is narrated in. It follows Section 2.1 exactly as `story_bible` does (Section 4.18): a stored row is never changed, every derivation or hand choice adds the next `version`, the newest row is the current one, and "out of date" is never stored. A project with no row has no narrator voice yet.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3, … per project. `UNIQUE (project_id, version)` |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`). `ai`: derived from the StoryBible by a `design_voice` job. `manual`: a saved voice the user chose |
+| `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice. `ON DELETE SET NULL` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `design_voice` job of an `ai` version. NULL for a manual one. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | An `ai` version: `{"project_id", "story_bible_version", "narration_sha256"}`; `narration_sha256` is the SHA-256 of the narration style, tone and genres the model was shown. A `manual` version: `{}` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE narrator_voice (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    source      TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    voice_id    INTEGER REFERENCES voice(id) ON DELETE SET NULL,
+    job_id      INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs      JSON NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, version)
+);
+CREATE INDEX idx_narrator_voice_project ON narrator_voice (project_id);
+```
+
+**Out of date** is never stored. `GET /api/projects/{id}/narrator-voice` reports an `ai` version as out of date when the newest StoryBible's narration facts no longer hash to `inputs.narration_sha256`. A `manual` version is never out of date (the user chose it), and deriving a voice over it asks the user to confirm first. A character's voice has no table of its own: it is the library character's `voice_id` (Section 4.22), and its status is worked out on read from the newest `design_voice` job, the run it queued and the pinned version's `inputs`.
+
 ---
 
 ## 5. JSON column shapes
@@ -1606,6 +1659,26 @@ On success, in **one transaction**, `character_definitions.save_definition` writ
 
 For Qwen3.8 the limit of 32,000 characters of messages (Section 6) applies to the instructions (4,200 characters), the StoryBible (about 1,000), the character, the other characters, the current profile and the story together, so a long story or a large cast can be refused with a readable failure on the job (this is an estimate: a story above about 25,000 characters is likely to fail).
 
+### `job.input` and `job.output` for a `design_voice` job (PHASE-011)
+
+One job per voice (one character, or the narrator). It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, uses the **story model** (D-12) and is created with `dedupe_key="target"`: while a `design_voice` job with the same `input.target` (`character:<discovery_id>` or `narrator`) is queued or running for the project, a second click returns that job. `services/story_voices` creates it only when the voice may start (the rules of Section 7), with a copy of everything it needs as it was when the button was pressed:
+
+```json
+{
+  "target": "character:arjun",
+  "subject": "character",
+  "project_id": 1,
+  "discovery_id": "arjun",
+  "character_id": 3,
+  "name": "Arjun",
+  "facts": {"sex": "...", "species": "...", "apparent_age": 27, "age_character": "...", "pitch": "...", "texture": "...", "accent": "...", "default_energy": "...", "baseline_behavior": "..."},
+  "line": "The sentence the sample will read.",
+  "inputs": {"project_id": 1, "discovery_id": "arjun", "character_id": 3, "character_version": 4, "voice_facts_sha256": "..."}
+}
+```
+
+For the narrator, `target` is `narrator`, `subject` is `narrator`, `discovery_id` and `character_id` are null, `facts` is `{"narration_style", "tone", "genre"}`, `line` is the start of the story and `inputs` is `{"project_id", "story_bible_version", "narration_sha256"}`. When the handler starts it adds `instructions_sha256`, `server_url`, `endpoint` and the exact `request` (D-3). `output` has the attempts, the usage counts and the answer (as every paid call, `jobs/llm_call.py`), plus `instruction` (the checked voice description: one line of at most 500 characters, the Breeze TTS limit) and `run_id` (the `lab_voice_run` queued in the same transaction that marked the job succeeded). The job's phases are `preparing the prompt`, `asking_model` (from `jobs/llm_call.py`) and `saving the voice description`.
+
 ### The character definition (PHASE-009)
 
 `library_character.definition` and `library_character_version.definition` hold this JSON (`services/character_definition_writer.check_definition` makes it from the model's answer). **Code sets `id`** to the discovered character's slug and never reads it from the model; only the fields below are kept, in this order, and each text is a single line with a character limit:
@@ -1705,6 +1778,7 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Define the characters (PHASE-009) | `POST /api/projects/{id}/character-definitions/{discovery_id}/run` (one character) or `POST .../run` (Define all): refused with 422 when there is no saved story, no `story_bible` row, a `story_bible` that is out of date with the story, no list of characters, an entry that is not linked to a library character, or a linked character that is archived. A character the user **chose from the library** (`project_character_link.how='mapped'`) is also refused unless the body has `confirm_overwrite: true`, and Define all skips it (it is listed in `skipped` with the reason). Otherwise `INSERT job` (`type='define_character'`, `provider='llm'`, `project_id` set, `dedupe_key='discovery_id'`, `input` = a copy of the story, the StoryBible and list versions, the character's `entry`, the `others` and the `inputs` to record). Nothing is written to `library_character` yet. **Start**: `UPDATE job.input` with the exact request, then the paid call (`jobs/llm_call.ask_model`, at most two attempts, `output` updated after every attempt). On an answer that checks: one transaction does `UPDATE library_character` (the profile fields the definition fills, and `definition`), `INSERT library_character_version` (`source='ai'`, `definition`, `job_id`, `inputs`), `UPDATE project_character_link.pinned_version` to the new number, and finishes the job. The link is read again inside that transaction, so a link removed or moved meanwhile fails the job and writes nothing. `GET .../character-definitions` writes nothing: it reads the newest list with each link, the pinned version, and the newest job of each character, and works out each status (`unlinked`, `not_defined`, `defined`, `out_of_date`) and the reasons on every read |
 | Make the characters' canonical images (PHASE-010) | `POST /api/projects/{id}/character-images/{discovery_id}/run` (one character) or `POST .../run` (Make images for all): refused with 422 when there is no list of characters, an entry that is not linked, a linked character that is archived, an entry with no definition or one that is out of date, or a definition being written. A character the user **chose from the library** (`how='mapped'`) is also refused unless the body has `confirm_overwrite: true`, and Make images for all skips it, as it skips a character whose images are `ready` or already being made. A press for a character whose look is being made returns that look and starts nothing. Otherwise one transaction does `INSERT character_look` (`status='writing_prompt'`, `project_id`, `discovery_id`, `inputs`) and `INSERT job` (`type='write_character_look_prompt'`, `requested='master'`, `project_id` NULL as in the lab, `dedupe=False`), then `UPDATE character_look.prompt_job_id`. The prompt is written from the character's card, which the definition filled. **When the prompt job finishes** (`on_look_prompt_written`): `UPDATE character_look` (`prompt`, `status='choosing'`) and one candidate, `INSERT lab_run` + `INSERT job` (`lab_image`) + `INSERT character_look_candidate` (a lab look makes four). **When the candidate's picture is stored** (`on_candidate_image_stored`, called by the `lab_image` job): the look's status is claimed (`choosing` → `making_angles` in one conditional `UPDATE`), `INSERT character_reference` (`front`) and four angle edit runs (`lab_run` + `lab_image` job + `character_reference`), exactly as a manual choice does. **When the fifth angle's picture is stored** (`_maybe_mark_ready`): `UPDATE character_look.status='ready'`, `UPDATE library_character.current_look_id`, `INSERT library_character_version` (`source='ai'`, `job_id` = the prompt job, `inputs` = the pinned version's `inputs`), `UPDATE project_character_link.pinned_version`, in one transaction. If the link was removed or moved to another character meanwhile, the look is only a lab look: a `manual` version and no pin move. A failed prompt job marks the look `failed` (`error`); a failed candidate or angle job writes nothing here: `GET .../character-images` finds it through the run's job and reports `failed`. **Retry** is a fresh look; **Redo angle** is the lab's own `POST /api/lab/characters/looks/{look_id}/angles/{angle}`. `GET .../character-images` writes nothing: it reads the newest look the pipeline made for each linked character, its candidate and angle jobs, and works out each status (`unavailable`, `none`, `in_progress`, `failed`, `ready`, `out_of_date`), the stage and the reasons on every read |
 | Find and edit the characters' relations (PHASE-047) | `POST /api/projects/{id}/character-relations/run` queues one `discover_relations` job (a second click returns it; refused with 422 when there is no saved story, up-to-date Story Bible or list of characters, and, when the newest version is a manual one, unless the body says `confirm_replace_manual: true`). The job asks the story model once, checks the answer (`check_relations`) and, in the same transaction that marks the job succeeded, adds the next `character_relations` version (`ai`). `PUT .../character-relations` checks the user's whole list the same way and adds a `manual` version. `GET` writes nothing: it reads the newest version and works out `dropped`, `reasons`, `can_run` and `needs_confirmation` on every read. The definition stage then passes each other character's `relation_to_this` to the model. **Make images for all** starts bases first; a same-face variant whose base is being made gets a `waiting` `character_look` and no job. When the base's look turns `ready` and its pin has moved, `character_images.release_waiting` (called from the `lab_image` job's hook) claims the waiting look with one conditional update (`waiting` → `writing_prompt`), sets `reference_image_id` to the base's front picture and queues the prompt job. A variant whose base has no picture and none in progress is refused with 422 |
+| Make the characters' and the narrator's voices (PHASE-011) | `POST /api/projects/{id}/character-voices/{discovery_id}/run` (one character), `POST .../character-voices/run` (Make voices for all, which also makes the narrator's) or `POST .../narrator-voice/run`: refused with 422 when there is no list of characters (or no saved story and up-to-date StoryBible for the narrator), an entry that is not linked, a linked character that is archived, an entry with no definition or one that is out of date. A character chosen from the library (not made by the pipeline) or a narrator voice chosen by hand is replaced only when the body says `confirm_overwrite: true` or `confirm_replace_manual: true`; Make voices for all skips both. Each start does `INSERT job` (`type='design_voice'`, `provider='llm'`, `dedupe_key='target'`) and commits, so a second click returns the same job. **Start** (`jobs/design_voice.py`): one paid call to the story model writes the voice description (Section 5); then, in the **same transaction that marks the job succeeded**, `story_voices.queue_sample` does `INSERT lab_voice_run` (`mode='design'`, the description as `instruction`, `project_id`, `subject`, `discovery_id`, `design_job_id`, `inputs`) and `INSERT job` (`type='lab_voice'`, `provider='gpu'`), so a job never succeeds without its sample. **When the speech is stored** (`lab_voice` after `UPDATE lab_voice_run`), `story_voices.on_voice_finished(run_id)` runs best effort and in **one transaction**: `INSERT voice` from the run (`voices.create_from_run(commit=False)`), then for a character `UPDATE library_character.voice_id`, `INSERT library_character_version` (`source='ai'`, `job_id` of the design job, `definition` and `inputs` carried over from the pinned version so the definition still reads "Defined") and `UPDATE project_character_link.pinned_version` (`character_looks.pin_new_version`), and for the narrator `INSERT narrator_voice` (`source='ai'`). It does nothing for a run made by hand, a run already saved, or a character whose link moved to another library character meanwhile. `GET .../character-voices` and `GET .../narrator-voice` work the status out on every read: `in_progress` while a design job runs or a sample is queued or running, `failed` when the job or the sample failed (or the speech succeeded more than 30 seconds ago and no voice was saved), `ready`, or `out_of_date` when the facts hash differs. `PUT .../narrator-voice` with `{"voice_id"}` adds a `manual` `narrator_voice` version (no job; the same voice twice adds none) |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 
