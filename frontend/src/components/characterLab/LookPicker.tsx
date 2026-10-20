@@ -17,6 +17,7 @@ import {
   useChooseMaster,
   useCharacterLooks,
   useRedoAngle,
+  useSetCurrentLook,
   useStartLook,
   useStartLookFromPicture,
   type Angle,
@@ -135,11 +136,42 @@ function ReferenceStrip({
   );
 }
 
+function EarlierLookTile({
+  look,
+  onUse,
+  using,
+  disabled,
+}: {
+  look: CharacterLook;
+  onUse: () => void;
+  using: boolean;
+  disabled: boolean;
+}) {
+  const front = look.references.find((reference) => reference.angle === "front");
+  const picture = front ? referencePicture(front) : null;
+  return (
+    <Stack gap={6}>
+      {picture !== null ? (
+        <img src={picture} alt={`Look ${look.version}`} loading="lazy" style={PICTURE_STYLE} />
+      ) : (
+        <div style={PLACEHOLDER_STYLE} />
+      )}
+      <Text size="sm" fw={500}>
+        Look {look.version}
+      </Text>
+      <Button size="compact-sm" variant="default" loading={using} disabled={disabled} onClick={onUse}>
+        Use this look
+      </Button>
+    </Stack>
+  );
+}
+
 /**
  * The look step: a look is five pictures of the character on a white backdrop. "Generate looks"
  * makes four candidates to choose from; "Generate from my picture" makes the four from the
  * author's own picture instead. The one you choose is the master (the front view), and the other
- * four angles are made from it by themselves. Any angle can be made again.
+ * four angles are made from it by themselves. Any angle can be made again. An earlier ready look
+ * can be made the current one again; the character then has a new version.
  */
 export function LookPicker({ character }: { character: LibraryCharacter }) {
   const looks = useCharacterLooks(character.id);
@@ -148,12 +180,17 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
   const startFromPicture = useStartLookFromPicture();
   const choose = useChooseMaster();
   const redo = useRedoAngle();
+  const setCurrent = useSetCurrentLook();
   // Lets the same file be picked again after a failed upload.
   const resetFileButton = useRef<() => void>(null);
 
   const latest = looks.data?.[0] ?? null;
   const busy = latest !== null && lookIsBusy(latest);
   const pictureBusy = upload.isPending || startFromPicture.isPending;
+  // The ready looks the character is not using now.
+  const earlierLooks = (looks.data ?? []).filter(
+    (look) => look.status === "ready" && look.id !== character.current_look?.id,
+  );
   const failure = start.isError
     ? start.error
     : upload.isError
@@ -164,7 +201,9 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
           ? choose.error
           : redo.isError
             ? redo.error
-            : null;
+            : setCurrent.isError
+              ? setCurrent.error
+              : null;
 
   function chooseFile(file: File | null) {
     resetFileButton.current?.();
@@ -189,7 +228,10 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
         </Alert>
       )}
 
-      {latest !== null && latest.id !== character.current_look?.id && character.current_look && (
+      {latest !== null &&
+        latest.status !== "ready" &&
+        latest.id !== character.current_look?.id &&
+        character.current_look && (
         <Text size="xs" c="dimmed">
           The character keeps using look {character.current_look.version} until this one is ready.
         </Text>
@@ -260,6 +302,32 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
         <Alert color="red" title="This look could not be made">
           {latest.error ?? "No reason was given."}
         </Alert>
+      )}
+
+      {earlierLooks.length > 0 && (
+        <Stack gap="sm">
+          <Text size="sm" fw={500}>
+            Earlier looks
+          </Text>
+          <Text size="xs" c="dimmed">
+            {character.current_look
+              ? `The character uses look ${character.current_look.version}. `
+              : ""}
+            Use an earlier look to make new pictures and clips from it. This adds a new version of
+            the character; nothing is lost.
+          </Text>
+          <SimpleGrid cols={{ base: 3, sm: 5 }} spacing="sm">
+            {earlierLooks.map((look) => (
+              <EarlierLookTile
+                key={look.id}
+                look={look}
+                using={setCurrent.isPending && setCurrent.variables?.lookId === look.id}
+                disabled={setCurrent.isPending}
+                onUse={() => setCurrent.mutate({ characterId: character.id, lookId: look.id })}
+              />
+            ))}
+          </SimpleGrid>
+        </Stack>
       )}
 
       {failure !== null && (

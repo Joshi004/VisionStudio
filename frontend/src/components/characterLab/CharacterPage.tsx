@@ -36,6 +36,7 @@ import {
   type TakeFormState,
 } from "./characterLabView";
 import { TakeGallery } from "./TakeGallery";
+import { VersionHistory } from "./VersionHistory";
 
 type CharacterPageProps = {
   characterId: number;
@@ -159,6 +160,11 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
               <Stack gap={4}>
                 <Group gap="xs" align="center">
                   <Title order={3}>{data.name}</Title>
+                  {data.version !== null && (
+                    <Badge variant="light" color="blue" title="The newest version of this character">
+                      v{data.version}
+                    </Badge>
+                  )}
                   {data.voice !== null ? (
                     <Badge variant="light" color="grape">
                       voice: {data.voice.name}
@@ -231,6 +237,8 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
                 <Detail label="Voice description" value={data.voice_description} />
                 <Detail label="Mouth" value={data.has_visible_mouth ? "visible" : "not visible (no lip sync)"} />
               </Stack>
+
+              <VersionHistory characterId={data.id} />
             </Stack>
           </Paper>
         </Grid.Col>

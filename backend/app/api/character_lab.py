@@ -9,6 +9,9 @@ project's own cast (`/api/projects/{id}/cast`): the two are never linked.
   /looks/from-picture` does the same from the author's own uploaded picture, the candidates
   then being edits of it. Choosing one starts
   the other four angles by itself. `POST /looks/{id}/angles/{angle}` redoes a single angle.
+  `PUT /{id}/current-look` makes an earlier ready look the current one.
+- Every change of the profile, the voice or the current look adds an immutable version
+  (`character_versions`); `GET /{id}/versions` lists them, newest first, read-only.
 - The voice is either an existing saved voice, one chosen from a 3-sample audition
   (`POST /{id}/voice/audition-line` writes a line to read, `POST /{id}/voice/auditions` makes
   the samples, `PUT /{id}/voice` chooses one, an existing voice, or mute), or none (a mute
@@ -58,7 +61,13 @@ from app.db.models import (
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
-from app.services import character_library, character_looks, character_takes, image_lab
+from app.services import (
+    character_library,
+    character_looks,
+    character_takes,
+    character_versions,
+    image_lab,
+)
 from app.services.character_looks import CharacterLookError
 from app.services.character_takes import CharacterTakeError
 from app.services.storage import media_url
@@ -213,6 +222,9 @@ class CharacterOut(BaseModel):
     voice_description: str | None
     current_look: LookOut | None
     archived: bool
+    # The number of the character's newest version (PHASE-007). None for a character made
+    # before versions existed, until its next change.
+    version: int | None
 
 
 class CharactersOut(BaseModel):
@@ -303,6 +315,7 @@ async def _character_out(session: AsyncSession, character: LibraryCharacter) -> 
         if character.current_look_id
         else None
     )
+    newest_version = await character_versions.latest_version(session, character.id)
     return CharacterOut(
         id=character.id,
         created_at=character.created_at,
@@ -323,7 +336,114 @@ async def _character_out(session: AsyncSession, character: LibraryCharacter) -> 
         voice_description=character.voice_description,
         current_look=await _look_out(session, current_look) if current_look is not None else None,
         archived=character.archived,
+        version=newest_version.version if newest_version is not None else None,
     )
+
+
+# --- A character's versions (read-only) ------------------------------------------------------
+
+
+class VersionProfileOut(BaseModel):
+    """The profile as a version froze it."""
+
+    name: str
+    age: int | None
+    gender: str
+    species: str
+    era_kind: EraKind
+    era_years: int | None
+    era_setting: str | None
+    appearance: str
+    outfit: str | None
+    personality: str | None
+    notes: str | None
+    has_visible_mouth: bool
+
+
+class CharacterVersionOut(BaseModel):
+    id: int
+    version: int
+    created_at: datetime
+    source: Literal["ai", "manual"]
+    # What this version changed compared with the one before it.
+    changes: list[character_versions.Change]
+    profile: VersionProfileOut
+    voice: VoiceBriefOut | None
+    voice_description: str | None
+    # The look this version froze, and its number. None when the character had no ready look.
+    look_id: int | None
+    look_version: int | None
+    # The pictures of that look exactly as this version froze them, in display order. A later
+    # redo of an angle does not change them.
+    references: list[CharacterReferenceOut]
+
+
+async def _versions_out(
+    session: AsyncSession, entries: list[character_versions.VersionEntry]
+) -> list[CharacterVersionOut]:
+    image_ids = {
+        picture["lab_image_id"]
+        for entry in entries
+        for picture in entry.version.look_references
+        if picture.get("lab_image_id") is not None
+    }
+    images: dict[int, LabImage] = {}
+    if image_ids:
+        found = await session.execute(select(LabImage).where(LabImage.id.in_(image_ids)))
+        images = {image.id: image for image in found.scalars()}
+
+    voice_ids = {e.version.voice_id for e in entries if e.version.voice_id is not None}
+    voices: dict[int, Voice] = {}
+    if voice_ids:
+        found_voices = await session.execute(select(Voice).where(Voice.id.in_(voice_ids)))
+        voices = {voice.id: voice for voice in found_voices.scalars()}
+
+    look_ids = {e.version.look_id for e in entries if e.version.look_id is not None}
+    looks: dict[int, CharacterLook] = {}
+    if look_ids:
+        found_looks = await session.execute(
+            select(CharacterLook).where(CharacterLook.id.in_(look_ids))
+        )
+        looks = {look.id: look for look in found_looks.scalars()}
+
+    out = []
+    for entry in entries:
+        version = entry.version
+        stored = {picture["angle"]: picture for picture in version.look_references}
+        references = []
+        for angle in _ANGLE_ORDER:
+            picture = stored.get(angle)
+            if picture is None:
+                continue
+            image = images.get(picture["lab_image_id"] or 0)
+            cutout_path = picture.get("cutout_path")
+            references.append(
+                CharacterReferenceOut(
+                    angle=angle,
+                    url=media_url(image.path) if image is not None else None,
+                    cutout_url=media_url(cutout_path) if cutout_path else None,
+                    ready=image is not None,
+                    lab_image_id=picture["lab_image_id"],
+                )
+            )
+        voice = voices.get(version.voice_id or 0)
+        look = looks.get(version.look_id or 0)
+        out.append(
+            CharacterVersionOut(
+                id=version.id,
+                version=version.version,
+                created_at=version.created_at,
+                source=typing_cast(Literal["ai", "manual"], version.source),
+                changes=entry.changes,
+                profile=VersionProfileOut.model_validate(version.profile),
+                voice=VoiceBriefOut(id=voice.id, name=voice.name) if voice is not None else None,
+                voice_description=version.voice_description,
+                look_id=version.look_id,
+                look_version=look.version if look is not None else None,
+                references=references,
+            )
+        )
+    return out
 
 
 def _form(body: CharacterIn) -> character_library.CharacterForm:
@@ -445,6 +565,23 @@ async def edit_character(
     return await _character_out(session, character)
 
 
+@router.get(
+    "/lab/characters/{character_id}/versions",
+    response_model=list[CharacterVersionOut],
+    responses=_NOT_FOUND,
+)
+async def list_versions(
+    character_id: CharacterId, session: SessionDep
+) -> list[CharacterVersionOut]:
+    """Every version of this character, newest first, each with what it changed. A version is
+    never edited: it is added when the profile, the voice or the current look changes.
+    """
+    if await character_library.get_character(session, character_id) is None:
+        raise _missing(f"There is no character {character_id}.")
+    entries = await character_versions.list_versions(session, character_id)
+    return await _versions_out(session, entries)
+
+
 # --- A character's look -------------------------------------------------------------------
 
 
@@ -550,6 +687,32 @@ async def redo_angle(look_id: LookId, angle: Angle, session: SessionDep) -> Look
     if look is None:
         raise _missing(f"There is no look {look_id}.")
     return await _look_out(session, look)
+
+
+class CurrentLookIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    look_id: Id
+
+
+@router.put(
+    "/lab/characters/{character_id}/current-look",
+    response_model=CharacterOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def set_current_look(
+    character_id: CharacterId, body: CurrentLookIn, session: SessionDep
+) -> CharacterOut:
+    """Makes an earlier ready look the character's current look, which new takes are made from.
+    A new version is added when that is a change.
+    """
+    if await character_library.get_character(session, character_id) is None:
+        raise _missing(f"There is no character {character_id}.")
+    try:
+        character = await character_looks.use_look(session, character_id, body.look_id)
+    except CharacterLookError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return await _character_out(session, character)
 
 
 # --- A character's voice -------------------------------------------------------------------
@@ -751,6 +914,8 @@ class TakeOut(BaseModel):
     created_at: datetime
     character_id: int
     look_id: int | None
+    # The character's version when the take was made. None for a take made before versions.
+    character_version: int | None
     output: Output
     action: str | None
     dialogue: str | None
@@ -905,6 +1070,7 @@ async def _takes_out(session: AsyncSession, rows: list[character_takes.TakeRow])
                 created_at=take.created_at,
                 character_id=take.character_id,
                 look_id=take.look_id,
+                character_version=take.character_version,
                 output=typing_cast(Output, take.output),
                 action=take.action,
                 dialogue=take.dialogue,

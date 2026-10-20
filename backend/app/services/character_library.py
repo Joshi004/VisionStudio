@@ -28,7 +28,7 @@ from app.db.models import Job, LibraryCharacter, Voice
 from app.db.types import utcnow
 from app.jobs import store
 from app.providers import speech_synthesizer
-from app.services import voice_lab, voices
+from app.services import character_versions, voice_lab, voices
 from app.services.voice_lab import RunRow, VoiceLabForm, VoiceLabInputError
 
 _logger = logging.getLogger(__name__)
@@ -163,11 +163,15 @@ def _apply(character: LibraryCharacter, form: CharacterForm) -> None:
 
 
 async def create_character(session: AsyncSession, form: CharacterForm) -> LibraryCharacter:
-    """Checks the form and saves a new character. Commits. Raises CharacterLibraryError."""
+    """Checks the form and saves a new character, as its version 1. Commits. Raises
+    CharacterLibraryError.
+    """
     validate_form(form)
     character = LibraryCharacter(name="", species="")
     _apply(character, form)
     session.add(character)
+    await session.flush()  # the character's id, for its first version
+    await character_versions.record_version_if_changed(session, character)
     await session.commit()
     _logger.info("character %d created: %s", character.id, character.name)
     return character
@@ -176,8 +180,8 @@ async def create_character(session: AsyncSession, form: CharacterForm) -> Librar
 async def update_character(
     session: AsyncSession, character_id: int, form: CharacterForm
 ) -> LibraryCharacter:
-    """Checks the form and saves it onto an existing character. Commits. Raises
-    CharacterLibraryError.
+    """Checks the form and saves it onto an existing character, and adds a new version when
+    the profile changed. Commits. Raises CharacterLibraryError.
     """
     validate_form(form)
     character = await session.get(LibraryCharacter, character_id)
@@ -185,6 +189,7 @@ async def update_character(
         raise CharacterLibraryError(f"There is no character {character_id}.")
     _apply(character, form)
     character.updated_at = utcnow()
+    await character_versions.record_version_if_changed(session, character)
     await session.commit()
     _logger.info("character %d updated", character.id)
     return character
@@ -331,8 +336,8 @@ def has_voice(character: LibraryCharacter) -> bool:
 async def set_voice_description(
     session: AsyncSession, character_id: int, voice_description: str | None
 ) -> LibraryCharacter:
-    """Sets what the audition's design-mode samples are made from. Commits. Raises
-    CharacterLibraryError.
+    """Sets what the audition's design-mode samples are made from, and adds a new version when
+    it changed. Commits. Raises CharacterLibraryError.
     """
     character = await session.get(LibraryCharacter, character_id)
     if character is None:
@@ -341,6 +346,7 @@ async def set_voice_description(
     _too_long(description, VOICE_DESCRIPTION_MAX_CHARS, "voice description")
     character.voice_description = description
     character.updated_at = utcnow()
+    await character_versions.record_version_if_changed(session, character)
     await session.commit()
     return character
 
@@ -348,8 +354,8 @@ async def set_voice_description(
 async def set_voice(
     session: AsyncSession, character_id: int, voice_id: int | None
 ) -> LibraryCharacter:
-    """Sets the character's voice to a saved voice, or clears it (mute). Commits. Raises
-    CharacterLibraryError.
+    """Sets the character's voice to a saved voice, or clears it (mute), and adds a new
+    version when it changed. Commits. Raises CharacterLibraryError.
     """
     character = await session.get(LibraryCharacter, character_id)
     if character is None:
@@ -358,6 +364,7 @@ async def set_voice(
         raise CharacterLibraryError(f"There is no saved voice {voice_id}.")
     character.voice_id = voice_id
     character.updated_at = utcnow()
+    await character_versions.record_version_if_changed(session, character)
     await session.commit()
     _logger.info("character %d voice set: voice_id=%s", character.id, voice_id)
     return character

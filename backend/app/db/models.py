@@ -667,6 +667,10 @@ class CharacterTake(Base):
     look_id: Mapped[int | None] = mapped_column(
         ForeignKey("character_look.id", ondelete="SET NULL"), default=None
     )
+    # The number of the character's newest version when the take was made (PHASE-007). NULL for
+    # a take made before the character had a version. A plain number, not a link: a version row
+    # is found by `(character_id, character_version)`.
+    character_version: Mapped[int | None] = mapped_column(default=None)
     output: Mapped[str]
     # What happens in the picture/clip, in the author's words. Ignored for an audio-only take.
     action: Mapped[str | None] = mapped_column(default=None)
@@ -728,3 +732,45 @@ class CharacterTake(Base):
     # one made. NULL: the take makes it (`voice_run_id`).
     audio_input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     last_error: Mapped[str | None] = mapped_column(default=None)
+
+
+class LibraryCharacterVersion(Base):
+    """One immutable snapshot of what defines a library character for production (PHASE-007):
+    its profile, its voice and its current look with that look's exact angle pictures.
+
+    `library_character` stays the editable head. A row here is added (never changed) whenever
+    the profile, the voice or the current look changes (`services/character_versions`), so a
+    project can later pin one version and still read exactly what it was. `version` numbers a
+    character's versions from 1. Follows the provenance convention of DATABASE_STRUCTURE.md
+    Section 2.1 where it applies: `source`, `version` and `created_at`; there is no job, and no
+    upstream artifact, because every change in this phase is made by hand in the lab.
+
+    `profile` is the twelve profile fields by name. `look_references` freezes the look's
+    pictures: `[{"angle", "lab_image_id", "cutout_path"}, ...]` sorted by angle name, empty when
+    the character had no ready look. Redoing an angle later updates the look's own
+    `character_reference` row in place, never this snapshot.
+    """
+
+    __tablename__ = "library_character_version"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("character_id", "version"),
+        Index("idx_library_character_version_character", "character_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("library_character.id", ondelete="CASCADE")
+    )
+    version: Mapped[int]
+    source: Mapped[str] = mapped_column(default="manual", server_default=text("'manual'"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    profile: Mapped[Any] = mapped_column(JSON)
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    voice_description: Mapped[str | None] = mapped_column(default=None)
+    look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_look.id", ondelete="SET NULL"), default=None
+    )
+    look_references: Mapped[Any] = mapped_column(JSON)

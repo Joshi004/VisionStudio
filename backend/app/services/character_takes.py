@@ -63,6 +63,7 @@ from app.jobs import store
 from app.services import (
     character_library,
     character_looks,
+    character_versions,
     image_lab,
     video_lab,
     video_models,
@@ -943,9 +944,12 @@ async def create_take(session: AsyncSession, form: TakeForm) -> TakeRow:
     h3 = form.output == "video" and form.video_model == video_models.H3_MODEL
     # What the clip has: a speech to hear (H3's reference endpoint) or none (H3's plain one).
     h3_speaks = h3 and not _blank(form.dialogue)
+    newest_version = await character_versions.latest_version(session, character.id)
     take = CharacterTake(
         character_id=form.character_id,
         look_id=character.current_look_id,
+        # The character's version at this moment (NULL for a character with no version yet).
+        character_version=newest_version.version if newest_version is not None else None,
         output=form.output,
         action=_clean(form.action),
         dialogue=_clean(form.dialogue),

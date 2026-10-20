@@ -48,8 +48,15 @@ from app.db.models import (
     LibraryCharacter,
 )
 from app.db.session import SessionLocal
+from app.db.types import utcnow
 from app.jobs import store
-from app.services import background_removal, character_library, frame_images, image_lab
+from app.services import (
+    background_removal,
+    character_library,
+    character_versions,
+    frame_images,
+    image_lab,
+)
 from app.services import image_models as image_models_service
 from app.services.frame_images import FrameRejected
 from app.services.image_lab import LabInputError, QwenEditForm, QwenLabForm, Ref
@@ -459,6 +466,8 @@ async def _maybe_mark_ready(session: AsyncSession, look_id: int) -> None:
     character = await session.get(LibraryCharacter, look.character_id)
     if character is not None:
         character.current_look_id = look.id
+        # A look that finishes, or an angle redone on the current look, is a new version.
+        await character_versions.record_version_if_changed(session, character)
 
 
 class _Cutout:
@@ -512,6 +521,29 @@ async def _make_cutout(image_path: str) -> _Cutout | None:
         size_bytes=temp.size_bytes,
         sha256=temp.sha256,
     )
+
+
+# --- Choosing which look is current --------------------------------------------------------
+
+
+async def use_look(session: AsyncSession, character_id: int, look_id: int) -> LibraryCharacter:
+    """Makes an earlier ready look of the character its current look, which new takes are made
+    from, and adds a new version when that is a change. Commits. Raises CharacterLookError.
+    """
+    character = await session.get(LibraryCharacter, character_id)
+    if character is None:
+        raise CharacterLookError(f"There is no character {character_id}.")
+    look = await session.get(CharacterLook, look_id)
+    if look is None or look.character_id != character_id:
+        raise CharacterLookError(f"There is no look {look_id} on this character.")
+    if look.status != "ready":
+        raise CharacterLookError("Only a look that is ready can be used.")
+    character.current_look_id = look.id
+    character.updated_at = utcnow()
+    await character_versions.record_version_if_changed(session, character)
+    await session.commit()
+    _logger.info("character %d: look %d is now the current look", character_id, look_id)
+    return character
 
 
 # --- Reading looks and references, for the API and for the Create panel ------------------

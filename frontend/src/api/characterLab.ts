@@ -14,6 +14,7 @@ export type LibraryCharacter = components["schemas"]["CharacterOut"];
 export type CharacterIn = components["schemas"]["CharacterIn"];
 export type CharacterPatch = components["schemas"]["CharacterPatch"];
 export type CharacterOptions = components["schemas"]["OptionsOut"];
+export type CharacterVersion = components["schemas"]["CharacterVersionOut"];
 export type CharacterLook = components["schemas"]["LookOut"];
 export type LookCandidate = components["schemas"]["LookCandidateOut"];
 export type CharacterReference = components["schemas"]["CharacterReferenceOut"];
@@ -39,6 +40,8 @@ const looksKey = (characterId: number | null) =>
   [...CHARACTER_LAB_KEY, "looks", characterId] as const;
 const takesKey = (characterId: number | null) =>
   [...CHARACTER_LAB_KEY, "takes", characterId] as const;
+const versionsKey = (characterId: number | null) =>
+  [...CHARACTER_LAB_KEY, "versions", characterId] as const;
 
 function failure(error: unknown, status: number, what: string): ApiError {
   return new ApiError(detailMessage(error, `${what} (HTTP ${status}).`), status);
@@ -220,8 +223,8 @@ async function fetchLooks(characterId: number) {
 
 /**
  * Every look of a character, newest first. They are loaded again every few seconds while one
- * is being made. When a look turns ready it becomes the character's current look, so the
- * character and the library are loaded again then.
+ * is being made. When a look turns ready it becomes the character's current look and adds a
+ * version, so the character, the library and the versions are loaded again then.
  */
 export function useCharacterLooks(characterId: number | null) {
   const queryClient = useQueryClient();
@@ -240,6 +243,7 @@ export function useCharacterLooks(characterId: number | null) {
       if (turnedReady) {
         void queryClient.invalidateQueries({ queryKey: detailKey(characterId) });
         void queryClient.invalidateQueries({ queryKey: listKey });
+        void queryClient.invalidateQueries({ queryKey: versionsKey(characterId) });
       }
       return looks;
     },
@@ -320,6 +324,51 @@ export function useRedoAngle() {
       return data;
     },
     onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+/** Makes an earlier ready look the character's current look. This adds a version. */
+export function useSetCurrentLook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { characterId: number; lookId: number }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/lab/characters/{character_id}/current-look",
+        {
+          params: { path: { character_id: input.characterId } },
+          body: { look_id: input.lookId },
+        },
+      );
+      if (!data) {
+        throw failure(error, response.status, "The look was not changed");
+      }
+      return data;
+    },
+    onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+// --- Versions ----------------------------------------------------------------------------------
+
+async function fetchVersions(characterId: number) {
+  const { data, error, response } = await api.GET("/api/lab/characters/{character_id}/versions", {
+    params: { path: { character_id: characterId } },
+  });
+  if (!data) {
+    throw failure(error, response.status, "Could not load the versions");
+  }
+  return data;
+}
+
+/**
+ * Every version of a character, newest first. A version is never edited, so nothing here is
+ * followed while it is open: it is loaded again after any change made in the lab.
+ */
+export function useCharacterVersions(characterId: number | null) {
+  return useQuery({
+    queryKey: versionsKey(characterId),
+    queryFn: () => fetchVersions(characterId as number),
+    enabled: characterId !== null,
   });
 }
 

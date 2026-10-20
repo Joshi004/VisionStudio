@@ -245,6 +245,7 @@ export function TakeCard({
             </Group>
             <Text size="xs" c="dimmed">
               {formatDateTime(take.created_at)}
+              {take.character_version !== null && ` · character v${take.character_version}`}
             </Text>
           </Stack>
           {take.output === "video" && (

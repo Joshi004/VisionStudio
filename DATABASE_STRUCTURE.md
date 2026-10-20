@@ -54,6 +54,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-006 scene discovery, 2026-10-20):** migration `0025`. The fourth story stage: the story divided into its scenes, **each scene tied to the exact slice of the author's story it owns**. (1) New table `scene_discovery` (Section 4.21): the same shape as `character_discovery`, one immutable row per run, which is one version of the whole scene list, following Section 2.1; `inputs` records the story hash and the StoryBible version it read. `UNIQUE (project_id, version)`. Each scene in `content` has `index`, `id`, `title`, `description`, `starts_with`, `start`, `end` and `text`. **The model gives only `id`, `title`, `description` and `starts_with`** (the scene's opening words, copied from the story); **code sets the rest**: scene 1 starts at character 0, every later scene starts at the word where its opening words are found, each scene ends where the next begins and the last ends at the end of the story, and `text` is `story[start:end]`. So the scenes' texts joined in order are the whole story, byte for byte, with no gap, overlap or skipped word. Scenes carry **no character or environment ids** (D-15). (2) `job.type` gains `discover_scenes`: the CHECK is rebuilt in batch mode, so `job` now has ten types. It is its own job type, so it runs beside the two PHASE-005 discovery jobs. It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, and uses the story model setting (D-12). (3) No setting is added. (4) New endpoints under `/api/projects/{id}/scenes` (run, read, read one version). A run is refused (422) on the same conditions as the PHASE-005 runs: no saved story, no StoryBible, or a StoryBible out of date with the story. Whether the newest version is out of date is **computed on every read**, as for the lists of PHASE-005. See Sections 3, 4.5, 4.21, 5 and 7.
 
+**Update (PHASE-007 character versioning, 2026-10-20):** migration `0026`. Every production-relevant change of a library character is kept as an **immutable version**, so a project can later pin one (PHASE-008). (1) New table `library_character_version` (Section 4.27): one row per version, never changed once written, numbered from 1 per character (`UNIQUE (character_id, version)`). It freezes the character's `profile` (twelve fields), its voice (`voice_id`, `voice_description`) and its current look: `look_id` plus `look_references`, the exact picture of every angle at that moment, so redoing an angle later (which updates `character_reference` in place) cannot change an old version. `library_character` stays the editable head. It follows the provenance convention of Section 2.1 where it applies (`source`, `version`, `created_at`); there is no job and no upstream artifact, and `source` is `manual` for every change made in the lab. (2) `character_take` gains a nullable `character_version`: the character's newest version when the take was made. (3) A version is added by `services/character_versions.record_version_if_changed` when the profile changes, when the voice or the voice description changes, when a look turns ready (it becomes the current look), and when an earlier ready look is made current again (`PUT /api/lab/characters/{id}/current-look`). A save that changes nothing adds no version, and archiving is not a version change. While the current look is being redone, the newest version's look part is carried forward; the redo adds its own version once the look is ready again. (4) No `job.type` change, so `job` is not rebuilt. No backfill: a character made before this migration has no version until its next change, which writes version 1. (5) **Documentation catch-up:** the Character lab's tables, which migration `0016` and later added without documentation, are now described in Sections 4.22 to 4.26; Sections 4.13 and 4.14 (the tables `0016` replaced) say so. See Sections 3, 4.22 to 4.27 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -124,7 +126,7 @@ Rules that go with it:
 
 ## 3. Entity-relationship overview
 
-A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows. Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run`, and the Character lab's own tables. They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
+A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows. Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run`, and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
 
 ```mermaid
 erDiagram
@@ -172,6 +174,21 @@ erDiagram
         integer project_id FK
         integer job_id FK
     }
+    LIBRARY_CHARACTER {
+        integer id PK
+        integer voice_id FK
+        integer current_look_id FK
+    }
+    CHARACTER_LOOK {
+        integer id PK
+        integer character_id FK
+    }
+    LIBRARY_CHARACTER_VERSION {
+        integer id PK
+        integer character_id FK
+        integer voice_id FK
+        integer look_id FK
+    }
 
     PROJECT ||--o{ ASSET         : "owns"
     PROJECT ||--o{ JOB           : "owns"
@@ -185,6 +202,10 @@ erDiagram
     CHARACTER_DISCOVERY   }o--o| JOB : "job_id"
     ENVIRONMENT_DISCOVERY }o--o| JOB : "job_id"
     SCENE_DISCOVERY       }o--o| JOB : "job_id"
+    LIBRARY_CHARACTER ||--o{ CHARACTER_LOOK : "has looks"
+    LIBRARY_CHARACTER ||--o{ LIBRARY_CHARACTER_VERSION : "has versions"
+    LIBRARY_CHARACTER }o--o| CHARACTER_LOOK : "current_look_id"
+    LIBRARY_CHARACTER_VERSION }o--o| CHARACTER_LOOK : "look_id"
 ```
 
 `SETTING` and `API_SNAPSHOT` have no edges to `PROJECT` — they are global, as described in Sections 3.7 and 6.5.
@@ -214,7 +235,31 @@ erDiagram
 | `lab_talk_run` | `voice_run_id` | `lab_voice_run.id` | Yes (the speech the take made or reuses; `SET NULL`). Phase 24 |
 | `lab_talk_run` | `video_run_id` | `lab_video_run.id` | Yes (the lip-synced clip; `SET NULL`). Phase 24 |
 
-(The last five rows describe the Talking character lab's first tables, which migration `0016` replaced; see the update at the top.)
+(The five rows above for `lab_character` and `lab_talk_run` describe the Talking character lab's first tables, which migration `0016` replaced by the Character lab's tables below; see Sections 4.13 and 4.14.)
+
+The Character lab's own foreign keys (documented in PHASE-007; the tables are Sections 4.22 to 4.27):
+
+| From | Column | To | Nullable |
+|---|---|---|---|
+| `library_character` | `voice_id` | `voice.id` | Yes (the character's saved voice; `SET NULL`) |
+| `library_character` | `current_look_id` | `character_look.id` | Yes (the look new takes are made from; `SET NULL`) |
+| `character_look` | `character_id` | `library_character.id` | No (`CASCADE`) |
+| `character_look` | `prompt_job_id` | `job.id` | Yes (the `write_character_look_prompt` job; `SET NULL`) |
+| `character_look` | `reference_image_id` | `lab_image.id` | Yes (the author's own picture the look was started from; `SET NULL`) |
+| `character_look_candidate` | `look_id` | `character_look.id` | No (`CASCADE`) |
+| `character_look_candidate` | `lab_run_id` | `lab_run.id` | Yes (`SET NULL`) |
+| `character_reference` | `look_id` | `character_look.id` | No (`CASCADE`) |
+| `character_reference` | `lab_run_id` | `lab_run.id` | Yes (`SET NULL`) |
+| `character_reference` | `lab_image_id` | `lab_image.id` | Yes (`SET NULL`) |
+| `character_take` | `character_id` | `library_character.id` | No (`CASCADE`) |
+| `character_take` | `look_id` | `character_look.id` | Yes (the look the take was made from; `SET NULL`) |
+| `character_take` | `prompt_job_id` | `job.id` | Yes (`SET NULL`) |
+| `character_take` | `image_run_id`, `last_frame_run_id` | `lab_run.id` | Yes (`SET NULL`) |
+| `character_take` | `voice_run_id` | `lab_voice_run.id` | Yes (`SET NULL`) |
+| `character_take` | `video_run_id` | `lab_video_run.id` | Yes (`SET NULL`) |
+| `library_character_version` | `character_id` | `library_character.id` | No (`CASCADE`). PHASE-007 |
+| `library_character_version` | `voice_id` | `voice.id` | Yes (the voice the version froze; `SET NULL`). PHASE-007 |
+| `library_character_version` | `look_id` | `character_look.id` | Yes (the look the version froze; `SET NULL`). PHASE-007 |
 
 Migration `0022` also removed the circular references the narration tables created (`project.voiceover_asset_id` and `asset`, `scene.description_job_id` and `job.scene_id`, and the project cast's): none is left.
 
@@ -607,6 +652,8 @@ CREATE TABLE lab_voice_run (
 
 ### 4.13 `lab_character`
 
+**Replaced in migration `0016`:** this table no longer exists. Its place is taken by `library_character` and its looks (Sections 4.22 to 4.25). The text below is the original description, kept for history.
+
 A character of the Talking character lab's cast (Phase 24): a name, the picture that pins how it looks, and what to say about it to the language model that writes a take's prompts (it cannot see the picture, so the description is all it knows). Like every lab table it belongs to no project. A character is created and edited, never deleted in this iteration.
 
 | Column | Type | Null | Default | Description |
@@ -632,6 +679,8 @@ CREATE TABLE lab_character (
 ```
 
 ### 4.14 `lab_talk_run`
+
+**Replaced in migration `0016`:** this table no longer exists. Its place is taken by `character_take` (Section 4.26). The text below is the original description, kept for history.
 
 One take of the Talking character lab (Phase 24): a line of dialogue spoken by a character picture. A take is made in up to three steps, each a job the other labs already run, so the take row only links them: `prompt_job_id` (a `write_talk_prompts` job), `voice_run_id` (a `lab_voice_run`, made for the take or reused from an earlier one) and `video_run_id` (a `lab_video_run` made by the audio-to-video endpoint). The speech and the clip are therefore also listed by the Voice lab and the Video lab. Each step is a paid call and starts only from a click; with `auto_continue` the backend starts the next one by itself when the prompts job finishes and when the speech is stored. Nothing is deleted in this iteration.
 
@@ -708,7 +757,15 @@ CREATE INDEX idx_lab_talk_run_created  ON lab_talk_run (created_at);
 CREATE INDEX idx_lab_talk_run_voice_run ON lab_talk_run (voice_run_id);
 CREATE INDEX idx_story_bible_project   ON story_bible (project_id);
 CREATE INDEX idx_scene_discovery_project ON scene_discovery (project_id);
+CREATE INDEX idx_library_character_created ON library_character (created_at);
+CREATE INDEX idx_character_look_character ON character_look (character_id);
+CREATE INDEX idx_character_look_candidate_look ON character_look_candidate (look_id);
+CREATE INDEX idx_character_take_character ON character_take (character_id);
+CREATE INDEX idx_character_take_created ON character_take (created_at);
+CREATE INDEX idx_library_character_version_character ON library_character_version (character_id);
 ```
+
+(The `lab_character` and `lab_talk_run` indexes above went with those tables in migration `0016`.)
 
 ### 4.15 `character`
 
@@ -913,6 +970,270 @@ CREATE INDEX idx_scene_discovery_project ON scene_discovery (project_id);
 ```
 
 **Out of date** is never stored, and is worked out exactly as for the two lists of PHASE-005: `GET /api/projects/{id}/scenes` says the newest version is out of date when `sha256(project.script_text)` differs from its `inputs.story_sha256`, when the story is now empty, or when the project's newest `story_bible` version is higher than the one in `inputs.artifacts` (`services/discovery.is_out_of_date`).
+
+### 4.22 `library_character`
+
+*Documented in PHASE-007; the table was added by migration `0016` (Phase 25).* A character of the Character lab's library: reusable, project-independent, and built once (profile, look, voice) to make pictures, speeches and clips from. Like every lab table it belongs to no project. A character is never deleted, only archived (`archived`). The table is the **editable head** of the character: every change of what defines it for production is also kept as an immutable version (Section 4.27). The rules for the fields are in `services/character_library.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `updated_at` | DATETIME | NOT NULL | now | Set by code on every change |
+| `name` | TEXT | NOT NULL | — | At most 80 characters |
+| `age` | INTEGER | NULL | — | 0 to 2,000 |
+| `gender` | TEXT | NOT NULL | `''` | Free text, at most 40 characters. The API offers every value already used as a suggestion (computed, no table) |
+| `species` | TEXT | NOT NULL | `''` | Free text, at most 40 characters. The form requires one. Suggested the same way as `gender` |
+| `era_kind` | TEXT | NOT NULL | `'present'` | `present` \| `past` \| `future` (`CHECK`) |
+| `era_years` | INTEGER | NULL | — | 1 to 10,000 years for `past` and `future`; NULL for `present` |
+| `era_setting` | TEXT | NULL | — | What that time looks like. At most 200 characters |
+| `appearance` | TEXT | NOT NULL | `''` | The form requires it. At most 2,000 characters |
+| `outfit` | TEXT | NULL | — | At most 500 characters |
+| `personality` | TEXT | NULL | — | At most 1,000 characters |
+| `notes` | TEXT | NULL | — | Anything else that keeps the character consistent. At most 1,000 characters |
+| `has_visible_mouth` | BOOLEAN | NOT NULL | 1 | 0 for a character with no mouth to lip-sync (a robot's screen face, an animal) |
+| `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice. NULL: the character is mute. `ON DELETE SET NULL` |
+| `voice_description` | TEXT | NULL | — | What a voice audition's samples are made from. At most 500 characters |
+| `current_look_id` | INTEGER, FK → `character_look.id` | NULL | — | The look new takes are made from. NULL until a look is ready. `ON DELETE SET NULL`. A circular reference with `character_look.character_id`, added by a second `ALTER` in migration `0016` |
+| `archived` | BOOLEAN | NOT NULL | 0 | |
+
+```sql
+CREATE TABLE library_character (
+    id                 INTEGER PRIMARY KEY,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    name               TEXT NOT NULL,
+    age                INTEGER,
+    gender             TEXT NOT NULL DEFAULT '',
+    species            TEXT NOT NULL DEFAULT '',
+    era_kind           TEXT NOT NULL DEFAULT 'present' CHECK (era_kind IN ('present', 'past', 'future')),
+    era_years          INTEGER,
+    era_setting        TEXT,
+    appearance         TEXT NOT NULL DEFAULT '',
+    outfit             TEXT,
+    personality        TEXT,
+    notes              TEXT,
+    has_visible_mouth  BOOLEAN NOT NULL DEFAULT 1,
+    voice_id           INTEGER REFERENCES voice(id) ON DELETE SET NULL,
+    voice_description  TEXT,
+    current_look_id    INTEGER REFERENCES character_look(id) ON DELETE SET NULL,
+    archived           BOOLEAN NOT NULL DEFAULT 0
+);
+```
+
+### 4.23 `character_look`
+
+*Documented in PHASE-007; added by migration `0016`, with `reference_image_id` added by `0018`.* One attempt at a library character's reference pictures: a master picture on a white backdrop, plus four more angles made by editing it. **`version` numbers a character's looks from 1 and is not the character's version** (Section 4.27): a look is one set of pictures, a character version is a snapshot of the whole character. `status` moves `writing_prompt` → `choosing` (the candidates are ready and wait for one to be picked as the master) → `making_angles` → `ready`, or `failed`. The look becomes the character's `current_look_id` each time it turns `ready`. Redoing one angle of a `ready` look sets it back to `making_angles` until the new picture is stored.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `character_id` | INTEGER, FK → `library_character.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | The look's number within its character: the highest so far plus 1 |
+| `status` | TEXT | NOT NULL | `'writing_prompt'` | `writing_prompt` \| `choosing` \| `making_angles` \| `ready` \| `failed` (`CHECK`) |
+| `prompt` | TEXT | NULL | — | The master prompt, once the language model has written it |
+| `prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_character_look_prompt` job. `ON DELETE SET NULL` |
+| `error` | TEXT | NULL | — | Why the look failed |
+| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The author's own picture the look was started from: its candidates are edits of it. NULL for a look made from the profile alone. `ON DELETE SET NULL` |
+
+```sql
+CREATE TABLE character_look (
+    id                  INTEGER PRIMARY KEY,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    character_id        INTEGER NOT NULL REFERENCES library_character(id) ON DELETE CASCADE,
+    version             INTEGER NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'writing_prompt'
+                        CHECK (status IN ('writing_prompt', 'choosing', 'making_angles', 'ready', 'failed')),
+    prompt              TEXT,
+    prompt_job_id       INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    error               TEXT,
+    reference_image_id  INTEGER REFERENCES lab_image(id) ON DELETE SET NULL
+);
+CREATE INDEX idx_character_look_character ON character_look (character_id);
+```
+
+### 4.24 `character_look_candidate`
+
+*Documented in PHASE-007; added by migration `0016`.* One of the (usually four) master pictures made for a look to choose from. A pure link to the `lab_run` that made it: its status is read from that run, never copied here.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `look_id` | INTEGER, FK → `character_look.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `lab_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | The Image lab run that made the picture. `ON DELETE SET NULL` |
+
+```sql
+CREATE TABLE character_look_candidate (
+    id          INTEGER PRIMARY KEY,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    look_id     INTEGER NOT NULL REFERENCES character_look(id) ON DELETE CASCADE,
+    lab_run_id  INTEGER REFERENCES lab_run(id) ON DELETE SET NULL
+);
+CREATE INDEX idx_character_look_candidate_look ON character_look_candidate (look_id);
+```
+
+### 4.25 `character_reference`
+
+*Documented in PHASE-007; added by migration `0016`.* One angle picture of a look: the master (`front`) or one of the four edited angles. `UNIQUE (look_id, angle)`: **redoing an angle updates this row in place**, so the character keeps its old picture of that angle until the new one is ready. That is why a character version (Section 4.27) copies the picture ids instead of pointing at this row.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `look_id` | INTEGER, FK → `character_look.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `angle` | TEXT | NOT NULL | — | `front` \| `three_quarter` \| `profile` \| `back` \| `face` (`CHECK`) |
+| `lab_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | The run that is making, or made, the picture. `ON DELETE SET NULL` |
+| `lab_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The picture exactly as the image model made it, on its white backdrop. NULL until it is stored. Later edits (another angle, a take's picture) are made from it. `ON DELETE SET NULL` |
+| `cutout_path` | TEXT | NULL | — | The same picture with its backdrop removed, for display. NULL when the cut-out could not be made (the picture on white is still a usable reference) |
+| `cutout_mime` | TEXT | NULL | — | |
+| `cutout_width` | INTEGER | NULL | — | |
+| `cutout_height` | INTEGER | NULL | — | |
+| `cutout_size_bytes` | INTEGER | NULL | — | |
+| `cutout_sha256` | TEXT | NULL | — | |
+
+```sql
+CREATE TABLE character_reference (
+    id                 INTEGER PRIMARY KEY,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    look_id            INTEGER NOT NULL REFERENCES character_look(id) ON DELETE CASCADE,
+    angle              TEXT NOT NULL CHECK (angle IN ('front', 'three_quarter', 'profile', 'back', 'face')),
+    lab_run_id         INTEGER REFERENCES lab_run(id) ON DELETE SET NULL,
+    lab_image_id       INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    cutout_path        TEXT,
+    cutout_mime        TEXT,
+    cutout_width       INTEGER,
+    cutout_height      INTEGER,
+    cutout_size_bytes  INTEGER,
+    cutout_sha256      TEXT,
+    UNIQUE (look_id, angle)
+);
+```
+
+### 4.26 `character_take`
+
+*Documented in PHASE-007; added by migration `0016`, extended by `0019` (MiniMax H3) and by `0026` (`character_version`).* One thing made from a library character in the Character lab: a line of dialogue spoken (`audio`), a picture (`image`), or a clip (`video`), with or without dialogue. A take is made in up to four steps, each a job or run the other labs already run, so the row only links them: `prompt_job_id` (a `write_character_take_prompt` job writing the texts the other steps need, stored in `prompts`), then `image_run_id` (the first frame), `last_frame_run_id` (an optional last frame made by editing the first), `voice_run_id` (the speech) and `video_run_id` (the clip). Which step is next is never stored: it is worked out from the rows. `look_id` freezes the look the take was made from, and `character_version` the character's version at that moment, so a later look or version never changes an old take. `auto_continue` is 1 for a take made with "run all": each step starts by itself when the one before it ends.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `character_id` | INTEGER, FK → `library_character.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `look_id` | INTEGER, FK → `character_look.id` | NULL | — | The look the take was made from. `ON DELETE SET NULL` |
+| `character_version` | INTEGER | NULL | — | The character's newest version number when the take was made (PHASE-007). NULL for a take made before the character had a version. A plain number, not a link: the version is found by `(character_id, character_version)` |
+| `output` | TEXT | NOT NULL | — | `image` \| `audio` \| `video` (`CHECK`) |
+| `action` | TEXT | NULL | — | What happens in the picture or clip, in the author's words. Ignored for audio |
+| `dialogue` | TEXT | NULL | — | What the character says. NULL: no dialogue |
+| `video_model` | TEXT | NULL | — | Video only: `ltx-2.3` \| `ltx-2.5` \| `minimax-h3` (`CHECK`, or NULL) |
+| `lip_sync` | BOOLEAN | NOT NULL | 0 | |
+| `framing` | TEXT | NOT NULL | `'medium'` | `close_up` \| `medium` \| `wide` (`CHECK`) |
+| `orientation` | TEXT | NOT NULL | `'portrait'` | `portrait` \| `landscape` (`CHECK`) |
+| `seed` | INTEGER | NULL | — | |
+| `duration_s` | REAL | NULL | — | A clip with no dialogue (or an H3 clip not made to match its speech): its length in seconds. NULL when it follows the speech |
+| `negative_prompt` | TEXT | NULL | — | LTX-2.3 only |
+| `auto_continue` | BOOLEAN | NOT NULL | 0 | |
+| `prompts` | JSON | NULL | — | `{"image_prompt", "last_frame_prompt", "video_prompt", "delivery_instruction"}`: only the texts this take's steps need, written by the language model or by hand |
+| `prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_character_take_prompt` job. `ON DELETE SET NULL` |
+| `image_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | The first frame the take made. `ON DELETE SET NULL` |
+| `voice_run_id` | INTEGER, FK → `lab_voice_run.id` | NULL | — | The speech the take made. `ON DELETE SET NULL` |
+| `video_run_id` | INTEGER, FK → `lab_video_run.id` | NULL | — | The clip. `ON DELETE SET NULL` |
+| `audio_marker` | TEXT | NULL | — | MiniMax H3 with dialogue: `fully_copy` \| `partially_copy` \| `reference` \| `weak_reference` (`CHECK`, or NULL) |
+| `match_audio_duration` | BOOLEAN | NOT NULL | 0 | The clip is as long as the speech |
+| `num_inference_steps` | INTEGER | NULL | — | MiniMax H3: 4 to 100, or NULL for the pipeline's own default |
+| `identity_refs` | BOOLEAN | NOT NULL | 0 | The look's pictures are sent as extra references after the frames |
+| `first_frame` | JSON | NULL | — | `{"source": "lab" \| "asset", "id": n}` when the author picked the first frame instead of having one made |
+| `make_last_frame` | BOOLEAN | NOT NULL | 0 | The last frame is made from the first |
+| `last_frame` | JSON | NULL | — | The last frame, picked: the shape of `first_frame` |
+| `last_frame_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | The last frame the take made. `ON DELETE SET NULL` |
+| `audio_input` | JSON | NULL | — | `{"source": "voice_run" \| "voice", "id": n}` when the author picked the speech instead of having one made |
+| `last_error` | TEXT | NULL | — | Why the take could not start its next step by itself |
+
+```sql
+CREATE TABLE character_take (
+    id                    INTEGER PRIMARY KEY,
+    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    character_id          INTEGER NOT NULL REFERENCES library_character(id) ON DELETE CASCADE,
+    look_id               INTEGER REFERENCES character_look(id) ON DELETE SET NULL,
+    character_version     INTEGER,
+    output                TEXT NOT NULL CHECK (output IN ('image', 'audio', 'video')),
+    action                TEXT,
+    dialogue              TEXT,
+    video_model           TEXT CHECK (video_model IS NULL OR video_model IN ('ltx-2.3', 'ltx-2.5', 'minimax-h3')),
+    lip_sync              BOOLEAN NOT NULL DEFAULT 0,
+    framing               TEXT NOT NULL DEFAULT 'medium' CHECK (framing IN ('close_up', 'medium', 'wide')),
+    orientation           TEXT NOT NULL DEFAULT 'portrait' CHECK (orientation IN ('portrait', 'landscape')),
+    seed                  INTEGER,
+    duration_s            REAL,
+    negative_prompt       TEXT,
+    auto_continue         BOOLEAN NOT NULL DEFAULT 0,
+    prompts               JSON,
+    prompt_job_id         INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    image_run_id          INTEGER REFERENCES lab_run(id) ON DELETE SET NULL,
+    voice_run_id          INTEGER REFERENCES lab_voice_run(id) ON DELETE SET NULL,
+    video_run_id          INTEGER REFERENCES lab_video_run(id) ON DELETE SET NULL,
+    audio_marker          TEXT CHECK (audio_marker IS NULL OR audio_marker IN
+                              ('fully_copy', 'partially_copy', 'reference', 'weak_reference')),
+    match_audio_duration  BOOLEAN NOT NULL DEFAULT 0,
+    num_inference_steps   INTEGER,
+    identity_refs         BOOLEAN NOT NULL DEFAULT 0,
+    first_frame           JSON,
+    make_last_frame       BOOLEAN NOT NULL DEFAULT 0,
+    last_frame            JSON,
+    last_frame_run_id     INTEGER REFERENCES lab_run(id) ON DELETE SET NULL,
+    audio_input           JSON,
+    last_error            TEXT
+);
+CREATE INDEX idx_character_take_character ON character_take (character_id);
+CREATE INDEX idx_character_take_created ON character_take (created_at);
+```
+
+### 4.27 `library_character_version`
+
+*Added in PHASE-007 (migration `0026`).* One **immutable snapshot of what defines a library character for production**: its profile, its voice and its current look with that look's exact pictures. A row is added (never changed) whenever one of those changes, so a project can later pin a version (PHASE-008) and still read exactly what it was. `library_character` (Section 4.22) stays the editable head; the newest version normally equals it. It follows the provenance convention of Section 2.1 where it applies: `source`, `version` and `created_at`. There is no `job_id` (the lab's changes are made by hand) and no `inputs` (nothing upstream), and `UNIQUE (character_id, version)` numbers a character's versions from 1.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `character_id` | INTEGER, FK → `library_character.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | 1 for the first, then the newest number plus 1 |
+| `source` | TEXT | NOT NULL | `'manual'` | `ai` or `manual` (`CHECK`). `manual` for every change made in the lab; a later phase's pipeline changes may write `ai` |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `profile` | JSON | NOT NULL | — | The twelve profile fields by their column names in `library_character`: `name`, `age`, `gender`, `species`, `era_kind`, `era_years`, `era_setting`, `appearance`, `outfit`, `personality`, `notes`, `has_visible_mouth` |
+| `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice at that moment (NULL: mute). `ON DELETE SET NULL` |
+| `voice_description` | TEXT | NULL | — | The voice description at that moment |
+| `look_id` | INTEGER, FK → `character_look.id` | NULL | — | The current look at that moment, when it was `ready`; NULL when the character had none. `ON DELETE SET NULL` |
+| `look_references` | JSON | NOT NULL | — | The look's pictures as they were: `[{"angle": "front", "lab_image_id": 41, "cutout_path": "lab/ab12.png" or null}, ...]`, sorted by angle name; `[]` when there is no look. Copied, not linked, so a later redo of an angle (which updates `character_reference` in place) never changes it |
+
+```sql
+CREATE TABLE library_character_version (
+    id                 INTEGER PRIMARY KEY,
+    character_id       INTEGER NOT NULL REFERENCES library_character(id) ON DELETE CASCADE,
+    version            INTEGER NOT NULL,
+    source             TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('ai', 'manual')),
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    profile            JSON NOT NULL,
+    voice_id           INTEGER REFERENCES voice(id) ON DELETE SET NULL,
+    voice_description  TEXT,
+    look_id            INTEGER REFERENCES character_look(id) ON DELETE SET NULL,
+    look_references    JSON NOT NULL,
+    UNIQUE (character_id, version)
+);
+CREATE INDEX idx_library_character_version_character ON library_character_version (character_id);
+```
+
+**What adds a version** (`services/character_versions.record_version_if_changed`, called before the commit of the change itself, so the change and its version are saved together):
+
+| Change | Where |
+|---|---|
+| The character is created | `character_library.create_character`: version 1 |
+| The profile is edited | `character_library.update_character` |
+| The voice is set, cleared or chosen from an audition | `character_library.set_voice`, `choose_audition` |
+| The voice description is edited | `character_library.set_voice_description` |
+| A look turns `ready` (it becomes the current look), or an angle redone on a look turns it `ready` again | `character_looks._maybe_mark_ready` |
+| An earlier ready look is made current again | `character_looks.use_look` (`PUT /api/lab/characters/{id}/current-look`) |
+
+The code builds the snapshot of the character as it is now and compares it with the newest version; a version is added **only when something differs**, so saving the same form twice adds none. Archiving is not a version change. A look that is not `ready` is never frozen: while the current look is being redone (`making_angles`) its pictures are half old and half new, so the newest version's look part is carried forward, and the redo adds its own version when the look is ready again. **What a version changed** (`created`, `profile`, `look`, `voice`) is worked out on read by comparing a version with the one before it (`character_versions.changes_between`), never stored. The newest number is also `CharacterOut.version` in the API. The version number is the newest plus 1, as looks are numbered, so two changes committed at the same instant could collide on the unique constraint and one of them would fail; with one backend process that is very unlikely and it is accepted. There is no backfill: a character made before this migration has no version (`version: null`) until its next change.
 
 ---
 
@@ -1179,6 +1500,7 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Find the characters and the environments (PHASE-005) | `POST /api/projects/{id}/discovery/{kind}/run` (`kind` is `characters` or `environments`): refused with 422 when there is no saved story, no `story_bible` row, or the newest `story_bible` is out of date with the story. Otherwise `INSERT job` (`type='discover_characters'` or `'discover_environments'`, `provider='llm'`, `project_id` set, `dedupe=True` per type, `input` = a copy of `script_text`, its SHA-256 and the StoryBible's id and version). Nothing is written to the discovery tables yet. The two jobs may run at the same time. **Start**: load the `story_bible` row, `UPDATE job.input` with the exact request, then the paid call (`jobs/llm_call.ask_model`, at most two attempts). **On success**, in one transaction: `INSERT character_discovery` (or `environment_discovery`: the next version, `source='ai'`, `inputs`, `content`) and `UPDATE job` (`succeeded`, `output.discovery_id`, `output.version`). A job that fails writes no row. Re-running adds a version and changes no earlier row. **Out of date** is computed by `GET .../discovery/{kind}` on every read: nothing is written when the story is edited or the StoryBible is re-run |
 | Divide the story into scenes (PHASE-006) | `POST /api/projects/{id}/scenes/run`: refused with 422 on the same conditions as the discovery runs above (no saved story, no `story_bible` row, or the newest one out of date). Otherwise `INSERT job` (`type='discover_scenes'`, `provider='llm'`, `project_id` set, `dedupe=True`, `input` = a copy of `script_text`, its SHA-256 and the StoryBible's id and version). It may run at the same time as the two discovery jobs. **Start**: load the `story_bible` row, `UPDATE job.input` with the exact request, then the paid call (`jobs/llm_call.ask_model`, at most two attempts). Each answer is checked and **placed in the story by code** (`scene_discovery_writer.check_scenes`: the opening words are located, and every scene's `start`, `end` and `text` are cut from the saved story). **On success**, in one transaction: `INSERT scene_discovery` (the next version, `source='ai'`, `inputs`, `content`) and `UPDATE job` (`succeeded`, `output.discovery_id`, `output.version`). A job that fails writes no row. Re-running adds a version and changes no earlier row. **Out of date** is computed by `GET .../scenes` on every read: nothing is written when the story is edited or the StoryBible is re-run |
 | Make speech in the Voice lab, and save voices | **Run** (Phase 21): `INSERT lab_voice_run` and `INSERT job` (`type='lab_voice'`, `provider='gpu'`, `project_id` NULL) in **one transaction**, only from a click, after the form is checked (mode and its fields, 1,000 characters of text, a saved voice for clone and direction); `lab_voice_run.job_id` is set. **Start**: the saved voice's recording is uploaded once, the job is submitted and `UPDATE job` sets `provider_job_id` and the exact body. **On success**: see Section 5. **Save a voice**: `INSERT voice` from an upload (the file goes to `media/lab/` after ffprobe accepts it) or from a finished run (the voice points at the run's file; the transcript starts as the run's text). Editing a voice is `UPDATE voice` of `name` and `transcript` only. Nothing is retried beyond pre-emption, cached, merged or deleted. The Activity page lists the jobs under "Voice lab". |
+| Make and change a library character (Character lab; versions: PHASE-007) | `POST /api/lab/characters`: `INSERT library_character` and, in the same transaction, `INSERT library_character_version` (version 1). Every later change calls `character_versions.record_version_if_changed` **before its own commit**: it builds a snapshot of the character (the twelve profile fields, `voice_id`, `voice_description`, and the current look with the `lab_image_id` and `cutout_path` of each angle), compares it with the newest version, and does `INSERT library_character_version` (the next number, `source='manual'`) only if something differs. The changes that call it: `PATCH /api/lab/characters/{id}` with profile fields (`UPDATE library_character`), `PUT .../voice` and `PUT .../voice/description` (`UPDATE library_character.voice_id` or `voice_description`), a look turning `ready` (`character_looks._maybe_mark_ready`: `UPDATE character_look.status`, `UPDATE library_character.current_look_id`), and `PUT .../current-look` (`UPDATE library_character.current_look_id` to an earlier `ready` look). **Archiving** (`PATCH` with `archived`) writes no version. **Redo an angle**: `UPDATE character_reference` in place (the old picture stays until the new one is stored), and never a version row; when the look is `ready` again, a new version records the new pictures, and every older version still names the pictures it had. **Take**: `POST .../takes` does `INSERT character_take` with `look_id` = the current look and `character_version` = the newest version number (NULL if none). A version is read, never edited: `GET .../versions` lists them newest first, and what each changed is computed on read. |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 

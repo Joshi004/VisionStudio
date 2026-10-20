@@ -4,6 +4,7 @@ import type {
   CharacterIn,
   CharacterReference,
   CharacterTake,
+  CharacterVersion,
   LibraryCharacter,
   TakeCreate,
   TakeRerun,
@@ -187,8 +188,13 @@ export function characterSubtitle(character: LibraryCharacter): string {
   return parts.join(", ");
 }
 
-/** "Present", "About 200 years in the past, Victorian London". */
-export function eraText(character: LibraryCharacter): string {
+/**
+ * "Present", "About 200 years in the past, Victorian London". Takes the era fields only, so a
+ * character and a version's profile both fit.
+ */
+export function eraText(
+  character: Pick<LibraryCharacter, "era_kind" | "era_years" | "era_setting">,
+): string {
   const setting = character.era_setting ? `, ${character.era_setting}` : "";
   if (character.era_kind === "present") {
     return `Present${setting}`;
@@ -196,6 +202,14 @@ export function eraText(character: LibraryCharacter): string {
   const direction = character.era_kind === "past" ? "in the past" : "in the future";
   return `About ${character.era_years ?? "?"} years ${direction}${setting}`;
 }
+
+/** What a version changed compared with the one before it, in words. */
+export const VERSION_CHANGE_LABELS: Record<CharacterVersion["changes"][number], string> = {
+  created: "Created",
+  profile: "Profile",
+  look: "Look",
+  voice: "Voice",
+};
 
 /** The picture of one angle to show: the cut-out when there is one, else the white backdrop. */
 export function referencePicture(reference: CharacterReference): string | null {

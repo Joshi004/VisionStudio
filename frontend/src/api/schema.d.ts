@@ -885,6 +885,27 @@ export interface paths {
         patch: operations["edit_character_api_lab_characters__character_id__patch"];
         trace?: never;
     };
+    "/api/lab/characters/{character_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Versions
+         * @description Every version of this character, newest first, each with what it changed. A version is
+         *     never edited: it is added when the profile, the voice or the current look changes.
+         */
+        get: operations["list_versions_api_lab_characters__character_id__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters/{character_id}/looks": {
         parameters: {
             query?: never;
@@ -984,6 +1005,27 @@ export interface paths {
          *     new one is ready.
          */
         post: operations["redo_angle_api_lab_characters_looks__look_id__angles__angle__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/current-look": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Current Look
+         * @description Makes an earlier ready look the character's current look, which new takes are made from.
+         *     A new version is added when that is a change.
+         */
+        put: operations["set_current_look_api_lab_characters__character_id__current_look_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1316,6 +1358,8 @@ export interface components {
             current_look: components["schemas"]["LookOut"] | null;
             /** Archived */
             archived: boolean;
+            /** Version */
+            version: number | null;
         };
         /**
          * CharacterPatch
@@ -1366,6 +1410,35 @@ export interface components {
             ready: boolean;
             /** Lab Image Id */
             lab_image_id?: number | null;
+        };
+        /** CharacterVersionOut */
+        CharacterVersionOut: {
+            /** Id */
+            id: number;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Changes */
+            changes: ("created" | "profile" | "look" | "voice")[];
+            profile: components["schemas"]["VersionProfileOut"];
+            voice: components["schemas"]["VoiceBriefOut"] | null;
+            /** Voice Description */
+            voice_description: string | null;
+            /** Look Id */
+            look_id: number | null;
+            /** Look Version */
+            look_version: number | null;
+            /** References */
+            references: components["schemas"]["CharacterReferenceOut"][];
         };
         /** CharactersOut */
         CharactersOut: {
@@ -1493,6 +1566,11 @@ export interface components {
             sources: components["schemas"]["SourceCheckOut"][];
             /** Message */
             message: string | null;
+        };
+        /** CurrentLookIn */
+        CurrentLookIn: {
+            /** Look Id */
+            look_id: number;
         };
         /** DatabaseStatus */
         DatabaseStatus: {
@@ -2793,6 +2871,8 @@ export interface components {
             character_id: number;
             /** Look Id */
             look_id: number | null;
+            /** Character Version */
+            character_version: number | null;
             /**
              * Output
              * @enum {string}
@@ -2881,6 +2961,39 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VersionProfileOut
+         * @description The profile as a version froze it.
+         */
+        VersionProfileOut: {
+            /** Name */
+            name: string;
+            /** Age */
+            age: number | null;
+            /** Gender */
+            gender: string;
+            /** Species */
+            species: string;
+            /**
+             * Era Kind
+             * @enum {string}
+             */
+            era_kind: "present" | "past" | "future";
+            /** Era Years */
+            era_years: number | null;
+            /** Era Setting */
+            era_setting: string | null;
+            /** Appearance */
+            appearance: string;
+            /** Outfit */
+            outfit: string | null;
+            /** Personality */
+            personality: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Has Visible Mouth */
+            has_visible_mouth: boolean;
         };
         /** VoiceBrief */
         VoiceBrief: {
@@ -4834,6 +4947,46 @@ export interface operations {
             };
         };
     };
+    list_versions_api_lab_characters__character_id__versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterVersionOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_looks_api_lab_characters__character_id__looks_get: {
         parameters: {
             query?: never;
@@ -5052,6 +5205,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LookOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_current_look_api_lab_characters__character_id__current_look_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurrentLookIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterOut"];
                 };
             };
             /** @description No character, look or take has this id. */
