@@ -138,7 +138,7 @@ class StartAllResult:
 
 
 @dataclass(frozen=True)
-class _Current:
+class CurrentDefinition:
     """A discovered character or environment as it stands now: what it is linked to and the
     definition its link pins.
     """
@@ -162,7 +162,7 @@ class _Loaded:
     characters: discovery.Discovery | None
     environments: discovery.Discovery | None
     # The newest list's entries that are linked, by `(kind, discovery id)`.
-    current: dict[tuple[str, str], _Current]
+    current: dict[tuple[str, str], CurrentDefinition]
     # Every entry of the two newest lists that is not defined and current, with its status.
     not_ready: list[tuple[str, str]]
     blocked_reason: str | None
@@ -229,7 +229,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
     characters = await discovery.latest(session, "characters", project.id)
     environments = await discovery.latest(session, "environments", project.id)
 
-    current: dict[tuple[str, str], _Current] = {}
+    current: dict[tuple[str, str], CurrentDefinition] = {}
     not_ready: list[tuple[str, str]] = []
     if characters is not None:
         for entry in (await character_definitions.state(session, project)).entries:
@@ -239,7 +239,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
                 not_ready.append((CHARACTER_DEFINITION_KIND, f"{item['name']} ({word})"))
                 continue
             link = entry.entry.info.link
-            current[(CHARACTER_DEFINITION_KIND, item["id"])] = _Current(
+            current[(CHARACTER_DEFINITION_KIND, item["id"])] = CurrentDefinition(
                 kind=CHARACTER_DEFINITION_KIND,
                 discovery_id=item["id"],
                 name=item["name"],
@@ -261,7 +261,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
             pinned = await environment_versions.get_version(
                 session, link_env.environment_id, link_env.pinned_version
             )
-            current[(ENVIRONMENT_DEFINITION_KIND, item["id"])] = _Current(
+            current[(ENVIRONMENT_DEFINITION_KIND, item["id"])] = CurrentDefinition(
                 kind=ENVIRONMENT_DEFINITION_KIND,
                 discovery_id=item["id"],
                 name=item["name"],
@@ -304,7 +304,7 @@ def _summary(scene: dict[str, Any] | None) -> dict[str, str] | None:
     return {"id": scene["id"], "title": scene["title"], "description": scene["description"]}
 
 
-def _for_model(current: _Current) -> dict[str, Any]:
+def _for_model(current: CurrentDefinition) -> dict[str, Any]:
     """A character or environment as the model sees it."""
     return {
         "id": current.discovery_id,
@@ -314,7 +314,7 @@ def _for_model(current: _Current) -> dict[str, Any]:
     }
 
 
-def _shown(current: _Current) -> dict[str, Any]:
+def _shown(current: CurrentDefinition) -> dict[str, Any]:
     """The record of one definition the model was shown, in the artifact shape of D-3."""
     return {
         "kind": current.kind,
@@ -465,7 +465,7 @@ def _out_of_date_reasons(
     story: str | None,
     newest_bible_version: int | None,
     scene_hash: str,
-    current: dict[tuple[str, str], _Current],
+    current: dict[tuple[str, str], CurrentDefinition],
     listed: dict[str, set[str]],
 ) -> list[str]:
     """Why a definition written for this scene is no longer current, one sentence each.
@@ -598,6 +598,17 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
     nothing here is stored.
     """
     return await _build(session, project, await _load(session, project))
+
+
+async def current_definitions(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], CurrentDefinition]:
+    """The newest lists' characters and environments that are linked and defined, as they stand
+    now, by `(artifact kind, discovery id)` with the kinds `CHARACTER_DEFINITION_KIND` and
+    `ENVIRONMENT_DEFINITION_KIND`. Later stages read the definitions of what a scene chose
+    from here (PHASE-020).
+    """
+    return (await _load(session, project)).current
 
 
 # --- Saving a definition ------------------------------------------------------------------

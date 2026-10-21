@@ -88,6 +88,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "shot-planning",
     name: "Shot planning",
     description: "Plans the shots of each scene against the real length of the speech.",
+    available: true,
   },
   {
     id: "shot-definitions",

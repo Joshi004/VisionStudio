@@ -162,6 +162,10 @@ SAVING_SCENE_EVENTS: Final = "saving the scene events"
 # `resolve_looks_states` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_RESOLUTION: Final = "saving the resolved looks and states"
 
+# --- Running: shot planning (PHASE-020) ---------------------------------------------------
+# `plan_shots` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_SHOT_PLAN: Final = "saving the shot plan"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

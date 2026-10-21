@@ -2260,6 +2260,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shot Plans */
+        get: operations["get_shot_plans_api_projects__project_id__shot_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-plans/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every scene that is not planned and up to date already, can be planned
+         *     and is not already being planned. The others are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__shot_plans_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-plans/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the job that plans one scene's shots. If it already has a job waiting or
+         *     running, that job's id is returned and no second job is made.
+         */
+        post: operations["run_one_api_projects__project_id__shot_plans__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3511,7 +3570,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots";
             /**
              * Status
              * @enum {string}
@@ -3564,7 +3623,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots";
             /**
              * Status
              * @enum {string}
@@ -4466,7 +4525,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots";
             /** Running */
             running: number;
             /** Queued */
@@ -5166,6 +5225,120 @@ export interface components {
             settings: components["schemas"]["SettingItem"][];
             /** Secrets */
             secrets: components["schemas"]["SecretStatus"][];
+        };
+        /**
+         * ShotOut
+         * @description One shot skeleton. The events stay the source of truth: a shot only names them.
+         */
+        ShotOut: {
+            /** Id */
+            id: string;
+            /** Scene Id */
+            scene_id: string;
+            /** Source Event Ids */
+            source_event_ids: string[];
+            /** Speech Unit Ids */
+            speech_unit_ids: string[];
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            /** Target Duration */
+            target_duration: number;
+            /** Description */
+            description: string;
+        };
+        /** ShotPlanContentOut */
+        ShotPlanContentOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shots */
+            shots: components["schemas"]["ShotOut"][];
+        };
+        /**
+         * ShotPlanEntryOut
+         * @description One scene of the newest list of scenes.
+         */
+        ShotPlanEntryOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_planned" | "planned" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            shots: components["schemas"]["ShotPlanContentOut"] | null;
+            /** Total Seconds */
+            total_seconds: number | null;
+            version: components["schemas"]["ShotPlanVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotPlanSkippedOut */
+        ShotPlanSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * ShotPlanVersionOut
+         * @description The provenance of the newest shot plan of a scene (D-3).
+         */
+        ShotPlanVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ShotPlansOut */
+        ShotPlansOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Target Min Seconds */
+            target_min_seconds: number | null;
+            /** Target Max Seconds */
+            target_max_seconds: number | null;
+            /** Entries */
+            entries: components["schemas"]["ShotPlanEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotPlansRunAllOut */
+        ShotPlansRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["ShotPlanSkippedOut"][];
+        };
+        /** ShotPlansRunOut */
+        ShotPlansRunOut: {
+            /** Job Id */
+            job_id: number;
         };
         /** SkippedOut */
         SkippedOut: {
@@ -10963,6 +11136,127 @@ export interface operations {
                 };
             };
             /** @description The scene or unit is not in the newest plan, the plan is out of date, or the unit has no voice to speak with yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_shot_plans_api_projects__project_id__shot_plans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlansOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__shot_plans_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlansRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or scene list, or the scene's definition, events, speech units or speech are not ready, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__shot_plans__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPlansRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or scene list, or the scene's definition, events, speech units or speech are not ready, or the scene is not in the newest list. */
             422: {
                 headers: {
                     [name: string]: unknown;

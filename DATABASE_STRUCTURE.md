@@ -82,6 +82,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-019 speech synthesis for speech units, 2026-10-21):** migration `0039`. The second speech stage: **every speech unit planned by PHASE-018 is spoken in the right saved voice, and the length of the audio is measured** (`Path_ahead.md` Sections 20 and 21), so timing comes from real audio and needs no transcription. (1) **A new job type, `synthesize_speech_unit`** (`provider='gpu'`, restart rule `resume`): one job per unit, a subclass of the shared `SpeechHandler` (Breeze TTS). `job` is rebuilt for the new CHECK, as in `0036`; no row changes. (2) One new table, `speech_unit_audio` (Section 4.42): one row per speech made or being made for one unit, written when the job is queued and filled in (`path`, `size_bytes`, `sha256`, `sample_rate` and the **measured** `duration_s`) in the same transaction that finishes the job. A row is not changed otherwise, and a speech made again adds a row. (3) `audio_key` is a hash of the text, the voice, the Breeze mode and the instruction, **not** of the unit's id (which a re-plan renumbers), so a unit that did not change keeps its audio. (4) The voice is the speaker's library character's saved voice **at the version the project pins** (PHASE-011), or the project's newest `narrator_voice`. A unit with a delivery emotion is **directed** (mode `direction`, an instruction written from the emotion, guidance 4); a unit with none is **cloned** (guidance 1). (5) **Out of date is worked out on every read**: a unit whose current key has no audio, but whose earlier audio exists for the same scene and unit id, is out of date, and the reasons (text, voice, delivery) come from comparing the two rows. A unit can only be made while its scene's plan is current. (6) `inputs` records the `speech_units` row (id and version) and where the voice came from. See Sections 4.5, 4.42, 5 and 7.
 
+**Update (PHASE-020 shot planning, 2026-10-21):** migration `0040`. The Shot Planning stage (`Path_ahead.md` Sections 22, 23 and 39): **for each scene, a model turns the scene's events and the *measured* lengths of its speech units into an ordered list of shot skeletons.** (1) **A new job type, `plan_shots`** (`provider='llm'`, restart rule `never_rerun`, the story model, D-12): one job per scene, deduped by `scene_id`. `job` is rebuilt for the new CHECK, as in `0039`; no row changes. (2) One new table, `shot_plan` (Section 4.43): one immutable row per run for one scene, following Section 2.1 and numbered per scene (`UNIQUE (project_id, scene_id, version)`), as `scene_events` is. It is a project artifact: there is no pin. (3) `content` is `{scene_id, shots}`. Each shot lists `source_event_ids`, `speech_unit_ids` (Q-15), a `type` from a fixed list, a `target_duration` and a `description`; **code sets every shot's id (`shot_1`, ...) and `scene_id`** and checks coverage and order before anything is stored. (4) **A strict gate:** a scene can be planned only when its speech plan is current and every unit's speech is `ready` with a measured length. Estimates are never used. (5) `inputs` records the story hash, the artifacts (events, speech units, **one `speech_unit_audio` row per unit with its measured length**, the scene definition and the chosen character and environment definitions with their hashes) and the two target-range rules. (6) **Out of date is worked out on every read**: any of those inputs changed, a unit's speech was made again or is no longer ready, or the target range (`shot_target_min_seconds` / `shot_target_max_seconds`) differs from the one recorded. See Sections 4.5, 4.43, 5 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -152,7 +154,7 @@ Rules that go with it:
 
 ## 3. Entity-relationship overview
 
-A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-014, its `scene_definition` rows (one version of one scene's definition each) and, from PHASE-015, its `scene_events` rows (one version of one scene's events each) and, from PHASE-018, its `speech_units` rows (one version of one scene's speech units each) and, from PHASE-019, its `speech_unit_audio` rows (one speech of one unit each) and, from PHASE-016, its `look_state_resolution` rows (one version of the resolution of the looks and states its scenes asked for) and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-013, its `project_environment_link` rows (the same for its discovered environments) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`, and, from PHASE-016, `character_named_look` and `environment_state`, the library's named looks and states). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
+A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-014, its `scene_definition` rows (one version of one scene's definition each) and, from PHASE-015, its `scene_events` rows (one version of one scene's events each) and, from PHASE-018, its `speech_units` rows (one version of one scene's speech units each) and, from PHASE-019, its `speech_unit_audio` rows (one speech of one unit each) and, from PHASE-020, its `shot_plan` rows (one version of one scene's shot plan each) and, from PHASE-016, its `look_state_resolution` rows (one version of the resolution of the looks and states its scenes asked for) and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-013, its `project_environment_link` rows (the same for its discovered environments) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`, and, from PHASE-016, `character_named_look` and `environment_state`, the library's named looks and states). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
 
 ```mermaid
 erDiagram
@@ -362,6 +364,8 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `speech_unit_audio` | `project_id` | `project.id` | No (`CASCADE`). PHASE-019 |
 | `speech_unit_audio` | `voice_id` | `voice.id` | Yes (the saved voice that spoke the unit; `SET NULL`). PHASE-019 |
 | `speech_unit_audio` | `job_id` | `job.id` | Yes (the `synthesize_speech_unit` job that made it; `SET NULL`). PHASE-019 |
+| `shot_plan` | `project_id` | `project.id` | No (`CASCADE`). PHASE-020 |
+| `shot_plan` | `job_id` | `job.id` | Yes (the `plan_shots` job that wrote the version; `SET NULL`). PHASE-020 |
 | `look_state_resolution` | `project_id` | `project.id` | No (`CASCADE`). PHASE-016 |
 | `look_state_resolution` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that wrote the version; `SET NULL`, and NULL for a manual version). PHASE-016 |
 | `character_named_look` | `character_id` | `library_character.id` | No (`CASCADE`). PHASE-016 |
@@ -469,13 +473,13 @@ CREATE TABLE asset (
 
 ### 4.5 `job`
 
-Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, migration `0032` (PHASE-012) added `write_environment_prompt`, migration `0033` (PHASE-013) added `define_environment`, migration `0034` (PHASE-014) added `define_scene`, migration `0035` (PHASE-015) added `extract_events`, migration `0036` (PHASE-016) added `resolve_looks_states`, and migration `0039` (PHASE-019) added `synthesize_speech_unit`. (Source: Section 3.3, 4.2, 4.3.)
+Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, migration `0032` (PHASE-012) added `write_environment_prompt`, migration `0033` (PHASE-013) added `define_environment`, migration `0034` (PHASE-014) added `define_scene`, migration `0035` (PHASE-015) added `extract_events`, migration `0036` (PHASE-016) added `resolve_looks_states`, migration `0039` (PHASE-019) added `synthesize_speech_unit`, and migration `0040` (PHASE-020) added `plan_shots`. (Source: Section 3.3, 4.2, 4.3.)
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047; `design_voice`, PHASE-011), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` (`synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` \| `plan_shots` (`plan_shots`: PHASE-020, the shot plan of one story scene, a job of the project, `provider='llm'`; `synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -494,7 +498,7 @@ Every unit of background work. This is where running-job information lives, so a
 CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt', 'define_environment', 'define_scene', 'extract_events', 'resolve_looks_states', 'synthesize_speech_unit')),
+    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt', 'define_environment', 'define_scene', 'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', 'plan_shots')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -1980,6 +1984,40 @@ CREATE INDEX idx_speech_unit_audio_project_scene ON speech_unit_audio (project_i
 
 ---
 
+### 4.43 `shot_plan`
+
+*Added in PHASE-020 (migration `0040`).* The Shot Planning stage's result (`Path_ahead.md` Sections 22, 23 and 39): one row per **version of one scene's list of shot skeletons**. It has the shape and provenance of `scene_events` (Section 4.37): `source`, `job_id`, `version`, `inputs`, `created_at`. A scene's versions are numbered from 1 (`UNIQUE (project_id, scene_id, version)`), and a stored row is never changed: planning a scene again adds the next version. `scene_id` is the slug `id` of the scene inside the project's newest `scene_discovery.content` and is not a foreign key. The row is written by `services/shot_plans.save_shot_plan` in the same transaction that finishes its `plan_shots` job. The rules are in `services/shot_plans.py` and `services/shot_planning_writer.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NOT NULL | — | The scene's slug `id` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... for this scene (the highest plus 1 when saved) |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`). Always `ai` until shots can be edited (PHASE-038) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `plan_shots` job that wrote it. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the plan was made from (Section 5, "The shot plan") |
+| `content` | JSON | NOT NULL | — | `{scene_id, shots}` (Section 5, "The shot plan") |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE shot_plan (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scene_id    TEXT NOT NULL,
+    version     INTEGER NOT NULL,
+    source      TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id      INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs      JSON NOT NULL,
+    content     JSON NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_shot_plan_project_id UNIQUE (project_id, scene_id, version)
+);
+CREATE INDEX idx_shot_plan_project_scene ON shot_plan (project_id, scene_id);
+```
+
+---
+
 ## 5. JSON column shapes
 
 The shapes of the narration jobs and of the assets they made were removed with migration `0022`: `transcript.words` and `script_words`, and the `job.input` and `job.output` of `transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `write_last_frame_prompt`, `generate_last_frame`, `generate_clip`, `render_final`, `generate_voiceover`, the cast jobs and `auto_pipeline`. Their full text is at the tag `narration-final` (`git show narration-final:DATABASE_STRUCTURE.md`). The shapes of the lab jobs follow.
@@ -2505,6 +2543,66 @@ A `synthesize_speech_unit` job makes one unit's speech. Its `job.input` is what 
 
 **What writes it.** `POST /api/projects/{id}/speech-audio/{scene_id}/{unit_id}/run` (one unit, also one that is made already) and `POST .../run` (Make all, which skips ready, in-progress and unavailable units). In one transaction each creates the `synthesize_speech_unit` job and the `speech_unit_audio` row (`path` NULL). `store_result` of the job then moves the WAV into `media/{project_id}/` and sets the row's `path`, `size_bytes`, `sha256`, `sample_rate` and the measured `duration_s` while finishing the job.
 
+### The shot plan (PHASE-020)
+
+`shot_plan.content` is the list of shot skeletons of one scene, in order. The model chooses the grouping, the types, the durations and the descriptions; **code sets the ids and `scene_id`** and checks the answer (`services/shot_planning_writer.check_answer`) before anything is stored:
+
+```json
+{ "scene_id": "the_warning",
+  "shots": [
+    { "id": "shot_1", "scene_id": "the_warning", "source_event_ids": ["evt_1"], "speech_unit_ids": ["su_1"],
+      "type": "establishing", "target_duration": 2.2, "description": "The apartment door, seen from the corridor." },
+    { "id": "shot_2", "scene_id": "the_warning", "source_event_ids": ["evt_1"], "speech_unit_ids": ["su_1"],
+      "type": "action", "target_duration": 2.1, "description": "Arjun carries a box inside." },
+    { "id": "shot_3", "scene_id": "the_warning", "source_event_ids": ["evt_2", "evt_3"], "speech_unit_ids": ["su_2"],
+      "type": "dialogue", "target_duration": 3.2, "description": "The landlord speaks; Arjun laughs." } ] }
+```
+
+Seven fields. `type` is one of `establishing`, `action`, `reaction`, `dialogue`, `insert`, `transition`. `target_duration` is a finite number above 0 in seconds, rounded to 0.1 s (a **pause** has no length of its own: its length is the `target_duration` of the shot that shows it). `description` is one line with a size limit. At most 60 shots. A shot carries no camera, no prompt and no frame (later phases).
+
+**The checks** (everything below makes the answer unusable, with the same two attempts as every stage; then the job fails with the reason and nothing is stored):
+
+- **Events.** `source_event_ids` are consecutive events of the scene. The first shot starts at the first event and the last shot ends at the last one. A shot never starts or ends before the shot before it (the shots overlap the events they show, they never go back), and never skips an event (Section 39).
+- **Speech (Q-15).** `speech_unit_ids` lists the units a shot carries, in the order of the plan. Every unit is carried by at least one shot. A unit's own event must be among the shot's events. A **dialogue** unit sits in exactly one shot. A **narration** unit may span consecutive shots (Section 23). A shot that shows a spoken event carries at least one of its units.
+- **Duration.** Only that it is a finite number above 0. **The duration range and the hard bounds are not enforced here** (PHASE-021); the range is given to the model as a `DURATION POLICY` block (never as text in the instructions, D-8) and recorded in `inputs.rules`.
+
+`shot_plan.inputs`:
+
+```json
+{ "project_id": 4, "scene_id": "the_warning", "story_sha256": "9f2c...", "scene_text_sha256": "77d0...",
+  "artifacts": [ { "kind": "story_bible", "id": 7, "version": 2 },
+                 { "kind": "scene_discovery", "id": 5, "version": 1 },
+                 { "kind": "scene_definition", "id": 21, "version": 1 },
+                 { "kind": "scene_events", "id": 40, "version": 1 },
+                 { "kind": "speech_units", "id": 31, "version": 2 },
+                 { "kind": "speech_unit_audio", "unit_id": "su_1", "id": 88, "audio_key": "ab12...", "duration_s": 3.4 },
+                 { "kind": "character_definition", "id": 8, "version": 3, "discovery_id": "arjun", "name": "Arjun", "definition_sha256": "cd34..." },
+                 { "kind": "environment_definition", "id": 2, "version": 1, "discovery_id": "bedroom", "name": "Bedroom", "definition_sha256": "ef56..." } ],
+  "rules": { "target_min_s": 2, "target_max_s": 10 } }
+```
+
+There is one `speech_unit_audio` entry per unit of the scene, with the **measured** `duration_s` the model was given. The `character_definition` and `environment_definition` entries are only the ones the scene's definition chose.
+
+**When a shot plan is current.** The newest row of a scene is out of date when, **on this read**: the story text hashes differently from `inputs.story_sha256`; the newest StoryBible, the scene's text, the scene's definition, its events or its speech units are newer than the recorded ones (or one of them is itself out of date); the speech of a unit was made again (its audio row differs) or is no longer ready; a chosen character's or environment's definition hashes differently; or a recorded rule differs from the effective target range now. Each reason is shown on the scene.
+
+### `job.input` and `job.output` for a `plan_shots` job (PHASE-020)
+
+One job per scene. It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, uses the **story model** (D-12) and is created with `dedupe_key="scene_id"`: while a `plan_shots` job of **that scene** is queued or running, a second click returns that job; jobs for other scenes run side by side when the pool allows. `services/shot_plans.start_run` creates the job only when the scene is defined and its definition is current, its events are current, its speech plan is current, **every unit's speech is `ready`**, and the characters and environment its definition chose are linked and defined (otherwise the API answers 422 with the reason, naming the units that are not ready). `start_all` ("Plan all") starts every scene that can be planned and is not planned and current, and returns the others with a reason. The job input is a copy of everything the job needs as it was when the button was pressed:
+
+```json
+{ "story_bible_id": 7, "story_bible_version": 2, "scene_id": "the_warning",
+  "scene": { "index": 1, "id": "the_warning", "title": "The Warning", "description": "...", "text": "..." },
+  "scene_definition": { "id": "the_warning", "story_context": { }, "characters": ["arjun"] },
+  "scene_characters": [ { "id": "arjun", "name": "Arjun", "description": "...", "definition": { } } ],
+  "environment": { "id": "bedroom", "name": "Bedroom", "description": "...", "definition": { } },
+  "events": [ { "id": "evt_1", "type": "narration", "text": "..." } ],
+  "units": [ { "id": "su_1", "event_id": "evt_1", "kind": "narration", "speaker_id": null, "text": "...", "measured_seconds": 3.4 } ],
+  "target_min_seconds": 2, "target_max_seconds": 10,
+  "inputs": { "project_id": 4, "scene_id": "the_warning", "artifacts": [ ], "rules": { } } }
+```
+
+When the job starts it resolves the story model, loads the StoryBible named by `story_bible_id`, and adds what it sent (`instructions_sha256`, `server_url`, `endpoint`, the exact chat `request`). On success, in **one transaction**, `shot_plans.save_shot_plan` adds the `shot_plan` row (`source='ai'`, `job_id`, `inputs`, `content`) and the job is marked succeeded; `output` holds the answer record, `scene_id`, `version`, `shots` (the number of shots) and `seconds`.
+
 ### The look and state resolution (PHASE-016)
 
 `look_state_resolution.content` says, for every scene of the newest list, what its environment state and each character's look resolved to. It is built by code (`look_state_resolution_writer.build_content`) from the checked answer; `how` is `default` (no record, the id is `null`), `reuse` (an existing named look or state) or `new` (created by this run):
@@ -2641,6 +2739,7 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Make the pictures of the new looks and states (PHASE-017) | `POST /api/projects/{id}/look-state-images/run` (all), `.../looks/{record_id}/run` or `.../states/{record_id}/run`: refused with 422 when there is no resolution or it is out of date, or, for the item, when its character or environment is not linked, its canonical images (or definition and picture) are not ready, the environment has a newer version than the pin, or its pictures exist or are being made. A look: `INSERT character_look` (`named_look_id`, `prompt` from the template, `status='choosing'`) with one candidate (`INSERT character_look_candidate`, one `lab_run` edit run and its `lab_image` job). A state: `INSERT lab_run` (16:9 edit of the pinned canonical picture) and its `lab_image` job, and `UPDATE environment_state SET lab_run_id, inputs`. When the pictures are stored: the master is taken, four angle runs follow, and when all five exist `UPDATE character_named_look SET look_id`, `INSERT library_character_version` (`source='ai'`, `named_looks`) and `UPDATE project_character_link SET pinned_version`; for a state `UPDATE environment_state SET reference_image_id`, `INSERT library_environment_version` (`source='ai'`, `states`, the canonical `reference_image_id` carried forward) and `UPDATE project_environment_link SET pinned_version`. Nothing else is written: `library_character.current_look_id` never changes. |
 | Plan the speech units (PHASE-018) | `POST /api/projects/{id}/speech-units/{scene_id}/run` (one scene) or `POST .../run` (Plan all): refused with 422 when the scene has no events or its events are out of date, when the duration settings are out of order or the dialogue margin leaves under 1 s, and for a scene id not in the newest list. Otherwise one `INSERT speech_units` (the next `version` of that scene, `source='ai'`, `job_id` NULL) per planned scene, in the request itself: no job is made. Plan all skips a scene that is planned and current and one without current events. Nothing else is written. |
 | Make the speech of the speech units (PHASE-019) | `POST /api/projects/{id}/speech-audio/{scene_id}/{unit_id}/run` (one unit) or `POST .../run` (Make all): refused with 422 when the scene or unit is not in the newest plan, the scene's plan is out of date or missing, the unit's voice does not exist (a speaker not linked, a linked character with no saved voice at the pinned version, or no narrator voice), or that very speech is already being made. Otherwise, in one transaction, one `INSERT job` (`type='synthesize_speech_unit'`, `provider='gpu'`, deduped by `audio_key`) and one `INSERT speech_unit_audio` (`path` NULL) per unit. Make all skips a unit that is ready, in progress or cannot be made, and an identical line already being made. When the job succeeds, `store_result` fills in the row's file and measured length and finishes the job in one transaction; nothing else is written. |
+| Plan the shots of a scene (PHASE-020) | `POST /api/projects/{id}/shot-plans/{scene_id}/run` (one scene) or `POST .../run` (Plan all): refused with 422 when the scene is not in the newest list, is not defined or its definition is out of date, its events or speech plan are missing or out of date, **any unit's speech is not ready** (the answer names them), or the characters and environment it chose are not linked and defined; it returns the running job when that scene is already being planned. Otherwise one `INSERT job` (`type='plan_shots'`, `provider='llm'`, `restart_rule='never_rerun'`, deduped by `scene_id`). Plan all skips a scene that is planned and current, one being planned, and one that cannot be planned, with a reason each. When the job succeeds, `save_shot_plan` inserts the next `shot_plan` version of the scene and finishes the job in one transaction; when the answer is unusable twice, the job fails with the reason and nothing is stored. |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 
