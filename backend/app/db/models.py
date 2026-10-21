@@ -90,13 +90,13 @@ class Job(Base):
         # scene discovery, since revision 0025, character definition, since revision 0028, and
         # relation discovery, since revision 0030, voice design, since revision 0031, and the
         # environment prompt, since revision 0032, and environment definition, since revision
-        # 0033.
+        # 0033, and scene definition, since revision 0034.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
             "'define_character', 'discover_relations', 'design_voice', "
-            "'write_environment_prompt', 'define_environment')",
+            "'write_environment_prompt', 'define_environment', 'define_scene')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -269,6 +269,39 @@ class SceneDiscovery(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     version: Mapped[int]
     source: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SceneDefinition(Base):
+    """One version of one scene's definition (PHASE-014, `Path_ahead.md` Section 16).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version` of that scene, and a stored row is never changed.
+    `scene_id` is the slug `id` of the scene inside the project's `scene_discovery` content, so
+    a re-run of scene discovery that keeps the id keeps the scene's definitions. `inputs`
+    records what the version was built from (the story hash, the scene's own hash, and the
+    artifacts: StoryBible, the discovered lists, and the definition of each character and the
+    environment the scene chose). `content` is the Section 16 definition.
+    """
+
+    __tablename__ = "scene_definition"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "version"),
+        Index("idx_scene_definition_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )

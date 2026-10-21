@@ -58,6 +58,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "scene-definitions",
     name: "Scene definitions",
     description: "Decides where and when each scene happens and who is in it.",
+    available: true,
   },
   {
     id: "event-extraction",

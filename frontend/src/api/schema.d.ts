@@ -1865,6 +1865,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/scene-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scene Definitions */
+        get: operations["get_scene_definitions_api_projects__project_id__scene_definitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-definitions/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every scene that is not defined and up to date already and not already
+         *     being defined. The others are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__scene_definitions_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-definitions/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the job that defines one scene. If it already has a job waiting or running, that
+         *     job's id is returned and no second job is made.
+         */
+        post: operations["run_one_api_projects__project_id__scene_definitions__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3085,7 +3144,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene";
             /**
              * Status
              * @enum {string}
@@ -3138,7 +3197,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene";
             /**
              * Status
              * @enum {string}
@@ -3835,7 +3894,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene";
             /** Running */
             running: number;
             /** Queued */
@@ -4132,6 +4191,112 @@ export interface components {
             /** Job Id */
             job_id: number;
         };
+        /**
+         * SceneDefinitionEntryOut
+         * @description One scene of the newest list of scenes.
+         */
+        SceneDefinitionEntryOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_defined" | "defined" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            definition: components["schemas"]["SceneDefinitionOut"] | null;
+            version: components["schemas"]["SceneDefinitionVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** SceneDefinitionOut */
+        SceneDefinitionOut: {
+            /** Id */
+            id: string;
+            story_context: components["schemas"]["SceneStoryContextOut"];
+            /** Environment Id */
+            environment_id: string;
+            /** Environment State */
+            environment_state: string;
+            time: components["schemas"]["SceneTimeOut"];
+            /** Characters */
+            characters: string[];
+            /** Character Looks */
+            character_looks: {
+                [key: string]: string;
+            };
+            mood: components["schemas"]["SceneMoodOut"];
+            /** Dramatic Goal */
+            dramatic_goal: string;
+            /** Continuity Start */
+            continuity_start: {
+                [key: string]: string;
+            };
+            /** Continuity End */
+            continuity_end: {
+                [key: string]: string;
+            };
+        };
+        /** SceneDefinitionRunAllOut */
+        SceneDefinitionRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["SceneDefinitionSkippedOut"][];
+        };
+        /** SceneDefinitionRunOut */
+        SceneDefinitionRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** SceneDefinitionSkippedOut */
+        SceneDefinitionSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * SceneDefinitionVersionOut
+         * @description The provenance of the newest definition of a scene (D-3).
+         */
+        SceneDefinitionVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SceneDefinitionsOut */
+        SceneDefinitionsOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["SceneDefinitionEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
         /** SceneDiscoveryOut */
         SceneDiscoveryOut: {
             /** Version */
@@ -4188,6 +4353,31 @@ export interface components {
             end: number;
             /** Text */
             text: string;
+        };
+        /** SceneMoodOut */
+        SceneMoodOut: {
+            /** Start */
+            start: string;
+            /** Middle */
+            middle: string;
+            /** End */
+            end: string;
+        };
+        /** SceneStoryContextOut */
+        SceneStoryContextOut: {
+            /** Before */
+            before: string;
+            /** Current */
+            current: string;
+            /** After */
+            after: string;
+        };
+        /** SceneTimeOut */
+        SceneTimeOut: {
+            /** Time Of Day */
+            time_of_day: string;
+            /** Lighting State */
+            lighting_state: string;
         };
         /** SecretStatus */
         SecretStatus: {
@@ -9034,6 +9224,127 @@ export interface operations {
                 };
             };
             /** @description There is no saved story, up-to-date Story Bible or scenes, or list of environments, or the environment is not linked, is archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_scene_definitions_api_projects__project_id__scene_definitions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneDefinitionsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__scene_definitions_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneDefinitionRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or a character or environment is not linked and defined yet, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__scene_definitions__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneDefinitionRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or a character or environment is not linked and defined yet, or the scene is not in the newest list. */
             422: {
                 headers: {
                     [name: string]: unknown;

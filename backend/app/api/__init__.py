@@ -19,6 +19,7 @@ from app.api import (
     image_lab,
     jobs,
     projects,
+    scene_definitions,
     scenes,
     settings,
     story_bible,
@@ -48,3 +49,4 @@ api_router.include_router(character_lab.router, tags=["character-lab"])
 api_router.include_router(environment_lab.router, tags=["environment-lab"])
 api_router.include_router(environment_links.router, tags=["environment-links"])
 api_router.include_router(environment_definitions.router, tags=["environment-definitions"])
+api_router.include_router(scene_definitions.router, tags=["scene-definitions"])

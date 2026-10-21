@@ -150,6 +150,10 @@ SAVING_ENVIRONMENT_PROMPT: Final = "saving the environment prompt"
 # `define_environment` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_ENVIRONMENT_DEFINITION: Final = "saving the environment definition"
 
+# --- Running: scene definition (PHASE-014) -----------------------------------------------
+# `define_scene` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_SCENE_DEFINITION: Final = "saving the scene definition"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES
