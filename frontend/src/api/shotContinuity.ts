@@ -13,13 +13,16 @@ import { shotDefinitionsKey } from "./shotDefinitions";
 export type ShotContinuity = components["schemas"]["ShotContinuityOut"];
 export type SceneContinuity = components["schemas"]["SceneContinuityOut"];
 export type ShotContinuityFlag = components["schemas"]["ShotContinuityFlagOut"];
+/** A cut between two shots (or at a scene's start or end) that does not line up. */
+export type ContinuityMismatch = components["schemas"]["ContinuityMismatchOut"];
 export type ShotContinuityRun =
   components["schemas"]["ShotContinuityRunManyOut"];
 
 /**
  * How long the continuity state keeps asking after something last ran. A scene's check is
- * queued a moment after its last shot is defined, and the shots that do not line up are queued
- * a moment after a check finishes, so the page must not stop asking the instant nothing runs.
+ * queued a moment after its last shot is defined, and the cuts that do not line up are queued
+ * for repair a moment after a check finishes, so the page must not stop asking the instant
+ * nothing runs.
  */
 const GRACE_MS = 15_000;
 
@@ -49,7 +52,7 @@ async function fetchShotContinuity(projectId: number) {
   return data;
 }
 
-/** Whether a scene's check or the re-definitions made for it are waiting or running. */
+/** Whether a scene's check or the repairs of its cuts are waiting or running. */
 export function isContinuityBusy(scene: SceneContinuity): boolean {
   return (
     scene.status === "checking" ||
@@ -60,7 +63,7 @@ export function isContinuityBusy(scene: SceneContinuity): boolean {
 
 /**
  * Where each scene's continuity stands. It is loaded again every few seconds while a check or a
- * re-definition runs, while shots are being defined (a check follows the last one), and for a
+ * cut repair runs, while shots are being defined (a check follows the last one), and for a
  * short while after either.
  */
 export function useShotContinuity(
@@ -74,9 +77,8 @@ export function useShotContinuity(
     queryFn: async () => {
       const data = await fetchShotContinuity(projectId);
       if (data.entries.some(isContinuityBusy)) {
-        // The re-definitions made for continuity are shot definition jobs: the shots' own
-        // list must follow them. Only that list (`exact`), or the two would refresh each other
-        // without end.
+        // A cut repair writes new shot definitions: the shots' own list must follow it. Only
+        // that list (`exact`), or the two would refresh each other without end.
         void queryClient.invalidateQueries({
           queryKey: shotDefinitionsKey(projectId),
           exact: true,
@@ -145,6 +147,47 @@ export function useCheckSceneContinuity(projectId: number) {
       );
       if (!data) {
         throw startError(error, response.status);
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/**
+ * "Fix this cut": repairs one cut that the newest check found not lining up. One call sees both
+ * shots and decides which side changes; the automatic rounds follow it.
+ */
+export function useRepairCut(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      sceneId,
+      boundaryId,
+    }: {
+      sceneId: string;
+      boundaryId: string;
+    }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/shot-continuity/{scene_id}/cuts/{boundary_id}/repair",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: sceneId,
+              boundary_id: boundaryId,
+            },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not start the repair of the cut (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
       }
       return data;
     },

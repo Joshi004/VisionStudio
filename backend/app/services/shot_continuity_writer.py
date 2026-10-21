@@ -14,17 +14,19 @@ Code lists the **boundaries** of the scene, in order, and writes their ids:
 The model says, for each boundary, whether the two states can follow each other at a cut, and
 what is wrong when they cannot.
 
-**Which shot is defined again.** The earlier side of a cut is the anchor. A cut that does not
-match defines the **later** shot again (told to start where the earlier one ends); a scene-start
-mismatch defines the first shot again; a scene-end mismatch defines the last shot again (told to
-end at the scene's end). `shots_to_redefine` works this out from the stored verdict.
+**Which shots a repair changes.** A cut that does not match is repaired by one call that sees
+both shots (`services/shot_cut_repair_writer`) and decides which side changes. The outer edges
+stay as they are (`editable_and_frozen`): the earlier shot's start and the later shot's end, so
+a repair cannot break the cuts next to it. A scene-start or scene-end mismatch has one shot that
+may change. Cuts that share no shot are repaired together, the others in the next wave (`wave`).
 
 - `boundaries` lists the boundaries of a scene.
 - `build_request` makes the exact request body sent to the model. The instructions are the
   system message; everything else is the user message.
 - `parse_answer` reads the model's text as JSON (the same as for the other stages).
 - `check_answer` checks the answer and returns the verdict that is stored.
-- `shots_to_redefine` says which shots to define again, and what each must match.
+- `shots_of_boundary`, `editable_and_frozen` and `wave` say which shots a repair touches, which
+  may change and which cuts are repaired together.
 
 The call is made by `jobs/llm_call.py`, the job is `jobs/check_shot_continuity.py`, and the rows
 are saved by `services/shot_continuity.py`.
@@ -48,6 +50,7 @@ REASONING_EFFORT: Final = "high"
 
 SCENE_START: Final = "scene_start"
 SCENE_END: Final = "scene_end"
+_SCENE_EDGES: Final = (SCENE_START, SCENE_END)
 
 # The most characters a problem may have. The prompt states it, but the check accepts this much
 # more: the model often misses a stated length by a few characters, and that should not fail
@@ -269,62 +272,64 @@ def check_answer(answer: Any, boundary_list: list[dict[str, Any]]) -> dict[str, 
     }
 
 
-# --- What to define again -----------------------------------------------------------------
+# --- Which shots a cut repair touches -----------------------------------------------------
+
+
+def shots_of_boundary(boundary: dict[str, Any]) -> list[str]:
+    """The ids of the shots on the two sides of a boundary, in order. The scene's start and
+    end are not shots, so a scene-start or scene-end boundary has one.
+    """
+    return [side for side in (boundary["before"], boundary["after"]) if side not in _SCENE_EDGES]
 
 
 @dataclass(frozen=True)
-class Redefinition:
-    """One shot to define again for continuity, and what it must agree with."""
+class CutEdit:
+    """What a repair of one cut may change and what it must keep."""
 
-    shot_id: str
-    # How the characters are when this shot must start (the state the shot before it ended in,
-    # or the scene's start), when its start boundary failed; else None.
-    must_start_from: dict[str, str] | None
-    # How the characters must be when this shot ends (the scene's end), when its end boundary
-    # failed; else None.
-    must_end_at: dict[str, str] | None
-    # What the check found, one sentence each, in boundary order.
-    problems: list[str]
+    # The shots the repair may change, in order. Their other edge is kept.
+    editable: list[str]
+    # The edges the repair must not change: `{shot_id, edge}` with `edge` `start` or `end`.
+    frozen: list[dict[str, str]]
 
 
-def shots_to_redefine(boundary_verdicts: Sequence[dict[str, Any]]) -> list[Redefinition]:
-    """The shots to define again for the boundaries that do not match, in boundary order.
+def editable_and_frozen(boundary: dict[str, Any]) -> CutEdit:
+    """What repairing this boundary may change.
 
-    The earlier side of a cut is the anchor, so the later shot is defined again with the earlier
-    one's end state as `must_start_from`. A scene-start mismatch defines the first shot again
-    (`must_start_from` is the scene's start); a scene-end mismatch defines the last shot again
-    (`must_end_at` is the scene's end). A shot named by several failed boundaries appears once,
-    with every target and problem. The next shot's start is never a target: when a cut fails it
-    is the next shot that is defined again.
+    - A cut between two shots: both may change, but only at the cut, so the earlier shot's
+      start and the later shot's end are frozen.
+    - The scene's start: only the first shot may change (its start); its end is frozen.
+    - The scene's end: only the last shot may change (its end); its start is frozen.
+
+    Freezing the outer edges is what keeps a repair from breaking the cuts next to it.
     """
-    order: list[str] = []
-    found: dict[str, dict[str, Any]] = {}
+    before, after = boundary["before"], boundary["after"]
+    if before == SCENE_START:
+        return CutEdit(editable=[after], frozen=[{"shot_id": after, "edge": "end"}])
+    if after == SCENE_END:
+        return CutEdit(editable=[before], frozen=[{"shot_id": before, "edge": "start"}])
+    return CutEdit(
+        editable=[before, after],
+        frozen=[
+            {"shot_id": before, "edge": "start"},
+            {"shot_id": after, "edge": "end"},
+        ],
+    )
 
-    def entry(shot_id: str) -> dict[str, Any]:
-        if shot_id not in found:
-            order.append(shot_id)
-            found[shot_id] = {"start": None, "end": None, "problems": []}
-        return found[shot_id]
 
+def wave(boundary_verdicts: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The cuts to repair together: the ones that do not match, taken in order, leaving out a
+    cut that shares a shot with one already taken. Cuts that share a shot would both write a new
+    version of it, so they wait for the next wave (after the scene is checked again). Two cuts
+    with a cut that lines up between them share nothing and go together.
+    """
+    taken: list[dict[str, Any]] = []
+    used: set[str] = set()
     for boundary in boundary_verdicts:
         if boundary["matches"]:
             continue
-        problem = boundary["problem"]
-        if boundary["after"] == SCENE_END:
-            target = entry(boundary["before"])
-            target["end"] = dict(boundary["after_state"])
-        else:
-            target = entry(boundary["after"])
-            target["start"] = dict(boundary["before_state"])
-        if problem is not None:
-            target["problems"].append(problem)
-
-    return [
-        Redefinition(
-            shot_id=shot_id,
-            must_start_from=found[shot_id]["start"],
-            must_end_at=found[shot_id]["end"],
-            problems=found[shot_id]["problems"],
-        )
-        for shot_id in order
-    ]
+        shots = shots_of_boundary(boundary)
+        if used.intersection(shots):
+            continue
+        used.update(shots)
+        taken.append(boundary)
+    return taken

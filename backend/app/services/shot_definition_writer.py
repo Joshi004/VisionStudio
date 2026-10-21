@@ -91,26 +91,25 @@ _DURATION_DECIMALS: Final = 3
 
 # What the model is shown as the form of its answer. It is built from a dict so the braces and
 # quotes are always valid JSON.
-_ANSWER_FORM: Final = json.dumps(
-    {
-        "visual_story": "...",
-        "characters": [
-            {
-                "id": "an id from CHARACTERS IN THE SCENE",
-                "expression": "...",
-                "pose": "...",
-                "gaze": "...",
-            }
-        ],
-        "environment_state": {"lighting": "...", "an_aspect_of_the_place": "..."},
-        "composition": {"shot_size": "one of the allowed sizes", "angle": "...", "focus": "..."},
-        "camera": {"movement": "...", "intensity": "..."},
-        "action": {"start_state": "...", "primary_action": "...", "end_state": "..."},
-        "continuity_start": {"an id from characters": "..."},
-        "continuity_end": {"an id from characters": "..."},
-        "audio_intent": {"ambient": "...", "sound_events": ["..."]},
-    }
-)
+ANSWER_FORM: Final[dict[str, Any]] = {
+    "visual_story": "...",
+    "characters": [
+        {
+            "id": "an id from CHARACTERS IN THE SCENE",
+            "expression": "...",
+            "pose": "...",
+            "gaze": "...",
+        }
+    ],
+    "environment_state": {"lighting": "...", "an_aspect_of_the_place": "..."},
+    "composition": {"shot_size": "one of the allowed sizes", "angle": "...", "focus": "..."},
+    "camera": {"movement": "...", "intensity": "..."},
+    "action": {"start_state": "...", "primary_action": "...", "end_state": "..."},
+    "continuity_start": {"an id from characters": "..."},
+    "continuity_end": {"an id from characters": "..."},
+    "audio_intent": {"ambient": "...", "sound_events": ["..."]},
+}
+_ANSWER_FORM: Final = json.dumps(ANSWER_FORM)
 
 _INSTRUCTIONS: Final = f"""You are the director of a studio that turns written stories into short \
 films. A shot planner has already decided which shots a scene has. You define ONE of them: exactly \
@@ -163,13 +162,6 @@ characters (write "silence" when there is none). "sound_events" lists the distin
 happen in this shot, each at most {SOUND_EVENT_MAX_CHARS} characters, at most {MAX_SOUND_EVENTS}, \
 and may be empty. Do not include spoken words, narration or music here: the speech is supplied \
 separately, and music is added to the whole film later.
-- When the user message has a CONTINUITY TO MATCH block, this shot was defined before and its \
-first version did not line up with its neighbour. "must_start_from", when given, says how each \
-character is when this shot must start: "continuity_start" and the shot's "action.start_state" \
-must agree with it. "must_end_at", when given, says how each character must be when this shot \
-ends: "continuity_end" and "action.end_state" must agree with it. "problems" says what was wrong \
-with the first version: do not repeat it. The shot must still fit its description and its \
-events.
 - Do not write the shot's id, its duration or its dialogue: they are filled in for you.
 - When SPEECH lists a line of dialogue, the shot must make sense of it: its speaker is shown \
 speaking, or is stated to be unseen. Narration is heard over the shot and is not spoken by \
@@ -192,14 +184,9 @@ def build_request(
     characters: list[dict[str, Any]],
     environment: dict[str, Any],
     model: str,
-    continuity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
-
-    `continuity` is given when the continuity check (PHASE-023) defines this shot again. Its
-    `must_start_from`, `must_end_at` and `problems` are sent as the data block CONTINUITY TO
-    MATCH, never as text in the instructions.
 
     `scene` is `{index, id, title, description}`; `shot` is the shot's skeleton with its
     `duration_seconds`, `position` and `shot_count` added; `previous_shot` and `next_shot` are
@@ -220,15 +207,6 @@ def build_request(
         "CHARACTERS IN THE SCENE (JSON):\n" + json.dumps(characters, ensure_ascii=False, indent=2),
         "ENVIRONMENT (JSON):\n" + json.dumps(environment, ensure_ascii=False, indent=2),
     ]
-    if continuity is not None:
-        to_match = {
-            "must_start_from": continuity.get("must_start_from"),
-            "must_end_at": continuity.get("must_end_at"),
-            "problems": continuity.get("problems") or [],
-        }
-        parts.append(
-            "CONTINUITY TO MATCH (JSON):\n" + json.dumps(to_match, ensure_ascii=False, indent=2)
-        )
     return {
         "model": model,
         "messages": [

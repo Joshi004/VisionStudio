@@ -19,7 +19,9 @@ import { useSceneEvents } from "../../api/sceneEvents";
 import {
   useCheckAllContinuity,
   useCheckSceneContinuity,
+  useRepairCut,
   useShotContinuity,
+  type ContinuityMismatch,
   type SceneContinuity,
   type ShotContinuityFlag,
 } from "../../api/shotContinuity";
@@ -54,7 +56,7 @@ const CONTINUITY_STATUS: Record<
 > = {
   not_checked: { label: "Continuity not checked", color: "gray" },
   checking: { label: "Checking continuity", color: "blue" },
-  reconciling: { label: "Reconciling", color: "blue" },
+  reconciling: { label: "Repairing cuts", color: "blue" },
   consistent: { label: "Continuity OK", color: "green" },
   mismatches: { label: "Continuity mismatch", color: "orange" },
 };
@@ -120,24 +122,17 @@ function ShotRow({
             <Badge variant="light" color="gray">
               {shot.duration_seconds.toFixed(1)} s
             </Badge>
-            {continuity?.flag === "mismatch" && (
-              <Badge
-                variant="light"
-                color="orange"
-                title={continuity.problems.join("\n")}
-                style={{ textTransform: "none" }}
-              >
-                Does not line up
-              </Badge>
-            )}
             {continuity?.redefined_round != null && (
               <Badge
                 variant="light"
                 color="grape"
-                title="This version was made by the continuity check, to line up with its neighbour"
+                title="This version was written by a continuity repair, to line up with its neighbour"
                 style={{ textTransform: "none" }}
               >
-                Re-defined for continuity (round {continuity.redefined_round})
+                Repaired for continuity
+                {continuity.redefined_round > 0
+                  ? ` (round ${continuity.redefined_round})`
+                  : ""}
               </Badge>
             )}
             {job && job.status !== "succeeded" && <JobStatusBadge job={job} />}
@@ -212,9 +207,10 @@ type SceneRowProps = {
   onDefineScene: () => void;
   onDefineShot: (shotId: string) => void;
   onCheckContinuity: () => void;
+  onRepairCut: (boundaryId: string) => void;
 };
 
-/** The continuity of one scene: its status, the boundaries that do not line up, and the button. */
+/** The continuity of one scene: its status and the button. The cuts that fail are shown between the shots. */
 function ContinuityLine({
   continuity,
   busy,
@@ -229,7 +225,7 @@ function ContinuityLine({
     continuity.status === "checking" || continuity.status === "reconciling";
   const label =
     continuity.status === "reconciling"
-      ? `Reconciling (round ${continuity.round} of ${continuity.max_rounds})`
+      ? `Repairing cuts (round ${continuity.round} of ${continuity.max_rounds})`
       : continuity.status === "mismatches"
         ? `${continuity.mismatches.length} ${
             continuity.mismatches.length === 1 ? "mismatch" : "mismatches"
@@ -267,13 +263,58 @@ function ContinuityLine({
           {continuity.blocked_reason}
         </Text>
       )}
-      {continuity.mismatches.map((item) => (
-        <Text key={item.id} size="xs" c="orange.8">
-          {boundaryName(item.before)} to {boundaryName(item.after)}:{" "}
-          {item.problem}
-        </Text>
-      ))}
     </Stack>
+  );
+}
+
+type CutRowProps = {
+  mismatch: ContinuityMismatch;
+  busy: boolean;
+  onRepair: () => void;
+};
+
+/**
+ * A cut that does not line up, shown where the cut is: between the two shots (or before the
+ * first shot, or after the last one, for the scene's start and end). The problem belongs to
+ * the cut, so it is repaired from here.
+ */
+function CutRow({ mismatch, busy, onRepair }: CutRowProps) {
+  const { job } = mismatch;
+  const active = isJobActive(job);
+  return (
+    <Alert
+      color="orange"
+      p="xs"
+      title={`Does not line up: ${boundaryName(mismatch.before)} to ${boundaryName(mismatch.after)}`}
+    >
+      <Stack gap={4}>
+        <Text size="sm" style={{ wordBreak: "break-word" }}>
+          {mismatch.problem}
+        </Text>
+        {job?.status === "failed" && (
+          <Text size="xs" c="red">
+            The last repair failed: {job.error ?? "the job failed."}
+          </Text>
+        )}
+        {!mismatch.can_repair && !active && mismatch.blocked_reason && (
+          <Text size="xs" c="dimmed">
+            {mismatch.blocked_reason}
+          </Text>
+        )}
+        <Group gap="xs">
+          <Button
+            size="compact-xs"
+            variant="default"
+            loading={active}
+            disabled={!mismatch.can_repair || busy}
+            onClick={onRepair}
+          >
+            Fix this cut
+          </Button>
+          {job && job.status !== "succeeded" && <JobStatusBadge job={job} />}
+        </Group>
+      </Stack>
+    </Alert>
   );
 }
 
@@ -287,6 +328,7 @@ function SceneRow({
   onDefineScene,
   onDefineShot,
   onCheckContinuity,
+  onRepairCut,
 }: SceneRowProps) {
   const defined = scene.shots.filter(
     (shot) => shot.status === "defined",
@@ -300,6 +342,17 @@ function SceneRow({
   const todo = scene.shots.filter(
     (shot) => shot.can_run && shot.status !== "defined",
   ).length;
+  // The cuts that do not line up, each shown at its place: the start of the scene before the
+  // first shot, every other cut after the shot it follows (the scene's end after the last).
+  const mismatches = continuity?.mismatches ?? [];
+  const cutRow = (item: ContinuityMismatch) => (
+    <CutRow
+      key={item.id}
+      mismatch={item}
+      busy={busy}
+      onRepair={() => onRepairCut(item.id)}
+    />
+  );
 
   return (
     <Stack gap={6}>
@@ -362,18 +415,25 @@ function SceneRow({
       </Group>
       {scene.shots.length > 0 && (
         <Stack gap="sm" ml={48}>
+          {mismatches
+            .filter((item) => item.before === "scene_start")
+            .map(cutRow)}
           {scene.shots.map((entry) => (
-            <ShotRow
-              key={entry.shot.id}
-              entry={entry}
-              continuity={continuity?.shots.find(
-                (flag) => flag.shot_id === entry.shot.id,
-              )}
-              characterNames={characterNames}
-              sceneBlocked={scene.blocked_reason !== null}
-              busy={busy}
-              onDefine={() => onDefineShot(entry.shot.id)}
-            />
+            <Stack key={entry.shot.id} gap="sm">
+              <ShotRow
+                entry={entry}
+                continuity={continuity?.shots.find(
+                  (flag) => flag.shot_id === entry.shot.id,
+                )}
+                characterNames={characterNames}
+                sceneBlocked={scene.blocked_reason !== null}
+                busy={busy}
+                onDefine={() => onDefineShot(entry.shot.id)}
+              />
+              {mismatches
+                .filter((item) => item.before === entry.shot.id)
+                .map(cutRow)}
+            </Stack>
           ))}
         </Stack>
       )}
@@ -394,6 +454,7 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
   const defineOne = useDefineOneShot(projectId);
   const checkAll = useCheckAllContinuity(projectId);
   const checkScene = useCheckSceneContinuity(projectId);
+  const repairCut = useRepairCut(projectId);
   // Characters are shown by name; the event list already carries them for its own panel.
   const sceneEvents = useSceneEvents(projectId).data;
 
@@ -412,7 +473,8 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
     defineScene.isPending ||
     defineOne.isPending ||
     checkAll.isPending ||
-    checkScene.isPending;
+    checkScene.isPending ||
+    repairCut.isPending;
   // What "Check all continuity" would start: scenes that can be checked and are not consistent.
   const checkAllCount = (continuity?.entries ?? []).filter(
     (scene) => scene.can_run && scene.status !== "consistent",
@@ -453,7 +515,9 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
               for generation and its looks and states are resolved. Once every
               shot of a scene is defined, the scene's continuity is checked:
               where each shot ends must be where the next one starts. Shots that
-              do not line up are defined again, a few rounds at most.
+              do not line up are shown at the cut between the two shots. The
+              repair sees both shots and changes the one that needs it, a few
+              rounds at most; a cut can also be fixed by hand.
             </Text>
           </Stack>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -501,13 +565,13 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
               </Alert>
             ),
         )}
-        {[checkAll, checkScene].map(
+        {[checkAll, checkScene, repairCut].map(
           (mutation, position) =>
             mutation.isError && (
               <Alert
                 key={position}
                 color="red"
-                title="Could not start the continuity check"
+                title="Could not start the continuity check or repair"
               >
                 {describeError(mutation.error)}
               </Alert>
@@ -555,6 +619,9 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
               defineOne.mutate({ sceneId: scene.id, shotId })
             }
             onCheckContinuity={() => checkScene.mutate(scene.id)}
+            onRepairCut={(boundaryId) =>
+              repairCut.mutate({ sceneId: scene.id, boundaryId })
+            }
           />
         ))}
       </Stack>

@@ -80,8 +80,6 @@ class _Input:
     environment: dict[str, Any]
     inputs: dict[str, Any]
     bible_id: int
-    # Set only when the continuity check defines this shot again (PHASE-023).
-    continuity: dict[str, Any] | None
 
 
 def _is_number(value: Any) -> bool:
@@ -109,7 +107,6 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     environment = job_input.get("environment")
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
-    continuity = job_input.get("continuity")
     if (
         not isinstance(scene, dict)
         or not isinstance(scene_id, str)
@@ -134,7 +131,6 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         or not isinstance(environment, dict)
         or not isinstance(inputs, dict)
         or not isinstance(bible_id, int)
-        or not (continuity is None or isinstance(continuity, dict))
     ):
         return None
     return _Input(
@@ -155,7 +151,6 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         environment=environment,
         inputs=inputs,
         bible_id=bible_id,
-        continuity=continuity,
     )
 
 
@@ -223,7 +218,6 @@ class DefineShotHandler(JobHandler):
             characters=read.characters,
             environment=read.environment,
             model=target.model,
-            continuity=read.continuity,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

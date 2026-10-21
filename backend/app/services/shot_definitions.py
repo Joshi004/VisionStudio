@@ -26,6 +26,9 @@ shot's id, its duration (from the scene's timeline, PHASE-021) and its dialogue.
   (which covers the story, the StoryBible, the scene, its events, speech and the definitions of
   its characters and environment), or the looks and states were resolved again or are out of
   date.
+- A shot that a cut repair (PHASE-023) is working on cannot be defined until the repair ends.
+  `cut_context` gives that repair the newest specification of each shot of the cut, and
+  `_shot_fields` is the one place that works out what the model is shown about a shot.
 - `save_shot_definition` is called by the job and flushes without committing; the job commits it
   together with finishing itself.
 """
@@ -56,6 +59,10 @@ _logger = logging.getLogger(__name__)
 JOB_TYPE: Final = "define_shot"
 # Two presses on one shot make one job; two shots run side by side. The key is `scene/shot`.
 DEDUPE_KEY: Final = "shot_key"
+# The job that repairs a cut between two shots (PHASE-023, `jobs/repair_shot_cut.py`). While one
+# runs, the shots it works on cannot be defined.
+REPAIR_JOB_TYPE: Final = "repair_shot_cut"
+REPAIRING_REASON: Final = "This shot is being repaired for continuity."
 
 # How many of a project's newest definition jobs are read to find each shot's newest one.
 _JOB_LOOKBACK: Final = 2000
@@ -352,25 +359,13 @@ def _unit_map(speech: speech_units.SceneEntry | None) -> dict[str, dict[str, Any
     return {unit["id"]: unit for unit in content["units"]} if content is not None else {}
 
 
-async def _queue(
-    session: AsyncSession,
-    project: Project,
-    loaded: _Loaded,
-    scene_id: str,
-    shot_id: str,
-    continuity: dict[str, Any] | None = None,
-) -> tuple[Job, bool]:
-    """Queues the job for this shot and returns `(job, created)`. `created` is False when the
-    shot already has a job waiting or running, which is returned instead. Raises
-    ShotDefinitionsError when this shot cannot be defined.
-
-    `continuity` is set only by the continuity check (PHASE-023) when it defines a shot again:
-    `{check_id, round, must_start_from, must_end_at, problems}`. It travels on the job as data
-    for the model, and `check_id` and `round` are recorded on the version the job makes.
+def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) -> dict[str, Any]:
+    """Everything the model is shown about one shot, as the fields of a job's input (without
+    the dedupe key): the scene and its definition, the shot with its neighbours, its events and
+    speech, the characters and the environment, and the `inputs` that are written onto the
+    version the job makes (D-3). The scene must not be refused. Used by the job that defines the
+    shot and by the repair of a cut (PHASE-023). Raises ShotDefinitionsError for an unknown shot.
     """
-    refusal = _scene_refusal(loaded, scene_id)
-    if refusal is not None:
-        raise ShotDefinitionsError(refusal)
     bible = loaded.bible
     assert bible is not None and loaded.story is not None  # not blocked
     plan_entry = loaded.plan_by_scene[scene_id]
@@ -430,7 +425,7 @@ async def _queue(
         "starts_at_seconds_in_scene": start_s,
     }
     inputs = {
-        "project_id": project.id,
+        "project_id": project_id,
         "scene_id": scene_id,
         "shot_id": shot_id,
         "story_sha256": story_bible.story_sha256(loaded.story),
@@ -454,10 +449,79 @@ async def _queue(
         ],
         "shot": {"id": shot_id, "duration_seconds": duration},
     }
-    job_continuity: dict[str, Any] = {}
-    if continuity is not None:
-        inputs["continuity"] = {"check_id": continuity["check_id"], "round": continuity["round"]}
-        job_continuity = {"continuity": continuity}
+    return {
+        "story_bible_id": bible.id,
+        "story_bible_version": bible.version,
+        "scene_id": scene_id,
+        "shot_id": shot_id,
+        "shot_plan_id": plan_row.id,
+        "scene": {
+            "index": item["index"],
+            "id": item["id"],
+            "title": item["title"],
+            "description": item["description"],
+        },
+        "scene_definition": definition,
+        "scene_character_ids": definition["characters"],
+        "shot": shot_for_model,
+        "previous_shot": neighbour(position - 1),
+        "next_shot": neighbour(position + 1),
+        "events": shot_events,
+        "speech": speech,
+        "dialogue": dialogue,
+        "duration": duration,
+        "characters": characters,
+        "environment": environment,
+        # Written onto the version the job makes (D-3).
+        "inputs": inputs,
+    }
+
+
+def _shot_key(scene_id: str, shot_id: str) -> str:
+    return f"{scene_id}/{shot_id}"
+
+
+async def _repair_locked(session: AsyncSession, project_id: int) -> set[str]:
+    """The `scene/shot` keys of the shots that a cut repair (PHASE-023) is working on now. Such
+    a shot cannot be defined: the repair would save over it, or be thrown away.
+    """
+    statement = (
+        select(Job)
+        .where(
+            Job.project_id == project_id,
+            Job.type == REPAIR_JOB_TYPE,
+            Job.status.in_(store.ACTIVE_STATUSES),
+        )
+        .execution_options(populate_existing=True)
+    )
+    locked: set[str] = set()
+    for job in (await session.execute(statement)).scalars():
+        if not isinstance(job.input, dict):
+            continue
+        scene_id = job.input.get("scene_id")
+        shot_ids = job.input.get("locked_shot_ids")
+        if isinstance(scene_id, str) and isinstance(shot_ids, list):
+            locked.update(_shot_key(scene_id, item) for item in shot_ids if isinstance(item, str))
+    return locked
+
+
+async def _queue(
+    session: AsyncSession,
+    project: Project,
+    loaded: _Loaded,
+    scene_id: str,
+    shot_id: str,
+) -> tuple[Job, bool]:
+    """Queues the job for this shot and returns `(job, created)`. `created` is False when the
+    shot already has a job waiting or running, which is returned instead. Raises
+    ShotDefinitionsError when this shot cannot be defined, among other reasons because a cut
+    repair is working on it.
+    """
+    refusal = _scene_refusal(loaded, scene_id)
+    if refusal is not None:
+        raise ShotDefinitionsError(refusal)
+    if _shot_key(scene_id, shot_id) in await _repair_locked(session, project.id):
+        raise ShotDefinitionsError(REPAIRING_REASON)
     return await store.create_job(
         session,
         project_id=project.id,
@@ -465,38 +529,81 @@ async def _queue(
         provider="llm",
         input={
             DEDUPE_KEY: _shot_key(scene_id, shot_id),
-            "story_bible_id": bible.id,
-            "story_bible_version": bible.version,
-            "scene_id": scene_id,
-            "shot_id": shot_id,
-            "shot_plan_id": plan_row.id,
-            "scene": {
-                "index": item["index"],
-                "id": item["id"],
-                "title": item["title"],
-                "description": item["description"],
-            },
-            "scene_definition": definition,
-            "scene_character_ids": definition["characters"],
-            "shot": shot_for_model,
-            "previous_shot": neighbour(position - 1),
-            "next_shot": neighbour(position + 1),
-            "events": shot_events,
-            "speech": speech,
-            "dialogue": dialogue,
-            "duration": duration,
-            "characters": characters,
-            "environment": environment,
-            **job_continuity,
-            # Written onto the version the job makes (D-3).
-            "inputs": inputs,
+            **_shot_fields(loaded, project.id, scene_id, shot_id),
         },
         dedupe_key=DEDUPE_KEY,
     )
 
 
-def _shot_key(scene_id: str, shot_id: str) -> str:
-    return f"{scene_id}/{shot_id}"
+@dataclass(frozen=True)
+class CutShot:
+    """One shot a cut repair reads: what the model is shown, and what the version it makes
+    records.
+    """
+
+    shot_id: str
+    # The fields of `_shot_fields` for this shot.
+    fields: dict[str, Any]
+    # The newest specification of the shot when the repair was prepared, and its row.
+    row: ShotDefinition
+
+
+@dataclass(frozen=True)
+class CutContext:
+    """What a repair of one cut reads (PHASE-023): the shots on its two sides, each with its
+    newest specification, in order.
+    """
+
+    shots: list[CutShot]
+
+
+async def cut_context(
+    session: AsyncSession, project: Project, scene_id: str, shot_ids: list[str]
+) -> CutContext:
+    """What the repair of a cut between these shots of one scene reads. Every shot must be
+    defined and current and none may be locked by another repair. Raises ShotDefinitionsError.
+    """
+    loaded = await _load(session, project)
+    _find_scene(loaded, scene_id)
+    refusal = _scene_refusal(loaded, scene_id)
+    if refusal is not None:
+        raise ShotDefinitionsError(refusal)
+    locked = await _repair_locked(session, project.id)
+    rows = await _newest_rows(session, project.id)
+    shots: list[CutShot] = []
+    for shot_id in shot_ids:
+        key = _shot_key(scene_id, shot_id)
+        if key in locked:
+            raise ShotDefinitionsError(REPAIRING_REASON)
+        row = rows.get(key)
+        if row is None:
+            raise ShotDefinitionsError(f"The shot '{shot_id}' is not defined. Define it first.")
+        shots.append(
+            CutShot(
+                shot_id=shot_id,
+                fields=_shot_fields(loaded, project.id, scene_id, shot_id),
+                row=row,
+            )
+        )
+    return CutContext(shots=shots)
+
+
+async def newest_row(
+    session: AsyncSession, project_id: int, scene_id: str, shot_id: str
+) -> ShotDefinition | None:
+    """The newest specification of one shot, read now."""
+    statement = (
+        select(ShotDefinition)
+        .where(
+            ShotDefinition.project_id == project_id,
+            ShotDefinition.scene_id == scene_id,
+            ShotDefinition.shot_id == shot_id,
+        )
+        .order_by(ShotDefinition.version.desc(), ShotDefinition.id.desc())
+        .limit(1)
+        .execution_options(populate_existing=True)
+    )
+    return (await session.execute(statement)).scalars().first()
 
 
 async def start_shot(
@@ -504,18 +611,14 @@ async def start_shot(
     project: Project,
     scene_id: str,
     shot_id: str,
-    continuity: dict[str, Any] | None = None,
 ) -> Job:
     """Queues the job that defines one shot, and commits. If that shot already has a job
     waiting or running, that job is returned and no new one is made. Raises
     ShotDefinitionsError.
-
-    `continuity` is for the continuity check (PHASE-023): see `_queue`. A press of Define in the
-    workspace never passes it.
     """
     loaded = await _load(session, project)
     _find_scene(loaded, scene_id)
-    job, _created = await _queue(session, project, loaded, scene_id, shot_id, continuity)
+    job, _created = await _queue(session, project, loaded, scene_id, shot_id)
     return job
 
 
@@ -545,7 +648,12 @@ async def _start_scene_shots(
                 Skipped(scene_id, shot_id, title, "Already defined and up to date.")
             )
             continue
-        job, created = await _queue(session, project, loaded, scene_id, shot_id)
+        try:
+            job, created = await _queue(session, project, loaded, scene_id, shot_id)
+        except ShotDefinitionsError as exc:
+            # A shot a cut repair is working on: the others are still defined.
+            result.skipped.append(Skipped(scene_id, shot_id, title, str(exc)))
+            continue
         if created:
             result.job_ids.append(job.id)
         else:
@@ -669,6 +777,7 @@ async def _newest_rows(session: AsyncSession, project_id: int) -> dict[str, Shot
 async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> ShotDefinitionsState:
     jobs = await _newest_jobs(session, project.id)
     rows = await _newest_rows(session, project.id)
+    locked = await _repair_locked(session, project.id)
 
     entries: list[SceneEntry] = []
     for plan in loaded.plans.entries:
@@ -690,6 +799,8 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             blocked = refusal
             if blocked is None and active:
                 blocked = "This shot is already being defined."
+            if blocked is None and key in locked:
+                blocked = REPAIRING_REASON
             start_s, duration = placed.get(shot["id"], (None, shot["target_duration"]))
             shots.append(
                 ShotEntry(

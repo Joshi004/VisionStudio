@@ -2460,6 +2460,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-continuity/{scene_id}/cuts/{boundary_id}/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Cut
+         * @description Repairs one cut that the newest check found not lining up ("Fix this cut"): one call that
+         *     sees both shots and decides which side changes. The count of automatic rounds starts again,
+         *     and the scene is checked again afterwards. If the cut already has a repair waiting or
+         *     running, that job's id is returned and no second job is made.
+         */
+        post: operations["repair_cut_api_projects__project_id__shot_continuity__scene_id__cuts__boundary_id__repair_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-references": {
         parameters: {
             query?: never;
@@ -3039,8 +3062,8 @@ export interface components {
         };
         /**
          * ContinuityMismatchOut
-         * @description A boundary that does not line up. `before` and `after` are a shot id, `scene_start` or
-         *     `scene_end`.
+         * @description A cut that does not line up. `before` and `after` are a shot id, `scene_start` or
+         *     `scene_end`. The problem belongs to the cut, not to either shot.
          */
         ContinuityMismatchOut: {
             /** Id */
@@ -3051,6 +3074,11 @@ export interface components {
             after: string;
             /** Problem */
             problem: string;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Repair */
+            can_repair: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
         };
         /**
          * ContinuityVersionOut
@@ -4037,7 +4065,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut";
             /**
              * Status
              * @enum {string}
@@ -4090,7 +4118,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut";
             /**
              * Status
              * @enum {string}
@@ -4992,7 +5020,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut";
             /** Running */
             running: number;
             /** Queued */
@@ -5943,18 +5971,11 @@ export interface components {
         };
         /**
          * ShotContinuityFlagOut
-         * @description One shot of a scene and where its continuity stands.
+         * @description One shot of a scene: whether a continuity repair made its newest definition.
          */
         ShotContinuityFlagOut: {
             /** Shot Id */
             shot_id: string;
-            /**
-             * Flag
-             * @enum {string}
-             */
-            flag: "not_checked" | "ok" | "mismatch";
-            /** Problems */
-            problems: string[];
             /** Redefined Round */
             redefined_round: number | null;
         };
@@ -12561,7 +12582,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, or the StoryBible is missing. */
+            /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, the StoryBible is missing, or (for a repair) the newest check does not cover the shots or the cut lines up. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12602,7 +12623,49 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, or the StoryBible is missing. */
+            /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, the StoryBible is missing, or (for a repair) the newest check does not cover the shots or the cut lines up. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    repair_cut_api_projects__project_id__shot_continuity__scene_id__cuts__boundary_id__repair_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                boundary_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotContinuityRunOneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, the StoryBible is missing, or (for a repair) the newest check does not cover the shots or the cut lines up. */
             422: {
                 headers: {
                     [name: string]: unknown;

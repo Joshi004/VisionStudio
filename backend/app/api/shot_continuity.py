@@ -2,11 +2,13 @@
 
 - `GET ...` answers everything the story workspace shows in one call: for each scene where its
   continuity stands (`not_checked`, `checking`, `reconciling`, `consistent`, `mismatches`), the
-  boundaries that do not line up, each shot's flag, the round being worked on and the newest
-  job. Worked out on every read.
+  cuts that do not line up (each with its repair job), which shots were repaired for continuity,
+  the round being worked on and the newest job. Worked out on every read.
 - `POST .../run` ("Check all continuity") starts a check for every scene whose shots are all
   defined and current, that is not consistent already and is not already being checked.
 - `POST .../{scene_id}/run` starts the check of one scene.
+- `POST .../{scene_id}/cuts/{boundary_id}/repair` ("Fix this cut") repairs one cut that the
+  newest check found not lining up. Automatic repairs follow it.
 
 A check is made by `services/shot_continuity.py` automatically after a scene's last shot is
 defined, and by these buttons. The answers never return ORM objects.
@@ -15,9 +17,9 @@ defined, and by these buttons. The answers never return ORM objects.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Path, status
 from pydantic import BaseModel
 
 from app.api.discovery import DiscoveryJobOut
@@ -25,6 +27,7 @@ from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.db.models import Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
 from app.services import shot_continuity
@@ -36,42 +39,46 @@ _INVALID = {
     422: {
         "model": ErrorResponse,
         "description": "The scene's shots are not all defined and current, the scene is not in "
-        "the newest list of scenes, or the StoryBible is missing.",
+        "the newest list of scenes, the StoryBible is missing, or (for a repair) the newest "
+        "check does not cover the shots or the cut lines up.",
     }
 }
 
 ContinuityStatus = Literal["not_checked", "checking", "reconciling", "consistent", "mismatches"]
-ContinuityFlag = Literal["not_checked", "ok", "mismatch"]
+# The ids of a check's boundaries are written by code: `b0`, `b1`, and so on.
+BoundaryId = Annotated[str, Path(pattern=r"^b[0-9]{1,4}$")]
 
 
 class ShotContinuityFlagOut(BaseModel):
-    """One shot of a scene and where its continuity stands."""
+    """One shot of a scene: whether a continuity repair made its newest definition."""
 
     shot_id: str
-    flag: ContinuityFlag
-    # What the check found at this shot's boundaries. Empty unless `mismatch`.
-    problems: list[str]
-    # The round of the check that made this shot's newest definition, when it was defined again
-    # for continuity.
+    # The round of the check that made this shot's newest definition, when it was repaired for
+    # continuity. 0 is a repair asked for by hand.
     redefined_round: int | None
 
 
 class ContinuityMismatchOut(BaseModel):
-    """A boundary that does not line up. `before` and `after` are a shot id, `scene_start` or
-    `scene_end`.
+    """A cut that does not line up. `before` and `after` are a shot id, `scene_start` or
+    `scene_end`. The problem belongs to the cut, not to either shot.
     """
 
     id: str
     before: str
     after: str
     problem: str
+    # The newest repair job of this cut, when it was made after the newest check.
+    job: DiscoveryJobOut | None
+    # Whether Fix this cut may be pressed, and the reason when it may not.
+    can_repair: bool
+    blocked_reason: str | None
 
 
 class ContinuityVersionOut(BaseModel):
     """The provenance of the newest check of a scene (D-3)."""
 
     version: int
-    # How many re-definitions for continuity came before this check.
+    # How many waves of cut repairs for continuity came before this check.
     round: int
     job_id: int | None
     created_at: datetime
@@ -121,6 +128,29 @@ class ShotContinuityRunOneOut(BaseModel):
     job_id: int
 
 
+def _job_out(job: Job | None) -> DiscoveryJobOut | None:
+    if job is None:
+        return None
+    return DiscoveryJobOut(
+        id=job.id,
+        status=cast(JobStatus, job.status),
+        phase=job.phase,
+        error=job.error,
+    )
+
+
+def _mismatch_out(item: shot_continuity.CutMismatch) -> ContinuityMismatchOut:
+    return ContinuityMismatchOut(
+        id=item.id,
+        before=item.before,
+        after=item.after,
+        problem=item.problem,
+        job=_job_out(item.job),
+        can_repair=item.can_repair,
+        blocked_reason=item.blocked_reason,
+    )
+
+
 def _scene_out(scene: shot_continuity.SceneContinuity) -> SceneContinuityOut:
     row = scene.row
     job = scene.job
@@ -139,27 +169,13 @@ def _scene_out(scene: shot_continuity.SceneContinuity) -> SceneContinuityOut:
             if row is not None
             else None
         ),
-        job=(
-            DiscoveryJobOut(
-                id=job.id,
-                status=cast(JobStatus, job.status),
-                phase=job.phase,
-                error=job.error,
-            )
-            if job is not None
-            else None
-        ),
+        job=_job_out(job),
         round=scene.round,
         max_rounds=scene.max_rounds,
-        mismatches=[ContinuityMismatchOut.model_validate(item) for item in scene.mismatches],
+        mismatches=[_mismatch_out(item) for item in scene.mismatches],
         round_limit_reached=scene.round_limit_reached,
         shots=[
-            ShotContinuityFlagOut(
-                shot_id=flag.shot_id,
-                flag=flag.flag,
-                problems=flag.problems,
-                redefined_round=flag.redefined_round,
-            )
+            ShotContinuityFlagOut(shot_id=flag.shot_id, redefined_round=flag.redefined_round)
             for flag in scene.shots
         ],
         can_run=scene.can_run,
@@ -229,6 +245,29 @@ async def run_scene(
     project = await load_project(session, project_id)
     try:
         job = await shot_continuity.start_scene(session, project, scene_id)
+    except shot_continuity.ShotContinuityError as exc:
+        raise _refused(exc) from exc
+    dispatcher.nudge()
+    return ShotContinuityRunOneOut(job_id=job.id)
+
+
+@router.post(
+    "/projects/{project_id}/shot-continuity/{scene_id}/cuts/{boundary_id}/repair",
+    response_model=ShotContinuityRunOneOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def repair_cut(
+    project_id: int, scene_id: DiscoveryId, boundary_id: BoundaryId, session: SessionDep
+) -> ShotContinuityRunOneOut:
+    """Repairs one cut that the newest check found not lining up ("Fix this cut"): one call that
+    sees both shots and decides which side changes. The count of automatic rounds starts again,
+    and the scene is checked again afterwards. If the cut already has a repair waiting or
+    running, that job's id is returned and no second job is made.
+    """
+    project = await load_project(session, project_id)
+    try:
+        job = await shot_continuity.start_cut_repair(session, project, scene_id, boundary_id)
     except shot_continuity.ShotContinuityError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()

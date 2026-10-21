@@ -23,6 +23,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   plan_shots: "Shot planning",
   define_shot: "Shot definition",
   check_shot_continuity: "Shot continuity check",
+  repair_shot_cut: "Cut repair",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
@@ -106,7 +107,10 @@ export function serverEstimateText(
   return parts.length === 0 ? null : parts.join(", ");
 }
 
-type Timed = Pick<JobSummary, "status" | "created_at" | "started_at" | "finished_at">;
+type Timed = Pick<
+  JobSummary,
+  "status" | "created_at" | "started_at" | "finished_at"
+>;
 
 /**
  * How long a job has waited, run or taken, worked out from the stored times and `now`

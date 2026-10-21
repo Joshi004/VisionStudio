@@ -47,7 +47,8 @@ async function fetchShotDefinitions(projectId: number) {
 /**
  * The newest list of scenes with where each shot's definition stands. It is loaded again every
  * few seconds while any definition job is waiting or running. (The continuity check queues
- * definitions of its own, PHASE-023: `useShotContinuity` loads this again while it is busy.)
+ * cut repairs that write definitions of their own, PHASE-023: `useShotContinuity` loads this
+ * again while it is busy.)
  */
 export function useShotDefinitions(projectId: number) {
   return useQuery({

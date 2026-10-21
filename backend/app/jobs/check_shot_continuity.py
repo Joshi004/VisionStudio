@@ -9,9 +9,9 @@ the `inputs` that are written onto the check (D-3). The job loads the StoryBible
 request, asks the model, checks the answer and saves it
 (`services/shot_continuity.save_check`) in the same transaction that marks the job succeeded.
 
-When it has finished and committed, the shots that do not line up are defined again by
-themselves, up to `shot_continuity_max_rounds` rounds
-(`services/shot_continuity.queue_redefinitions`).
+When it has finished and committed, the cuts that do not line up are repaired by themselves
+(`jobs/repair_shot_cut.py`), one wave of cuts at a time, up to `shot_continuity_max_rounds`
+rounds (`services/shot_continuity.queue_repairs`).
 
 One job per scene, so scenes are checked side by side when the pools allow
 (`store.create_job` with `dedupe_key`). The model is the **story role**
@@ -228,19 +228,19 @@ class CheckShotContinuityHandler(JobHandler):
             outcome.usage,
         )
 
-        # The shots that do not line up are defined again by themselves, up to the number of
-        # rounds in the settings. A separate step: the check is stored and this job is finished
-        # first. A failure here must not fail a job that has already succeeded.
+        # The cuts that do not line up are repaired by themselves, up to the number of rounds in
+        # the settings. A separate step: the check is stored and this job is finished first. A
+        # failure here must not fail a job that has already succeeded.
         try:
             async with SessionLocal() as session:
-                queued = await shot_continuity.queue_redefinitions(session, project_id, check_id)
+                queued = await shot_continuity.queue_repairs(session, project_id, check_id)
         except Exception:
-            _logger.exception("job %d: the shots could not be defined again", job_id)
+            _logger.exception("job %d: the cuts could not be repaired", job_id)
             return
         if queued:
             dispatcher.nudge()
             _logger.info(
-                "job %d: %d shots of scene '%s' defined again for continuity, jobs %s",
+                "job %d: %d cuts of scene '%s' repaired for continuity, jobs %s",
                 job_id,
                 len(queued),
                 read.scene_id,

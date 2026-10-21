@@ -93,7 +93,8 @@ class Job(Base):
         # 0033, and scene definition, since revision 0034, and event extraction, since
         # revision 0035, and look and state resolution, since revision 0036, and speech
         # unit audio, since revision 0039, and shot planning, since revision 0040, and shot
-        # definition, since revision 0041, and shot continuity, since revision 0042.
+        # definition, since revision 0041, and shot continuity, since revision 0042, and the
+        # repair of a cut between two shots, since revision 0045.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -101,7 +102,7 @@ class Job(Base):
             "'define_character', 'discover_relations', 'design_voice', "
             "'write_environment_prompt', 'define_environment', 'define_scene', "
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
-            "'plan_shots', 'define_shot', 'check_shot_continuity')",
+            "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -428,7 +429,7 @@ class ShotContinuityCheck(Base):
     Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every check
     is a new row with the next `version` of that scene, and a stored row is never changed.
     `scene_id` is the slug `id` of the scene inside the project's `scene_discovery` content and
-    `shot_plan_id` is the plan row the shots belong to. `round` is how many re-definitions for
+    `shot_plan_id` is the plan row the shots belong to. `round` is how many waves of cut repairs for
     continuity came before this check (0 for a check after a definition the user asked for).
     `inputs` records what the check was made from (the story hash, the artifacts: the scene's
     definition, the shot plan and every shot definition read). `content` is the verdict: one
