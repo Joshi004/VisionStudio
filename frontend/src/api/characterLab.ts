@@ -16,6 +16,7 @@ export type CharacterPatch = components["schemas"]["CharacterPatch"];
 export type CharacterOptions = components["schemas"]["OptionsOut"];
 export type CharacterVersion = components["schemas"]["CharacterVersionOut"];
 export type CharacterLook = components["schemas"]["LookOut"];
+export type NamedLook = components["schemas"]["NamedLookOut"];
 export type LookCandidate = components["schemas"]["LookCandidateOut"];
 export type CharacterReference = components["schemas"]["CharacterReferenceOut"];
 export type Angle = CharacterReference["angle"];
@@ -42,6 +43,8 @@ const takesKey = (characterId: number | null) =>
   [...CHARACTER_LAB_KEY, "takes", characterId] as const;
 const versionsKey = (characterId: number | null) =>
   [...CHARACTER_LAB_KEY, "versions", characterId] as const;
+const namedLooksKey = (characterId: number | null) =>
+  [...CHARACTER_LAB_KEY, "named-looks", characterId] as const;
 
 function failure(error: unknown, status: number, what: string): ApiError {
   return new ApiError(detailMessage(error, `${what} (HTTP ${status}).`), status);
@@ -373,6 +376,31 @@ export function useCharacterVersions(characterId: number | null) {
   return useQuery({
     queryKey: versionsKey(characterId),
     queryFn: () => fetchVersions(characterId as number),
+    enabled: characterId !== null,
+  });
+}
+
+// --- Named looks -------------------------------------------------------------------------------
+
+async function fetchNamedLooks(characterId: number) {
+  const { data, error, response } = await api.GET(
+    "/api/lab/characters/{character_id}/named-looks",
+    { params: { path: { character_id: characterId } } },
+  );
+  if (!data) {
+    throw failure(error, response.status, "Could not load the named looks");
+  }
+  return data;
+}
+
+/**
+ * The named looks of a character (such as night clothes), read-only. A story project's
+ * resolution creates them and makes their pictures, so they are loaded again after any change.
+ */
+export function useNamedLooks(characterId: number | null) {
+  return useQuery({
+    queryKey: namedLooksKey(characterId),
+    queryFn: () => fetchNamedLooks(characterId as number),
     enabled: characterId !== null,
   });
 }

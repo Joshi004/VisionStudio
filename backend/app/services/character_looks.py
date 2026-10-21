@@ -25,6 +25,14 @@ the master as soon as its picture is stored (D-5), so nobody chooses. When it is
 character's new version is written with `source = "ai"` and the project's pin moves to it
 (`_pin_pipeline_look`). A look made in the lab never moves a pin.
 
+**A look for a named look** (PHASE-017, `start_look(named_look_id=..., prompt=...)`) is a
+pipeline look whose candidate is an edit of the character's canonical front picture, from a
+prompt made from a template (`look_state_edit_prompts`), so no prompt job runs. Its master is
+chosen automatically and the five angles follow. When it is ready it fills
+`character_named_look.look_id` and writes the character's next version, which freezes the
+named look's pictures and moves the pin, but it **never** becomes the character's current look
+and is left out of `list_looks`.
+
 A pipeline look for a character that is the same person as another (a younger self, an older
 self, a twin; PHASE-047) is made by editing that other character's front picture. While that
 picture does not exist yet the look is `waiting` (no job); `release_look` starts it.
@@ -52,6 +60,7 @@ from app.core import settings as settings_service
 from app.db.models import (
     CharacterLook,
     CharacterLookCandidate,
+    CharacterNamedLook,
     CharacterReference,
     Job,
     LabImage,
@@ -176,6 +185,8 @@ async def start_look(
     relation: dict[str, Any] | None = None,
     resemblance: str | None = None,
     wait: bool = False,
+    prompt: str | None = None,
+    named_look_id: int | None = None,
 ) -> CharacterLook:
     """Starts a new, fresh version of a character's look: a job writes its master prompt
     first. With `reference_image_id` (a lab image: the author's own picture of the character),
@@ -186,8 +197,14 @@ async def start_look(
     The story pipeline also passes what it knows about the character's relations (PHASE-047):
     `relation` (the character is the same person as the one in `reference_image_id`, or its
     twin: `{"kind", "base_name", "base_age", "age"}`) and `resemblance` (the family likeness,
-    as text). Both go to the prompt job. With `wait`, the look is only recorded, as `waiting`,
+    as text). Both go to the prompt job. With `wait`, the look is only recorded,     as `waiting`,
     and no job is made: `release_look` makes it when the picture it is edited from exists.
+
+    A look for a named look (PHASE-017) passes `named_look_id` and the finished edit `prompt`,
+    written from a template in code, so no job writes a prompt: the candidate is started at
+    once. It needs `automatic` and `reference_image_id` (the character's canonical front
+    picture), never waits, and when it is ready it fills the named look and never becomes the
+    character's current look.
     Commits. Raises CharacterLookError.
     """
     character = await session.get(LibraryCharacter, character_id)
@@ -197,7 +214,19 @@ async def start_look(
         raise CharacterLookError(f"There is no lab image {reference_image_id}.")
     if wait and automatic is None:
         raise CharacterLookError("Only a look the story pipeline makes can wait.")
-    if automatic is not None:
+    if named_look_id is not None or prompt is not None:
+        if named_look_id is None or prompt is None or not prompt.strip():
+            raise CharacterLookError("A named look needs both its look and its edit prompt.")
+        if automatic is None or reference_image_id is None or wait:
+            raise CharacterLookError(
+                "A named look is made by the story pipeline, from a picture, without waiting."
+            )
+        named = await session.get(CharacterNamedLook, named_look_id)
+        if named is None or named.character_id != character_id:
+            raise CharacterLookError(f"There is no named look {named_look_id} on this character.")
+    # A named look's attempt has the same discovered character as the canonical look, and must
+    # not replace a variant's canonical look that is still waiting for its base.
+    if automatic is not None and named_look_id is None:
         await _replace_waiting_looks(session, automatic)
     version = await _next_version(session, character_id)
     look = CharacterLook(
@@ -208,10 +237,19 @@ async def start_look(
         project_id=automatic.project_id if automatic is not None else None,
         discovery_id=automatic.discovery_id if automatic is not None else None,
         inputs=automatic.inputs if automatic is not None else None,
+        named_look_id=named_look_id,
     )
     session.add(look)
     await session.flush()
-    if not wait:
+    if named_look_id is not None and prompt is not None:
+        look.prompt = prompt.strip()
+        try:
+            await _start_candidates(session, look, reference_image_id)
+        except CharacterLookError:
+            await session.rollback()
+            raise
+        look.status = "choosing"
+    elif not wait:
         await _queue_prompt_job(session, look, reference_image_id, relation, resemblance)
     await session.commit()
     _logger.info(
@@ -637,9 +675,14 @@ async def _maybe_mark_ready(session: AsyncSession, look_id: int) -> None:
     if len(filled) != len(character_library.ANGLES) or any(value is None for value in filled):
         return
     look.status = "ready"
+    character = await session.get(LibraryCharacter, look.character_id)
+    if look.named_look_id is not None:
+        # The pictures of a named look (PHASE-017): they fill the named look, and the
+        # character's current look stays the canonical one.
+        await _finish_named_look(session, look, character)
+        return
     # The most recently finished look becomes the one new takes are made from: starting a new
     # look is how an author asks for a different one to be current.
-    character = await session.get(LibraryCharacter, look.character_id)
     if character is not None:
         character.current_look_id = look.id
         # A look the story pipeline made moves the project's pin (its own change, like a
@@ -647,6 +690,25 @@ async def _maybe_mark_ready(session: AsyncSession, look_id: int) -> None:
         # version by hand that leaves every pin where it is.
         if not await _pin_pipeline_look(session, look, character):
             await character_versions.record_version_if_changed(session, character)
+
+
+async def _finish_named_look(
+    session: AsyncSession, look: CharacterLook, character: LibraryCharacter | None
+) -> None:
+    """A named look's five pictures are all there: points the named look at them and writes the
+    character's next version (`ai`) that freezes them, moving the project's pin. The character's
+    current look is not touched. Flushes; the caller commits.
+    """
+    named = (
+        await session.get(CharacterNamedLook, look.named_look_id)
+        if look.named_look_id is not None
+        else None
+    )
+    if named is None or character is None:
+        return
+    named.look_id = look.id
+    await session.flush()
+    await _pin_pipeline_look(session, look, character)
 
 
 async def _pin_pipeline_look(
@@ -791,6 +853,11 @@ async def use_look(session: AsyncSession, character_id: int, look_id: int) -> Li
     look = await session.get(CharacterLook, look_id)
     if look is None or look.character_id != character_id:
         raise CharacterLookError(f"There is no look {look_id} on this character.")
+    if look.named_look_id is not None:
+        raise CharacterLookError(
+            "This look holds the pictures of a named look, such as night clothes. It cannot "
+            "become the character's current look."
+        )
     if look.status != "ready":
         raise CharacterLookError("Only a look that is ready can be used.")
     character.current_look_id = look.id
@@ -809,10 +876,12 @@ async def get_look(session: AsyncSession, look_id: int) -> CharacterLook | None:
 
 
 async def list_looks(session: AsyncSession, character_id: int) -> list[CharacterLook]:
-    """Every look of a character, newest version first."""
+    """Every look of a character, newest version first. The pictures of a named look
+    (PHASE-017) are not here: they are shown with the named looks, not as the character's own.
+    """
     statement = (
         select(CharacterLook)
-        .where(CharacterLook.character_id == character_id)
+        .where(CharacterLook.character_id == character_id, CharacterLook.named_look_id.is_(None))
         .order_by(CharacterLook.version.desc())
     )
     return list((await session.execute(statement)).scalars().all())

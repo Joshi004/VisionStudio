@@ -18,6 +18,7 @@ export const VERSION_CHANGE_LABELS: Record<EnvironmentVersion["changes"][number]
   created: "Created",
   profile: "Profile",
   definition: "Definition",
+  states: "States",
 };
 
 /** The time an environment is set in, in words. */

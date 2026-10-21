@@ -214,6 +214,7 @@ export const VERSION_CHANGE_LABELS: Record<CharacterVersion["changes"][number], 
   definition: "Definition",
   look: "Look",
   voice: "Voice",
+  named_looks: "Named looks",
 };
 
 /** The picture of one angle to show: the cut-out when there is one, else the white backdrop. */

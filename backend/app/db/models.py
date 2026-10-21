@@ -752,6 +752,7 @@ class CharacterLook(Base):
         ),
         Index("idx_character_look_character", "character_id"),
         Index("idx_character_look_project", "project_id"),
+        Index("idx_character_look_named_look", "named_look_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -780,6 +781,12 @@ class CharacterLook(Base):
     )
     discovery_id: Mapped[str | None] = mapped_column(default=None)
     inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # Only for a look that holds the pictures of a named look (PHASE-017): such a look is an
+    # edit of the character's canonical front picture and never becomes its current look.
+    # `use_alter`: `character_named_look.look_id` points back at this table, the intended cycle.
+    named_look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_named_look.id", ondelete="SET NULL", use_alter=True), default=None
+    )
 
 
 class CharacterLookCandidate(Base):
@@ -993,6 +1000,10 @@ class LibraryCharacterVersion(Base):
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
     inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The pictures of the character's finished named looks (PHASE-017) as this version froze
+    # them: `[{"slug", "named_look_id", "look_id", "references": [{"angle", "lab_image_id",
+    # "cutout_path"}]}]`, sorted by slug. Empty when there are none.
+    named_looks: Mapped[Any] = mapped_column(JSON, default=list, server_default=text("'[]'"))
 
 
 class ProjectCharacterLink(Base):
@@ -1173,6 +1184,9 @@ class LibraryEnvironmentVersion(Base):
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
     inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The pictures of the environment's states (PHASE-017) as this version froze them:
+    # `[{"slug", "state_id", "reference_image_id"}]`, sorted by slug. Empty when there are none.
+    states: Mapped[Any] = mapped_column(JSON, default=list, server_default=text("'[]'"))
 
 
 class EnvironmentReference(Base):
@@ -1316,4 +1330,11 @@ class EnvironmentState(Base):
     reference_image_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
     )
+    # The edit run that makes the state's picture (PHASE-017), and what it was made from
+    # (`{"project_id", "discovery_id", "environment_version", "source_image_id",
+    # "resolution_version"}`). NULL until a picture is started.
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

@@ -140,7 +140,7 @@ class MadeFrom:
 
 
 @dataclass(frozen=True)
-class _Front:
+class Front:
     """The front picture of a character's pinned version: the lab image a same-face variant is
     edited from.
     """
@@ -171,7 +171,7 @@ class ImagesState:
     # What `_start` needs, by the entry's id: how each character is drawn, and the front
     # picture of each linked character's pinned version.
     plans: dict[str, _Plan] = field(default_factory=dict)
-    fronts: dict[str, _Front | None] = field(default_factory=dict)
+    fronts: dict[str, Front | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -209,37 +209,37 @@ def _text_sha256(text: str | None) -> str:
 
 
 @dataclass(frozen=True)
-class _Progress:
+class Progress:
     stage: Stage | None
     angles_ready: int
     failed_angles: list[FailedAngle]
     error: str | None
 
 
-def _job_error(job: Job, what: str) -> str:
+def job_error(job: Job, what: str) -> str:
     if job.error:
         return job.error
     return f"The {what} was cancelled." if job.status == "cancelled" else f"The {what} failed."
 
 
-async def _progress(session: AsyncSession, look: CharacterLook) -> _Progress:
+async def look_progress(session: AsyncSession, look: CharacterLook) -> Progress:
     """Where one look stands, from its own status and the jobs of the step it is in."""
     if look.status == "ready":
-        return _Progress(None, len(character_library.ANGLES), [], None)
+        return Progress(None, len(character_library.ANGLES), [], None)
     if look.status == "failed":
-        return _Progress(None, 0, [], look.error or "The look failed.")
+        return Progress(None, 0, [], look.error or "The look failed.")
 
     if look.status == "waiting":
-        return _Progress("waiting_for_base", 0, [], None)
+        return Progress("waiting_for_base", 0, [], None)
 
     if look.status == "writing_prompt":
         prompt_job = (
             await session.get(Job, look.prompt_job_id) if look.prompt_job_id is not None else None
         )
         if prompt_job is not None and prompt_job.status in _DEAD_JOB_STATUSES:
-            error = _job_error(prompt_job, "image prompt")
-            return _Progress(None, 0, [], f"The look's prompt could not be written: {error}")
-        return _Progress("writing_prompt", 0, [], None)
+            error = job_error(prompt_job, "image prompt")
+            return Progress(None, 0, [], f"The look's prompt could not be written: {error}")
+        return Progress("writing_prompt", 0, [], None)
 
     if look.status == "choosing":
         candidates = await character_looks.candidates_for(session, look.id)
@@ -247,9 +247,9 @@ async def _progress(session: AsyncSession, look: CharacterLook) -> _Progress:
         jobs = await image_lab.jobs_for_runs(session, await _runs(session, run_ids))
         if jobs and all(job.status in _DEAD_JOB_STATUSES for job in jobs.values()):
             first = next(iter(jobs.values()))
-            error = _job_error(first, "master picture")
-            return _Progress(None, 0, [], f"The master picture could not be made: {error}")
-        return _Progress("making_master", 0, [], None)
+            error = job_error(first, "master picture")
+            return Progress(None, 0, [], f"The master picture could not be made: {error}")
+        return Progress("making_master", 0, [], None)
 
     # making_angles: each angle's row is filled once its picture is stored.
     references = await character_looks.references_for_look(session, look.id)
@@ -264,13 +264,13 @@ async def _progress(session: AsyncSession, look: CharacterLook) -> _Progress:
             continue
         job = jobs.get(reference.lab_run_id or 0)
         if job is not None and job.status in _DEAD_JOB_STATUSES:
-            failed.append(FailedAngle(reference.angle, _job_error(job, "picture")))
+            failed.append(FailedAngle(reference.angle, job_error(job, "picture")))
         else:
             pending += 1
     if failed and pending == 0:
         names = ", ".join(item.angle.replace("_", " ") for item in failed)
-        return _Progress(None, ready, failed, f"These angles could not be made: {names}.")
-    return _Progress("making_angles", ready, failed, None)
+        return Progress(None, ready, failed, f"These angles could not be made: {names}.")
+    return Progress("making_angles", ready, failed, None)
 
 
 async def _runs(session: AsyncSession, run_ids: list[int]) -> list[LabRun]:
@@ -314,7 +314,12 @@ async def _newest_looks(
     """The newest pipeline look of each `(discovered character id, library character id)`."""
     statement = (
         select(CharacterLook)
-        .where(CharacterLook.project_id == project_id, CharacterLook.discovery_id.is_not(None))
+        .where(
+            CharacterLook.project_id == project_id,
+            CharacterLook.discovery_id.is_not(None),
+            # The pictures of a named look (PHASE-017) are not the character's canonical images.
+            CharacterLook.named_look_id.is_(None),
+        )
         .order_by(CharacterLook.id.desc())
         .execution_options(populate_existing=True)
     )
@@ -336,7 +341,7 @@ _LIKENESS_TRAITS: Final = (
 )
 
 
-async def _pinned_front(session: AsyncSession, info: LinkInfo) -> _Front | None:
+async def pinned_front(session: AsyncSession, info: LinkInfo) -> Front | None:
     """The front picture of the character's pinned version, or None when that version holds no
     look.
     """
@@ -353,7 +358,7 @@ async def _pinned_front(session: AsyncSession, info: LinkInfo) -> _Front | None:
             and picture.get("angle") == "front"
             and isinstance(picture.get("lab_image_id"), int)
         ):
-            return _Front(version.version, version.look_id, picture["lab_image_id"])
+            return Front(version.version, version.look_id, picture["lab_image_id"])
     return None
 
 
@@ -399,7 +404,7 @@ def _plan_for(
 
 
 def _relation_reasons(
-    look: CharacterLook, plan: _Plan, fronts: dict[str, _Front | None]
+    look: CharacterLook, plan: _Plan, fronts: dict[str, Front | None]
 ) -> list[str]:
     """Why a ready look no longer matches what the project's relations say now, if it does not.
     A look made before relations existed recorded none, which is what a character with no
@@ -426,7 +431,7 @@ def _with_relations(
     item: EntryImages,
     plan: _Plan,
     by_id: dict[str, EntryImages],
-    fronts: dict[str, _Front | None],
+    fronts: dict[str, Front | None],
 ) -> EntryImages:
     """The entry with what the project's relations add: the character it is drawn from, why a
     waiting look cannot go on, why a variant cannot start, and why a ready look is out of date.
@@ -494,17 +499,17 @@ async def state(session: AsyncSession, project: Project) -> ImagesState:
     looks = await _newest_looks(session, project.id)
     by_definition = {entry.item["id"]: entry for entry in definitions.entries}
     plans = {entry_id: _plan_for(entry_id, relations, by_definition) for entry_id in by_definition}
-    fronts: dict[str, _Front | None] = {}
+    fronts: dict[str, Front | None] = {}
     for entry_id, entry in by_definition.items():
         if entry.entry.info is not None:
-            fronts[entry_id] = await _pinned_front(session, entry.entry.info)
+            fronts[entry_id] = await pinned_front(session, entry.entry.info)
 
     first_pass: list[EntryImages] = []
     for entry in definitions.entries:
         info = entry.entry.info
         look = looks.get((entry.item["id"], info.character.id)) if info is not None else None
         refusal = _start_refusal(entry)
-        progress = await _progress(session, look) if look is not None else None
+        progress = await look_progress(session, look) if look is not None else None
 
         status: Status
         reasons: list[str] = []
@@ -566,7 +571,7 @@ def _relation(plan: _Plan, base: EntryImages, item: EntryImages) -> dict[str, An
     return {"kind": plan.kind, "base_age": age(base), "age": age(item)}
 
 
-def _base_record(base: EntryImages, front: _Front | None) -> dict[str, Any]:
+def _base_record(base: EntryImages, front: Front | None) -> dict[str, Any]:
     """What a look records about the base it is drawn from. Without `front` the look is still
     waiting for the base's picture, and only the base is named.
     """
@@ -806,6 +811,7 @@ async def on_angle_image_stored(run_id: int) -> bool:
             or look.status != "ready"
             or look.project_id is None
             or look.discovery_id is None
+            or look.named_look_id is not None
         ):
             await session.commit()
             return False

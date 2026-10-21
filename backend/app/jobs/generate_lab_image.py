@@ -20,8 +20,9 @@ candidate of a look the story pipeline made (`character_looks.on_candidate_image
 chooses the master by itself) or a take's own picture (`character_takes.on_image_stored`). A
 picture made for the one candidate of an environment's picture the story pipeline made
 (`environment_references.on_candidate_image_stored`, PHASE-013) becomes that environment
-version's canonical picture by itself. A plain Image lab run is none of these and all are
-no-ops for it.
+version's canonical picture by itself, and a picture made for an environment state
+(`look_state_images.on_state_image_stored`, PHASE-017) becomes that state's picture. A plain
+Image lab run is none of these and all are no-ops for it.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from app.services import (
     environment_references,
     frame_images,
     image_lab,
+    look_state_images,
 )
 from app.services.frame_images import FrameRejected
 from app.services.storage import StorageError, TempFile, get_storage
@@ -251,5 +253,7 @@ class GenerateLabImageHandler(RemoteImageHandler):
         """
         try:
             await environment_references.on_candidate_image_stored(run_id)
+            # The picture of a new environment state (PHASE-017) is an edit of the canonical one.
+            await look_state_images.on_state_image_stored(run_id)
         except Exception:
             _logger.exception("job %d: the environment picture could not be attached", job_id)

@@ -38,6 +38,7 @@ import {
   takeToForm,
   type TakeFormState,
 } from "./characterLabView";
+import { NamedLooks } from "./NamedLooks";
 import { TakeGallery } from "./TakeGallery";
 import { UsedByProjects } from "./UsedByProjects";
 import { VersionHistory } from "./VersionHistory";
@@ -283,6 +284,8 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
               </Stack>
 
               <DefinitionSection definition={data.definition} />
+
+              <NamedLooks characterId={data.id} />
 
               <UsedByProjects characterId={data.id} />
 

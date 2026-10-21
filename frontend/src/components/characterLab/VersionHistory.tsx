@@ -96,6 +96,35 @@ function VersionDetails({ version }: { version: CharacterVersion }) {
           })}
         </SimpleGrid>
       )}
+      {version.named_looks.map((named) => (
+        <Stack key={named.slug} gap={4}>
+          <Text size="sm" fw={600}>
+            Named look: {named.name}
+          </Text>
+          <SimpleGrid cols={5} spacing={4}>
+            {named.references.map((reference) => {
+              const picture = referencePicture(reference);
+              return (
+                <Stack key={reference.angle} gap={2}>
+                  {picture !== null ? (
+                    <img
+                      src={picture}
+                      alt={`${named.name}, ${ANGLE_LABELS[reference.angle]} view, version ${version.version}`}
+                      loading="lazy"
+                      style={PICTURE_STYLE}
+                    />
+                  ) : (
+                    <div style={PICTURE_STYLE} />
+                  )}
+                  <Text size="xs" c="dimmed" ta="center">
+                    {ANGLE_LABELS[reference.angle]}
+                  </Text>
+                </Stack>
+              );
+            })}
+          </SimpleGrid>
+        </Stack>
+      ))}
     </Stack>
   );
 }

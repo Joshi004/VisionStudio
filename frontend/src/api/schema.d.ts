@@ -1251,6 +1251,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/characters/{character_id}/named-looks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Named Looks
+         * @description The named looks of this character, oldest first, each with its pictures once they are
+         *     made. Read-only: a story project's resolution creates them and makes their pictures.
+         */
+        get: operations["list_named_looks_api_lab_characters__character_id__named_looks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters/{character_id}/projects": {
         parameters: {
             query?: never;
@@ -1625,6 +1646,27 @@ export interface paths {
          *     profile changes.
          */
         get: operations["list_versions_api_lab_environments__environment_id__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/states": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Environment States
+         * @description The named states of this environment, oldest first, each with its picture once it is
+         *     made. Read-only: a story project's resolution creates them and makes their pictures.
+         */
+        get: operations["list_environment_states_api_lab_environments__environment_id__states_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2022,6 +2064,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/look-state-images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Look State Images */
+        get: operations["get_look_state_images_api_projects__project_id__look_state_images_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/look-state-images/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts the pictures of every new look and state that has none yet and can be made now.
+         *     Every other one is skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__look_state_images_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/look-state-images/looks/{record_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Look
+         * @description Starts the pictures of one new look. If they are being made already, that look's id is
+         *     returned and no second look is made.
+         */
+        post: operations["run_look_api_projects__project_id__look_state_images_looks__record_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/look-state-images/states/{record_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run State
+         * @description Starts the picture of one new state. If it is being made already, nothing new starts.
+         */
+        post: operations["run_state_api_projects__project_id__look_state_images_states__record_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2352,7 +2473,7 @@ export interface components {
              */
             source: "ai" | "manual";
             /** Changes */
-            changes: ("created" | "profile" | "definition" | "look" | "voice")[];
+            changes: ("created" | "profile" | "definition" | "look" | "voice" | "named_looks")[];
             profile: components["schemas"]["VersionProfileOut"];
             voice: components["schemas"]["VoiceBriefOut"] | null;
             /** Voice Description */
@@ -2366,6 +2487,8 @@ export interface components {
             definition: components["schemas"]["CharacterDefinitionOut"] | null;
             /** Job Id */
             job_id: number | null;
+            /** Named Looks */
+            named_looks: components["schemas"]["NamedLookPicturesOut"][];
         };
         /** CharactersOut */
         CharactersOut: {
@@ -2980,6 +3103,33 @@ export interface components {
             reason: string;
         };
         /**
+         * EnvironmentStateOut
+         * @description A named state of a library environment, such as night (PHASE-016, PHASE-017).
+         */
+        EnvironmentStateOut: {
+            /** Id */
+            id: number;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Origin Project Id */
+            origin_project_id: number | null;
+            image: components["schemas"]["PictureOut"] | null;
+        };
+        /**
          * EnvironmentUsageOut
          * @description One story project that uses the environment, and the version it pins.
          */
@@ -3019,7 +3169,7 @@ export interface components {
              */
             source: "ai" | "manual";
             /** Changes */
-            changes: ("created" | "profile" | "definition")[];
+            changes: ("created" | "profile" | "definition" | "states")[];
             profile: components["schemas"]["EnvironmentProfileOut"];
             image: components["schemas"]["PictureOut"] | null;
             definition: components["schemas"]["EnvironmentDefinitionOut"] | null;
@@ -3027,6 +3177,8 @@ export interface components {
             job_id: number | null;
             /** Pinned By */
             pinned_by: components["schemas"]["PinnedByOut"][];
+            /** States */
+            states: components["schemas"]["StatePictureOut"][];
         };
         /** EnvironmentVisualIdentityOut */
         EnvironmentVisualIdentityOut: {
@@ -3744,6 +3896,64 @@ export interface components {
             /** References */
             references: components["schemas"]["CharacterReferenceOut"][];
         };
+        /** LookRunOut */
+        LookRunOut: {
+            /** Look Id */
+            look_id: number;
+        };
+        /**
+         * LookStateImageItemOut
+         * @description One new look or environment state of the newest resolution.
+         */
+        LookStateImageItemOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "look" | "state";
+            /** Id */
+            id: number;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Subject Id */
+            subject_id: string;
+            /** Subject Name */
+            subject_name: string;
+            /** Scenes */
+            scenes: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unavailable" | "none" | "in_progress" | "failed" | "ready";
+            /** Stage */
+            stage: ("drawing" | "making_master" | "making_angles") | null;
+            /** Angles Ready */
+            angles_ready: number;
+            /** Failed Angles */
+            failed_angles: components["schemas"]["FailedAngleOut"][];
+            /** Error */
+            error: string | null;
+            look: components["schemas"]["LookOut"] | null;
+            image: components["schemas"]["PictureOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** LookStateImagesOut */
+        LookStateImagesOut: {
+            /** Resolution Version */
+            resolution_version: number | null;
+            /** Items */
+            items: components["schemas"]["LookStateImageItemOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
         /**
          * LookStateItemOut
          * @description One request of a scene and what it resolved to. `id`, `name` and `description` are None
@@ -3783,6 +3993,15 @@ export interface components {
             /** Blocked Reason */
             blocked_reason: string | null;
         };
+        /** LookStateRunAllOut */
+        LookStateRunAllOut: {
+            /** Look Ids */
+            look_ids: number[];
+            /** State Ids */
+            state_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["LookStateSkippedOut"][];
+        };
         /** LookStateRunOut */
         LookStateRunOut: {
             /** Job Id */
@@ -3806,6 +4025,20 @@ export interface components {
             environment: components["schemas"]["LookStateItemOut"] | null;
             /** Looks */
             looks: components["schemas"]["LookStateItemOut"][];
+        };
+        /** LookStateSkippedOut */
+        LookStateSkippedOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "look" | "state";
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
         };
         /**
          * LookStateVersionOut
@@ -3846,6 +4079,47 @@ export interface components {
         MapIn: {
             /** Character Id */
             character_id: number;
+        };
+        /**
+         * NamedLookOut
+         * @description A named look of a library character, such as night clothes (PHASE-016, PHASE-017).
+         */
+        NamedLookOut: {
+            /** Id */
+            id: number;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Origin Project Id */
+            origin_project_id: number | null;
+            look: components["schemas"]["LookOut"] | null;
+        };
+        /**
+         * NamedLookPicturesOut
+         * @description The pictures of one named look as a version froze them (PHASE-017).
+         */
+        NamedLookPicturesOut: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Look Id */
+            look_id: number;
+            /** References */
+            references: components["schemas"]["CharacterReferenceOut"][];
         };
         /** NarratorChooseIn */
         NarratorChooseIn: {
@@ -4836,6 +5110,22 @@ export interface components {
             approved: components["schemas"]["ApprovedSummaryOut"] | null;
             pending: components["schemas"]["PendingChangeOut"] | null;
             last_check: components["schemas"]["SourceCheckOut"] | null;
+        };
+        /**
+         * StatePictureOut
+         * @description The picture of one environment state as a version froze it (PHASE-017).
+         */
+        StatePictureOut: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            image: components["schemas"]["PictureOut"] | null;
+        };
+        /** StateRunOut */
+        StateRunOut: {
+            /** State Id */
+            state_id: number;
         };
         /**
          * StoryBibleContent
@@ -8125,6 +8415,46 @@ export interface operations {
             };
         };
     };
+    list_named_looks_api_lab_characters__character_id__named_looks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NamedLookOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_character_projects_api_lab_characters__character_id__projects_get: {
         parameters: {
             query?: never;
@@ -9013,6 +9343,46 @@ export interface operations {
             };
         };
     };
+    list_environment_states_api_lab_environments__environment_id__states_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentStateOut"][];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_environment_projects_api_lab_environments__environment_id__projects_get: {
         parameters: {
             query?: never;
@@ -9860,6 +10230,168 @@ export interface operations {
                 };
             };
             /** @description There is no saved story, up-to-date Story Bible or list of scenes, or a scene is not defined yet or is out of date. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_look_state_images_api_projects__project_id__look_state_images_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookStateImagesOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__look_state_images_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookStateRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no resolution or it is out of date, or the look or state is not in it, or its character or environment is not ready for it. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_look_api_projects__project_id__look_state_images_looks__record_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                record_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no resolution or it is out of date, or the look or state is not in it, or its character or environment is not ready for it. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_state_api_projects__project_id__look_state_images_states__record_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                record_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no resolution or it is out of date, or the look or state is not in it, or its character or environment is not ready for it. */
             422: {
                 headers: {
                     [name: string]: unknown;

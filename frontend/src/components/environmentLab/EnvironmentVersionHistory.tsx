@@ -60,6 +60,25 @@ function VersionDetails({ version }: { version: EnvironmentVersion }) {
           No picture was chosen for this version.
         </Text>
       )}
+      {version.states.map((state) => (
+        <Stack key={state.slug} gap={4}>
+          <Text size="sm" fw={600}>
+            State: {state.name}
+          </Text>
+          {state.image !== null ? (
+            <img
+              src={state.image.url}
+              alt={`${state.name} picture, version ${version.version}`}
+              loading="lazy"
+              style={PICTURE_STYLE}
+            />
+          ) : (
+            <Text size="xs" c="dimmed">
+              Its picture is gone.
+            </Text>
+          )}
+        </Stack>
+      ))}
       {version.job_id !== null && (
         <Text size="xs" c="dimmed">
           Written by job {version.job_id} of a story project.

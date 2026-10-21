@@ -76,6 +76,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-016 look and environment-state resolution, 2026-10-21):** migration `0036`. Between the scene stages and speech: **after all scenes are defined, one model call per project maps every look and environment state the scenes asked for to the default, an existing named look or state, or one new entry that equivalent requests share** (`Path_ahead.md` Sections 14 and 16), so no picture is made twice. (1) `job.type` gains `resolve_looks_states`: the CHECK is rebuilt in batch mode, so `job` now has eighteen types. (2) Three new tables. `character_named_look` (Section 4.38) and `environment_state` (Section 4.39) hold the **named looks of a library character** ("night clothes") and the **named states of a library environment** ("night"): `slug`, `name`, `description`, `source`, the project and job that created it, and the picture link PHASE-017 fills (`look_id` and `reference_image_id`, both NULL for now). **Decision Q-2 (owner, 2026-10-21): a named look is a new record that points at a look**; `character_look` stays one image-making attempt and is not changed. The canonical look or reference is the implicit **`default`** and has no row (`slug <> 'default'` is a CHECK). Both tables are **library-wide**: they belong to the library character or environment, not to one of its versions, so any project that uses it can reuse them, and creating one adds **no version and moves no pin** (PHASE-017 does that when the pictures exist). `look_state_resolution` (Section 4.40) is the project artifact: one immutable row per run, numbered per project (`UNIQUE (project_id, version)`), following Section 2.1. (3) **Code decides what the model sees.** A request that says "default" (or nothing), and a character left out of `character_looks`, is `default` and is never sent. Requests with the same words (ignoring case and spacing) for one character or environment are grouped into one, with the scenes that made it, so the model only merges requests that are worded differently. The model sees the requests and, for each character or environment that has one, its default and the named looks or states it already has; it answers `default`, an existing id of **that** subject, or a new id. Code checks every request is answered once, every target belongs to its own subject, every new id is well formed (`^[a-z][a-z0-9_]{0,39}$`, not `default`, not taken, not repeated), the names and one-line descriptions are within their limits, and every new entry is used; an answer that fails is asked for once more and then the job fails with the reason and stores nothing. When every request is the default, the model is not called. (4) `inputs` records the story hash and the artifacts: the StoryBible, the list of scenes, **every scene's definition** (`scene_definition` row id, version and `scene_id`) and the library character or environment each subject was linked to. **Out of date is worked out on every read**: the story, the StoryBible or the list of scenes changed, a scene was defined again or added since, or a character or environment is linked to another library object. (5) A resolution can only be run when every scene in the newest list is defined and current. Running again is always allowed; with nothing changed the model sees the records the earlier run created and reuses them, so nothing new is created. See Sections 4.38 to 4.40, 5 and 7.
 
+**Update (PHASE-017 pictures of new looks and environment states, 2026-10-21):** migration `0037`. **Every new look and environment state PHASE-016 resolved gets its pictures, made once, as edits of the canonical picture.** (1) **No table and no job type is added**: the work is the Character Lab's own jobs, and the edit prompts are templates in code (`services/look_state_edit_prompts.py`), not written by a model. (2) `character_look` gains `named_look_id` (FK → `character_named_look.id`, `SET NULL`, indexed by `idx_character_look_named_look`) (Section 4.23): a look with it set holds the pictures of that named look, makes one candidate that is an edit of the canonical front picture, chooses its master by itself (D-5) and **never becomes the character's current look**. The two tables point at each other (`character_named_look.look_id` is the finished look). (3) `environment_state` gains `lab_run_id` (FK → `lab_run.id`, `SET NULL`: the edit run that makes the picture) and `inputs` (JSON, what it was made from); `reference_image_id` is filled when the picture is stored (Section 4.39). (4) `library_character_version` gains `named_looks` (JSON list, NOT NULL, default `'[]'`: the five pictures of each **ready** named look, as the version froze them) (Section 4.27), and `library_environment_version` gains `states` (JSON list, NOT NULL, default `'[]'`: the picture of each state that has one) (Section 4.32). (5) When a named look's five pictures exist, `character_named_look.look_id` is set and the character gets a new `ai` version that freezes them; when a state's picture is stored, `environment_state.reference_image_id` is set and the environment gets a new `ai` version that freezes it **and carries its canonical picture forward**. In both cases the project's pin moves to the new version, unless the link no longer points at that character or environment (or, for an environment, a newer version was made in the lab meanwhile), in which case the pictures stay on the record and the pin is left alone. (6) What is being made, failed or ready is **computed on every read** from the records, the looks, the runs and their jobs, never stored. No backfill: the two JSON lists default to empty. New endpoints under `/api/projects/{id}/look-state-images` and two read-only lab endpoints. See Sections 4.23, 4.27, 4.32, 4.38, 4.39, 5 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -321,6 +323,7 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `character_look` | `prompt_job_id` | `job.id` | Yes (the `write_character_look_prompt` job; `SET NULL`) |
 | `character_look` | `reference_image_id` | `lab_image.id` | Yes (the author's own picture the look was started from; `SET NULL`) |
 | `character_look` | `project_id` | `project.id` | Yes (the project the story pipeline made the look for; `SET NULL`). PHASE-010 |
+| `character_look` | `named_look_id` | `character_named_look.id` | Yes (the named look whose pictures this look holds; `SET NULL`). PHASE-017 |
 | `character_look_candidate` | `look_id` | `character_look.id` | No (`CASCADE`) |
 | `character_look_candidate` | `lab_run_id` | `lab_run.id` | Yes (`SET NULL`) |
 | `character_reference` | `look_id` | `character_look.id` | No (`CASCADE`) |
@@ -355,11 +358,12 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `character_named_look` | `character_id` | `library_character.id` | No (`CASCADE`). PHASE-016 |
 | `character_named_look` | `origin_project_id` | `project.id` | Yes (the project whose resolution created it; `SET NULL`). PHASE-016 |
 | `character_named_look` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that created it; `SET NULL`). PHASE-016 |
-| `character_named_look` | `look_id` | `character_look.id` | Yes (the look that holds its pictures; `SET NULL`; NULL until PHASE-017). PHASE-016 |
+| `character_named_look` | `look_id` | `character_look.id` | Yes (the look that holds its pictures; `SET NULL`; NULL until its five pictures exist, PHASE-017). PHASE-016 |
 | `environment_state` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-016 |
 | `environment_state` | `origin_project_id` | `project.id` | Yes (the project whose resolution created it; `SET NULL`). PHASE-016 |
 | `environment_state` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that created it; `SET NULL`). PHASE-016 |
-| `environment_state` | `reference_image_id` | `lab_image.id` | Yes (the state's picture; `SET NULL`; NULL until PHASE-017). PHASE-016 |
+| `environment_state` | `reference_image_id` | `lab_image.id` | Yes (the state's picture; `SET NULL`; NULL until its picture is stored, PHASE-017). PHASE-016 |
+| `environment_state` | `lab_run_id` | `lab_run.id` | Yes (the edit run that makes the state's picture; `SET NULL`). PHASE-017 |
 | `environment_reference` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-012 |
 | `environment_reference` | `version_id` | `library_environment_version.id` | No (the version the attempt was made for; `CASCADE`). PHASE-012 |
 | `environment_reference` | `prompt_job_id` | `job.id` | Yes (the `write_environment_prompt` job; `SET NULL`). PHASE-012 |
@@ -879,6 +883,7 @@ CREATE INDEX idx_scene_discovery_project ON scene_discovery (project_id);
 CREATE INDEX idx_library_character_created ON library_character (created_at);
 CREATE INDEX idx_character_look_character ON character_look (character_id);
 CREATE INDEX idx_character_look_project ON character_look (project_id);
+CREATE INDEX idx_character_look_named_look ON character_look (named_look_id);
 CREATE INDEX idx_character_look_candidate_look ON character_look_candidate (look_id);
 CREATE INDEX idx_character_take_character ON character_take (character_id);
 CREATE INDEX idx_character_take_created ON character_take (created_at);
@@ -1159,7 +1164,7 @@ CREATE TABLE library_character (
 
 ### 4.23 `character_look`
 
-*Documented in PHASE-007; added by migration `0016`, with `reference_image_id` added by `0018` and `project_id`, `discovery_id` and `inputs` added by `0029` (PHASE-010).* One attempt at a library character's reference pictures: a master picture on a white backdrop, plus four more angles made by editing it. **`version` numbers a character's looks from 1 and is not the character's version** (Section 4.27): a look is one set of pictures, a character version is a snapshot of the whole character. `status` starts at `waiting` for a same-face variant the story pipeline makes while its base's images are still being made (PHASE-047; no job exists yet, and it moves to `writing_prompt` by one conditional update when the base's pin has moved, or is replaced by a newer run), then moves `writing_prompt` → `choosing` (the candidates are ready and wait for one to be picked as the master) → `making_angles` → `ready`, or `failed`. The look becomes the character's `current_look_id` each time it turns `ready`. Redoing one angle of a `ready` look sets it back to `making_angles` until the new picture is stored.
+*Documented in PHASE-007; added by migration `0016`, with `reference_image_id` added by `0018`, `project_id`, `discovery_id` and `inputs` added by `0029` (PHASE-010) and `named_look_id` added by `0037` (PHASE-017).* One attempt at a library character's reference pictures: a master picture on a white backdrop, plus four more angles made by editing it. **`version` numbers a character's looks from 1 and is not the character's version** (Section 4.27): a look is one set of pictures, a character version is a snapshot of the whole character. `status` starts at `waiting` for a same-face variant the story pipeline makes while its base's images are still being made (PHASE-047; no job exists yet, and it moves to `writing_prompt` by one conditional update when the base's pin has moved, or is replaced by a newer run), then moves `writing_prompt` → `choosing` (the candidates are ready and wait for one to be picked as the master) → `making_angles` → `ready`, or `failed`. The look becomes the character's `current_look_id` each time it turns `ready`. Redoing one angle of a `ready` look sets it back to `making_angles` until the new picture is stored.
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
@@ -1174,7 +1179,8 @@ CREATE TABLE library_character (
 | `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The author's own picture the look was started from: its candidates are edits of it. NULL for a look made from the profile alone. `ON DELETE SET NULL` |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | PHASE-010 (migration `0029`). The project the **story pipeline** made this look for. NULL for a look made in the lab. A look with a `project_id` makes one candidate, chooses its master by itself and, once `ready`, moves that project's pin (Section 7). `ON DELETE SET NULL` (the look then behaves as a lab look) |
 | `discovery_id` | TEXT | NULL | — | PHASE-010. The slug id of the discovered character in that project. Together with `project_id` it finds the `project_character_link` to move |
-| `inputs` | JSON | NULL | — | PHASE-010. The D-3 provenance of a pipeline look: `{"project_id", "discovery_id", "character_version", "definition_sha256"}`. NULL for a lab look. "Out of date" images are worked out by comparing `definition_sha256` with the definition the project pins now |
+| `inputs` | JSON | NULL | — | PHASE-010. The D-3 provenance of a pipeline look: `{"project_id", "discovery_id", "character_version", "definition_sha256"}`. NULL for a lab look. "Out of date" images are worked out by comparing `definition_sha256` with the definition the project pins now. A look for a named look (PHASE-017) records `{"project_id", "discovery_id", "slug", "source_version", "source_image_id", "resolution_version", "named_look_id"}` instead |
+| `named_look_id` | INTEGER, FK → `character_named_look.id` | NULL | — | PHASE-017 (migration `0037`). Set only for a look that holds the pictures of a **named look** ("night clothes"). Such a look is made from a template prompt (no `write_character_look_prompt` job, so `prompt_job_id` stays NULL), starts at `choosing`, makes one candidate that is an edit of the canonical front picture (`reference_image_id`), takes it as its master by itself and, once `ready`, sets `character_named_look.look_id`. **It never becomes `current_look_id`**, and it is left out of the canonical look readings (the lab's looks list, the canonical-images status, "use this look"). `ON DELETE SET NULL` (named `fk_character_look_named_look_id_character_named_look`) |
 
 ```sql
 CREATE TABLE character_look (
@@ -1190,10 +1196,12 @@ CREATE TABLE character_look (
     reference_image_id  INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
     project_id          INTEGER REFERENCES project(id) ON DELETE SET NULL,
     discovery_id        TEXT,
-    inputs              JSON
+    inputs              JSON,
+    named_look_id       INTEGER REFERENCES character_named_look(id) ON DELETE SET NULL
 );
 CREATE INDEX idx_character_look_character ON character_look (character_id);
 CREATE INDEX idx_character_look_project ON character_look (project_id);
+CREATE INDEX idx_character_look_named_look ON character_look (named_look_id);
 ```
 
 ### 4.24 `character_look_candidate`
@@ -1333,7 +1341,7 @@ CREATE INDEX idx_character_take_created ON character_take (created_at);
 
 ### 4.27 `library_character_version`
 
-*Added in PHASE-007 (migration `0026`) and extended by `0028` (`definition`, `job_id`, `inputs`).* One **immutable snapshot of what defines a library character for production**: its profile, its structured definition (PHASE-009), its voice and its current look with that look's exact pictures. A row is added (never changed) whenever one of those changes, so a project can later pin a version (PHASE-008) and still read exactly what it was. `library_character` (Section 4.22) stays the editable head; the newest version normally equals it. It follows the provenance convention of Section 2.1: `source`, `version` and `created_at`, and, since PHASE-009, `job_id` and `inputs`. Both are NULL for a version made by hand in the lab (nothing upstream), and set for a version a `define_character` job wrote: the job, and what the definition was made from. `UNIQUE (character_id, version)` numbers a character's versions from 1.
+*Added in PHASE-007 (migration `0026`) and extended by `0028` (`definition`, `job_id`, `inputs`) and `0037` (`named_looks`, PHASE-017).* One **immutable snapshot of what defines a library character for production**: its profile, its structured definition (PHASE-009), its voice and its current look with that look's exact pictures. A row is added (never changed) whenever one of those changes, so a project can later pin a version (PHASE-008) and still read exactly what it was. `library_character` (Section 4.22) stays the editable head; the newest version normally equals it. It follows the provenance convention of Section 2.1: `source`, `version` and `created_at`, and, since PHASE-009, `job_id` and `inputs`. Both are NULL for a version made by hand in the lab (nothing upstream), and set for a version a `define_character` job wrote: the job, and what the definition was made from. `UNIQUE (character_id, version)` numbers a character's versions from 1.
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
@@ -1349,6 +1357,7 @@ CREATE INDEX idx_character_take_created ON character_take (created_at);
 | `look_references` | JSON | NOT NULL | — | The look's pictures as they were: `[{"angle": "front", "lab_image_id": 41, "cutout_path": "lab/ab12.png" or null}, ...]`, sorted by angle name; `[]` when there is no look. Copied, not linked, so a later redo of an angle (which updates `character_reference` in place) never changes it |
 | `definition` | JSON | NULL | — | PHASE-009. The structured definition the character held at that moment (Section 5, "The character definition"), or NULL when it had none. A version made by a lab edit **carries forward** the definition the character already has |
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | PHASE-009. The `define_character` job that wrote this version. NULL for a version made by hand. `ON DELETE SET NULL` (named `fk_library_character_version_job_id_job`) |
+| `named_looks` | JSON | NOT NULL | `'[]'` | PHASE-017 (migration `0037`). The pictures of the character's named looks as the version froze them: `[{"slug", "named_look_id", "look_id", "references": [{"angle", "lab_image_id", "cutout_path"}]}]`, sorted by `slug`, only for a look that is `ready` (a named look whose pictures are being redone keeps the entry of the newest version). Copied, not linked, like `look_references` |
 | `inputs` | JSON | NULL | — | PHASE-009, the D-3 inputs (Section 2.1): `{"project_id", "discovery_id", "story_sha256", "entry_sha256", "artifacts": [{"kind": "story_bible", "id", "version"}, {"kind": "character_discovery", "id", "version"}]}`. `entry_sha256` is the SHA-256 of the entry's name and one-line description as the model saw them. Since PHASE-047 it also has `relations_sha256` (the SHA-256 of the relations that name this character, as the model saw them; a version without it reads as having none) and, when the project had relations, `{"kind": "character_relations", "id", "version"}` in `artifacts`. NULL for a version made by hand. It is what "out of date" is worked out from, and it also says which project and which character of its list the definition was written for |
 
 ```sql
@@ -1366,6 +1375,7 @@ CREATE TABLE library_character_version (
     definition         JSON,
     job_id             INTEGER,
     inputs             JSON,
+    named_looks        JSON NOT NULL DEFAULT '[]',
     UNIQUE (character_id, version),
     CONSTRAINT fk_library_character_version_job_id_job
         FOREIGN KEY (job_id) REFERENCES job(id) ON DELETE SET NULL
@@ -1385,9 +1395,10 @@ CREATE INDEX idx_library_character_version_character ON library_character_versio
 | The voice description is edited | `character_library.set_voice_description` |
 | A look turns `ready` (it becomes the current look), or an angle redone on a look turns it `ready` again | `character_looks._maybe_mark_ready` |
 | An earlier ready look is made current again | `character_looks.use_look` (`PUT /api/lab/characters/{id}/current-look`) |
+| The five pictures of a named look exist (PHASE-017) | `character_looks._finish_named_look`: sets `character_named_look.look_id`, then `pin_new_version` writes a version with `source='ai'` (no job) and the `inputs` of the pinned version, and moves the project's pin. The character's current look is not touched |
 | A `define_character` job saves a definition (PHASE-009) | `character_definitions.save_definition`: writes `library_character.definition` and the profile fields it fills, then adds a version with `source='ai'`, `job_id` and `inputs`, in the same transaction that marks the job succeeded. It also moves the project's pin to that version |
 
-The code builds the snapshot of the character as it is now and compares it with the newest version; a version is added **only when something differs**, so saving the same form twice adds none. The comparison includes the `definition`. When the caller passes `inputs` (a definition run), the `inputs` are compared too: the same definition made again from newer inputs (a changed story, a re-written StoryBible) is a new version, so the pinned version always says what it was made from. Archiving is not a version change. A look that is not `ready` is never frozen: while the current look is being redone (`making_angles`) its pictures are half old and half new, so the newest version's look part is carried forward, and the redo adds its own version when the look is ready again. **What a version changed** (`created`, `profile`, `definition`, `look`, `voice`) is worked out on read by comparing a version with the one before it (`character_versions.changes_between`), never stored. The newest number is also `CharacterOut.version` in the API. The version number is the newest plus 1, as looks are numbered, so two changes committed at the same instant could collide on the unique constraint and one of them would fail; with one backend process that is very unlikely and it is accepted. There is no backfill: a character made before this migration has no version (`version: null`) until its next change.
+The code builds the snapshot of the character as it is now and compares it with the newest version; a version is added **only when something differs**, so saving the same form twice adds none. The comparison includes the `definition`. When the caller passes `inputs` (a definition run), the `inputs` are compared too: the same definition made again from newer inputs (a changed story, a re-written StoryBible) is a new version, so the pinned version always says what it was made from. Archiving is not a version change. A look that is not `ready` is never frozen: while the current look is being redone (`making_angles`) its pictures are half old and half new, so the newest version's look part is carried forward, and the redo adds its own version when the look is ready again. **What a version changed** (`created`, `profile`, `definition`, `look`, `voice`, `named_looks`) is worked out on read by comparing a version with the one before it (`character_versions.changes_between`), never stored. The newest number is also `CharacterOut.version` in the API. The version number is the newest plus 1, as looks are numbered, so two changes committed at the same instant could collide on the unique constraint and one of them would fail; with one backend process that is very unlikely and it is accepted. There is no backfill: a character made before this migration has no version (`version: null`) until its next change.
 
 ### 4.28 `project_character_link`
 
@@ -1558,7 +1569,7 @@ The head is the **current** profile. Every change that alters one of the seven p
 
 ### 4.32 `library_environment_version`
 
-*Added in PHASE-012 (migration `0032`).* One **immutable snapshot of an environment's profile**, the same pattern as `library_character_version` (Section 4.27): `environment_versions.record_version_if_changed` adds the next `version` only when the profile differs from the newest one's (so saving the same form twice adds none), flushes and never commits. A stored row is never changed, except that `reference_image_id` is set when its canonical picture is chosen. What a version changed is **worked out on read**, never stored.
+*Added in PHASE-012 (migration `0032`) and extended by `0033` and, for `states`, `0037` (PHASE-017).* One **immutable snapshot of an environment's profile**, the same pattern as `library_character_version` (Section 4.27): `environment_versions.record_version_if_changed` adds the next `version` only when the profile differs from the newest one's (so saving the same form twice adds none), flushes and never commits. A stored row is never changed, except that `reference_image_id` is set when its canonical picture is chosen. What a version changed is **worked out on read**, never stored.
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
@@ -1572,6 +1583,7 @@ The head is the **current** profile. Every change that alters one of the seven p
 | `definition` | JSON | NULL | — | PHASE-013 (migration `0033`). The structured definition as the head held it when this version was written (Section 5). NULL for a version with none. A lab edit copies the head's definition forward unchanged |
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | PHASE-013. The `define_environment` job that wrote this version. NULL for a manual version and for the first version of an environment the pipeline created. `ON DELETE SET NULL` |
 | `inputs` | JSON | NULL | — | PHASE-013. The D-3 inputs of Section 2.1 the definition was made from: `project_id`, `discovery_id`, the story hash, the entry's hash and the artifacts read (the StoryBible, the list of environments and the scenes, each with its version). NULL for a version made by hand |
+| `states` | JSON | NOT NULL | `'[]'` | PHASE-017 (migration `0037`). The pictures of the environment's named states as the version froze them: `[{"slug", "state_id", "reference_image_id"}]`, sorted by `slug`, only for a state that has a picture |
 
 ```sql
 CREATE TABLE library_environment_version (
@@ -1585,12 +1597,13 @@ CREATE TABLE library_environment_version (
     definition         JSON,
     job_id             INTEGER REFERENCES job(id) ON DELETE SET NULL,
     inputs             JSON,
+    states             JSON NOT NULL DEFAULT '[]',
     UNIQUE (environment_id, version)
 );
 CREATE INDEX idx_library_environment_version_environment ON library_environment_version (environment_id);
 ```
 
-`environment_versions.record_version_if_changed` compares the profile and the `definition`, and, when a definition run passes `inputs`, those too: the same text made from newer inputs (the story changed) is a new version, so the pinned version always says what it was made from. What a version changed (`created`, `profile`, `definition`) is worked out on read.
+`environment_versions.record_version_if_changed` compares the profile and the `definition`, and, when a definition run passes `inputs`, those too: the same text made from newer inputs (the story changed) is a new version, so the pinned version always says what it was made from. What a version changed (`created`, `profile`, `definition`, `states`) is worked out on read. A version also freezes the pictures of the states the environment has (`states`), so a lab edit made after a state's picture exists keeps it, and a version written for a state's picture carries the canonical `reference_image_id` forward (`record_version_if_changed(..., carry_picture=True)`, only when the profile and the definition equal the newest version's); no other writer carries a picture forward.
 
 **A picture belongs to the version it was made for.** An edit never copies the picture forward: the new version starts with none and the older version keeps its own. A picture can be chosen or replaced only while the version is **not frozen**, and a version is frozen when **either** holds (`environment_references.is_frozen` and the "newest" check): (1) it is no longer the environment's newest version, or (2) **a project pins it and it already has a picture**. So a pipeline picture cannot be swapped under a project, and a pinned version with no picture yet can still be given one. (`environment_references.choose` and the start of a lab attempt both refuse a frozen version.) The "chosen" candidate of an attempt is not stored: it is the candidate whose picture is the version's `reference_image_id`.
 
@@ -1763,7 +1776,7 @@ CREATE INDEX idx_scene_events_project_scene ON scene_events (project_id, scene_i
 
 ### 4.38 `character_named_look`
 
-*Added in PHASE-016 (migration `0036`).* A **named look of a library character** ("night clothes", "wet from the rain"). **Decision Q-2 (owner, 2026-10-21): a named look is a new record that points at a look**, so `character_look` (one image-making attempt, Section 4.23) is not changed. The character's canonical look is the implicit **`default`** and has **no row**. The table belongs to the **library character, not to one of its versions**: any project that links the character sees the same named looks, and creating one adds no `library_character_version` and moves no pin (PHASE-017 does that when the pictures exist). Rows are written by the `resolve_looks_states` job (Section 4.40) in the transaction that saves the resolution; nothing edits a row in this phase. The rules are in `services/look_state_resolution.py`.
+*Added in PHASE-016 (migration `0036`).* A **named look of a library character** ("night clothes", "wet from the rain"). **Decision Q-2 (owner, 2026-10-21): a named look is a new record that points at a look**, so `character_look` (one image-making attempt, Section 4.23) is not changed. The character's canonical look is the implicit **`default`** and has **no row**. The table belongs to the **library character, not to one of its versions**: any project that links the character sees the same named looks, and creating one adds no `library_character_version` and moves no pin (PHASE-017 does that when its pictures exist: Section 4.23, `named_look_id`). Rows are written by the `resolve_looks_states` job (Section 4.40) in the transaction that saves the resolution; nothing edits a row in this phase. The rules are in `services/look_state_resolution.py`.
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
@@ -1775,7 +1788,7 @@ CREATE INDEX idx_scene_events_project_scene ON scene_events (project_id, scene_i
 | `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`). Always `ai` in this phase |
 | `origin_project_id` | INTEGER, FK → `project.id` | NULL | — | The project whose resolution created it. `ON DELETE SET NULL` |
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | The `resolve_looks_states` job that created it. `ON DELETE SET NULL` |
-| `look_id` | INTEGER, FK → `character_look.id` | NULL | — | The look that holds its pictures. NULL until PHASE-017. `ON DELETE SET NULL` |
+| `look_id` | INTEGER, FK → `character_look.id` | NULL | — | The look that holds its pictures. NULL until its five pictures exist; set by PHASE-017 (`character_looks._finish_named_look`) to the newest attempt that finished. `ON DELETE SET NULL` |
 | `created_at` | DATETIME | NOT NULL | now | |
 
 ```sql
@@ -1798,7 +1811,7 @@ CREATE TABLE character_named_look (
 
 ### 4.39 `environment_state`
 
-*Added in PHASE-016 (migration `0036`).* The same for environments: a **named state of a library environment** ("night", "after the storm"). The environment's canonical reference is the implicit **`default`** and has no row. It belongs to the library environment, not to one of its versions, and is written by the same job. Its picture link is `reference_image_id` (a `lab_image`), NULL until PHASE-017.
+*Added in PHASE-016 (migration `0036`).* The same for environments: a **named state of a library environment** ("night", "after the storm"). The environment's canonical reference is the implicit **`default`** and has no row. It belongs to the library environment, not to one of its versions, and is written by the same job. Its picture link is `reference_image_id` (a `lab_image`), NULL until PHASE-017 stores the picture (migration `0037` also added `lab_run_id` and `inputs`).
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
@@ -1810,7 +1823,9 @@ CREATE TABLE character_named_look (
 | `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
 | `origin_project_id` | INTEGER, FK → `project.id` | NULL | — | `ON DELETE SET NULL` |
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | `ON DELETE SET NULL` |
-| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The state's picture. NULL until PHASE-017. `ON DELETE SET NULL` |
+| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The state's picture. NULL until it is stored (PHASE-017, `look_state_images.on_state_image_stored`). `ON DELETE SET NULL` |
+| `lab_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | PHASE-017 (migration `0037`). The edit run (16:9, an edit of the pinned version's canonical picture) that makes the picture. NULL until a picture is started; pressing the button again after a failure replaces it. `ON DELETE SET NULL` (named `fk_environment_state_lab_run_id_lab_run`) |
+| `inputs` | JSON | NULL | — | PHASE-017. What the picture was made from: `{"project_id", "discovery_id", "slug", "source_version", "source_image_id", "resolution_version", "environment_version"}`. It also says which project's link to move when the picture is stored |
 | `created_at` | DATETIME | NOT NULL | now | |
 
 ```sql
@@ -1824,6 +1839,8 @@ CREATE TABLE environment_state (
     origin_project_id  INTEGER REFERENCES project(id) ON DELETE SET NULL,
     job_id             INTEGER REFERENCES job(id) ON DELETE SET NULL,
     reference_image_id INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    lab_run_id         INTEGER REFERENCES lab_run(id) ON DELETE SET NULL,
+    inputs             JSON,
     created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_environment_state_environment_id UNIQUE (environment_id, slug)
 );
@@ -2371,6 +2388,23 @@ One job per project. It belongs to the project, is `provider='llm'` with the res
 
 Only requests that are **not** the default are listed (`plan` keeps `request_id: null` for the rest). `library_id` and `record_id` are kept for code and are **not sent** to the model. When the job starts it resolves the story model, loads the StoryBible named by `story_bible_id` (the job fails with "The Story Bible this run was started with could not be found." if it is missing), and adds what it sent: `instructions_sha256`, `server_url`, `endpoint` and the exact chat `request`. When `requests` is empty **the model is not called**. The answer is checked once for the whole project; an unusable answer is retried within the attempt limits (D-7). On success, in **one transaction**, `look_state_resolution.save_resolution` inserts the new `character_named_look` and `environment_state` rows (checking again that no slug was taken while the job ran), adds the `look_state_resolution` row (`source='ai'`, `job_id`, `inputs`, `content`) and marks the job succeeded; `output` holds the answer record, `content: null`, `version`, `requests`, `new_looks`, `new_states` and `seconds`.
 
+### The pictures of named looks and states (PHASE-017)
+
+`library_character_version.named_looks`:
+
+```json
+[{"slug": "night_clothes", "named_look_id": 3, "look_id": 12,
+  "references": [{"angle": "front", "lab_image_id": 41, "cutout_path": null}]}]
+```
+
+`library_environment_version.states`:
+
+```json
+[{"slug": "night", "state_id": 2, "reference_image_id": 57}]
+```
+
+`character_look.inputs` (a look for a named look) and `environment_state.inputs`: `{"project_id", "discovery_id", "slug", "source_version", "source_image_id", "resolution_version"}` plus `named_look_id` for a look and `environment_version` for a state. `source_version` is the version of the library character or environment the project pinned, and `source_image_id` the canonical `lab_image` the edit started from. The edit prompts are not stored in these columns: they are in `lab_run.prompt`.
+
 ---
 
 ## 6. Global settings stored in `setting`
@@ -2440,6 +2474,7 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Define the scenes (PHASE-014) | `POST /api/projects/{id}/scene-definitions/{scene_id}/run` (one scene) or `POST .../run` (Define all): refused with 422 when there is no saved story, no `story_bible` row or one out of date, no list of scenes, characters or environments or one out of date, or a character or environment that is not linked and `defined`, and for a scene id not in the newest list. Otherwise `INSERT job` (`type='define_scene'`, `dedupe_key=scene_id`) with the story, the scene, its neighbours and every definition. Define all skips a scene that is defined and current and one being defined. The job writes one row: `INSERT scene_definition` (the next `version` of that scene) in the transaction that finishes the job. Nothing else is written: no library object changes and no pin moves. |
 | Extract the events of the scenes (PHASE-015) | `POST /api/projects/{id}/scene-events/{scene_id}/run` (one scene) or `POST .../run` (Extract all): refused with 422 when there is no saved story, no `story_bible` row or one out of date, no list of scenes or characters or one out of date, and for a scene id not in the newest list or a scene whose definition is missing or out of date. Otherwise `INSERT job` (`type='extract_events'`, `dedupe_key=scene_id`) with the scene, its definition and the characters. Extract all skips a scene that is extracted and current, one without a current definition, and one being extracted. The job writes one row: `INSERT scene_events` (the next `version` of that scene) in the transaction that finishes the job. Nothing else is written: no library object changes and no pin moves. |
 | Resolve the looks and environment states (PHASE-016) | `POST /api/projects/{id}/looks-and-states/run`: refused with 422 when there is no saved story, no `story_bible` row or one out of date, no list of scenes or characters or one out of date, a scene that is not defined or whose definition is out of date, or a character or environment a scene uses that is not linked. Otherwise `INSERT job` (`type='resolve_looks_states'`, one active job per project). The job writes, in the transaction that finishes it: `INSERT character_named_look` and `INSERT environment_state` for each **new** look or state (belonging to the library character or environment, `look_id` and `reference_image_id` NULL) and `INSERT look_state_resolution` (the next `version` of the project). Nothing else is written: no library version is added, no pin moves and no `character_look` or `lab_image` row changes. |
+| Make the pictures of the new looks and states (PHASE-017) | `POST /api/projects/{id}/look-state-images/run` (all), `.../looks/{record_id}/run` or `.../states/{record_id}/run`: refused with 422 when there is no resolution or it is out of date, or, for the item, when its character or environment is not linked, its canonical images (or definition and picture) are not ready, the environment has a newer version than the pin, or its pictures exist or are being made. A look: `INSERT character_look` (`named_look_id`, `prompt` from the template, `status='choosing'`) with one candidate (`INSERT character_look_candidate`, one `lab_run` edit run and its `lab_image` job). A state: `INSERT lab_run` (16:9 edit of the pinned canonical picture) and its `lab_image` job, and `UPDATE environment_state SET lab_run_id, inputs`. When the pictures are stored: the master is taken, four angle runs follow, and when all five exist `UPDATE character_named_look SET look_id`, `INSERT library_character_version` (`source='ai'`, `named_looks`) and `UPDATE project_character_link SET pinned_version`; for a state `UPDATE environment_state SET reference_image_id`, `INSERT library_environment_version` (`source='ai'`, `states`, the canonical `reference_image_id` carried forward) and `UPDATE project_environment_link SET pinned_version`. Nothing else is written: `library_character.current_look_id` never changes. |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 

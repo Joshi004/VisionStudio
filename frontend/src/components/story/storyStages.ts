@@ -69,7 +69,8 @@ export const STORY_STAGES: readonly StoryStage[] = [
   {
     id: "looks-and-states",
     name: "Looks and environment states",
-    description: "Settles which outfits and conditions (such as night) the scenes need.",
+    description:
+      "Settles which outfits and conditions (such as night) the scenes need, then draws the new ones from the canonical pictures.",
     available: true,
   },
   {

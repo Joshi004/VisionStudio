@@ -17,6 +17,7 @@ import type { EnvironmentDefinition } from "../../api/environmentDefinitions";
 import { useEditEnvironment, useLibraryEnvironment } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { EnvironmentDefinitionView } from "./EnvironmentDefinitionView";
+import { EnvironmentStates } from "./EnvironmentStates";
 import { EnvironmentUsedByProjects } from "./EnvironmentUsedByProjects";
 import { EnvironmentVersionHistory } from "./EnvironmentVersionHistory";
 import { eraText } from "./environmentLabView";
@@ -176,6 +177,8 @@ export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPa
               </Stack>
 
               <DefinitionSection definition={data.definition} />
+
+              <EnvironmentStates environmentId={data.id} />
 
               <EnvironmentUsedByProjects environmentId={data.id} />
 

@@ -18,6 +18,7 @@ from app.api import (
     health,
     image_lab,
     jobs,
+    look_state_images,
     look_state_resolution,
     projects,
     scene_definitions,
@@ -54,3 +55,4 @@ api_router.include_router(environment_definitions.router, tags=["environment-def
 api_router.include_router(scene_definitions.router, tags=["scene-definitions"])
 api_router.include_router(scene_events.router, tags=["scene-events"])
 api_router.include_router(look_state_resolution.router, tags=["look-state-resolution"])
+api_router.include_router(look_state_images.router, tags=["look-state-images"])

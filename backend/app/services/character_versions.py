@@ -15,6 +15,8 @@ A version holds:
   place, which never touches a snapshot: an old version keeps showing the picture it had;
 - the structured **definition** the Character Definition stage wrote (PHASE-009), as the head
   held it. A lab edit carries it forward unchanged;
+- the **named looks** (PHASE-017): the exact pictures of each finished named look, such as night
+  clothes (`named_looks`). Only a ready look is frozen, as for the current look;
 - for a version the pipeline made, its provenance (D-3): `job_id` and `inputs`. A version made
   by hand has neither.
 
@@ -49,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     CharacterLook,
+    CharacterNamedLook,
     CharacterReference,
     LibraryCharacter,
     LibraryCharacterVersion,
@@ -71,7 +74,7 @@ PROFILE_FIELDS: Final[tuple[str, ...]] = (
 )
 
 # What a version changed compared with the one before it. `created` is the first version.
-Change = Literal["created", "profile", "definition", "look", "voice"]
+Change = Literal["created", "profile", "definition", "look", "voice", "named_looks"]
 
 # Who made the change: a person in the lab, or the pipeline from the model's text.
 Source = Literal["ai", "manual"]
@@ -87,6 +90,7 @@ class Snapshot:
     look_id: int | None
     look_references: list[dict[str, Any]]
     definition: dict[str, Any] | None
+    named_looks: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -147,6 +151,56 @@ async def _look_part(
     return look.id, pictures
 
 
+async def _named_looks_part(
+    session: AsyncSession,
+    character: LibraryCharacter,
+    newest: LibraryCharacterVersion | None,
+) -> list[dict[str, Any]]:
+    """The pictures of the character's named looks (PHASE-017) a snapshot freezes, sorted by
+    slug. Only a named look whose look is ready is frozen: while one is being redone its entry
+    is carried forward from the newest version, as the current look's is.
+    """
+    statement = (
+        select(CharacterNamedLook)
+        .where(CharacterNamedLook.character_id == character.id)
+        .where(CharacterNamedLook.look_id.is_not(None))
+        .order_by(CharacterNamedLook.slug)
+    )
+    carried = {
+        entry["slug"]: entry for entry in (newest.named_looks if newest is not None else None) or []
+    }
+    entries: list[dict[str, Any]] = []
+    for named in (await session.execute(statement)).scalars().all():
+        look = await session.get(CharacterLook, named.look_id) if named.look_id else None
+        if look is None:
+            continue
+        if look.status != "ready":
+            if named.slug in carried:
+                entries.append(carried[named.slug])
+            continue
+        reference_statement = select(CharacterReference).where(
+            CharacterReference.look_id == look.id
+        )
+        references = (await session.execute(reference_statement)).scalars().all()
+        entries.append(
+            {
+                "slug": named.slug,
+                "named_look_id": named.id,
+                "look_id": look.id,
+                "references": [
+                    {
+                        "angle": reference.angle,
+                        "lab_image_id": reference.lab_image_id,
+                        "cutout_path": reference.cutout_path,
+                    }
+                    for reference in sorted(references, key=lambda reference: reference.angle)
+                    if reference.lab_image_id is not None
+                ],
+            }
+        )
+    return entries
+
+
 async def snapshot(
     session: AsyncSession,
     character: LibraryCharacter,
@@ -163,6 +217,7 @@ async def snapshot(
         look_id=look_id,
         look_references=look_references,
         definition=character.definition,
+        named_looks=await _named_looks_part(session, character, newest),
     )
 
 
@@ -179,6 +234,7 @@ def _same(
         and version.look_id == current.look_id
         and version.look_references == current.look_references
         and version.definition == current.definition
+        and (version.named_looks or []) == current.named_looks
         and (inputs is None or version.inputs == inputs)
     )
 
@@ -215,6 +271,7 @@ async def record_version_if_changed(
         look_id=current.look_id,
         look_references=current.look_references,
         definition=current.definition,
+        named_looks=current.named_looks,
         job_id=job_id,
         inputs=inputs,
     )
@@ -243,6 +300,8 @@ def changes_between(
         or previous.voice_description != current.voice_description
     ):
         changes.append("voice")
+    if (previous.named_looks or []) != (current.named_looks or []):
+        changes.append("named_looks")
     return changes
 
 

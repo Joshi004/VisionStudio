@@ -13,6 +13,7 @@ export type EnvironmentIn = components["schemas"]["EnvironmentIn"];
 export type EnvironmentPatch = components["schemas"]["EnvironmentPatch"];
 export type EnvironmentVersion = components["schemas"]["EnvironmentVersionOut"];
 export type EnvironmentReference = components["schemas"]["ReferenceOut"];
+export type EnvironmentStateRecord = components["schemas"]["EnvironmentStateOut"];
 export type ReferenceCandidate = components["schemas"]["ReferenceCandidateOut"];
 
 const PAGE_SIZE = 20;
@@ -26,6 +27,8 @@ const versionsKey = (environmentId: number | null) =>
   [...ENVIRONMENT_LAB_KEY, "versions", environmentId] as const;
 const referencesKey = (environmentId: number | null) =>
   [...ENVIRONMENT_LAB_KEY, "references", environmentId] as const;
+const statesKey = (environmentId: number | null) =>
+  [...ENVIRONMENT_LAB_KEY, "states", environmentId] as const;
 
 function failure(error: unknown, status: number, what: string): ApiError {
   return new ApiError(detailMessage(error, `${what} (HTTP ${status}).`), status);
@@ -148,6 +151,31 @@ export function useEnvironmentVersions(environmentId: number | null) {
   return useQuery({
     queryKey: versionsKey(environmentId),
     queryFn: () => fetchVersions(environmentId as number),
+    enabled: environmentId !== null,
+  });
+}
+
+// --- States ------------------------------------------------------------------------------------
+
+async function fetchStates(environmentId: number) {
+  const { data, error, response } = await api.GET(
+    "/api/lab/environments/{environment_id}/states",
+    { params: { path: { environment_id: environmentId } } },
+  );
+  if (!data) {
+    throw failure(error, response.status, "Could not load the states");
+  }
+  return data;
+}
+
+/**
+ * The named states of an environment (such as night), read-only. A story project's resolution
+ * creates them and makes their pictures, so they are loaded again after any change.
+ */
+export function useEnvironmentStates(environmentId: number | null) {
+  return useQuery({
+    queryKey: statesKey(environmentId),
+    queryFn: () => fetchStates(environmentId as number),
     enabled: environmentId !== null,
   });
 }

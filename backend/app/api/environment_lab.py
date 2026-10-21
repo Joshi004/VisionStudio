@@ -36,6 +36,7 @@ from app.api.errors import ErrorResponse
 from app.api.jobs import JobSummary, job_summary
 from app.db.models import (
     EnvironmentReference,
+    EnvironmentState,
     Job,
     LabImage,
     LabRun,
@@ -347,6 +348,14 @@ class PinnedByOut(BaseModel):
     discovery_id: str
 
 
+class StatePictureOut(BaseModel):
+    """The picture of one environment state as a version froze it (PHASE-017)."""
+
+    slug: str
+    name: str
+    image: PictureOut | None
+
+
 class EnvironmentVersionOut(BaseModel):
     id: int
     version: int
@@ -364,6 +373,9 @@ class EnvironmentVersionOut(BaseModel):
     job_id: int | None
     # The story projects that pin this version.
     pinned_by: list[PinnedByOut]
+    # The pictures of the environment's states (such as night) this version froze, by slug
+    # (PHASE-017). Empty when there were none.
+    states: list[StatePictureOut]
 
 
 @router.get(
@@ -382,6 +394,13 @@ async def list_versions(
         raise _missing(f"There is no environment {environment_id}.")
     entries = await environment_versions.list_versions(session, environment_id)
     usages = await environment_links.used_by(session, environment_id)
+    state_ids = {frozen["state_id"] for entry in entries for frozen in entry.version.states or []}
+    state_names: dict[int, str] = {}
+    if state_ids:
+        found = await session.execute(
+            select(EnvironmentState).where(EnvironmentState.id.in_(state_ids))
+        )
+        state_names = {record.id: record.name for record in found.scalars()}
     return [
         EnvironmentVersionOut(
             id=entry.version.id,
@@ -406,8 +425,69 @@ async def list_versions(
                 for usage in usages
                 if usage.link.pinned_version == entry.version.version
             ],
+            states=[
+                StatePictureOut(
+                    slug=frozen["slug"],
+                    name=state_names.get(frozen["state_id"], frozen["slug"]),
+                    image=await _picture(session, frozen["reference_image_id"]),
+                )
+                for frozen in entry.version.states or []
+            ],
         )
         for entry in entries
+    ]
+
+
+# --- An environment's states (read-only) ------------------------------------------------------
+
+
+class EnvironmentStateOut(BaseModel):
+    """A named state of a library environment, such as night (PHASE-016, PHASE-017)."""
+
+    id: int
+    slug: str
+    name: str
+    description: str
+    source: Literal["ai", "manual"]
+    created_at: datetime
+    # The project whose resolution created it, when that project still exists.
+    origin_project_id: int | None
+    # The state's picture, an edit of the canonical one. None until it is made.
+    image: PictureOut | None
+
+
+@router.get(
+    "/lab/environments/{environment_id}/states",
+    response_model=list[EnvironmentStateOut],
+    responses=_NOT_FOUND,
+)
+async def list_environment_states(
+    environment_id: EnvironmentId, session: SessionDep
+) -> list[EnvironmentStateOut]:
+    """The named states of this environment, oldest first, each with its picture once it is
+    made. Read-only: a story project's resolution creates them and makes their pictures.
+    """
+    if await environment_library.get_environment(session, environment_id) is None:
+        raise _missing(f"There is no environment {environment_id}.")
+    statement = (
+        select(EnvironmentState)
+        .where(EnvironmentState.environment_id == environment_id)
+        .order_by(EnvironmentState.id)
+        .execution_options(populate_existing=True)
+    )
+    records = (await session.execute(statement)).scalars().all()
+    return [
+        EnvironmentStateOut(
+            id=record.id,
+            slug=record.slug,
+            name=record.name,
+            description=record.description,
+            source=typing_cast(Literal["ai", "manual"], record.source),
+            created_at=record.created_at,
+            origin_project_id=record.origin_project_id,
+            image=await _picture(session, record.reference_image_id),
+        )
+        for record in records
     ]
 
 

@@ -55,6 +55,7 @@ from app.api.video_lab import (
 )
 from app.db.models import (
     CharacterLook,
+    CharacterNamedLook,
     Job,
     LabImage,
     LabRun,
@@ -399,6 +400,15 @@ class VersionProfileOut(BaseModel):
     has_visible_mouth: bool
 
 
+class NamedLookPicturesOut(BaseModel):
+    """The pictures of one named look as a version froze them (PHASE-017)."""
+
+    slug: str
+    name: str
+    look_id: int
+    references: list[CharacterReferenceOut]
+
+
 class CharacterVersionOut(BaseModel):
     id: int
     version: int
@@ -420,6 +430,33 @@ class CharacterVersionOut(BaseModel):
     # made by hand.
     definition: CharacterDefinitionOut | None
     job_id: int | None
+    # The pictures of the named looks (such as night clothes) this version froze (PHASE-017),
+    # by slug. Empty when there were none.
+    named_looks: list[NamedLookPicturesOut]
+
+
+def _stored_references(
+    pictures: list[dict[str, Any]], images: dict[int, LabImage]
+) -> list[CharacterReferenceOut]:
+    """The pictures a version froze, in display order."""
+    stored = {picture["angle"]: picture for picture in pictures}
+    references = []
+    for angle in _ANGLE_ORDER:
+        picture = stored.get(angle)
+        if picture is None:
+            continue
+        image = images.get(picture["lab_image_id"] or 0)
+        cutout_path = picture.get("cutout_path")
+        references.append(
+            CharacterReferenceOut(
+                angle=angle,
+                url=media_url(image.path) if image is not None else None,
+                cutout_url=media_url(cutout_path) if cutout_path else None,
+                ready=image is not None,
+                lab_image_id=picture["lab_image_id"],
+            )
+        )
+    return references
 
 
 async def _versions_out(
@@ -431,6 +468,22 @@ async def _versions_out(
         for picture in entry.version.look_references
         if picture.get("lab_image_id") is not None
     }
+    named_look_ids = {
+        named["named_look_id"] for entry in entries for named in entry.version.named_looks or []
+    }
+    named_records: dict[int, CharacterNamedLook] = {}
+    if named_look_ids:
+        found_named = await session.execute(
+            select(CharacterNamedLook).where(CharacterNamedLook.id.in_(named_look_ids))
+        )
+        named_records = {record.id: record for record in found_named.scalars()}
+        image_ids |= {
+            picture["lab_image_id"]
+            for entry in entries
+            for named in entry.version.named_looks or []
+            for picture in named["references"]
+            if picture.get("lab_image_id") is not None
+        }
     images: dict[int, LabImage] = {}
     if image_ids:
         found = await session.execute(select(LabImage).where(LabImage.id.in_(image_ids)))
@@ -453,23 +506,20 @@ async def _versions_out(
     out = []
     for entry in entries:
         version = entry.version
-        stored = {picture["angle"]: picture for picture in version.look_references}
-        references = []
-        for angle in _ANGLE_ORDER:
-            picture = stored.get(angle)
-            if picture is None:
-                continue
-            image = images.get(picture["lab_image_id"] or 0)
-            cutout_path = picture.get("cutout_path")
-            references.append(
-                CharacterReferenceOut(
-                    angle=angle,
-                    url=media_url(image.path) if image is not None else None,
-                    cutout_url=media_url(cutout_path) if cutout_path else None,
-                    ready=image is not None,
-                    lab_image_id=picture["lab_image_id"],
-                )
+        references = _stored_references(version.look_references, images)
+        named_looks_out = [
+            NamedLookPicturesOut(
+                slug=named["slug"],
+                name=(
+                    named_records[named["named_look_id"]].name
+                    if named["named_look_id"] in named_records
+                    else named["slug"]
+                ),
+                look_id=named["look_id"],
+                references=_stored_references(named["references"], images),
             )
+            for named in version.named_looks or []
+        ]
         voice = voices.get(version.voice_id or 0)
         look = looks.get(version.look_id or 0)
         out.append(
@@ -491,6 +541,7 @@ async def _versions_out(
                     else None
                 ),
                 job_id=version.job_id,
+                named_looks=named_looks_out,
             )
         )
     return out
@@ -630,6 +681,60 @@ async def list_versions(
         raise _missing(f"There is no character {character_id}.")
     entries = await character_versions.list_versions(session, character_id)
     return await _versions_out(session, entries)
+
+
+# --- A character's named looks (read-only) -----------------------------------------------------
+
+
+class NamedLookOut(BaseModel):
+    """A named look of a library character, such as night clothes (PHASE-016, PHASE-017)."""
+
+    id: int
+    slug: str
+    name: str
+    description: str
+    source: Literal["ai", "manual"]
+    created_at: datetime
+    # The project whose resolution created it, when that project still exists.
+    origin_project_id: int | None
+    # The look that holds its pictures, in the lab's shape. None until they are made.
+    look: LookOut | None
+
+
+@router.get(
+    "/lab/characters/{character_id}/named-looks",
+    response_model=list[NamedLookOut],
+    responses=_NOT_FOUND,
+)
+async def list_named_looks(character_id: CharacterId, session: SessionDep) -> list[NamedLookOut]:
+    """The named looks of this character, oldest first, each with its pictures once they are
+    made. Read-only: a story project's resolution creates them and makes their pictures.
+    """
+    if await character_library.get_character(session, character_id) is None:
+        raise _missing(f"There is no character {character_id}.")
+    statement = (
+        select(CharacterNamedLook)
+        .where(CharacterNamedLook.character_id == character_id)
+        .order_by(CharacterNamedLook.id)
+        .execution_options(populate_existing=True)
+    )
+    records = (await session.execute(statement)).scalars().all()
+    out = []
+    for record in records:
+        look = await session.get(CharacterLook, record.look_id) if record.look_id else None
+        out.append(
+            NamedLookOut(
+                id=record.id,
+                slug=record.slug,
+                name=record.name,
+                description=record.description,
+                source=typing_cast(Literal["ai", "manual"], record.source),
+                created_at=record.created_at,
+                origin_project_id=record.origin_project_id,
+                look=await look_out(session, look) if look is not None else None,
+            )
+        )
+    return out
 
 
 # --- The projects that use a character (read-only) ---------------------------------------------
