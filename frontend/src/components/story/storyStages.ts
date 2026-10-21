@@ -77,6 +77,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "speech-planning",
     name: "Speech planning",
     description: "Cuts spoken text into short units that can each be turned into speech.",
+    available: true,
   },
   {
     id: "speech-synthesis",

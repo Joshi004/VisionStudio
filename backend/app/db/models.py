@@ -345,6 +345,37 @@ class SceneEvents(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
+class SpeechUnits(Base):
+    """One version of one scene's plan of speech units (PHASE-018, `Path_ahead.md` Section 19).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version` of that scene, and a stored row is never changed.
+    `scene_id` is the slug `id` of the scene inside the project's `scene_discovery` content.
+    The plan is made by code in the request, so `job_id` is NULL. `inputs` records the
+    `scene_events` version the units were cut from and the speech rules used; `content` holds
+    the ordered units and the warnings.
+    """
+
+    __tablename__ = "speech_units"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "version"),
+        Index("idx_speech_units_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
 class LookStateResolution(Base):
     """One version of a project's resolution of the looks and environment states its scenes
     asked for (PHASE-016, `Path_ahead.md` Section 16).

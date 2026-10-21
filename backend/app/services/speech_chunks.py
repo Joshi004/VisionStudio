@@ -48,6 +48,35 @@ def split_script(text: str, max_cost: int = MAX_CHUNK_COST) -> list[str]:
     return chunks
 
 
+def sentences(text: str) -> list[str]:
+    """The text cut after each sentence end (PHASE-018). Each piece keeps the whitespace that
+    followed it, so the pieces joined with no separator are the text again.
+    """
+    return _slices(text, _SENTENCE_END)
+
+
+def clauses(text: str) -> list[str]:
+    """The text cut after each comma, semicolon or colon, in the same way as `sentences`."""
+    return _slices(text, _CLAUSE_END)
+
+
+def _slices(text: str, pattern: re.Pattern[str]) -> list[str]:
+    """The text cut where `pattern` ends a match, with nothing lost: the pieces joined give the
+    text. A piece made only of whitespace is attached to the piece before it.
+    """
+    cuts = sorted({match.end() for match in pattern.finditer(text) if 0 < match.end() < len(text)})
+    pieces: list[str] = []
+    start = 0
+    for cut in [*cuts, len(text)]:
+        piece = text[start:cut]
+        start = cut
+        if pieces and not piece.strip():
+            pieces[-1] += piece
+        else:
+            pieces.append(piece)
+    return pieces
+
+
 def _pieces(text: str, pattern: re.Pattern[str]) -> list[str]:
     return [piece.strip() for piece in pattern.split(text) if piece and piece.strip()]
 

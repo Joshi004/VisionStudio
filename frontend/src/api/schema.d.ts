@@ -2143,6 +2143,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/speech-units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Speech Units */
+        get: operations["get_speech_units_api_projects__project_id__speech_units_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/speech-units/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Plans every scene that has current events and no current plan. The others are skipped,
+         *     with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__speech_units_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/speech-units/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Plans one scene's speech units, as a new version, and answers with the scene's entry.
+         */
+        post: operations["run_one_api_projects__project_id__speech_units__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -5110,6 +5168,137 @@ export interface components {
             approved: components["schemas"]["ApprovedSummaryOut"] | null;
             pending: components["schemas"]["PendingChangeOut"] | null;
             last_check: components["schemas"]["SourceCheckOut"] | null;
+        };
+        /** SpeechUnitDeliveryOut */
+        SpeechUnitDeliveryOut: {
+            /** Emotion */
+            emotion: string;
+        };
+        /**
+         * SpeechUnitOut
+         * @description One speech unit. `speaker_id` is None for narration. `part` of `parts` says which piece of
+         *     its event this is.
+         */
+        SpeechUnitOut: {
+            /** Id */
+            id: string;
+            /** Event Id */
+            event_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "narration" | "dialogue";
+            /** Speaker Id */
+            speaker_id: string | null;
+            /** Text */
+            text: string;
+            delivery: components["schemas"]["SpeechUnitDeliveryOut"] | null;
+            /** Order */
+            order: number;
+            /** Part */
+            part: number;
+            /** Parts */
+            parts: number;
+            /** Estimated Seconds */
+            estimated_seconds: number;
+        };
+        /** SpeechUnitWarningOut */
+        SpeechUnitWarningOut: {
+            /** Event Id */
+            event_id: string;
+            /** Message */
+            message: string;
+        };
+        /** SpeechUnitsCharacterOut */
+        SpeechUnitsCharacterOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** SpeechUnitsContentOut */
+        SpeechUnitsContentOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Units */
+            units: components["schemas"]["SpeechUnitOut"][];
+            /** Warnings */
+            warnings: components["schemas"]["SpeechUnitWarningOut"][];
+        };
+        /**
+         * SpeechUnitsEntryOut
+         * @description One scene of the newest list of scenes.
+         */
+        SpeechUnitsEntryOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_planned" | "planned" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            units: components["schemas"]["SpeechUnitsContentOut"] | null;
+            version: components["schemas"]["SpeechUnitsVersionOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** SpeechUnitsOut */
+        SpeechUnitsOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Characters */
+            characters: components["schemas"]["SpeechUnitsCharacterOut"][];
+            /** Entries */
+            entries: components["schemas"]["SpeechUnitsEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** SpeechUnitsRunAllOut */
+        SpeechUnitsRunAllOut: {
+            /** Planned */
+            planned: string[];
+            /** Skipped */
+            skipped: components["schemas"]["SpeechUnitsSkippedOut"][];
+        };
+        /** SpeechUnitsSkippedOut */
+        SpeechUnitsSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * SpeechUnitsVersionOut
+         * @description The provenance of the newest plan of a scene (D-3).
+         */
+        SpeechUnitsVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * StatePictureOut
@@ -10392,6 +10581,127 @@ export interface operations {
                 };
             };
             /** @description There is no resolution or it is out of date, or the look or state is not in it, or its character or environment is not ready for it. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_speech_units_api_projects__project_id__speech_units_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechUnitsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__speech_units_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechUnitsRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene has no current events, the speech rules cannot be used, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__speech_units__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechUnitsEntryOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene has no current events, the speech rules cannot be used, or the scene is not in the newest list. */
             422: {
                 headers: {
                     [name: string]: unknown;

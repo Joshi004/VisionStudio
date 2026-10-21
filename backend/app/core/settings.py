@@ -106,6 +106,7 @@ GROUP_GPU = "GPU server"
 GROUP_LLM = "Language model"
 GROUP_IMAGE = "Image model"
 GROUP_DURATION = "Shot duration"
+GROUP_SPEECH = "Speech"
 GROUP_STORY = "Story"
 GROUP_LIMITS = "Limits"
 
@@ -113,6 +114,13 @@ GROUP_LIMITS = "Limits"
 # estimated from its word count at a speaking pace; one above the limit is still saved.
 STORY_WPM_KEY = "story_words_per_minute"
 STORY_MAX_MINUTES_KEY = "story_max_minutes"
+
+# How speech units are estimated and cut (PHASE-018). `narration_unit_max_seconds` 0 means "use
+# the planning target maximum"; `dialogue_shot_margin_seconds` is taken off the H3 maximum to
+# give the longest dialogue unit.
+SPEECH_WPM_KEY = "speech_words_per_minute"
+NARRATION_UNIT_MAX_KEY = "narration_unit_max_seconds"
+DIALOGUE_MARGIN_KEY = "dialogue_shot_margin_seconds"
 
 # The shot-duration policy (PHASE-002). All four values are whole seconds. The hard maximum can
 # never pass the longest clip the GPU server accepts: 345 frames at 24 fps is 14.375 s, so 14.
@@ -384,6 +392,49 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=H3_MAX_WHOLE_SECONDS,
         min_value=1,
         max_value=H3_MAX_WHOLE_SECONDS,
+    ),
+    SettingSpec(
+        key=SPEECH_WPM_KEY,
+        group=GROUP_SPEECH,
+        label="Speech pace (words per minute)",
+        help=(
+            "Used to estimate how long each speech unit will take to say: its number of words "
+            "divided by this pace. It is a starting value, not a measurement; the real length "
+            "is measured when the speech is made. Changing it marks the speech units that "
+            "were planned with another pace as out of date."
+        ),
+        value_type="integer",
+        default=150,
+        min_value=60,
+        max_value=300,
+    ),
+    SettingSpec(
+        key=NARRATION_UNIT_MAX_KEY,
+        group=GROUP_SPEECH,
+        label="Longest narration unit (seconds)",
+        help=(
+            "A narration event estimated to take longer than this is cut into several speech "
+            "units, at sentence and then clause boundaries. 0 means use the planning target "
+            "longest shot (Shot duration)."
+        ),
+        value_type="integer",
+        default=0,
+        min_value=0,
+        max_value=60,
+    ),
+    SettingSpec(
+        key=DIALOGUE_MARGIN_KEY,
+        group=GROUP_SPEECH,
+        label="Dialogue margin inside a shot (seconds)",
+        help=(
+            "Dialogue is played inside a single shot, so a dialogue line estimated to take "
+            "longer than the H3 longest shot minus this margin is cut at sentence boundaries. "
+            "The margin leaves room for the shot to begin and end."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=H3_MAX_WHOLE_SECONDS - 1,
     ),
     SettingSpec(
         key=STORY_WPM_KEY,
