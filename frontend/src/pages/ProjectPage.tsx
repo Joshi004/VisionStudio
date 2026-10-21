@@ -13,6 +13,7 @@ import { EnvironmentDefinitionsPanel } from "../components/story/EnvironmentDefi
 import { EnvironmentLinksPanel } from "../components/story/EnvironmentLinksPanel";
 import { NarratorVoicePanel } from "../components/story/NarratorVoicePanel";
 import { SceneDefinitionsPanel } from "../components/story/SceneDefinitionsPanel";
+import { SceneEventsPanel } from "../components/story/SceneEventsPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
 import { StageList } from "../components/story/StageList";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
@@ -94,6 +95,7 @@ export function ProjectPage() {
           <ScenesPanel projectId={project.id} hasStory={project.script_text !== null} />
           <EnvironmentDefinitionsPanel projectId={project.id} />
           <SceneDefinitionsPanel projectId={project.id} />
+          <SceneEventsPanel projectId={project.id} />
           <StageList />
         </>
       )}

@@ -90,13 +90,15 @@ class Job(Base):
         # scene discovery, since revision 0025, character definition, since revision 0028, and
         # relation discovery, since revision 0030, voice design, since revision 0031, and the
         # environment prompt, since revision 0032, and environment definition, since revision
-        # 0033, and scene definition, since revision 0034.
+        # 0033, and scene definition, since revision 0034, and event extraction, since
+        # revision 0035.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
             "'define_character', 'discover_relations', 'design_voice', "
-            "'write_environment_prompt', 'define_environment', 'define_scene')",
+            "'write_environment_prompt', 'define_environment', 'define_scene', "
+            "'extract_events')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -294,6 +296,39 @@ class SceneDefinition(Base):
         CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
         UniqueConstraint("project_id", "scene_id", "version"),
         Index("idx_scene_definition_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SceneEvents(Base):
+    """One version of one scene's list of events (PHASE-015, `Path_ahead.md` Section 17).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version` of that scene, and a stored row is never changed.
+    `scene_id` is the slug `id` of the scene inside the project's `scene_discovery` content.
+    `inputs` records what the version was built from (the story hash, the scene text's hash,
+    and the artifacts: StoryBible, the discovered lists, the scene's definition and the
+    definition of each of the scene's characters). `content` is the Section 17 list of events
+    with the pieces of the scene's text that no speech event covers.
+    """
+
+    __tablename__ = "scene_events"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "version"),
+        Index("idx_scene_events_project_scene", "project_id", "scene_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

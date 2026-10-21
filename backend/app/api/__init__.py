@@ -20,6 +20,7 @@ from app.api import (
     jobs,
     projects,
     scene_definitions,
+    scene_events,
     scenes,
     settings,
     story_bible,
@@ -50,3 +51,4 @@ api_router.include_router(environment_lab.router, tags=["environment-lab"])
 api_router.include_router(environment_links.router, tags=["environment-links"])
 api_router.include_router(environment_definitions.router, tags=["environment-definitions"])
 api_router.include_router(scene_definitions.router, tags=["scene-definitions"])
+api_router.include_router(scene_events.router, tags=["scene-events"])

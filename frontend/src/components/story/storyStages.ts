@@ -64,6 +64,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "event-extraction",
     name: "Event extraction",
     description: "Lists what happens in each scene: narration, dialogue, actions and sounds.",
+    available: true,
   },
   {
     id: "looks-and-states",

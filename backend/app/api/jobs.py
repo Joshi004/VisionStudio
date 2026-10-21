@@ -44,6 +44,7 @@ JobType = Literal[
     "write_environment_prompt",
     "define_environment",
     "define_scene",
+    "extract_events",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

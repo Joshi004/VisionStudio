@@ -151,21 +151,21 @@ def normalise(word: str) -> str:
 
 
 @dataclass(frozen=True)
-class _StoryWord:
+class StoryWord:
     start: int  # the offset of the word's first character, in the story as written
     key: str  # the word, normalised
 
 
-def _story_words(story_text: str) -> list[_StoryWord]:
+def story_words(story_text: str) -> list[StoryWord]:
     """The story's words in order, each with where it starts. A word is a run of characters
     without whitespace, so a boundary placed at a word keeps its opening quotation mark. Marks
     that are nothing but punctuation (a lone "…") are not words.
     """
-    words: list[_StoryWord] = []
+    words: list[StoryWord] = []
     for found in _WORD.finditer(story_text):
         key = normalise(found.group())
         if key:
-            words.append(_StoryWord(start=found.start(), key=key))
+            words.append(StoryWord(start=found.start(), key=key))
     return words
 
 
@@ -173,7 +173,7 @@ def _quote_keys(quote: str) -> list[str]:
     return [key for key in (normalise(part) for part in quote.split()) if key]
 
 
-def _find(keys: list[str], quote: list[str], first: int) -> int | None:
+def find_words(keys: list[str], quote: list[str], first: int) -> int | None:
     """The position of the first word, at or after `first`, where `quote` begins."""
     for position in range(first, len(keys) - len(quote) + 1):
         if keys[position : position + len(quote)] == quote:
@@ -214,7 +214,7 @@ def _opening_preview(story_text: str) -> str:
     return " ".join(story_text.split())[:_OPENING_PREVIEW_CHARS]
 
 
-def _locate(scenes: list[_Described], story_text: str, words: list[_StoryWord]) -> list[int]:
+def _locate(scenes: list[_Described], story_text: str, words: list[StoryWord]) -> list[int]:
     """The offset in the story where each scene starts. Raises ValueError, with a message fit
     for the user, for the first opening that cannot be placed. The first scene starts at 0.
     """
@@ -243,9 +243,9 @@ def _locate(scenes: list[_Described], story_text: str, words: list[_StoryWord]) 
                 )
             found: int | None = 0
         else:
-            found = _find(keys, quote, previous + 1)
+            found = find_words(keys, quote, previous + 1)
             if found is None:
-                if _find(keys, quote, 0) is not None:
+                if find_words(keys, quote, 0) is not None:
                     raise ValueError(
                         f'The "starts_with" of scene {position} is not after the start of '
                         "the scene before it: scenes must follow the story in order."
@@ -282,7 +282,7 @@ def check_scenes(answer: Any, story_text: str) -> dict[str, Any]:
     seen: set[str] = set()
     described = [_described(entry, position, seen) for position, entry in enumerate(entries, 1)]
 
-    words = _story_words(story_text)
+    words = story_words(story_text)
     if not words:
         raise ValueError("The story has no words to divide into scenes.")
     starts = _locate(described, story_text, words)

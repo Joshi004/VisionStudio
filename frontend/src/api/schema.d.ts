@@ -1924,6 +1924,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/scene-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scene Events */
+        get: operations["get_scene_events_api_projects__project_id__scene_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-events/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every scene that is not extracted and up to date already, is defined
+         *     and is not already being extracted. The others are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__scene_events_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-events/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the job that extracts one scene's events. If it already has a job waiting or
+         *     running, that job's id is returned and no second job is made.
+         */
+        post: operations["run_one_api_projects__project_id__scene_events__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3144,7 +3203,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events";
             /**
              * Status
              * @enum {string}
@@ -3197,7 +3256,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events";
             /**
              * Status
              * @enum {string}
@@ -3894,7 +3953,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events";
             /** Running */
             running: number;
             /** Queued */
@@ -4332,6 +4391,129 @@ export interface components {
             /** Out Of Date */
             out_of_date: boolean;
         };
+        /** SceneEventDeliveryOut */
+        SceneEventDeliveryOut: {
+            /** Emotion */
+            emotion: string;
+        };
+        /**
+         * SceneEventOut
+         * @description One event. Which fields are set depends on `type`: `narration` has `text`; `dialogue`
+         *     has `speaker_id`, `text` and maybe `delivery`; `action` and `sound_event` have
+         *     `description`; `pause` has none of them.
+         */
+        SceneEventOut: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "narration" | "dialogue" | "action" | "sound_event" | "pause";
+            /** Text */
+            text?: string | null;
+            /** Speaker Id */
+            speaker_id?: string | null;
+            delivery?: components["schemas"]["SceneEventDeliveryOut"] | null;
+            /** Description */
+            description?: string | null;
+        };
+        /** SceneEventsCharacterOut */
+        SceneEventsCharacterOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** SceneEventsContentOut */
+        SceneEventsContentOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Events */
+            events: components["schemas"]["SceneEventOut"][];
+            /** Uncovered */
+            uncovered: components["schemas"]["SceneUncoveredOut"][];
+        };
+        /**
+         * SceneEventsEntryOut
+         * @description One scene of the newest list of scenes.
+         */
+        SceneEventsEntryOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_extracted" | "extracted" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            events: components["schemas"]["SceneEventsContentOut"] | null;
+            version: components["schemas"]["SceneEventsVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** SceneEventsOut */
+        SceneEventsOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Characters */
+            characters: components["schemas"]["SceneEventsCharacterOut"][];
+            /** Entries */
+            entries: components["schemas"]["SceneEventsEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** SceneEventsRunAllOut */
+        SceneEventsRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["SceneEventsSkippedOut"][];
+        };
+        /** SceneEventsRunOut */
+        SceneEventsRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** SceneEventsSkippedOut */
+        SceneEventsSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * SceneEventsVersionOut
+         * @description The provenance of the newest events of a scene (D-3).
+         */
+        SceneEventsVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /**
          * SceneItem
          * @description One discovered scene. Nothing about who is in it or where it happens is kept (D-15).
@@ -4378,6 +4560,16 @@ export interface components {
             time_of_day: string;
             /** Lighting State */
             lighting_state: string;
+        };
+        /**
+         * SceneUncoveredOut
+         * @description A piece of the scene's text that no narration or dialogue event covers.
+         */
+        SceneUncoveredOut: {
+            /** Text */
+            text: string;
+            /** After Event Id */
+            after_event_id: string | null;
         };
         /** SecretStatus */
         SecretStatus: {
@@ -9345,6 +9537,127 @@ export interface operations {
                 };
             };
             /** @description There is no saved story, up-to-date Story Bible or lists, or a character or environment is not linked and defined yet, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_scene_events_api_projects__project_id__scene_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneEventsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__scene_events_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneEventsRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or the scene is not defined yet, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__scene_events__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneEventsRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or the scene is not defined yet, or the scene is not in the newest list. */
             422: {
                 headers: {
                     [name: string]: unknown;
