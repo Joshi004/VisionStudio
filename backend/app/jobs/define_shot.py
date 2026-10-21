@@ -50,7 +50,7 @@ from app.services.llm_target import STORY_MODEL_KEY
 _logger = logging.getLogger(__name__)
 
 # The longest the whole call may take. Qwen3.8 raises it to its own minimum.
-REQUEST_TIMEOUT_S: Final = 600.0
+REQUEST_TIMEOUT_S: Final = 1200.0
 
 _BAD_INPUT = "This job has no shot to define."
 _NO_BIBLE = "The Story Bible this run was started with could not be found."

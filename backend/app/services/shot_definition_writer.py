@@ -42,7 +42,7 @@ parse_answer = discovery_writer.parse_answer
 
 # Hidden reasoning is billed as output, so this leaves room to think before the answer.
 # Qwen3.8 ignores it and uses its own limit (`providers/qwen38.py`).
-MAX_TOKENS: Final = 8000
+MAX_TOKENS: Final = 32000
 REASONING_EFFORT: Final = "high"
 
 # The allowed shot sizes, from the tightest to the widest.
@@ -70,9 +70,9 @@ FRAMING_OF_SIZE: Final = {
 
 # The most characters each text field of the specification may have.
 VISUAL_STORY_MAX_CHARS: Final = 300
-EXPRESSION_MAX_CHARS: Final = 120
-POSE_MAX_CHARS: Final = 150
-GAZE_MAX_CHARS: Final = 100
+EXPRESSION_MAX_CHARS: Final = 240
+POSE_MAX_CHARS: Final = 300
+GAZE_MAX_CHARS: Final = 200
 STATE_VALUE_MAX_CHARS: Final = 120
 COMPOSITION_MAX_CHARS: Final = 100
 CAMERA_MAX_CHARS: Final = 80
@@ -129,9 +129,10 @@ neighbouring shots are given so that this one fits between them.
 shot shows and what it means.
 - "characters": one entry for each character who is VISIBLE in this shot, with the id exactly as \
 listed in CHARACTERS IN THE SCENE. Use an empty list when nobody is visible. A character who is \
-only heard, or who is not in this shot, gets no entry. "expression", "pose" and "gaze" say how \
-that character looks, how they stand or sit, and where they look. Keep each character's \
-appearance consistent with the look given for them.
+only heard, or who is not in this shot, gets no entry. "expression" (at most \
+{EXPRESSION_MAX_CHARS} characters), "pose" (at most {POSE_MAX_CHARS}) and "gaze" (at most \
+{GAZE_MAX_CHARS}) are short phrases saying how that character looks, how they stand or sit, and \
+where they look. Keep each character's appearance consistent with the look given for them.
 - "environment_state": what is true of the place in this shot, as short key and value pairs \
 (for example the lighting, what is visible, what has changed). Keys are lower_case_with_\
 underscores, at most {MAX_STATE_KEYS} of them; each value is a short phrase of at most \
