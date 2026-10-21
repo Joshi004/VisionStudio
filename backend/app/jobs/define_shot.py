@@ -41,6 +41,7 @@ from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import (
     discovery,
+    generation_requests,
     llm_target,
     shot_continuity,
     shot_definition_writer,
@@ -293,6 +294,15 @@ class DefineShotHandler(JobHandler):
                 await shot_references.select_if_ready(session, project_id, read.scene_id, shot_id)
         except Exception:
             _logger.exception("job %d: the references of the shot could not be chosen", job_id)
+
+        # With the references chosen, the shot's generation request is planned by code too
+        # (PHASE-025). Its own step for the same reason: a shot that cannot be planned yet (its
+        # speech is not ready, say) is left for the user's **Plan**.
+        try:
+            async with SessionLocal() as session:
+                await generation_requests.plan_if_ready(session, project_id, read.scene_id, shot_id)
+        except Exception:
+            _logger.exception("job %d: the generation request could not be planned", job_id)
 
         # When this was the last shot of its scene to be defined, the scene's continuity is
         # checked by itself (PHASE-023). A separate step: the definition is stored and this job

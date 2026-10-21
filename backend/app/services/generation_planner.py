@@ -1,0 +1,245 @@
+"""The deterministic H3 router (PHASE-025, `Path_ahead.md` Section 29).
+
+Pure functions: no database, no files, no clock, no model. The caller
+(`services/generation_requests.py`) gathers what one shot needs and `plan` turns it into the exact
+request the video model will be asked for, or refuses with a sentence for the user.
+
+The rules:
+
+- **Pictures** are the shot's reference manifest, in its order (`<Picture n>`).
+- **Audios** are the audio of each dialogue line the shot carries, in plan order (`<Audio n>`),
+  each used as a `partially_copy` reference. Narration is never sent (D-10). A speaker who is not
+  visible in the shot (Q-4) is still sent, and flagged `speaker_visible: false` so the prompt can
+  say the voice comes from somebody unseen (PHASE-026). A short line is used as is, with the time
+  it starts inside the shot (Q-5, PHASE-001 V2).
+- **Route:** pictures go to the reference endpoint (`H3_AUDIO_TO_VIDEO_PATH`), with the audios
+  when there are any. A shot with neither pictures nor dialogue goes to the plain generate
+  endpoint (text). A shot with dialogue and no pictures is refused: the generate endpoint takes no
+  audio.
+- **Frames:** the smallest `17n + 5` at or above the shot's length on the timeline
+  (`duration_policy.shot_num_frames`, D-9), within the hard bounds. The clip is trimmed to the
+  exact length when the video is rendered.
+- **Size:** MiniMax H3's own size for the project's orientation (`H3_SIZES`).
+
+Nothing here chooses a seed or a partition: those are decided when the request is sent.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Final, Literal
+
+from app.providers import video_generator
+from app.services import video_models
+from app.services.duration_policy import DurationPolicy, DurationPolicyError, shot_num_frames
+from app.services.frame_counts import H3_FPS
+
+Route = Literal["reference", "text"]
+
+ROUTE_REFERENCE: Final = "reference"
+ROUTE_TEXT: Final = "text"
+# How every dialogue audio is used: the model copies its spoken layer, and the rest of the clip
+# is made by the model.
+AUDIO_MARKER: Final = "partially_copy"
+# What the GPU server's guide documents as the longest audio reference.
+H3_MAX_AUDIO_SECONDS: Final = 15.0
+# Rounding noise allowed when an audio is compared with the length of its shot.
+_TOLERANCE: Final = 0.001
+
+
+class GenerationPlanError(ValueError):
+    """A shot that cannot be given a generation request. The message is meant to be shown."""
+
+
+@dataclass(frozen=True)
+class DialogueInput:
+    """One dialogue line of the shot and its stored audio."""
+
+    unit_id: str
+    speaker_id: str
+    text: str
+    # The `speech_unit_audio` row: its id and the key that identifies the recording.
+    audio_id: int
+    audio_key: str
+    # The measured length of the recording.
+    duration_s: float | None
+    # Where the line starts inside the shot, from the timeline.
+    start_in_shot_s: float
+
+
+@dataclass(frozen=True)
+class GenerationPlan:
+    shot_id: str
+    scene_id: str
+    model: str
+    route: Route
+    endpoint: str
+    orientation: str
+    width: int
+    height: int
+    fps: int
+    target_seconds: float
+    num_frames: int
+    clip_seconds: float
+    match_audio_duration: bool
+    pictures: list[dict[str, Any]]
+    audios: list[dict[str, Any]]
+    notes: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        """The `content` of a stored generation request."""
+        return {
+            "shot_id": self.shot_id,
+            "scene_id": self.scene_id,
+            "model": self.model,
+            "route": self.route,
+            "endpoint": self.endpoint,
+            "orientation": self.orientation,
+            "width": self.width,
+            "height": self.height,
+            "fps": self.fps,
+            "target_seconds": self.target_seconds,
+            "num_frames": self.num_frames,
+            "clip_seconds": self.clip_seconds,
+            "match_audio_duration": self.match_audio_duration,
+            "pictures": self.pictures,
+            "audios": self.audios,
+            "notes": self.notes,
+        }
+
+
+def _picture(entry: dict[str, Any], number: int) -> dict[str, Any]:
+    """One manifest picture as the request names it. `label` is what a prompt calls it."""
+    return {
+        "label": f"Picture {number}",
+        "order": number,
+        "lab_image_id": entry["lab_image_id"],
+        "kind": entry["kind"],
+        "subject_id": entry["subject_id"],
+        "subject_name": entry["subject_name"],
+        "view": entry["view"],
+        "variant": entry["variant"],
+    }
+
+
+def _check_audio(line: DialogueInput, target_s: float) -> float:
+    """The length of one line's recording, after checking it fits the video model and the shot.
+    Raises GenerationPlanError.
+    """
+    seconds = line.duration_s
+    # Written so that None and NaN, which compare false to everything, are refused too.
+    if seconds is None or not seconds > 0:
+        raise GenerationPlanError(f"The speech of the line '{line.unit_id}' has no length.")
+    if seconds > H3_MAX_AUDIO_SECONDS:
+        raise GenerationPlanError(
+            f"The speech of the line '{line.unit_id}' lasts {seconds:g} s, longer than the "
+            f"{H3_MAX_AUDIO_SECONDS:g} s the video model takes as a reference."
+        )
+    if line.start_in_shot_s + seconds > target_s + _TOLERANCE:
+        raise GenerationPlanError(
+            f"The line '{line.unit_id}' would end at {line.start_in_shot_s + seconds:.2f} s, "
+            f"after its shot ends at {target_s:g} s. Plan the shots of this scene again."
+        )
+    return seconds
+
+
+def plan(
+    *,
+    scene_id: str,
+    shot_id: str,
+    target_s: float,
+    policy: DurationPolicy,
+    orientation: str,
+    pictures: list[dict[str, Any]],
+    dialogue: list[DialogueInput],
+    visible_character_ids: list[str],
+) -> GenerationPlan:
+    """The generation request of one shot. `pictures` are the manifest's `references` (each has
+    `order`, `lab_image_id`, `kind`, `subject_id`, `subject_name`, `view` and `variant`) and
+    `dialogue` the lines the shot carries, both in the order they are sent. Raises
+    GenerationPlanError.
+    """
+    sizes = video_generator.H3_SIZES.get(orientation)
+    if sizes is None:
+        raise GenerationPlanError(f"The project's orientation '{orientation}' has no H3 size.")
+    width, height = sizes
+    try:
+        video_generator.check_size(width, height)
+        num_frames = shot_num_frames(target_s, policy)
+    except DurationPolicyError as exc:
+        raise GenerationPlanError(f"{exc} Plan the shots of this scene again.") from exc
+    except ValueError as exc:
+        raise GenerationPlanError(str(exc)) from exc
+
+    max_pictures = video_generator.H3_MAX_REFERENCE_IMAGES
+    if len(pictures) > max_pictures:
+        raise GenerationPlanError(
+            f"The shot has {len(pictures)} reference pictures; the video model takes at most "
+            f"{max_pictures}."
+        )
+    max_audios = video_generator.H3_MAX_REFERENCE_AUDIOS
+    if len(dialogue) > max_audios:
+        raise GenerationPlanError(
+            f"The shot carries {len(dialogue)} lines of dialogue; the video model takes at most "
+            f"{max_audios} audios. Plan the shots of this scene again."
+        )
+
+    if not pictures:
+        if dialogue:
+            raise GenerationPlanError(
+                "The shot has dialogue but no reference pictures, and a text-only clip takes no "
+                "audio. Choose the shot's references first."
+            )
+        route: Route = ROUTE_TEXT
+        endpoint = video_generator.H3_GENERATE_PATH
+    else:
+        route = ROUTE_REFERENCE
+        endpoint = video_generator.H3_AUDIO_TO_VIDEO_PATH
+
+    visible = set(visible_character_ids)
+    audios: list[dict[str, Any]] = []
+    notes: list[str] = []
+    for number, line in enumerate(dialogue, start=1):
+        seconds = _check_audio(line, target_s)
+        speaker_visible = line.speaker_id in visible
+        if not speaker_visible:
+            notes.append(
+                f"The speaker of the line '{line.unit_id}' is not seen in this shot: the voice "
+                "comes from an unseen speaker."
+            )
+        audios.append(
+            {
+                "label": f"Audio {number}",
+                "order": number,
+                "unit_id": line.unit_id,
+                "speaker_id": line.speaker_id,
+                "text": line.text,
+                "speaker_visible": speaker_visible,
+                "speech_unit_audio_id": line.audio_id,
+                "audio_key": line.audio_key,
+                "duration_s": round(seconds, 3),
+                "starts_in_shot_seconds": round(max(0.0, line.start_in_shot_s), 3),
+                "marker": AUDIO_MARKER,
+            }
+        )
+
+    return GenerationPlan(
+        shot_id=shot_id,
+        scene_id=scene_id,
+        model=video_models.H3_MODEL,
+        route=route,
+        endpoint=endpoint,
+        orientation=orientation,
+        width=width,
+        height=height,
+        fps=H3_FPS,
+        target_seconds=round(target_s, 3),
+        num_frames=num_frames,
+        clip_seconds=round(num_frames / H3_FPS, 3),
+        # The clip is as long as the shot asks, never as long as the audio: the shot's length is
+        # never shorter than its speech (PHASE-021).
+        match_audio_duration=False,
+        pictures=[_picture(entry, number) for number, entry in enumerate(pictures, start=1)],
+        audios=audios,
+        notes=notes,
+    )

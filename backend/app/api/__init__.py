@@ -14,6 +14,7 @@ from app.api import (
     environment_definitions,
     environment_lab,
     environment_links,
+    generation_requests,
     gpu,
     health,
     image_lab,
@@ -68,3 +69,4 @@ api_router.include_router(shot_plans.router, tags=["shot-plans"])
 api_router.include_router(shot_definitions.router, tags=["shot-definitions"])
 api_router.include_router(shot_continuity.router, tags=["shot-continuity"])
 api_router.include_router(shot_references.router, tags=["shot-references"])
+api_router.include_router(generation_requests.router, tags=["generation-requests"])

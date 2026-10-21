@@ -2539,6 +2539,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/generation-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Generation Requests */
+        get: operations["get_generation_requests_api_projects__project_id__generation_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/generation-requests/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Plans the request of every shot that has none or an out of date one. The shots that
+         *     cannot be done are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__generation_requests_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/generation-requests/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scene
+         * @description Plans the request of every shot of one scene that has none or an out of date one.
+         */
+        post: operations["run_scene_api_projects__project_id__generation_requests__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/generation-requests/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Shot
+         * @description Plans the request of one shot. Refused with the reason when it cannot be done.
+         */
+        post: operations["run_shot_api_projects__project_id__generation_requests__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3705,6 +3783,116 @@ export interface components {
             id: number;
             /** Url */
             url: string | null;
+        };
+        /** GenerationPlannedOut */
+        GenerationPlannedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string;
+            /** Version */
+            version: number;
+        };
+        /** GenerationRequestEntryOut */
+        GenerationRequestEntryOut: {
+            shot: components["schemas"]["RequestShotSkeletonOut"];
+            /**
+             * Manifest Status
+             * @enum {string}
+             */
+            manifest_status: "not_selected" | "selected" | "out_of_date";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_planned" | "planned" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            request: components["schemas"]["GenerationRequestOut"] | null;
+            version: components["schemas"]["GenerationRequestVersionOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** GenerationRequestOut */
+        GenerationRequestOut: {
+            /** Model */
+            model: string;
+            /**
+             * Route
+             * @enum {string}
+             */
+            route: "reference" | "text";
+            /** Endpoint */
+            endpoint: string;
+            /** Orientation */
+            orientation: string;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Fps */
+            fps: number;
+            /** Target Seconds */
+            target_seconds: number;
+            /** Num Frames */
+            num_frames: number;
+            /** Clip Seconds */
+            clip_seconds: number;
+            /** Match Audio Duration */
+            match_audio_duration: boolean;
+            /** Pictures */
+            pictures: components["schemas"]["RequestPictureOut"][];
+            /** Audios */
+            audios: components["schemas"]["RequestAudioOut"][];
+            /** Notes */
+            notes: string[];
+        };
+        /**
+         * GenerationRequestVersionOut
+         * @description The provenance of the newest request of a shot (D-3).
+         */
+        GenerationRequestVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** GenerationRequestsOut */
+        GenerationRequestsOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["SceneGenerationRequestsOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** GenerationRequestsRunOut */
+        GenerationRequestsRunOut: {
+            /** Planned */
+            planned: components["schemas"]["GenerationPlannedOut"][];
+            /** Skipped */
+            skipped: components["schemas"]["GenerationSkippedOut"][];
+        };
+        /** GenerationSkippedOut */
+        GenerationSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string | null;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
         };
         /** GpuStatus */
         GpuStatus: {
@@ -5096,6 +5284,76 @@ export interface components {
             created_at: string;
         };
         /**
+         * RequestAudioOut
+         * @description One dialogue audio of the request, in the order it is sent. A prompt calls it
+         *     `<Audio n>`.
+         */
+        RequestAudioOut: {
+            /** Label */
+            label: string;
+            /** Order */
+            order: number;
+            /** Unit Id */
+            unit_id: string;
+            /** Speaker Id */
+            speaker_id: string;
+            /** Text */
+            text: string;
+            /** Speaker Visible */
+            speaker_visible: boolean;
+            /** Speech Unit Audio Id */
+            speech_unit_audio_id: number;
+            /** Url */
+            url: string | null;
+            /** Duration S */
+            duration_s: number;
+            /** Starts In Shot Seconds */
+            starts_in_shot_seconds: number;
+            /** Marker */
+            marker: string;
+        };
+        /**
+         * RequestPictureOut
+         * @description One picture of the request, in the order it is sent. A prompt calls it `<Picture n>`.
+         */
+        RequestPictureOut: {
+            /** Label */
+            label: string;
+            /** Order */
+            order: number;
+            /** Lab Image Id */
+            lab_image_id: number;
+            /** Url */
+            url: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "character" | "environment";
+            /** Subject Id */
+            subject_id: string;
+            /** Subject Name */
+            subject_name: string;
+            /** View */
+            view: string;
+            /** Variant */
+            variant: string;
+        };
+        /** RequestShotSkeletonOut */
+        RequestShotSkeletonOut: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            /** Description */
+            description: string;
+            /** Duration Seconds */
+            duration_seconds: number;
+        };
+        /**
          * RerunIn
          * @description Edited prompt text(s). Only a text this take needs can be sent; sending one clears what
          *     was made from it, so the take's next step makes it again.
@@ -5423,6 +5681,22 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * SceneGenerationRequestsOut
+         * @description One scene of the newest list of scenes.
+         */
+        SceneGenerationRequestsOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Shots */
+            shots: components["schemas"]["GenerationRequestEntryOut"][];
         };
         /**
          * SceneItem
@@ -12492,6 +12766,169 @@ export interface operations {
                 };
             };
             /** @description The shot is not defined and current, a picture it needs is missing, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_generation_requests_api_projects__project_id__generation_requests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRequestsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__generation_requests_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRequestsRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's references are not chosen and current, its speech is not ready, its length is outside the limits, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_scene_api_projects__project_id__generation_requests__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRequestsRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's references are not chosen and current, its speech is not ready, its length is outside the limits, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_shot_api_projects__project_id__generation_requests__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationRequestsRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's references are not chosen and current, its speech is not ready, its length is outside the limits, or the scene or shot is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;

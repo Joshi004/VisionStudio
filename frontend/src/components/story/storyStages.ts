@@ -107,6 +107,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "generation-planning",
     name: "Generation planning",
     description: "Decides how each shot is requested from the video model.",
+    available: true,
   },
   {
     id: "h3-prompts",

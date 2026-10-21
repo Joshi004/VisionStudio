@@ -19,6 +19,7 @@ never return ORM objects.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Literal, cast
 
@@ -31,8 +32,10 @@ from app.api.errors import ErrorResponse
 from app.api.projects import load_project
 from app.db.models import LabImage
 from app.db.session import SessionDep
-from app.services import shot_references, storage
+from app.services import generation_requests, shot_references, storage
 from app.services.shot_references import SceneEntry, ShotEntry
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -255,6 +258,25 @@ def _refused(exc: shot_references.ShotReferencesError) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
 
+async def _plan_requests(
+    session: SessionDep, project_id: int, result: shot_references.SelectResult
+) -> None:
+    """Plans the generation request of each shot whose references were just chosen (PHASE-025).
+    A shot that cannot be planned yet is left for the user's **Plan** and never fails the press.
+    """
+    for item in result.selected:
+        try:
+            await generation_requests.plan_if_ready(
+                session, project_id, item.scene_id, item.shot_id
+            )
+        except Exception:
+            _logger.exception(
+                "the generation request of shot '%s' of scene '%s' could not be planned",
+                item.shot_id,
+                item.scene_id,
+            )
+
+
 @router.get(
     "/projects/{project_id}/shot-references",
     response_model=ShotReferencesOut,
@@ -285,6 +307,7 @@ async def run_all(project_id: int, session: SessionDep) -> ShotReferencesRunOut:
         result = await shot_references.select_all(session, project)
     except shot_references.ShotReferencesError as exc:
         raise _refused(exc) from exc
+    await _plan_requests(session, project_id, result)
     return _run_out(result)
 
 
@@ -304,6 +327,7 @@ async def run_scene(
         result = await shot_references.select_scene(session, project, scene_id)
     except shot_references.ShotReferencesError as exc:
         raise _refused(exc) from exc
+    await _plan_requests(session, project_id, result)
     return _run_out(result)
 
 
@@ -321,4 +345,5 @@ async def run_shot(
         result = await shot_references.select_shot(session, project, scene_id, shot_id)
     except shot_references.ShotReferencesError as exc:
         raise _refused(exc) from exc
+    await _plan_requests(session, project_id, result)
     return _run_out(result)
