@@ -74,14 +74,17 @@ EXPRESSION_MAX_CHARS: Final = 240
 POSE_MAX_CHARS: Final = 300
 GAZE_MAX_CHARS: Final = 200
 STATE_VALUE_MAX_CHARS: Final = 120
-COMPOSITION_MAX_CHARS: Final = 100
-CAMERA_MAX_CHARS: Final = 80
+COMPOSITION_MAX_CHARS: Final = 200
+CAMERA_MAX_CHARS: Final = 160
 ACTION_MAX_CHARS: Final = 250
 CONTINUITY_MAX_CHARS: Final = 200
 AMBIENT_MAX_CHARS: Final = 200
 SOUND_EVENT_MAX_CHARS: Final = 150
 MAX_SOUND_EVENTS: Final = 8
 MAX_STATE_KEYS: Final = 12
+# The prompt states the limits above, but the check accepts this much more: the model often
+# misses a stated length by a few characters, and that should not fail the shot.
+LIMIT_SLACK: Final = 1.25
 _STATE_KEY: Final = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # Durations are written to a thousandth of a second, as the timeline keeps them.
 _DURATION_DECIMALS: Final = 3
@@ -246,7 +249,7 @@ def _optional_object(parent: dict[str, Any], key: str) -> dict[str, Any]:
 
 def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars`.
+    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -254,9 +257,10 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
-    if len(text) > max_chars:
+    accepted_chars = int(max_chars * LIMIT_SLACK)
+    if len(text) > accepted_chars:
         raise ValueError(
-            f'The "{path}" of the model\'s answer was longer than {max_chars} characters.'
+            f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
         )
     return text
 
