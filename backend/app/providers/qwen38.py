@@ -39,7 +39,7 @@ MAX_TOKENS_CAP: Final = 49152
 # answer takes about 12 minutes. A caller's own time limit is raised to this.
 MIN_GENERATION_S: Final = 900.0
 # The server refuses messages longer than this in total.
-MESSAGES_MAX_CHARS: Final = 32000
+MESSAGES_MAX_CHARS: Final = 45000
 # A stopped server takes 3 to 10 minutes to start, and the job waits `queued` meanwhile.
 COLD_START_ALLOWANCE_S: Final = 600.0
 # The guide: every 2-3 s once the server is up, every 10-15 s while it starts.
