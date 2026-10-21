@@ -91,14 +91,14 @@ class Job(Base):
         # relation discovery, since revision 0030, voice design, since revision 0031, and the
         # environment prompt, since revision 0032, and environment definition, since revision
         # 0033, and scene definition, since revision 0034, and event extraction, since
-        # revision 0035.
+        # revision 0035, and look and state resolution, since revision 0036.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
             "'define_character', 'discover_relations', 'design_voice', "
             "'write_environment_prompt', 'define_environment', 'define_scene', "
-            "'extract_events')",
+            "'extract_events', 'resolve_looks_states')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -334,6 +334,39 @@ class SceneEvents(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     scene_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class LookStateResolution(Base):
+    """One version of a project's resolution of the looks and environment states its scenes
+    asked for (PHASE-016, `Path_ahead.md` Section 16).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version` of the project, and a stored row is never changed.
+    `inputs` records what the version was built from (the story hash, and the artifacts:
+    StoryBible, the list of scenes, the definition of every scene, and the library character or
+    environment each subject was linked to). `content` holds, for each scene, the request in the
+    model's own words and what it resolved to (`default`, an existing named look or state, or a
+    new one).
+    """
+
+    __tablename__ = "look_state_resolution"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_look_state_resolution_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     version: Mapped[int]
     source: Mapped[str]
     # The job that produced it. NULL for a manual version.
@@ -1206,3 +1239,81 @@ class EnvironmentReferenceCandidate(Base):
     lab_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
     )
+
+
+class CharacterNamedLook(Base):
+    """A named look of a library character (PHASE-016), for example "night clothes": a short
+    `slug`, a `name` and a text `description`. The character's canonical look is the implicit
+    "default" and has no row here (`slug` can never be `default`).
+
+    This is a record that points at a look, not a look: a `character_look` is one attempt at
+    making pictures. `look_id` stays NULL until PHASE-017 makes the pictures of this named look.
+
+    Named looks belong to the library character, not to one of its versions, so any project that
+    uses the character can reuse them. Creating one adds no version and moves no pin.
+    `origin_project_id` and `job_id` say which project's resolution run created it (NULL for one
+    made by hand, or when the project or job is gone).
+    """
+
+    __tablename__ = "character_named_look"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        CheckConstraint("slug <> 'default'", name="slug_not_default"),
+        UniqueConstraint("character_id", "slug"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("library_character.id", ondelete="CASCADE")
+    )
+    slug: Mapped[str]
+    name: Mapped[str]
+    description: Mapped[str]
+    source: Mapped[str]
+    origin_project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_look.id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EnvironmentState(Base):
+    """A named state of a library environment (PHASE-016), for example "night": a short `slug`,
+    a `name` and a text `description`. The environment's canonical reference is the implicit
+    "default" and has no row here (`slug` can never be `default`).
+
+    `reference_image_id` stays NULL until PHASE-017 makes the state's picture. Like a named
+    look, a state belongs to the library environment and not to one version, and creating one
+    adds no version and moves no pin.
+    """
+
+    __tablename__ = "environment_state"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        CheckConstraint("slug <> 'default'", name="slug_not_default"),
+        UniqueConstraint("environment_id", "slug"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    environment_id: Mapped[int] = mapped_column(
+        ForeignKey("library_environment.id", ondelete="CASCADE")
+    )
+    slug: Mapped[str]
+    name: Mapped[str]
+    description: Mapped[str]
+    source: Mapped[str]
+    origin_project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    reference_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

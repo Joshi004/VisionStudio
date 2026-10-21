@@ -74,6 +74,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-015 event extraction, 2026-10-21):** migration `0035`. The tenth story stage: **the events of each defined scene are listed with one model call per scene** (what happens, in story order, as `narration`, `dialogue`, `action`, `sound_event` and `pause` events; `Path_ahead.md` Section 17). (1) `job.type` gains `extract_events`: the CHECK is rebuilt in batch mode, so `job` now has seventeen types. (2) One new table, `scene_events` (Section 4.37): one immutable row per run for one scene, following Section 2.1, numbered per scene (`UNIQUE (project_id, scene_id, version)`), with `scene_id` the slug `id` of the scene in `scene_discovery.content`. A scene's events belong to the project alone: nothing is written to the Character Lab and no pin moves. (3) `content` is `{scene_id, events, uncovered}`. **Code sets the event ids** (`evt_1`, `evt_2`, ... in order) and `scene_id`; the model gives the types and fields. **Code checks that every `narration` and `dialogue` text is found in the scene's own text, in order, word by word** (case, punctuation and quote style ignored, the word matching of scene discovery); an answer that fails is refused and asked for once more. Text of the scene that no speech event covers is **not** an error: it is stored as `uncovered` warnings (`{text, after_event_id}`), because a sentence such as "Thump." legitimately becomes a `sound_event`. (4) `inputs` records the story hash, the scene text's hash (`scene_text_sha256`) and the artifacts it was built from: the StoryBible, the lists of characters and scenes, the scene's definition (`scene_definition` row id and version) and the definition of each character the scene chose (with `definition_sha256`). (5) **Out of date is worked out on every read**: the story or the StoryBible changed, the scene's text changed, the scene was defined again (a newer `scene_definition` version) or its definition is itself out of date, a character the scene chose is gone, relinked or has another definition, or a speaker is no longer in the newest list of characters. (6) A scene can only be extracted when its definition exists and is current. See Sections 4.37, 5 and 7.
 
+**Update (PHASE-016 look and environment-state resolution, 2026-10-21):** migration `0036`. Between the scene stages and speech: **after all scenes are defined, one model call per project maps every look and environment state the scenes asked for to the default, an existing named look or state, or one new entry that equivalent requests share** (`Path_ahead.md` Sections 14 and 16), so no picture is made twice. (1) `job.type` gains `resolve_looks_states`: the CHECK is rebuilt in batch mode, so `job` now has eighteen types. (2) Three new tables. `character_named_look` (Section 4.38) and `environment_state` (Section 4.39) hold the **named looks of a library character** ("night clothes") and the **named states of a library environment** ("night"): `slug`, `name`, `description`, `source`, the project and job that created it, and the picture link PHASE-017 fills (`look_id` and `reference_image_id`, both NULL for now). **Decision Q-2 (owner, 2026-10-21): a named look is a new record that points at a look**; `character_look` stays one image-making attempt and is not changed. The canonical look or reference is the implicit **`default`** and has no row (`slug <> 'default'` is a CHECK). Both tables are **library-wide**: they belong to the library character or environment, not to one of its versions, so any project that uses it can reuse them, and creating one adds **no version and moves no pin** (PHASE-017 does that when the pictures exist). `look_state_resolution` (Section 4.40) is the project artifact: one immutable row per run, numbered per project (`UNIQUE (project_id, version)`), following Section 2.1. (3) **Code decides what the model sees.** A request that says "default" (or nothing), and a character left out of `character_looks`, is `default` and is never sent. Requests with the same words (ignoring case and spacing) for one character or environment are grouped into one, with the scenes that made it, so the model only merges requests that are worded differently. The model sees the requests and, for each character or environment that has one, its default and the named looks or states it already has; it answers `default`, an existing id of **that** subject, or a new id. Code checks every request is answered once, every target belongs to its own subject, every new id is well formed (`^[a-z][a-z0-9_]{0,39}$`, not `default`, not taken, not repeated), the names and one-line descriptions are within their limits, and every new entry is used; an answer that fails is asked for once more and then the job fails with the reason and stores nothing. When every request is the default, the model is not called. (4) `inputs` records the story hash and the artifacts: the StoryBible, the list of scenes, **every scene's definition** (`scene_definition` row id, version and `scene_id`) and the library character or environment each subject was linked to. **Out of date is worked out on every read**: the story, the StoryBible or the list of scenes changed, a scene was defined again or added since, or a character or environment is linked to another library object. (5) A resolution can only be run when every scene in the newest list is defined and current. Running again is always allowed; with nothing changed the model sees the records the earlier run created and reuses them, so nothing new is created. See Sections 4.38 to 4.40, 5 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -144,7 +146,7 @@ Rules that go with it:
 
 ## 3. Entity-relationship overview
 
-A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-014, its `scene_definition` rows (one version of one scene's definition each) and, from PHASE-015, its `scene_events` rows (one version of one scene's events each) and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-013, its `project_environment_link` rows (the same for its discovered environments) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
+A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-014, its `scene_definition` rows (one version of one scene's definition each) and, from PHASE-015, its `scene_events` rows (one version of one scene's events each) and, from PHASE-016, its `look_state_resolution` rows (one version of the resolution of the looks and states its scenes asked for) and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-013, its `project_environment_link` rows (the same for its discovered environments) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`, and, from PHASE-016, `character_named_look` and `environment_state`, the library's named looks and states). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
 
 ```mermaid
 erDiagram
@@ -348,6 +350,16 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `scene_definition` | `job_id` | `job.id` | Yes (the `define_scene` job that wrote the version; `SET NULL`, and NULL for a manual version). PHASE-014 |
 | `scene_events` | `project_id` | `project.id` | No (`CASCADE`). PHASE-015 |
 | `scene_events` | `job_id` | `job.id` | Yes (the `extract_events` job that wrote the version; `SET NULL`, and NULL for a manual version). PHASE-015 |
+| `look_state_resolution` | `project_id` | `project.id` | No (`CASCADE`). PHASE-016 |
+| `look_state_resolution` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that wrote the version; `SET NULL`, and NULL for a manual version). PHASE-016 |
+| `character_named_look` | `character_id` | `library_character.id` | No (`CASCADE`). PHASE-016 |
+| `character_named_look` | `origin_project_id` | `project.id` | Yes (the project whose resolution created it; `SET NULL`). PHASE-016 |
+| `character_named_look` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that created it; `SET NULL`). PHASE-016 |
+| `character_named_look` | `look_id` | `character_look.id` | Yes (the look that holds its pictures; `SET NULL`; NULL until PHASE-017). PHASE-016 |
+| `environment_state` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-016 |
+| `environment_state` | `origin_project_id` | `project.id` | Yes (the project whose resolution created it; `SET NULL`). PHASE-016 |
+| `environment_state` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that created it; `SET NULL`). PHASE-016 |
+| `environment_state` | `reference_image_id` | `lab_image.id` | Yes (the state's picture; `SET NULL`; NULL until PHASE-017). PHASE-016 |
 | `environment_reference` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-012 |
 | `environment_reference` | `version_id` | `library_environment_version.id` | No (the version the attempt was made for; `CASCADE`). PHASE-012 |
 | `environment_reference` | `prompt_job_id` | `job.id` | Yes (the `write_environment_prompt` job; `SET NULL`). PHASE-012 |
@@ -444,13 +456,13 @@ CREATE TABLE asset (
 
 ### 4.5 `job`
 
-Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, migration `0032` (PHASE-012) added `write_environment_prompt`, migration `0033` (PHASE-013) added `define_environment`, migration `0034` (PHASE-014) added `define_scene`, and migration `0035` (PHASE-015) added `extract_events`. (Source: Section 3.3, 4.2, 4.3.)
+Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, migration `0032` (PHASE-012) added `write_environment_prompt`, migration `0033` (PHASE-013) added `define_environment`, migration `0034` (PHASE-014) added `define_scene`, migration `0035` (PHASE-015) added `extract_events`, and migration `0036` (PHASE-016) added `resolve_looks_states`. (Source: Section 3.3, 4.2, 4.3.)
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047; `design_voice`, PHASE-011), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` (`resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -469,7 +481,7 @@ Every unit of background work. This is where running-job information lives, so a
 CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt', 'define_environment', 'define_scene', 'extract_events')),
+    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt', 'define_environment', 'define_scene', 'extract_events', 'resolve_looks_states')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -878,6 +890,7 @@ CREATE INDEX idx_library_environment_version_environment ON library_environment_
 CREATE INDEX idx_environment_reference_environment ON environment_reference (environment_id);
 CREATE INDEX idx_scene_definition_project_scene ON scene_definition (project_id, scene_id);
 CREATE INDEX idx_scene_events_project_scene ON scene_events (project_id, scene_id);
+CREATE INDEX idx_look_state_resolution_project ON look_state_resolution (project_id);
 CREATE INDEX idx_environment_reference_project ON environment_reference (project_id);
 CREATE INDEX idx_environment_reference_candidate_reference ON environment_reference_candidate (reference_id);
 ```
@@ -1748,6 +1761,108 @@ CREATE INDEX idx_scene_events_project_scene ON scene_events (project_id, scene_i
 
 ---
 
+### 4.38 `character_named_look`
+
+*Added in PHASE-016 (migration `0036`).* A **named look of a library character** ("night clothes", "wet from the rain"). **Decision Q-2 (owner, 2026-10-21): a named look is a new record that points at a look**, so `character_look` (one image-making attempt, Section 4.23) is not changed. The character's canonical look is the implicit **`default`** and has **no row**. The table belongs to the **library character, not to one of its versions**: any project that links the character sees the same named looks, and creating one adds no `library_character_version` and moves no pin (PHASE-017 does that when the pictures exist). Rows are written by the `resolve_looks_states` job (Section 4.40) in the transaction that saves the resolution; nothing edits a row in this phase. The rules are in `services/look_state_resolution.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `character_id` | INTEGER, FK → `library_character.id` | NOT NULL | — | The library character. `ON DELETE CASCADE` |
+| `slug` | TEXT | NOT NULL | — | The look's id, `^[a-z][a-z0-9_]{0,39}$`, unique for the character (`UNIQUE (character_id, slug)`). `CHECK (slug <> 'default')` |
+| `name` | TEXT | NOT NULL | — | A short name for people to read (up to 60 characters) |
+| `description` | TEXT | NOT NULL | — | One line saying what the look is (up to 300 characters) |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`). Always `ai` in this phase |
+| `origin_project_id` | INTEGER, FK → `project.id` | NULL | — | The project whose resolution created it. `ON DELETE SET NULL` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `resolve_looks_states` job that created it. `ON DELETE SET NULL` |
+| `look_id` | INTEGER, FK → `character_look.id` | NULL | — | The look that holds its pictures. NULL until PHASE-017. `ON DELETE SET NULL` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE character_named_look (
+    id                INTEGER PRIMARY KEY,
+    character_id      INTEGER NOT NULL REFERENCES library_character(id) ON DELETE CASCADE,
+    slug              TEXT NOT NULL CHECK (slug <> 'default'),
+    name              TEXT NOT NULL,
+    description       TEXT NOT NULL,
+    source            TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    origin_project_id INTEGER REFERENCES project(id) ON DELETE SET NULL,
+    job_id            INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    look_id           INTEGER REFERENCES character_look(id) ON DELETE SET NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_character_named_look_character_id UNIQUE (character_id, slug)
+);
+```
+
+---
+
+### 4.39 `environment_state`
+
+*Added in PHASE-016 (migration `0036`).* The same for environments: a **named state of a library environment** ("night", "after the storm"). The environment's canonical reference is the implicit **`default`** and has no row. It belongs to the library environment, not to one of its versions, and is written by the same job. Its picture link is `reference_image_id` (a `lab_image`), NULL until PHASE-017.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `environment_id` | INTEGER, FK → `library_environment.id` | NOT NULL | — | The library environment. `ON DELETE CASCADE` |
+| `slug` | TEXT | NOT NULL | — | The state's id, same pattern as `character_named_look.slug`; `UNIQUE (environment_id, slug)`; `CHECK (slug <> 'default')` |
+| `name` | TEXT | NOT NULL | — | Up to 60 characters |
+| `description` | TEXT | NOT NULL | — | Up to 300 characters |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `origin_project_id` | INTEGER, FK → `project.id` | NULL | — | `ON DELETE SET NULL` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | `ON DELETE SET NULL` |
+| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The state's picture. NULL until PHASE-017. `ON DELETE SET NULL` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE environment_state (
+    id                 INTEGER PRIMARY KEY,
+    environment_id     INTEGER NOT NULL REFERENCES library_environment(id) ON DELETE CASCADE,
+    slug               TEXT NOT NULL CHECK (slug <> 'default'),
+    name               TEXT NOT NULL,
+    description        TEXT NOT NULL,
+    source             TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    origin_project_id  INTEGER REFERENCES project(id) ON DELETE SET NULL,
+    job_id             INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    reference_image_id INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_environment_state_environment_id UNIQUE (environment_id, slug)
+);
+```
+
+---
+
+### 4.40 `look_state_resolution`
+
+*Added in PHASE-016 (migration `0036`).* The Look and Environment-State Resolution stage's result: one row per **version of the project's resolution**, written by the `resolve_looks_states` job. It follows Section 2.1 (`source`, `job_id`, `version`, `inputs`, immutable) and, unlike the scene tables, is one per **project**, so versions are numbered `UNIQUE (project_id, version)`. Running again adds the next version. The rules are in `services/look_state_resolution.py` and `services/look_state_resolution_writer.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... (the highest plus 1 when the job saves) |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`). Always `ai` in this phase |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `resolve_looks_states` job. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the version was built from (Section 5, "The look and state resolution") |
+| `content` | JSON | NOT NULL | — | What every scene's requests resolved to (Section 5) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE look_state_resolution (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    source      TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id      INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs      JSON NOT NULL,
+    content     JSON NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_look_state_resolution_project_id UNIQUE (project_id, version)
+);
+CREATE INDEX idx_look_state_resolution_project ON look_state_resolution (project_id);
+```
+
+---
+
 ## 5. JSON column shapes
 
 The shapes of the narration jobs and of the assets they made were removed with migration `0022`: `transcript.words` and `script_words`, and the `job.input` and `job.output` of `transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `write_last_frame_prompt`, `generate_last_frame`, `generate_clip`, `render_final`, `generate_voiceover`, the cast jobs and `auto_pipeline`. Their full text is at the tag `narration-final` (`git show narration-final:DATABASE_STRUCTURE.md`). The shapes of the lab jobs follow.
@@ -2212,6 +2327,50 @@ One job per scene. It belongs to a project, is `provider='llm'` with the restart
 
 When the job starts it resolves the story model, loads the StoryBible named by `story_bible_id` (the job fails with "The Story Bible this run was started with could not be found." if it is missing), and adds what it sent: `instructions_sha256`, `server_url`, `endpoint` and the exact chat `request`. The answer is checked against the ids in `characters` and against the scene's `text` (shape first, then coverage); an unusable answer is retried within the attempt limits (D-7). On success, in **one transaction**, `scene_events.save_events` adds the `scene_events` row (`source='ai'`, `job_id`, `inputs`, `content`) and the job is marked succeeded; `output` holds the answer record, `scene_id`, `version`, `events` (the number of events), `uncovered` (the number of warnings) and `seconds`.
 
+### The look and state resolution (PHASE-016)
+
+`look_state_resolution.content` says, for every scene of the newest list, what its environment state and each character's look resolved to. It is built by code (`look_state_resolution_writer.build_content`) from the checked answer; `how` is `default` (no record, the id is `null`), `reuse` (an existing named look or state) or `new` (created by this run):
+
+```json
+{ "scenes": [
+    { "scene_id": "the_warning",
+      "environment": { "discovery_id": "apartment", "request": "night", "state": "night", "state_id": 3, "how": "new" },
+      "looks": [ { "character_id": "arjun", "request": "night clothes", "look": "night_clothes", "look_id": 5, "how": "new" },
+                 { "character_id": "meera", "request": "default", "look": null, "look_id": null, "how": "default" } ] } ] }
+```
+
+`state` and `look` are the slug of the record (`state_id` and `look_id` its row id in `environment_state` and `character_named_look`). A scene that does not ask for a look for a character keeps `default`. The model answers `{"new_looks": [{"character_id", "id", "name", "description"}], "new_states": [{"environment_id", "id", "name", "description"}], "looks": [{"request_id", "look"}], "states": [{"request_id", "state"}]}`; code checks it (`check_answer`) before anything is stored.
+
+`look_state_resolution.inputs`:
+
+```json
+{ "story_sha256": "9f2c...",
+  "artifacts": [ { "kind": "story_bible", "id": 7, "version": 2 },
+                 { "kind": "scene_discovery", "id": 5, "version": 1 },
+                 { "kind": "scene_definition", "id": 21, "version": 1, "scene_id": "the_warning" },
+                 { "kind": "character", "id": 8, "discovery_id": "arjun", "name": "Arjun" },
+                 { "kind": "environment", "id": 2, "discovery_id": "apartment", "name": "Apartment" } ] }
+```
+
+`character` and `environment` entries name the **library** object each used discovered character or environment was linked to (`id`), and only those the scenes use. **When the resolution is current.** It is out of date when, **on this read**: the story hashes differently from `story_sha256`; the newest StoryBible or list of scenes is newer than the recorded one; a scene of the newest list has no entry or a newer `scene_definition` version than recorded; or a recorded character or environment is linked to another library object or is no longer linked.
+
+### `job.input` and `job.output` for a `resolve_looks_states` job (PHASE-016)
+
+One job per project. It belongs to the project, is `provider='llm'` with the restart rule `never_rerun`, uses the **story model** (D-12) and is created without a `dedupe_key`: while one is queued or running, a second click returns it. `services/look_state_resolution.start_run` creates the job only when the project has a saved story, a StoryBible and lists of scenes and characters that are up to date **and every scene of the newest list is defined and current** (otherwise the API answers 422 with the reason), and every character and environment the scenes use is linked to a library object:
+
+```json
+{ "story_bible_id": 7, "story_bible_version": 2,
+  "plan": [ { "scene_id": "the_warning", "title": "The Warning",
+              "environment": { "subject_id": "apartment", "text": "night", "request_id": "state_1" },
+              "looks": [ { "subject_id": "arjun", "text": "night clothes", "request_id": "look_1" } ] } ],
+  "requests": [ { "id": "look_1", "kind": "look", "subject_id": "arjun", "text": "night clothes", "scenes": [ { "id": "the_warning", "title": "The Warning" } ] } ],
+  "catalog": { "looks":  [ { "subject_id": "arjun", "library_id": 8, "name": "Arjun", "default": "...", "named": [ { "id": "night_clothes", "record_id": 5, "name": "...", "description": "..." } ] } ],
+               "states": [ ] },
+  "inputs": { "story_sha256": "9f2c...", "artifacts": [ ] } }
+```
+
+Only requests that are **not** the default are listed (`plan` keeps `request_id: null` for the rest). `library_id` and `record_id` are kept for code and are **not sent** to the model. When the job starts it resolves the story model, loads the StoryBible named by `story_bible_id` (the job fails with "The Story Bible this run was started with could not be found." if it is missing), and adds what it sent: `instructions_sha256`, `server_url`, `endpoint` and the exact chat `request`. When `requests` is empty **the model is not called**. The answer is checked once for the whole project; an unusable answer is retried within the attempt limits (D-7). On success, in **one transaction**, `look_state_resolution.save_resolution` inserts the new `character_named_look` and `environment_state` rows (checking again that no slug was taken while the job ran), adds the `look_state_resolution` row (`source='ai'`, `job_id`, `inputs`, `content`) and marks the job succeeded; `output` holds the answer record, `content: null`, `version`, `requests`, `new_looks`, `new_states` and `seconds`.
+
 ---
 
 ## 6. Global settings stored in `setting`
@@ -2280,6 +2439,7 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Define the environments and make their pictures (PHASE-013) | `POST /api/projects/{id}/environment-definitions/{discovery_id}/run` (one environment) or `POST .../run` (Define all): refused with 422 when there is no saved story, no `story_bible` row, a `story_bible` that is out of date with the story, no list of scenes or one that is out of date, no list of environments, an entry that is not linked, or a linked environment that is archived. An environment the user **chose from the library** (`project_environment_link.how='mapped'`) is also refused unless the body has `confirm_overwrite: true`; Define all skips it, skips one that is already defined and current, and skips one that is already being defined (each is listed in `skipped` with the reason). Otherwise `INSERT job` (`type='define_environment'`, `provider='llm'`, `project_id` set, `dedupe_key='discovery_id'`, `input` as in Section 5). Nothing is written to `library_environment` yet. **Start**: `UPDATE job.input` with the exact request, then the paid call. **When the answer is usable**, one transaction does `UPDATE library_environment` (`definition` and the profile fields written from it, never `name` or `notes`), `INSERT library_environment_version` (`source='ai'`, `job_id`, `inputs`, `definition`), `UPDATE project_environment_link.pinned_version` to it, then `INSERT environment_reference` (`project_id`, `discovery_id`, `version_id`) and `INSERT job` (`write_environment_prompt`) for the picture, and finishes the job. **Then the lab's own machinery runs**: the prompt job writes the prompt from the new version's frozen profile, `on_prompt_written` starts **one** candidate (`INSERT lab_run` + `INSERT job` `lab_image` + `INSERT environment_reference_candidate`), and when its picture is stored `UPDATE library_environment_version.reference_image_id` makes it the canonical picture. `POST .../{discovery_id}/picture` starts another attempt for the pinned version when it has no picture (a failed or never-started one), and is refused otherwise. `GET` writes nothing: each entry's status (`unlinked`, `not_defined`, `defined`, `out_of_date` and why), its definition and its picture state (`unavailable`, `none`, `in_progress` with the stage, `failed` with the reason, `ready`) are worked out on read from the pinned version, its `inputs`, the newest definition job and the newest attempts |
 | Define the scenes (PHASE-014) | `POST /api/projects/{id}/scene-definitions/{scene_id}/run` (one scene) or `POST .../run` (Define all): refused with 422 when there is no saved story, no `story_bible` row or one out of date, no list of scenes, characters or environments or one out of date, or a character or environment that is not linked and `defined`, and for a scene id not in the newest list. Otherwise `INSERT job` (`type='define_scene'`, `dedupe_key=scene_id`) with the story, the scene, its neighbours and every definition. Define all skips a scene that is defined and current and one being defined. The job writes one row: `INSERT scene_definition` (the next `version` of that scene) in the transaction that finishes the job. Nothing else is written: no library object changes and no pin moves. |
 | Extract the events of the scenes (PHASE-015) | `POST /api/projects/{id}/scene-events/{scene_id}/run` (one scene) or `POST .../run` (Extract all): refused with 422 when there is no saved story, no `story_bible` row or one out of date, no list of scenes or characters or one out of date, and for a scene id not in the newest list or a scene whose definition is missing or out of date. Otherwise `INSERT job` (`type='extract_events'`, `dedupe_key=scene_id`) with the scene, its definition and the characters. Extract all skips a scene that is extracted and current, one without a current definition, and one being extracted. The job writes one row: `INSERT scene_events` (the next `version` of that scene) in the transaction that finishes the job. Nothing else is written: no library object changes and no pin moves. |
+| Resolve the looks and environment states (PHASE-016) | `POST /api/projects/{id}/looks-and-states/run`: refused with 422 when there is no saved story, no `story_bible` row or one out of date, no list of scenes or characters or one out of date, a scene that is not defined or whose definition is out of date, or a character or environment a scene uses that is not linked. Otherwise `INSERT job` (`type='resolve_looks_states'`, one active job per project). The job writes, in the transaction that finishes it: `INSERT character_named_look` and `INSERT environment_state` for each **new** look or state (belonging to the library character or environment, `look_id` and `reference_image_id` NULL) and `INSERT look_state_resolution` (the next `version` of the project). Nothing else is written: no library version is added, no pin moves and no `character_look` or `lab_image` row changes. |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 

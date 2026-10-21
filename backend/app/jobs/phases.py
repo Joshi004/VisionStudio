@@ -158,6 +158,10 @@ SAVING_SCENE_DEFINITION: Final = "saving the scene definition"
 # `extract_events` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_SCENE_EVENTS: Final = "saving the scene events"
 
+# --- Running: look and environment-state resolution (PHASE-016) --------------------------
+# `resolve_looks_states` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_RESOLUTION: Final = "saving the resolved looks and states"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

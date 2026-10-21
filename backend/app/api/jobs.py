@@ -45,6 +45,7 @@ JobType = Literal[
     "define_environment",
     "define_scene",
     "extract_events",
+    "resolve_looks_states",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

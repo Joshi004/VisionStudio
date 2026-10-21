@@ -18,6 +18,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   define_environment: "Environment definition",
   define_scene: "Scene definition",
   extract_events: "Event extraction",
+  resolve_looks_states: "Look and state resolution",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

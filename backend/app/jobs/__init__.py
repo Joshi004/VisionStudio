@@ -9,7 +9,8 @@
   (`write_character_look_prompt.py`, `write_character_take_prompt.py`) and the story stages
   (`write_story_bible.py`, `discover_characters.py`, `discover_environments.py`,
   `discover_scenes.py`, `define_character.py`, `discover_relations.py`, `design_voice.py`,
-  `define_environment.py`, `define_scene.py`, `extract_events.py`) and the environment library
+  `define_environment.py`, `define_scene.py`, `extract_events.py`,
+  `resolve_looks_states.py`) and the environment library
   (`write_environment_prompt.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
@@ -43,6 +44,7 @@ def register_handlers() -> None:
     from app.jobs.generate_lab_image import GenerateLabImageHandler
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
     from app.jobs.lab_voice import LabVoiceHandler
+    from app.jobs.resolve_looks_states import ResolveLooksStatesHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
@@ -66,3 +68,4 @@ def register_handlers() -> None:
     handlers.register(DefineEnvironmentHandler())
     handlers.register(DefineSceneHandler())
     handlers.register(ExtractEventsHandler())
+    handlers.register(ResolveLooksStatesHandler())

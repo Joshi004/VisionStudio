@@ -1983,6 +1983,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/looks-and-states": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Looks And States */
+        get: operations["get_looks_and_states_api_projects__project_id__looks_and_states_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/looks-and-states/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Looks And States
+         * @description Starts the job that resolves every look and environment state the scenes asked for. If
+         *     one is already waiting or running for the project, its id is returned and no second job is
+         *     made.
+         */
+        post: operations["run_looks_and_states_api_projects__project_id__looks_and_states_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3203,7 +3242,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states";
             /**
              * Status
              * @enum {string}
@@ -3256,7 +3295,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states";
             /**
              * Status
              * @enum {string}
@@ -3706,6 +3745,89 @@ export interface components {
             references: components["schemas"]["CharacterReferenceOut"][];
         };
         /**
+         * LookStateItemOut
+         * @description One request of a scene and what it resolved to. `id`, `name` and `description` are None
+         *     for `default`.
+         */
+        LookStateItemOut: {
+            /** Subject Id */
+            subject_id: string;
+            /** Subject Name */
+            subject_name: string;
+            /** Request */
+            request: string;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "default" | "reuse" | "new";
+            /** Id */
+            id: string | null;
+            /** Name */
+            name: string | null;
+            /** Description */
+            description: string | null;
+        };
+        /** LookStateResolutionOut */
+        LookStateResolutionOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            version: components["schemas"]["LookStateVersionOut"] | null;
+            /** Scenes */
+            scenes: components["schemas"]["LookStateSceneOut"][];
+            /** Reasons */
+            reasons: string[];
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** LookStateRunOut */
+        LookStateRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /**
+         * LookStateSceneOut
+         * @description One scene of the newest list of scenes.
+         */
+        LookStateSceneOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Resolved */
+            resolved: boolean;
+            /** Current */
+            current: boolean;
+            environment: components["schemas"]["LookStateItemOut"] | null;
+            /** Looks */
+            looks: components["schemas"]["LookStateItemOut"][];
+        };
+        /**
+         * LookStateVersionOut
+         * @description The provenance of the newest resolution (D-3).
+         */
+        LookStateVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * MadeFromOut
          * @description The character a same-face variant is drawn from (PHASE-047).
          */
@@ -3953,7 +4075,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states";
             /** Running */
             running: number;
             /** Queued */
@@ -9658,6 +9780,86 @@ export interface operations {
                 };
             };
             /** @description There is no saved story, up-to-date Story Bible or lists, or the scene is not defined yet, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_looks_and_states_api_projects__project_id__looks_and_states_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookStateResolutionOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_looks_and_states_api_projects__project_id__looks_and_states_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookStateRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or list of scenes, or a scene is not defined yet or is out of date. */
             422: {
                 headers: {
                     [name: string]: unknown;
