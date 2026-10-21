@@ -146,6 +146,10 @@ SAVING_VOICE_DESCRIPTION: Final = "saving the voice description"
 # `write_environment_prompt` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_ENVIRONMENT_PROMPT: Final = "saving the environment prompt"
 
+# --- Running: environment definition (PHASE-013) -----------------------------------------
+# `define_environment` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_ENVIRONMENT_DEFINITION: Final = "saving the environment definition"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

@@ -1,9 +1,10 @@
 """The `write_environment_prompt` job (PHASE-012): a language model writes the prompt for a
-library environment's canonical reference picture, from the environment's card, on the
-environment sheet profile (`image_prompt_profiles.ACTIVE_ENVIRONMENT_SHEET_PROFILE`).
+library environment's canonical reference picture, from the card of the version the picture is
+for, on the environment sheet profile (`image_prompt_profiles.ACTIVE_ENVIRONMENT_SHEET_PROFILE`).
 
-Once the prompt is saved, the four candidate pictures are started
-(`environment_references.on_prompt_written`); if the model fails, the attempt is marked failed
+Once the prompt is saved, the candidate pictures are started (four for a lab attempt, one for
+an attempt the story pipeline made: `environment_references.on_prompt_written`); if the model
+fails, the attempt is marked failed
 (`on_prompt_failed`), so the page shows why instead of waiting forever. Reuses
 `image_prompt_writer.py`'s reader and checks.
 
@@ -23,6 +24,7 @@ import time
 from typing import Any, Final
 
 from app.core.urls import docker_mapped
+from app.db.models import EnvironmentReference, LibraryEnvironmentVersion
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.handlers import JobHandler
@@ -79,13 +81,32 @@ class WriteEnvironmentPromptHandler(JobHandler):
                 if isinstance(environment_id, int)
                 else None
             )
+            # The picture is made for one version, so the prompt describes that version as it
+            # was frozen, never a later edit of the head (PHASE-013). An attempt with no
+            # version (cannot happen: `start_reference` always sets one) falls back to the head.
+            reference_id = job_input.get("reference_id")
+            attempt = (
+                await session.get(EnvironmentReference, reference_id)
+                if isinstance(reference_id, int)
+                else None
+            )
+            version = (
+                await session.get(LibraryEnvironmentVersion, attempt.version_id)
+                if attempt is not None
+                else None
+            )
+            version_profile = dict(version.profile) if version is not None else None
             target = await llm_target.resolve(session, IMAGE_PROMPT_MODEL_KEY)
             await session.commit()
 
         if environment is None:
             await self._fail(job_id, _NO_ENVIRONMENT)
             return
-        card = environment_library.environment_card(environment)
+        card = (
+            environment_library.card_from_profile(version_profile)
+            if version_profile is not None
+            else environment_library.environment_card(environment)
+        )
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
         profile = ACTIVE_ENVIRONMENT_SHEET_PROFILE

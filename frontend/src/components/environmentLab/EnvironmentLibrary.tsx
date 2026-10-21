@@ -80,6 +80,15 @@ function EnvironmentCard({
                 archived
               </Badge>
             )}
+            {environment.origin !== null && (
+              <Badge
+                variant="light"
+                color="teal"
+                title={`Made from the project ${environment.origin.project_name}`}
+              >
+                from project
+              </Badge>
+            )}
           </Group>
         </Stack>
       </UnstyledButton>

@@ -64,9 +64,11 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-047 character relations, 2026-10-20):** migration `0030`. The project says who is the same person at another age, a twin, or family of whom, and the definitions and the images use it. (1) New table `character_relations` (Section 4.29): the shape of `character_discovery`, one immutable row per version of the project's whole list of relations, found by the `discover_relations` job (`source` `ai`) or saved by the user (`manual`), keyed by the discovery slug ids; **a library character never carries a relation** (D-14, amended). (2) `job.type` gains `discover_relations`: the CHECK is rebuilt in batch mode, so `job` now has twelve types. (3) `character_look.status` gains `waiting` (Section 4.23): a pipeline look for a same-face variant that waits for its base's images; no job exists until it starts. The CHECK is rebuilt in batch mode. (4) The `inputs` of a definition version gain `relations_sha256` and, when the project has relations, a `character_relations` artifact (Section 4.27); the `inputs` of a pipeline look gain `relation_kind`, `base` and `resemblance_sha256` (Section 4.23). A row made before this has none of them and reads as having no relations. The downgrade drops the table, deletes `discover_relations` jobs and `waiting` looks, and restores both CHECKs. No data is touched on upgrade. Section 7 has the new row.
 
-**Update (PHASE-012 environment library, 2026-10-20):** migration `0032`. The Character Lab gets a library of **environments** (places) with versions and a canonical reference picture. (1) `job.type` gains `write_environment_prompt`: the CHECK is rebuilt in batch mode, so `job` now has fourteen types. It is a lab job (`project_id` NULL, `provider='llm'`) that writes the prompt of one reference picture. (2) Four new tables, all global (no `project_id`): `library_environment` (Section 4.31, the editable head), `library_environment_version` (Section 4.32, one immutable profile snapshot per version, with the canonical picture `reference_image_id` chosen for it), `environment_reference` (Section 4.33, one attempt to make a version's picture) and `environment_reference_candidate` (Section 4.34, the four candidate pictures of an attempt, each a `lab_run`). (3) **A version freezes its text and its picture together**: an edit adds the next version with **no** picture, and the older version keeps its own; only the **newest** version's picture can be chosen or replaced. There is no foreign key from the head to a version: the newest version is the one with the highest `version`. No column of an existing table changed, and no data is moved. See Sections 4.31 to 4.34, 5 and 7.
+**Update (PHASE-012 environment library, 2026-10-20):** migration `0032`. The Character Lab gets a library of **environments** (places) with versions and a canonical reference picture. (1) `job.type` gains `write_environment_prompt`: the CHECK is rebuilt in batch mode, so `job` now has fourteen types. It is a lab job (`project_id` NULL, `provider='llm'`) that writes the prompt of one reference picture. (2) Four new tables, all global (no `project_id`): `library_environment` (Section 4.31, the editable head), `library_environment_version` (Section 4.32, one immutable profile snapshot per version, with the canonical picture `reference_image_id` chosen for it), `environment_reference` (Section 4.33, one attempt to make a version's picture) and `environment_reference_candidate` (Section 4.34, the four candidate pictures of an attempt, each a `lab_run`). (3) **A version freezes its text and its picture together**: an edit adds the next version with **no** picture, and the older version keeps its own; only the **newest** version's picture can be chosen or replaced (**tightened in PHASE-013:** a newest version that a project pins and that already has its picture is frozen too). There is no foreign key from the head to a version: the newest version is the one with the highest `version`. No column of an existing table changed, and no data is moved. See Sections 4.31 to 4.34, 5 and 7.
 
 **Update (PHASE-011 character and narrator voices, 2026-10-20):** migration `0031`. The seventh story stage: **each defined character, and the narrator, gets a saved voice made by the pipeline**, with nobody choosing a sample. (1) `job.type` gains `design_voice`: the CHECK is rebuilt in batch mode, so `job` now has thirteen types. One job writes one voice description (one paid call to the story model); in the same transaction that marks it succeeded it queues **one design-mode Voice lab run**. (2) `lab_voice_run` gains five nullable columns: `project_id` (FK → `project.id`, `SET NULL`, indexed), `subject` (`character` or `narrator`), `discovery_id` (the slug of the discovered character), `design_job_id` (FK → `job.id`, `SET NULL`: the `design_voice` job that wrote the description) and `inputs` (JSON, the D-3 inputs the voice is compared with). A run made by hand has none of the five (Section 4.12). (3) New table `narrator_voice` (Section 4.30): the shape of `story_bible`, one immutable row per derivation (`ai`) or hand choice (`manual`) of the project's narrator voice. (4) When the run's speech is stored, `lab_voice` calls `story_voices.on_voice_finished`, which saves the `voice` row from the run and, for a character, sets `library_character.voice_id`, adds a new `ai` `library_character_version` and moves the project's pin to it (the same way PHASE-010 does for a look). A character has **no** new column: the voice is the library character's own `voice_id`. "Out of date" is never stored: a character voice is compared by `inputs.voice_facts_sha256`, a derived narrator voice by `inputs.narration_sha256`. See Sections 4.2, 4.12, 4.30, 5 and 7.
+
+**Update (PHASE-013 environment definition and project link, 2026-10-21):** migration `0033`. A story project's discovered environments are **backed by library environments, the project pins one version of each**, and the eighth story stage **defines each environment with one model call and makes its canonical reference picture by itself**. (1) New table `project_environment_link` (Section 4.35): the shape of `project_character_link`, one row per linked discovered environment, found by `(project_id, discovery_id)`, naming the library environment, the **pinned version** (a plain number), `how` (`created` or `mapped`) and `discovery_version`; `UNIQUE (project_id, discovery_id)` and `UNIQUE (project_id, environment_id)`. (2) `library_environment` gains `origin_project_id` (FK → `project.id`, `SET NULL`), `origin_discovery_id` and a nullable JSON `definition` (Section 4.31). `library_environment_version` gains `definition`, `job_id` (FK → `job.id`, `SET NULL`) and `inputs` (the D-3 provenance, Section 4.32). The definition is `Path_ahead.md` Section 13's (architecture, layout, `visual_identity`, `important_landmarks`, `atmosphere.baseline`, `continuity_rules`) plus a top-level `era`; the shape is in Section 5. (3) `environment_reference` gains `project_id` (FK → `project.id`, `SET NULL`, indexed by `idx_environment_reference_project`) and `discovery_id` (Section 4.33): **a non-NULL `project_id` makes an attempt a pipeline attempt**, which starts **one** candidate (a lab attempt still starts four) and takes it as the version's canonical picture itself (D-5). (4) `job.type` gains `define_environment`: the CHECK is rebuilt in batch mode, so `job` now has fifteen types. It is **one job per environment** (`input.discovery_id` names it, `dedupe_key`), belongs to the project, is `provider='llm'` with the restart rule `never_rerun`, and uses the story model setting (D-12). (5) A definition run **overwrites the lab profile fields it fills** (`description`, `atmosphere`, `era_kind`, `era_years`, `era_setting`) and never `name` or `notes`; the text written over stays readable in the earlier version. The new version has `source='ai'`, and **the project's pin moves to it** (the pipeline's own change: a lab edit never moves a pin). A later lab edit carries the definition forward. An environment the user **chose from the library** is overwritten only after the request confirms it (`confirm_overwrite`); **Define all** skips it, and skips one that is already defined and current. (6) A definition needs an **up-to-date list of scenes** (the model works out from it which scenes use the place, D-15), so a newer list of scenes marks a definition out of date. Whether a definition is **out of date** is computed on every read from the pinned version's `inputs`, never stored. (7) **The picture's freeze rule is tightened** (it was "only the newest version's picture can change" in PHASE-012): a version is frozen when it is not the newest, **or** a project pins it and it already has a picture. The picture prompt is now written from the attempt's own version, not the head. (8) No setting is added and no data is moved. The downgrade deletes every link and every `define_environment` job, drops the new columns and restores the `job.type` CHECK. New endpoints: `/api/projects/{id}/environment-links` (read, link all, create, map, unlink), `/api/projects/{id}/environment-definitions` (read, run all, run one, retry the picture) and `GET /api/lab/environments/{id}/projects`. See Sections 4.31 to 4.35, 5 and 7.
 
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
@@ -138,7 +140,7 @@ Rules that go with it:
 
 ## 3. Entity-relationship overview
 
-A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
+A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-013, its `project_environment_link` rows (the same for its discovered environments) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
 
 ```mermaid
 erDiagram
@@ -208,19 +210,28 @@ erDiagram
         integer voice_id FK
         integer look_id FK
     }
+    PROJECT_ENVIRONMENT_LINK {
+        integer id PK
+        integer project_id FK
+        integer environment_id FK
+        integer pinned_version
+    }
     LIBRARY_ENVIRONMENT {
         integer id PK
+        integer origin_project_id FK
     }
     LIBRARY_ENVIRONMENT_VERSION {
         integer id PK
         integer environment_id FK
         integer reference_image_id FK
+        integer job_id FK
     }
     ENVIRONMENT_REFERENCE {
         integer id PK
         integer environment_id FK
         integer version_id FK
         integer prompt_job_id FK
+        integer project_id FK
     }
     ENVIRONMENT_REFERENCE_CANDIDATE {
         integer id PK
@@ -236,6 +247,11 @@ erDiagram
     PROJECT ||--o{ SCENE_DISCOVERY       : "owns"
     PROJECT ||--o{ PROJECT_CHARACTER_LINK : "owns"
     LIBRARY_CHARACTER ||--o{ PROJECT_CHARACTER_LINK : "used by"
+    PROJECT ||--o{ PROJECT_ENVIRONMENT_LINK : "owns"
+    LIBRARY_ENVIRONMENT ||--o{ PROJECT_ENVIRONMENT_LINK : "used by"
+    LIBRARY_ENVIRONMENT }o--o| PROJECT : "origin_project_id"
+    LIBRARY_ENVIRONMENT_VERSION }o--o| JOB : "job_id"
+    ENVIRONMENT_REFERENCE }o--o| PROJECT : "project_id"
     LIBRARY_CHARACTER }o--o| PROJECT : "origin_project_id"
     JOB     }o--o| ASSET         : "result_asset_id"
     LAB_VIDEO_RUN }o--o| JOB     : "job_id"
@@ -317,8 +333,13 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `library_character` | `origin_project_id` | `project.id` | Yes (the project the pipeline made the character for; NULL for a character made in the lab; `SET NULL`). PHASE-008 |
 | `project_character_link` | `project_id` | `project.id` | No (`CASCADE`). PHASE-008 |
 | `project_character_link` | `character_id` | `library_character.id` | No (`CASCADE`). PHASE-008. The pinned version is **not** a foreign key: it is the number `pinned_version`, found by `(character_id, pinned_version)` |
+| `project_environment_link` | `project_id` | `project.id` | No (`CASCADE`). PHASE-013 |
+| `project_environment_link` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-013. The pinned version is **not** a foreign key: it is the number `pinned_version`, found by `(environment_id, pinned_version)` |
+| `library_environment` | `origin_project_id` | `project.id` | Yes (the project the pipeline made this environment for; `SET NULL`). PHASE-013 |
 | `library_environment_version` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-012 |
 | `library_environment_version` | `reference_image_id` | `lab_image.id` | Yes (the canonical picture chosen for this version; `SET NULL`). PHASE-012 |
+| `library_environment_version` | `job_id` | `job.id` | Yes (the `define_environment` job that wrote this version; `SET NULL`). PHASE-013 |
+| `environment_reference` | `project_id` | `project.id` | Yes (the project whose pipeline made the attempt; `SET NULL`; a non-NULL value marks a pipeline attempt). PHASE-013 |
 | `environment_reference` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-012 |
 | `environment_reference` | `version_id` | `library_environment_version.id` | No (the version the attempt was made for; `CASCADE`). PHASE-012 |
 | `environment_reference` | `prompt_job_id` | `job.id` | Yes (the `write_environment_prompt` job; `SET NULL`). PHASE-012 |
@@ -415,13 +436,13 @@ CREATE TABLE asset (
 
 ### 4.5 `job`
 
-Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, and migration `0032` (PHASE-012) added `write_environment_prompt`. (Source: Section 3.3, 4.2, 4.3.)
+Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, migration `0032` (PHASE-012) added `write_environment_prompt`, and migration `0033` (PHASE-013) added `define_environment`. (Source: Section 3.3, 4.2, 4.3.)
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047; `design_voice`, PHASE-011), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` (`lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -440,7 +461,7 @@ Every unit of background work. This is where running-job information lives, so a
 CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt')),
+    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt', 'define_environment')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -843,9 +864,11 @@ CREATE INDEX idx_character_take_character ON character_take (character_id);
 CREATE INDEX idx_character_take_created ON character_take (created_at);
 CREATE INDEX idx_library_character_version_character ON library_character_version (character_id);
 CREATE INDEX idx_project_character_link_character ON project_character_link (character_id);
+CREATE INDEX idx_project_environment_link_environment ON project_environment_link (environment_id);
 CREATE INDEX idx_library_environment_created ON library_environment (created_at);
 CREATE INDEX idx_library_environment_version_environment ON library_environment_version (environment_id);
 CREATE INDEX idx_environment_reference_environment ON environment_reference (environment_id);
+CREATE INDEX idx_environment_reference_project ON environment_reference (project_id);
 CREATE INDEX idx_environment_reference_candidate_reference ON environment_reference_candidate (reference_id);
 ```
 
@@ -1469,7 +1492,7 @@ CREATE INDEX idx_narrator_voice_project ON narrator_voice (project_id);
 
 ### 4.31 `library_environment`
 
-*Added in PHASE-012 (migration `0032`).* The editable head of an **environment** in the Character Lab: a place that is kept, versioned and illustrated. It is global (no `project_id`); a story project will link to one in PHASE-013. An environment is never deleted: `archived` hides it.
+*Added in PHASE-012 (migration `0032`).* The editable head of an **environment** in the Character Lab: a place that is kept, versioned and illustrated. It is global (no `project_id`); a story project links its discovered environments to library environments and pins a version of each (Section 4.35, PHASE-013). An environment is never deleted: `archived` hides it.
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
@@ -1484,6 +1507,9 @@ CREATE INDEX idx_narrator_voice_project ON narrator_voice (project_id);
 | `atmosphere` | TEXT | NULL | — | Optional, its usual mood and light. At most 500 characters |
 | `notes` | TEXT | NULL | — | Optional. At most 1,000 characters |
 | `archived` | BOOLEAN | NOT NULL | `0` | Hidden from the library list when true. Archiving is not a version change |
+| `origin_project_id` | INTEGER, FK → `project.id` | NULL | — | PHASE-013 (migration `0033`). The project the pipeline made this environment for (`project_environment_link.how = 'created'`). NULL for an environment made in the lab. `ON DELETE SET NULL`. Provenance only: it does not say which projects use the environment (Section 4.35 does) |
+| `origin_discovery_id` | TEXT | NULL | — | PHASE-013. The slug `id` of the discovered environment it was made from. Set together with `origin_project_id` |
+| `definition` | JSON | NULL | — | PHASE-013. The **newest structured definition** the Environment Definition stage wrote (`Path_ahead.md` Section 13; the shape is in Section 5). NULL until one is written, and for an environment made by hand. It is the same document as the newest version's `definition`; the head carries it so the lab can show it without reading a version |
 
 ```sql
 CREATE TABLE library_environment (
@@ -1497,12 +1523,15 @@ CREATE TABLE library_environment (
     era_setting TEXT,
     atmosphere  TEXT,
     notes       TEXT,
-    archived    BOOLEAN NOT NULL DEFAULT 0
+    archived    BOOLEAN NOT NULL DEFAULT 0,
+    origin_project_id   INTEGER REFERENCES project(id) ON DELETE SET NULL,
+    origin_discovery_id TEXT,
+    definition  JSON
 );
 CREATE INDEX idx_library_environment_created ON library_environment (created_at);
 ```
 
-The head is the **current** profile. Every change that alters one of the seven profile fields adds a row to `library_environment_version` (Section 4.32) in the same transaction.
+The head is the **current** profile. Every change that alters one of the seven profile fields, or the definition, adds a row to `library_environment_version` (Section 4.32) in the same transaction. A definition run **overwrites the profile fields it fills** (`description`, `atmosphere` and the era, from the definition) and never `name` or `notes`; a later lab edit **carries the definition forward** into its own version, so a hand edit does not lose it.
 
 ### 4.32 `library_environment_version`
 
@@ -1513,10 +1542,13 @@ The head is the **current** profile. Every change that alters one of the seven p
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `environment_id` | INTEGER, FK → `library_environment.id` | NOT NULL | — | `ON DELETE CASCADE` |
 | `version` | INTEGER | NOT NULL | — | 1, 2, 3, … per environment. `UNIQUE (environment_id, version)` |
-| `source` | TEXT | NOT NULL | `'manual'` | `ai` or `manual` (`CHECK`). Every version is `manual` in PHASE-012 |
+| `source` | TEXT | NOT NULL | `'manual'` | `ai` or `manual` (`CHECK`). `manual` for every change made in the lab. `ai` (PHASE-013) for version 1 of an environment the pipeline created from a discovered environment, and for a version a definition run writes |
 | `created_at` | DATETIME | NOT NULL | now | |
 | `profile` | JSON | NOT NULL | — | The seven profile fields as they were: `name`, `description`, `era_kind`, `era_years`, `era_setting`, `atmosphere`, `notes` (Section 5) |
-| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The **canonical picture** of this version: the candidate the author chose, made for this version's text. NULL until one is chosen, and always NULL on a version just added by an edit. `ON DELETE SET NULL` |
+| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The **canonical picture** of this version: the candidate the author chose, or the one picture the pipeline made, for this version's text. NULL until one is set, and always NULL on a version just added by an edit. `ON DELETE SET NULL` |
+| `definition` | JSON | NULL | — | PHASE-013 (migration `0033`). The structured definition as the head held it when this version was written (Section 5). NULL for a version with none. A lab edit copies the head's definition forward unchanged |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | PHASE-013. The `define_environment` job that wrote this version. NULL for a manual version and for the first version of an environment the pipeline created. `ON DELETE SET NULL` |
+| `inputs` | JSON | NULL | — | PHASE-013. The D-3 inputs of Section 2.1 the definition was made from: `project_id`, `discovery_id`, the story hash, the entry's hash and the artifacts read (the StoryBible, the list of environments and the scenes, each with its version). NULL for a version made by hand |
 
 ```sql
 CREATE TABLE library_environment_version (
@@ -1527,12 +1559,17 @@ CREATE TABLE library_environment_version (
     created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     profile            JSON NOT NULL,
     reference_image_id INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    definition         JSON,
+    job_id             INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs             JSON,
     UNIQUE (environment_id, version)
 );
 CREATE INDEX idx_library_environment_version_environment ON library_environment_version (environment_id);
 ```
 
-**A picture belongs to the version it was made for.** An edit never copies the picture forward: the new version starts with none and the older version keeps its own. Only the environment's **newest** version can have its picture chosen or replaced (`environment_references.choose` refuses an attempt made for an older version, because that version is frozen). The "chosen" candidate of an attempt is not stored: it is the candidate whose picture is the version's `reference_image_id`. PHASE-013 will tighten "newest" to "not pinned by a project".
+`environment_versions.record_version_if_changed` compares the profile and the `definition`, and, when a definition run passes `inputs`, those too: the same text made from newer inputs (the story changed) is a new version, so the pinned version always says what it was made from. What a version changed (`created`, `profile`, `definition`) is worked out on read.
+
+**A picture belongs to the version it was made for.** An edit never copies the picture forward: the new version starts with none and the older version keeps its own. A picture can be chosen or replaced only while the version is **not frozen**, and a version is frozen when **either** holds (`environment_references.is_frozen` and the "newest" check): (1) it is no longer the environment's newest version, or (2) **a project pins it and it already has a picture**. So a pipeline picture cannot be swapped under a project, and a pinned version with no picture yet can still be given one. (`environment_references.choose` and the start of a lab attempt both refuse a frozen version.) The "chosen" candidate of an attempt is not stored: it is the candidate whose picture is the version's `reference_image_id`.
 
 ### 4.33 `environment_reference`
 
@@ -1548,6 +1585,8 @@ CREATE INDEX idx_library_environment_version_environment ON library_environment_
 | `prompt` | TEXT | NULL | — | The image prompt the model wrote, set when it is written |
 | `prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_environment_prompt` job. `ON DELETE SET NULL` |
 | `error` | TEXT | NULL | — | Why the attempt failed, in words for the user |
+| `project_id` | INTEGER, FK → `project.id` | NULL | — | PHASE-013 (migration `0033`). The project whose Environment Definition stage made this attempt. **A non-NULL `project_id` is what makes it a pipeline attempt**: it starts one candidate (a lab attempt starts four) and, once that picture is stored, the version takes it as its canonical picture itself (D-5). NULL for an attempt made in the lab. `ON DELETE SET NULL`, indexed |
+| `discovery_id` | TEXT | NULL | — | PHASE-013. The slug id of the discovered environment in that project. With `project_id` it finds the `project_environment_link` |
 
 ```sql
 CREATE TABLE environment_reference (
@@ -1559,12 +1598,17 @@ CREATE TABLE environment_reference (
                    CHECK (status IN ('writing_prompt', 'ready', 'failed')),
     prompt         TEXT,
     prompt_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
-    error          TEXT
+    error          TEXT,
+    project_id     INTEGER REFERENCES project(id) ON DELETE SET NULL,
+    discovery_id   TEXT
 );
 CREATE INDEX idx_environment_reference_environment ON environment_reference (environment_id);
+CREATE INDEX idx_environment_reference_project ON environment_reference (project_id);
 ```
 
-An attempt is **frozen** when its version is no longer the environment's newest: this is worked out on read and not stored.
+An attempt is **frozen** when its version is no longer the environment's newest, **or** a project pins the version and it already has its picture (Section 4.32): this is worked out on read and not stored. The prompt of an attempt is written from **its own version's** frozen profile, not from the head, so a later edit never changes what a pinned version's picture was asked to show.
+
+**Pipeline attempts.** A pipeline attempt reads as `ready` after its one candidate has been started. When that candidate's picture is stored (`jobs/generate_lab_image.py` calls `environment_references.on_candidate_image_stored`), the version's `reference_image_id` is set to it in the same step, if the version still has none. "Picture is `failed`" for a project is worked out on read from the attempt's own status and the jobs of its prompt and candidate (a `lab_image` job that fails leaves its `lab_run` `running`, so the job's status is the truth), and the author can press **Retry the picture**, which adds another attempt.
 
 ### 4.34 `environment_reference_candidate`
 
@@ -1587,7 +1631,44 @@ CREATE TABLE environment_reference_candidate (
 CREATE INDEX idx_environment_reference_candidate_reference ON environment_reference_candidate (reference_id);
 ```
 
-The candidates are also in the Image lab's history, as any run is. Choosing one does not copy it: the version points at its `lab_image`.
+The candidates are also in the Image lab's history, as any run is. Choosing one does not copy it: the version points at its `lab_image`. A pipeline attempt (Section 4.33) has exactly one.
+
+### 4.35 `project_environment_link`
+
+*Added in PHASE-013 (migration `0033`).* The environment twin of `project_character_link` (Section 4.28). Links one of a story project's **discovered environments** (`environment_discovery.content`) to a **library environment** (Section 4.31) and **pins one version** of it (Section 4.32), so the Character Lab can change a place without silently changing a project. A row is found by `(project_id, discovery_id)`; `discovery_id` is the slug `id` of the discovered environment, the only thing that ties the link to the list, so a re-run of discovery that keeps an id keeps its link, a new id starts unlinked, and a link whose id has left the list is kept and reported as "not in the newest list". The rules are in `services/environment_links.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `discovery_id` | TEXT | NOT NULL | — | The discovered environment's slug `id` (`^[a-z][a-z0-9_]*$`, at most 48 characters) |
+| `environment_id` | INTEGER, FK → `library_environment.id` | NOT NULL | — | The library environment that backs it. `ON DELETE CASCADE` (an environment is never deleted, only archived) |
+| `pinned_version` | INTEGER | NOT NULL | — | The `library_environment_version.version` the project uses. A plain number, found by `(environment_id, pinned_version)`. **Never changed by a lab edit.** It moves only when the pipeline writes a new version for this project (the definition is saved) and when the entry is mapped to another environment (which pins that environment's newest version) |
+| `how` | TEXT | NOT NULL | — | `created`: the pipeline made the library environment from the discovery entry (`library_environment.origin_*` name this project). `mapped`: the user chose an existing environment (`CHECK`) |
+| `discovery_version` | INTEGER | NOT NULL | — | The version of the discovered list (`environment_discovery.version`) the link was made from. Provenance only |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `updated_at` | DATETIME | NOT NULL | now | Set by code when an entry is mapped to another environment or its pin moves |
+
+```sql
+CREATE TABLE project_environment_link (
+    id                INTEGER PRIMARY KEY,
+    project_id        INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    discovery_id      TEXT NOT NULL,
+    environment_id    INTEGER NOT NULL REFERENCES library_environment(id) ON DELETE CASCADE,
+    pinned_version    INTEGER NOT NULL,
+    how               TEXT NOT NULL CHECK (how IN ('created', 'mapped')),
+    discovery_version INTEGER NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_project_environment_link_discovery UNIQUE (project_id, discovery_id),
+    CONSTRAINT uq_project_environment_link_environment UNIQUE (project_id, environment_id)
+);
+CREATE INDEX idx_project_environment_link_environment ON project_environment_link (environment_id);
+```
+
+`UNIQUE (project_id, discovery_id)`: a discovered environment is linked once. `UNIQUE (project_id, environment_id)`: a project uses a library environment for one discovered environment only, so "Apartment" and "Apartment at night" stay two environments. The two unique keys are named explicitly because both would otherwise get the name `uq_project_environment_link_project_id`.
+
+**"A newer version is available"** is worked out on every read (`environment_links.LinkInfo.newer_version_available`): the environment's newest `library_environment_version.version` is higher than `pinned_version`. It is information only and is never stored (Section 2.1). "Used by projects" in the lab is the same table read from the other side (`GET /api/lab/environments/{id}/projects`, `environment_links.used_by`), and a version's "pinned by" list is the same rows grouped by `pinned_version`.
 
 ---
 
@@ -1893,7 +1974,68 @@ The profile as it was when the version was added. It always has all seven keys, 
 
 ### `job.input` and `job.output` for a `write_environment_prompt` job (PHASE-012)
 
-One job per attempt. It is a lab job (`project_id` NULL), `provider='llm'`, restart rule `never_rerun`, uses the **image-prompt model** (the same setting as the Character lab's prompt writers) and is created with `dedupe=False`, so two presses make two jobs (a press while a prompt is being written for the same version is refused before that). `input` starts as `{"environment_id", "reference_id", "version"}`; when the job starts it adds `profile` (`{"id": "qwen-image-2.1-environment-sheet", "version": 1}`, the prompt profile), `instructions_sha256`, `server_url`, `endpoint` and the exact chat `request`. `output` holds the model's answer record and: `image_prompt` (the text saved as `environment_reference.prompt`), `word_count`, `warnings` and `seconds`. The prompt describes the empty place only, wide and with no people, because the place is the background of later pictures. A failed job marks its attempt `failed` with the reason.
+One job per attempt. It is a lab job (`project_id` NULL), `provider='llm'`, restart rule `never_rerun`, uses the **image-prompt model** (the same setting as the Character lab's prompt writers) and is created with `dedupe=False`, so two presses make two jobs (a press while a prompt is being written for the same version is refused before that). `input` starts as `{"environment_id", "reference_id", "version"}`; when the job starts it adds `profile` (`{"id": "qwen-image-2.1-environment-sheet", "version": 1}`, the prompt profile), `instructions_sha256`, `server_url`, `endpoint` and the exact chat `request`. `output` holds the model's answer record and: `image_prompt` (the text saved as `environment_reference.prompt`), `word_count`, `warnings` and `seconds`. The prompt describes the empty place only, wide and with no people, because the place is the background of later pictures. A failed job marks its attempt `failed` with the reason. Since PHASE-013 the job reads the profile of **the attempt's own version** (`environment_reference.version_id`) and not the head, so a version's picture is always drawn from the text that version froze; it falls back to the head only for an attempt with no version, which cannot be made.
+
+### The environment definition (PHASE-013)
+
+`library_environment.definition` and `library_environment_version.definition` hold this JSON (`services/environment_definition_writer.check_definition` makes it from the model's answer). **Code sets `id`** to the discovered environment's slug and never reads it from the model; only the fields below are kept, in this order, and each text is a single line with a character limit. It follows `Path_ahead.md` Section 13 and adds one top-level key, `era` (owner decision, 2026-10-21), because the lab profile needs it, as the character definition does. Section 13's "scenes using the environment" is **not stored**: scene discovery records no environment ids (D-15), so the model works out for itself in which scenes the place appears and designs it for all of them.
+
+```json
+{
+  "id": "apartment",
+  "architecture": "A small mid-century brick apartment block.",
+  "layout": "One bedroom, a narrow hall and an open kitchen with a window onto the lane.",
+  "visual_identity": {
+    "walls": "Cream plaster, stained near the ceiling.",
+    "floor": "Red oxide tiles.",
+    "windows": "Two wooden shuttered windows.",
+    "doors": "One heavy teak front door.",
+    "furniture": "A steel cot and a small wooden table.",
+    "color_palette": "Cream, red oxide, teak brown."
+  },
+  "important_landmarks": ["teak front door", "steel cot"],
+  "atmosphere": { "baseline": "Quiet and warm, lit by soft daylight." },
+  "continuity_rules": ["The teak door is always on the left."],
+  "era": { "kind": "past", "years": 20, "setting": "2000s Mumbai" }
+}
+```
+
+The text limits are: `architecture` 140, `layout` 240, `walls` 130, `floor` 90, `windows` 90, `doors` 90, `furniture` 160, `color_palette` 120, `atmosphere.baseline` 300; `important_landmarks` holds from 1 to 6 items of at most 50 characters and `continuity_rules` from 1 to 4 items of at most 100. `era.kind` is `present`, `past` or `future`, and `years` (1 to 10,000) is needed for the last two (a present era that came with years is accepted with the years dropped). They are chosen so that the two profile fields written from them fit the lab's own limits (`check_definition` checks it).
+
+**The mapping into the profile** (`environment_definition_writer.to_profile`, pure: the same definition always gives the same text). It overwrites exactly these fields of `library_environment` and never `name` or `notes`:
+
+| Profile field | Written from |
+|---|---|
+| `description` | `Architecture: … Layout: … Walls: … Floor: … Windows: … Doors: … Furniture: … Colour palette: … Landmarks: …; …. Continuity: …; ….` |
+| `atmosphere` | `{atmosphere.baseline}.` |
+| `era_kind`, `era_years`, `era_setting` | `era.kind`, `era.years`, `era.setting` |
+
+The longest the description can be is 1,897 characters and the atmosphere 301, both inside their limits (2,000 and 500). The lab's prompt writer reads `description`, `atmosphere` and the era as it always did, so a defined environment works with it unchanged.
+
+**When a definition is current.** A project's definition of an environment is the **pinned version**, when that version has a `definition` and its `inputs` name this project and this entry of the list. A pinned version made by hand, or defined for another project, is not shown as this project's definition. It is out of date when, **on this read**: the story text hashes differently from `inputs.story_sha256`; or the newest StoryBible is newer than the one in `inputs.artifacts`; or the newest list of scenes is newer than the one in `inputs.artifacts` (or none is recorded); or `inputs.entry_sha256` differs from the hash of the entry's current name and description. Nothing of this is stored (Section 2.1).
+
+### `job.input` and `job.output` for a `define_environment` job (PHASE-013)
+
+One job per environment. It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, uses the **story model** (D-12) and is created with `dedupe_key="discovery_id"`: while a `define_environment` job of **that environment** (the same `input.discovery_id`) is queued or running for the project, a second click returns that job; jobs for other environments run side by side when the pool allows. `services/environment_definitions.start_run` creates the job only when the project has a saved story, a StoryBible and a list of scenes that are up to date with it, a list of environments, and a link for the environment that is not archived (otherwise the API answers 422), with a copy of everything the job needs, **as it was when the button was pressed**:
+
+```json
+{ "story_text": "Maya lives in a small apartment in Mumbai...", "story_sha256": "9f2c...",
+  "story_bible_id": 7, "story_bible_version": 2, "discovery_version": 3, "discovery_id": "apartment",
+  "entry": { "id": "apartment", "name": "Apartment", "description": "Maya's flat." },
+  "others": [ { "id": "bakery", "name": "Bakery", "description": "Where she works." } ],
+  "scenes": [ { "index": 1, "id": "morning-walk", "title": "Morning walk", "description": "...", "starts_with": "Every morning" } ],
+  "environment_id": 12,
+  "inputs": { "project_id": 4, "discovery_id": "apartment", "story_sha256": "9f2c...", "entry_sha256": "51ab...",
+              "artifacts": [ { "kind": "story_bible", "id": 7, "version": 2 },
+                             { "kind": "environment_discovery", "id": 9, "version": 3 },
+                             { "kind": "scene_discovery", "id": 5, "version": 1 } ] } }
+```
+
+`inputs` is written onto the version the job makes (Section 4.32). When the job starts it resolves the story model (D-12), loads the StoryBible row named by `story_bible_id` and the library environment named by `environment_id` (the job fails with "The Story Bible this run was started with could not be found." or "The Character Lab environment this run was started with could not be found." if either is missing), and adds what it sent, before it sends it: `instructions_sha256`, `server_url`, `endpoint` and `request`. The `request` is built by `services/environment_definition_writer.build_request`. Its system message is the definition instructions (about 3,700 characters, which give the model the answer form, the limit of each text field and the era rules). Its user message is, in this order: `STORY BIBLE (JSON):` and the bible's `content`; `ENVIRONMENT TO DEFINE (JSON):` and `entry`; `OTHER ENVIRONMENTS (JSON):` and `others` (so a room inside a building can share its style); `SCENES (JSON):` and `scenes` (the position, id, title, description and opening words of each scene, without its text); `CURRENT PROFILE:` and the library environment's profile as text (`environment_library.card_from_profile`), **only when the environment already has a definition or its newest version was made by hand**, so the definition keeps to what a person wrote and a brand-new pipeline environment is not tied to the placeholder era it started with; `TODAY'S YEAR:`; and `STORY:` and the story text. The `request` asks for JSON, with `max_tokens` 12,000 and `reasoning_effort` `high`. `jobs/llm_call.ask_model` makes at most two attempts, and `output` holds what is known after every attempt (`attempts`, `answer` = the **checked** definition, `answer_usable`, `content`, `usage`).
+
+On success, in **one transaction**, `environment_definitions.save_definition` writes the definition and the profile fields onto the library environment, adds a `library_environment_version` row (`source='ai'`, `job_id`, `inputs`), moves `project_environment_link.pinned_version` to it, and, when that version has no picture, `INSERT environment_reference` (`project_id`, `discovery_id`, `status='writing_prompt'`, `version_id` = the new version) and `INSERT job` (`type='write_environment_prompt'`) for its canonical picture. The job finishes with `{...the output above, "content": null, "environment_id": 12, "version": 2, "seconds": 41.0}`. If the job was cancelled meanwhile, nothing is stored. If the link was removed or moved to another environment while the model was answering, the job fails with "The definition of Apartment could not be saved: <why>" and nothing is stored. If no answer could be used, the job fails with "The definition of Apartment could not be written: <why>". The phase labels are `preparing the prompt`, `asking the language model (attempt N of 2)` and `saving the environment definition`. If the picture cannot be started (for example the GPU image endpoint is missing), the definition is still saved, and the stage shows the picture as `failed` with a Retry button.
+
+For Qwen3.8 the limit of 32,000 characters of messages (Section 6) applies to the instructions (about 3,700 characters), the StoryBible (about 1,000), the environment, the other environments, the scenes (roughly 250 characters each, estimated), the current profile and the story together, so a long story or many scenes can be refused with a readable failure on the job (this is an estimate, not measured: a story above about 20,000 characters is likely to fail).
 
 ---
 
@@ -1958,7 +2100,9 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Make the characters' canonical images (PHASE-010) | `POST /api/projects/{id}/character-images/{discovery_id}/run` (one character) or `POST .../run` (Make images for all): refused with 422 when there is no list of characters, an entry that is not linked, a linked character that is archived, an entry with no definition or one that is out of date, or a definition being written. A character the user **chose from the library** (`how='mapped'`) is also refused unless the body has `confirm_overwrite: true`, and Make images for all skips it, as it skips a character whose images are `ready` or already being made. A press for a character whose look is being made returns that look and starts nothing. Otherwise one transaction does `INSERT character_look` (`status='writing_prompt'`, `project_id`, `discovery_id`, `inputs`) and `INSERT job` (`type='write_character_look_prompt'`, `requested='master'`, `project_id` NULL as in the lab, `dedupe=False`), then `UPDATE character_look.prompt_job_id`. The prompt is written from the character's card, which the definition filled. **When the prompt job finishes** (`on_look_prompt_written`): `UPDATE character_look` (`prompt`, `status='choosing'`) and one candidate, `INSERT lab_run` + `INSERT job` (`lab_image`) + `INSERT character_look_candidate` (a lab look makes four). **When the candidate's picture is stored** (`on_candidate_image_stored`, called by the `lab_image` job): the look's status is claimed (`choosing` → `making_angles` in one conditional `UPDATE`), `INSERT character_reference` (`front`) and four angle edit runs (`lab_run` + `lab_image` job + `character_reference`), exactly as a manual choice does. **When the fifth angle's picture is stored** (`_maybe_mark_ready`): `UPDATE character_look.status='ready'`, `UPDATE library_character.current_look_id`, `INSERT library_character_version` (`source='ai'`, `job_id` = the prompt job, `inputs` = the pinned version's `inputs`), `UPDATE project_character_link.pinned_version`, in one transaction. If the link was removed or moved to another character meanwhile, the look is only a lab look: a `manual` version and no pin move. A failed prompt job marks the look `failed` (`error`); a failed candidate or angle job writes nothing here: `GET .../character-images` finds it through the run's job and reports `failed`. **Retry** is a fresh look; **Redo angle** is the lab's own `POST /api/lab/characters/looks/{look_id}/angles/{angle}`. `GET .../character-images` writes nothing: it reads the newest look the pipeline made for each linked character, its candidate and angle jobs, and works out each status (`unavailable`, `none`, `in_progress`, `failed`, `ready`, `out_of_date`), the stage and the reasons on every read |
 | Find and edit the characters' relations (PHASE-047) | `POST /api/projects/{id}/character-relations/run` queues one `discover_relations` job (a second click returns it; refused with 422 when there is no saved story, up-to-date Story Bible or list of characters, and, when the newest version is a manual one, unless the body says `confirm_replace_manual: true`). The job asks the story model once, checks the answer (`check_relations`) and, in the same transaction that marks the job succeeded, adds the next `character_relations` version (`ai`). `PUT .../character-relations` checks the user's whole list the same way and adds a `manual` version. `GET` writes nothing: it reads the newest version and works out `dropped`, `reasons`, `can_run` and `needs_confirmation` on every read. The definition stage then passes each other character's `relation_to_this` to the model. **Make images for all** starts bases first; a same-face variant whose base is being made gets a `waiting` `character_look` and no job. When the base's look turns `ready` and its pin has moved, `character_images.release_waiting` (called from the `lab_image` job's hook) claims the waiting look with one conditional update (`waiting` → `writing_prompt`), sets `reference_image_id` to the base's front picture and queues the prompt job. A variant whose base has no picture and none in progress is refused with 422 |
 | Make the characters' and the narrator's voices (PHASE-011) | `POST /api/projects/{id}/character-voices/{discovery_id}/run` (one character), `POST .../character-voices/run` (Make voices for all, which also makes the narrator's) or `POST .../narrator-voice/run`: refused with 422 when there is no list of characters (or no saved story and up-to-date StoryBible for the narrator), an entry that is not linked, a linked character that is archived, an entry with no definition or one that is out of date. A character chosen from the library (not made by the pipeline) or a narrator voice chosen by hand is replaced only when the body says `confirm_overwrite: true` or `confirm_replace_manual: true`; Make voices for all skips both. Each start does `INSERT job` (`type='design_voice'`, `provider='llm'`, `dedupe_key='target'`) and commits, so a second click returns the same job. **Start** (`jobs/design_voice.py`): one paid call to the story model writes the voice description (Section 5); then, in the **same transaction that marks the job succeeded**, `story_voices.queue_sample` does `INSERT lab_voice_run` (`mode='design'`, the description as `instruction`, `project_id`, `subject`, `discovery_id`, `design_job_id`, `inputs`) and `INSERT job` (`type='lab_voice'`, `provider='gpu'`), so a job never succeeds without its sample. **When the speech is stored** (`lab_voice` after `UPDATE lab_voice_run`), `story_voices.on_voice_finished(run_id)` runs best effort and in **one transaction**: `INSERT voice` from the run (`voices.create_from_run(commit=False)`), then for a character `UPDATE library_character.voice_id`, `INSERT library_character_version` (`source='ai'`, `job_id` of the design job, `definition` and `inputs` carried over from the pinned version so the definition still reads "Defined") and `UPDATE project_character_link.pinned_version` (`character_looks.pin_new_version`), and for the narrator `INSERT narrator_voice` (`source='ai'`). It does nothing for a run made by hand, a run already saved, or a character whose link moved to another library character meanwhile. `GET .../character-voices` and `GET .../narrator-voice` work the status out on every read: `in_progress` while a design job runs or a sample is queued or running, `failed` when the job or the sample failed (or the speech succeeded more than 30 seconds ago and no voice was saved), `ready`, or `out_of_date` when the facts hash differs. `PUT .../narrator-voice` with `{"voice_id"}` adds a `manual` `narrator_voice` version (no job; the same voice twice adds none) |
-| Make and change a library environment, and make its picture (PHASE-012) | `POST /api/lab/environments`: `INSERT library_environment` and, in the same transaction, `INSERT library_environment_version` (version 1, `source='manual'`). `PATCH /api/lab/environments/{id}` merges the fields sent over the current profile, checks the whole result, does `UPDATE library_environment` and calls `environment_versions.record_version_if_changed` **before its own commit**: the next `library_environment_version` is added (with no `reference_image_id`) only if a profile field differs from the newest version's. **Archiving** (`archived`) writes no version. **Make the picture** (`POST .../environments/{id}/references`, 202): refused with 422 when the environment is archived or a prompt is already being written for its newest version; otherwise one transaction does `INSERT environment_reference` (`status='writing_prompt'`, `version_id` = the newest version) and `INSERT job` (`type='write_environment_prompt'`, `project_id` NULL, `dedupe=False`), then `UPDATE environment_reference.prompt_job_id`. **When the job succeeds** (`environment_references.on_prompt_written`, after the job's own commit): `UPDATE environment_reference` (`prompt`, `status='ready'`) and four candidates, each `INSERT lab_run` + `INSERT job` (`lab_image`, text-to-image at 16:9, its own random seed) + `INSERT environment_reference_candidate`, in one transaction; if they cannot be started the attempt is marked `failed`. A failed prompt job marks the attempt `failed` (`on_prompt_failed`). **Choose** (`POST .../environments/references/{reference_id}/choose` with `{candidate_id}`): refused with 422 when the attempt's version is not the environment's newest (it is frozen), or the candidate is not of this attempt or its picture is not stored yet; otherwise `UPDATE library_environment_version.reference_image_id` (replacing an earlier choice). Nothing else is written, and no version is added. `GET` calls write nothing: the candidates' state, the list of versions with what each changed, and whether an attempt is frozen are all worked out on read |
+| Make and change a library environment, and make its picture (PHASE-012) | `POST /api/lab/environments`: `INSERT library_environment` and, in the same transaction, `INSERT library_environment_version` (version 1, `source='manual'`). `PATCH /api/lab/environments/{id}` merges the fields sent over the current profile, checks the whole result, does `UPDATE library_environment` and calls `environment_versions.record_version_if_changed` **before its own commit**: the next `library_environment_version` is added (with no `reference_image_id`) only if a profile field differs from the newest version's. **Archiving** (`archived`) writes no version. **Make the picture** (`POST .../environments/{id}/references`, 202): refused with 422 when the environment is archived or a prompt is already being written for its newest version; otherwise one transaction does `INSERT environment_reference` (`status='writing_prompt'`, `version_id` = the newest version) and `INSERT job` (`type='write_environment_prompt'`, `project_id` NULL, `dedupe=False`), then `UPDATE environment_reference.prompt_job_id`. **When the job succeeds** (`environment_references.on_prompt_written`, after the job's own commit): `UPDATE environment_reference` (`prompt`, `status='ready'`) and four candidates, each `INSERT lab_run` + `INSERT job` (`lab_image`, text-to-image at 16:9, its own random seed) + `INSERT environment_reference_candidate`, in one transaction; if they cannot be started the attempt is marked `failed`. A failed prompt job marks the attempt `failed` (`on_prompt_failed`). **Choose** (`POST .../environments/references/{reference_id}/choose` with `{candidate_id}`): refused with 422 when the attempt's version is frozen (it is not the environment's newest, **or** a project pins it and it already has its picture, PHASE-013), or the candidate is not of this attempt or its picture is not stored yet; otherwise `UPDATE library_environment_version.reference_image_id` (replacing an earlier choice). Nothing else is written, and no version is added. `GET` calls write nothing: the candidates' state, the list of versions with what each changed and which projects pin it, and whether an attempt is frozen are all worked out on read. **Make the picture** also refuses a frozen newest version (the same rule) |
+| Link the story's environments to the Character Lab (PHASE-013) | The same as the characters' links, with the environment tables: every action is a database write done before the answer (no job, no model call), commits once, reads the newest `environment_discovery` row and refuses (422) when there is none or the id is not in it. **Create** (`POST /api/projects/{id}/environment-links/{discovery_id}/create`) and **Link all** (`POST .../link-all`, every unlinked entry, in one transaction): `INSERT library_environment` (`name` from the discovery, `description` from its one-line description, the era `present`, `origin_project_id`, `origin_discovery_id`), `INSERT library_environment_version` (version 1, `source='ai'`) and `INSERT project_environment_link` (`how='created'`, `pinned_version=1`, `discovery_version`). **Map** (`PUT .../{discovery_id}` with `environment_id`): refused for a missing or archived environment, or one the project already uses for another entry; the link pins the environment's newest version (writing version 1 first if it has none), and a link that is already there is moved to the new environment. **Unlink** (`DELETE .../{discovery_id}`): `DELETE project_environment_link`; the library environment and its versions are never deleted. A link whose id is no longer in the newest list is kept and reported as orphaned. `GET` writes nothing: "a newer version is available" is worked out on read |
+| Define the environments and make their pictures (PHASE-013) | `POST /api/projects/{id}/environment-definitions/{discovery_id}/run` (one environment) or `POST .../run` (Define all): refused with 422 when there is no saved story, no `story_bible` row, a `story_bible` that is out of date with the story, no list of scenes or one that is out of date, no list of environments, an entry that is not linked, or a linked environment that is archived. An environment the user **chose from the library** (`project_environment_link.how='mapped'`) is also refused unless the body has `confirm_overwrite: true`; Define all skips it, skips one that is already defined and current, and skips one that is already being defined (each is listed in `skipped` with the reason). Otherwise `INSERT job` (`type='define_environment'`, `provider='llm'`, `project_id` set, `dedupe_key='discovery_id'`, `input` as in Section 5). Nothing is written to `library_environment` yet. **Start**: `UPDATE job.input` with the exact request, then the paid call. **When the answer is usable**, one transaction does `UPDATE library_environment` (`definition` and the profile fields written from it, never `name` or `notes`), `INSERT library_environment_version` (`source='ai'`, `job_id`, `inputs`, `definition`), `UPDATE project_environment_link.pinned_version` to it, then `INSERT environment_reference` (`project_id`, `discovery_id`, `version_id`) and `INSERT job` (`write_environment_prompt`) for the picture, and finishes the job. **Then the lab's own machinery runs**: the prompt job writes the prompt from the new version's frozen profile, `on_prompt_written` starts **one** candidate (`INSERT lab_run` + `INSERT job` `lab_image` + `INSERT environment_reference_candidate`), and when its picture is stored `UPDATE library_environment_version.reference_image_id` makes it the canonical picture. `POST .../{discovery_id}/picture` starts another attempt for the pinned version when it has no picture (a failed or never-started one), and is refused otherwise. `GET` writes nothing: each entry's status (`unlinked`, `not_defined`, `defined`, `out_of_date` and why), its definition and its picture state (`unavailable`, `none`, `in_progress` with the stage, `failed` with the reason, `ready`) are worked out on read from the pinned version, its `inputs`, the newest definition job and the newest attempts |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 

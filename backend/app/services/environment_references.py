@@ -1,21 +1,34 @@
 """A library environment's canonical reference picture (PHASE-012): one empty, wide
-establishing view of the place at 16:9, chosen by the author from four candidates.
+establishing view of the place at 16:9.
 
-**Making one** (`start_reference`), for the environment's newest version:
+**Making one** (`start_reference`):
 
-1. A `write_environment_prompt` job writes the prompt from the environment's card, on the
-   environment sheet profile (`image_prompt_profiles.ACTIVE_ENVIRONMENT_SHEET_PROFILE`).
-2. When it finishes (`on_prompt_written`, called by the job), four `lab_image` text-to-image
-   runs with different random seeds make the candidates (`environment_reference_candidate`
-   rows, read live from their `lab_run`). Nothing else is started: a place has no angles and
-   its picture is not cut out, because the place is the background.
-3. `choose` makes one candidate the canonical picture of the version the attempt was made for
+1. A `write_environment_prompt` job writes the prompt from the card of the version the picture
+   is for, on the environment sheet profile
+   (`image_prompt_profiles.ACTIVE_ENVIRONMENT_SHEET_PROFILE`).
+2. When it finishes (`on_prompt_written`, called by the job), `lab_image` text-to-image runs
+   with different random seeds make the candidates (`environment_reference_candidate` rows,
+   read live from their `lab_run`). Nothing else is started: a place has no angles and its
+   picture is not cut out, because the place is the background.
+3. The candidate becomes the canonical picture of the version the attempt was made for
    (`library_environment_version.reference_image_id`).
 
-**Versions and pictures.** A picture is made for one version's text. `choose` only works on the
-environment's **newest** version, and may replace the picture already chosen for it. Once an
-edit adds a newer version, the older one is frozen and keeps its own picture; the new version
-starts with none. (PHASE-013 will tighten this to "frozen once a project pins it".)
+There are two kinds of attempt:
+
+- **A lab attempt** is for the environment's newest version. It makes four candidates and
+  waits: `choose` makes the one the author picks the canonical picture.
+- **A pipeline attempt** (PHASE-013, `PipelineAttempt`) is for the version a story project
+  pins, started by the Environment Definition stage. It makes one candidate and takes it as the
+  canonical picture by itself (`on_candidate_image_stored`, D-5), the way a pipeline look
+  takes its one candidate as the master (PHASE-010).
+
+**Versions and pictures.** A picture is made for one version's text, so an edit never carries it
+forward: the new version starts with none and the older one keeps its own. In the lab, `choose`
+and a new lab attempt work on the environment's **newest** version only, and not on a version
+that a project pins and that already has its picture (**frozen**): such a picture is what the
+project's later stages read, so it is never replaced. To get another picture, edit the
+environment (a new version) and make one for that. The pipeline only ever puts a picture on a
+version that has none.
 
 This module creates rows and jobs. It never calls the GPU server or the language model itself.
 """
@@ -24,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from dataclasses import dataclass
 from typing import Final
 
 from sqlalchemy import select
@@ -38,6 +52,7 @@ from app.db.models import (
     LabRun,
     LibraryEnvironment,
     LibraryEnvironmentVersion,
+    ProjectEnvironmentLink,
 )
 from app.db.session import SessionLocal
 from app.jobs import store
@@ -50,8 +65,10 @@ _logger = logging.getLogger(__name__)
 
 # A place is shown wide, whatever the orientation of the project that later uses it.
 REFERENCE_SHAPE: Final = "16:9"
-# How many candidates one attempt makes to choose from.
+# How many candidates a lab attempt makes for the author to choose from.
 CANDIDATE_COUNT: Final = 4
+# How many candidates a pipeline attempt makes: the one is taken as the picture by itself.
+AUTOMATIC_CANDIDATE_COUNT: Final = 1
 
 
 class EnvironmentReferenceError(ValueError):
@@ -60,21 +77,88 @@ class EnvironmentReferenceError(ValueError):
     """
 
 
+@dataclass(frozen=True)
+class PipelineAttempt:
+    """What marks an attempt as made by the story pipeline: the project and the discovered
+    environment it is for, and the version (`library_environment_version.id`) the project pins,
+    which is the version the picture is made for.
+    """
+
+    project_id: int
+    discovery_id: str
+    version_id: int
+
+
+# --- Pins and the frozen rule -------------------------------------------------------------
+
+
+async def pinning_links(
+    session: AsyncSession, environment_id: int, version: int
+) -> list[ProjectEnvironmentLink]:
+    """The links of the projects that pin this version of the environment."""
+    statement = (
+        select(ProjectEnvironmentLink)
+        .where(
+            ProjectEnvironmentLink.environment_id == environment_id,
+            ProjectEnvironmentLink.pinned_version == version,
+        )
+        .order_by(ProjectEnvironmentLink.id)
+        .execution_options(populate_existing=True)
+    )
+    return list((await session.execute(statement)).scalars())
+
+
+async def is_frozen(session: AsyncSession, version: LibraryEnvironmentVersion) -> bool:
+    """Whether the version's picture can no longer be changed in the lab because a project pins
+    the version and the version already has its picture.
+    """
+    if version.reference_image_id is None:
+        return False
+    return bool(await pinning_links(session, version.environment_id, version.version))
+
+
 # --- Starting an attempt ------------------------------------------------------------------
 
 
-async def start_reference(session: AsyncSession, environment_id: int) -> EnvironmentReference:
-    """Starts an attempt to make a canonical picture for the environment's newest version: a
-    job writes the prompt first. Commits. Raises EnvironmentReferenceError.
+async def start_reference(
+    session: AsyncSession,
+    environment_id: int,
+    *,
+    pipeline: PipelineAttempt | None = None,
+    commit: bool = True,
+) -> EnvironmentReference:
+    """Starts an attempt to make a canonical picture: a job writes the prompt first. Raises
+    EnvironmentReferenceError.
+
+    Without `pipeline` this is a lab attempt for the environment's newest version, which must
+    not be frozen. With it, this is the story pipeline's attempt for the version the project
+    pins, which must not have a picture yet (an archived environment is allowed: the
+    definition that asked for the picture was already saved). Commits, unless `commit` is
+    False: the attempt and its job are then only flushed, so the Environment Definition stage
+    can save the definition and start the picture in one transaction.
     """
     environment = await session.get(LibraryEnvironment, environment_id)
     if environment is None:
         raise EnvironmentReferenceError(f"There is no environment {environment_id}.")
-    if environment.archived:
-        raise EnvironmentReferenceError("This environment is archived: unarchive it first.")
-    version = await environment_versions.latest_version(session, environment_id)
-    if version is None:
-        raise EnvironmentReferenceError("This environment has no version yet: save it first.")
+    if pipeline is None:
+        if environment.archived:
+            raise EnvironmentReferenceError("This environment is archived: unarchive it first.")
+        version = await environment_versions.latest_version(session, environment_id)
+        if version is None:
+            raise EnvironmentReferenceError("This environment has no version yet: save it first.")
+        if await is_frozen(session, version):
+            raise EnvironmentReferenceError(
+                f"Version {version.version} is pinned by a project and already has its picture, "
+                "so it cannot be replaced. Edit the environment to make a new version, then "
+                "make a picture for that one."
+            )
+    else:
+        found = await session.get(LibraryEnvironmentVersion, pipeline.version_id)
+        if found is None or found.environment_id != environment_id:
+            raise EnvironmentReferenceError("The version this picture is for does not exist.")
+        version = found
+        if version.reference_image_id is not None:
+            raise EnvironmentReferenceError(f"Version {version.version} already has its picture.")
     busy = await session.execute(
         select(EnvironmentReference.id).where(
             EnvironmentReference.version_id == version.id,
@@ -84,7 +168,12 @@ async def start_reference(session: AsyncSession, environment_id: int) -> Environ
     if busy.first() is not None:
         raise EnvironmentReferenceError("A prompt is already being written for this version.")
 
-    attempt = EnvironmentReference(environment_id=environment_id, version_id=version.id)
+    attempt = EnvironmentReference(
+        environment_id=environment_id,
+        version_id=version.id,
+        project_id=pipeline.project_id if pipeline is not None else None,
+        discovery_id=pipeline.discovery_id if pipeline is not None else None,
+    )
     session.add(attempt)
     await session.flush()
     job, _created = await store.create_job(
@@ -101,12 +190,16 @@ async def start_reference(session: AsyncSession, environment_id: int) -> Environ
         dedupe=False,
     )
     attempt.prompt_job_id = job.id
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     _logger.info(
-        "environment %d: reference %d started for version %d",
+        "environment %d: reference %d started for version %d (%s)",
         environment_id,
         attempt.id,
         version.version,
+        "pipeline" if pipeline is not None else "lab",
     )
     return attempt
 
@@ -132,8 +225,9 @@ async def on_prompt_written(job_id: int) -> bool:
             return False
         attempt.prompt = prompt.strip()
         attempt_id = attempt.id
+        count = _candidate_count(attempt)
         try:
-            await _start_candidates(session, attempt)
+            await _start_candidates(session, attempt, count)
         except EnvironmentReferenceError as exc:
             await session.rollback()
             failed = await session.get(EnvironmentReference, attempt_id)
@@ -147,7 +241,7 @@ async def on_prompt_written(job_id: int) -> bool:
     _logger.info(
         "environment reference %d: prompt saved, %d candidates started",
         attempt_id,
-        CANDIDATE_COUNT,
+        count,
     )
     return True
 
@@ -163,12 +257,19 @@ async def on_prompt_failed(job_id: int, error: str) -> None:
         await session.commit()
 
 
-async def _start_candidates(session: AsyncSession, attempt: EnvironmentReference) -> None:
-    """Four text-to-image runs from the prompt, each with its own random seed. No commit."""
+def _candidate_count(attempt: EnvironmentReference) -> int:
+    """One candidate for an attempt the story pipeline made, four for one made in the lab."""
+    return AUTOMATIC_CANDIDATE_COUNT if attempt.project_id is not None else CANDIDATE_COUNT
+
+
+async def _start_candidates(
+    session: AsyncSession, attempt: EnvironmentReference, count: int
+) -> None:
+    """`count` text-to-image runs from the prompt, each with its own random seed. No commit."""
     mode = image_models_service.resolve_mode(
         await settings_service.get_str(session, IMAGE_MODE_KEY)
     )
-    for _ in range(CANDIDATE_COUNT):
+    for _ in range(count):
         seed = secrets.randbelow(image_models_service.SEED_LIMIT)
         form = QwenLabForm(
             prompt=attempt.prompt or "",
@@ -192,7 +293,8 @@ async def choose(
 ) -> LibraryEnvironmentVersion:
     """Makes one candidate the canonical picture of the version its attempt was made for, and
     returns that version. It replaces a picture chosen earlier. Only the environment's newest
-    version can be changed. Commits. Raises EnvironmentReferenceError.
+    version can be changed, and not one that a project pins and that already has its picture
+    (`is_frozen`). Commits. Raises EnvironmentReferenceError.
     """
     attempt = await session.get(EnvironmentReference, reference_id)
     if attempt is None:
@@ -205,6 +307,12 @@ async def choose(
         raise EnvironmentReferenceError(
             f"Version {version.version} is frozen: only the newest version's picture can be "
             "changed. Make a new picture for the newest version."
+        )
+    if await is_frozen(session, version):
+        raise EnvironmentReferenceError(
+            f"Version {version.version} is pinned by a project and already has its picture, so "
+            "it cannot be replaced. Edit the environment to make a new version, then make a "
+            "picture for that one."
         )
     candidate = await session.get(EnvironmentReferenceCandidate, candidate_id)
     if candidate is None or candidate.reference_id != reference_id:
@@ -228,6 +336,49 @@ async def choose(
         image.id,
     )
     return version
+
+
+async def on_candidate_image_stored(run_id: int) -> bool:
+    """Called (best effort) once a `lab_image` job has stored its picture. When the picture is
+    the candidate of an attempt the story pipeline made (`project_id` set), takes it as the
+    canonical picture of the version the attempt was made for (D-5), unless that version has a
+    picture already (a lab attempt chose one first). Returns True when the picture was set.
+    Does nothing (False) for a lab attempt, whose picture the author chooses, and for a run
+    that is no candidate.
+    """
+    async with SessionLocal() as session:
+        statement = select(EnvironmentReferenceCandidate).where(
+            EnvironmentReferenceCandidate.lab_run_id == run_id
+        )
+        candidate = (await session.execute(statement)).scalars().first()
+        attempt = (
+            await session.get(EnvironmentReference, candidate.reference_id)
+            if candidate is not None
+            else None
+        )
+        if attempt is None or attempt.project_id is None:
+            await session.commit()
+            return False
+        version = await session.get(LibraryEnvironmentVersion, attempt.version_id)
+        if version is None or version.reference_image_id is not None:
+            await session.commit()
+            return False
+        image_statement = select(LabImage).where(LabImage.run_id == run_id)
+        image = (await session.execute(image_statement)).scalars().first()
+        if image is None:
+            await session.commit()
+            return False
+        image_id = image.id
+        version.reference_image_id = image_id
+        environment_id, version_number = attempt.environment_id, version.version
+        await session.commit()
+    _logger.info(
+        "environment %d: version %d picture taken automatically: image=%d",
+        environment_id,
+        version_number,
+        image_id,
+    )
+    return True
 
 
 # --- Reading ------------------------------------------------------------------------------

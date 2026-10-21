@@ -17,6 +17,7 @@ export const LIMITS = {
 export const VERSION_CHANGE_LABELS: Record<EnvironmentVersion["changes"][number], string> = {
   created: "Created",
   profile: "Profile",
+  definition: "Definition",
 };
 
 /** The time an environment is set in, in words. */

@@ -1,5 +1,6 @@
 """The Character lab's library of environments (PHASE-012): global, project-independent places
-an author builds once and a story project can later link to and pin a version of (PHASE-013).
+an author builds once and a story project can link to and pin a version of
+(`services/environment_links.py`, PHASE-013).
 
 An environment is never deleted, only archived, like characters and voices. Its profile is
 versioned (`services/environment_versions.py`): creating one writes version 1, and an edit that
@@ -13,9 +14,10 @@ so there is exactly one place that turns the row's columns into words.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -189,18 +191,74 @@ def _era_text(kind: str, years: int | None, setting: str | None) -> str:
     return text
 
 
-def environment_card(environment: LibraryEnvironment) -> str:
-    """Everything the prompt writer is told about the environment, as one block of plain
-    English. Pure: it reads columns only.
+def card_from_profile(profile: Mapping[str, Any]) -> str:
+    """Everything the prompt writer is told about an environment, as one block of plain
+    English, from a profile (the seven fields of `environment_versions.PROFILE_FIELDS`, as a
+    version freezes them). Pure. Used for a version's picture, so the prompt describes the
+    version the picture is made for and never a later edit of the head.
     """
     lines = [
-        f"Name: {environment.name}.",
-        f"Time: {_era_text(environment.era_kind, environment.era_years, environment.era_setting)}.",
+        f"Name: {profile['name']}.",
+        f"Time: {_era_text(profile['era_kind'], profile['era_years'], profile['era_setting'])}.",
     ]
-    if environment.description:
-        lines.append(f"Description: {environment.description}")
-    if environment.atmosphere:
-        lines.append(f"Atmosphere: {environment.atmosphere}")
-    if environment.notes:
-        lines.append(f"Other notes: {environment.notes}")
+    if profile["description"]:
+        lines.append(f"Description: {profile['description']}")
+    if profile["atmosphere"]:
+        lines.append(f"Atmosphere: {profile['atmosphere']}")
+    if profile["notes"]:
+        lines.append(f"Other notes: {profile['notes']}")
     return "\n".join(lines)
+
+
+def environment_card(environment: LibraryEnvironment) -> str:
+    """Everything the prompt writer is told about the environment as it is now. Pure: it reads
+    columns only.
+    """
+    return card_from_profile(environment_versions.profile_of(environment))
+
+
+# --- Making an environment from a story project's discovered environment (PHASE-013) -------
+
+
+async def create_from_discovery(
+    session: AsyncSession,
+    *,
+    name: str,
+    description: str,
+    project_id: int,
+    discovery_id: str,
+) -> LibraryEnvironment:
+    """Makes a library environment from a story project's discovered environment, as its
+    version 1 (`source` is `ai`, because the text came from the model). Flushes but does not
+    commit: the caller commits it together with the link, so an environment is never made
+    without its link. Raises EnvironmentLibraryError.
+
+    The discovery gives a name and one line: they become the name and the description. The era
+    is the present, and the atmosphere and the notes stay empty until the Environment
+    Definition stage (or the author) fills them. The environment is marked with the project and
+    the discovered environment it came from.
+    """
+    clean_name = _clean(name)
+    if clean_name is None:
+        raise EnvironmentLibraryError("Give the environment a name.")
+    _too_long(clean_name, NAME_MAX_CHARS, "name")
+    clean_description = _clean(description)
+    if clean_description is None:
+        raise EnvironmentLibraryError("Describe what the environment looks like.")
+    _too_long(clean_description, DESCRIPTION_MAX_CHARS, "description")
+    environment = LibraryEnvironment(
+        name=clean_name,
+        description=clean_description,
+        origin_project_id=project_id,
+        origin_discovery_id=discovery_id,
+    )
+    session.add(environment)
+    await session.flush()  # the environment's id, for its first version
+    await environment_versions.record_version_if_changed(session, environment, source="ai")
+    _logger.info(
+        "environment %d created from project %d's discovered environment %s",
+        environment.id,
+        project_id,
+        discovery_id,
+    )
+    return environment

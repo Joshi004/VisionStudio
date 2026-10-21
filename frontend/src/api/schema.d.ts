@@ -1620,10 +1620,32 @@ export interface paths {
         };
         /**
          * List Versions
-         * @description Every version of this environment, newest first, each with what it changed and its own
-         *     picture. A version is never edited: it is added when the profile changes.
+         * @description Every version of this environment, newest first, each with what it changed, its own
+         *     picture and the projects that pin it. A version is never edited: it is added when the
+         *     profile changes.
          */
         get: operations["list_versions_api_lab_environments__environment_id__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Environment Projects
+         * @description The story projects that use this environment, each with the version it pins.
+         *     Read-only: a project's link is changed from the project.
+         */
+        get: operations["list_environment_projects_api_lab_environments__environment_id__projects_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1672,6 +1694,171 @@ export interface paths {
          *     replaces a picture chosen earlier. Only the newest version can be changed.
          */
         post: operations["choose_reference_api_lab_environments_references__reference_id__choose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Environment Links */
+        get: operations["get_environment_links_api_projects__project_id__environment_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-links/link-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link All
+         * @description Makes a library environment for every unlinked entry of the newest list. When everything
+         *     is linked already, nothing is made.
+         */
+        post: operations["link_all_api_projects__project_id__environment_links_link_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-links/{discovery_id}/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Link
+         * @description Makes a new library environment from one entry of the newest list and pins its version
+         *     1.
+         */
+        post: operations["create_link_api_projects__project_id__environment_links__discovery_id__create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-links/{discovery_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Map Link
+         * @description Links one entry of the newest list to an existing library environment and pins that
+         *     environment's newest version.
+         */
+        put: operations["map_link_api_projects__project_id__environment_links__discovery_id__put"];
+        post?: never;
+        /**
+         * Delete Link
+         * @description Removes the link. The library environment stays in the Character Lab.
+         */
+        delete: operations["delete_link_api_projects__project_id__environment_links__discovery_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Environment Definitions */
+        get: operations["get_environment_definitions_api_projects__project_id__environment_definitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-definitions/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every linked environment the pipeline made. An environment chosen from
+         *     the library, an archived one, one defined and up to date already and one already being
+         *     defined are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__environment_definitions_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-definitions/{discovery_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the job that defines one environment. If it already has a job waiting or running,
+         *     that job's id is returned and no second job is made.
+         */
+        post: operations["run_one_api_projects__project_id__environment_definitions__discovery_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-definitions/{discovery_id}/picture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Picture
+         * @description Starts the canonical picture of the version the project pins again, for a defined
+         *     environment that has no picture.
+         */
+        post: operations["run_picture_api_projects__project_id__environment_definitions__discovery_id__picture_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2333,6 +2520,104 @@ export interface components {
              */
             created_at: string;
         };
+        /** EnvironmentAtmosphereOut */
+        EnvironmentAtmosphereOut: {
+            /** Baseline */
+            baseline: string;
+        };
+        /**
+         * EnvironmentDefinitionEntryOut
+         * @description One entry of the newest list of environments.
+         */
+        EnvironmentDefinitionEntryOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Environment Id */
+            environment_id: number | null;
+            /** Environment Name */
+            environment_name: string | null;
+            /** Pinned Version */
+            pinned_version: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unlinked" | "not_defined" | "defined" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            definition: components["schemas"]["EnvironmentDefinitionOut"] | null;
+            version: components["schemas"]["EnvironmentDefinitionVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            picture: components["schemas"]["EnvironmentPictureOut"];
+        };
+        /** EnvironmentDefinitionOut */
+        EnvironmentDefinitionOut: {
+            /** Id */
+            id: string;
+            /** Architecture */
+            architecture: string;
+            /** Layout */
+            layout: string;
+            visual_identity: components["schemas"]["EnvironmentVisualIdentityOut"];
+            /** Important Landmarks */
+            important_landmarks: string[];
+            atmosphere: components["schemas"]["EnvironmentAtmosphereOut"];
+            /** Continuity Rules */
+            continuity_rules: string[];
+            era: components["schemas"]["EnvironmentEraOut"];
+        };
+        /**
+         * EnvironmentDefinitionVersionOut
+         * @description The version of the library environment that holds the definition (the one the project
+         *     pins): the provenance of the definition (D-3).
+         */
+        EnvironmentDefinitionVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** EnvironmentDefinitionsOut */
+        EnvironmentDefinitionsOut: {
+            /** Discovery Version */
+            discovery_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["EnvironmentDefinitionEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** EnvironmentEraOut */
+        EnvironmentEraOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "present" | "past" | "future";
+            /** Years */
+            years: number | null;
+            /** Setting */
+            setting: string | null;
+        };
         /**
          * EnvironmentIn
          * @description The create form. Every field is sent, even when it has not changed.
@@ -2356,6 +2641,45 @@ export interface components {
             atmosphere?: string | null;
             /** Notes */
             notes?: string | null;
+        };
+        /**
+         * EnvironmentLinkEntryOut
+         * @description One entry of the newest discovered list. `link` is None while it is unlinked.
+         */
+        EnvironmentLinkEntryOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            link: components["schemas"]["LinkedEnvironmentOut"] | null;
+        };
+        /** EnvironmentLinksOut */
+        EnvironmentLinksOut: {
+            /** Discovery Version */
+            discovery_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["EnvironmentLinkEntryOut"][];
+            /** Orphaned */
+            orphaned: components["schemas"]["OrphanedEnvironmentLinkOut"][];
+        };
+        /** EnvironmentMapIn */
+        EnvironmentMapIn: {
+            /** Environment Id */
+            environment_id: number;
+        };
+        /**
+         * EnvironmentOriginOut
+         * @description The story project and discovered environment a library environment was made from.
+         */
+        EnvironmentOriginOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Discovery Id */
+            discovery_id: string;
         };
         /** EnvironmentOut */
         EnvironmentOut: {
@@ -2393,6 +2717,10 @@ export interface components {
             /** Version */
             version: number | null;
             image: components["schemas"]["PictureOut"] | null;
+            /** Picture Locked */
+            picture_locked: boolean;
+            origin: components["schemas"]["EnvironmentOriginOut"] | null;
+            definition: components["schemas"]["EnvironmentDefinitionOut"] | null;
         };
         /**
          * EnvironmentPatch
@@ -2418,6 +2746,31 @@ export interface components {
             archived?: boolean | null;
         };
         /**
+         * EnvironmentPictureOut
+         * @description How the canonical picture of the version the project pins is doing.
+         */
+        EnvironmentPictureOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unavailable" | "none" | "in_progress" | "failed" | "ready";
+            /** Stage */
+            stage: ("writing_prompt" | "drawing") | null;
+            /** Error */
+            error: string | null;
+            image: components["schemas"]["PictureImageOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** EnvironmentPictureRunOut */
+        EnvironmentPictureRunOut: {
+            /** Reference Id */
+            reference_id: number;
+        };
+        /**
          * EnvironmentProfileOut
          * @description The profile as a version froze it.
          */
@@ -2440,6 +2793,58 @@ export interface components {
             /** Notes */
             notes: string | null;
         };
+        /** EnvironmentRunAllOut */
+        EnvironmentRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["EnvironmentSkippedOut"][];
+        };
+        /** EnvironmentRunIn */
+        EnvironmentRunIn: {
+            /**
+             * Confirm Overwrite
+             * @default false
+             */
+            confirm_overwrite: boolean;
+        };
+        /** EnvironmentRunOut */
+        EnvironmentRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** EnvironmentSkippedOut */
+        EnvironmentSkippedOut: {
+            /** Discovery Id */
+            discovery_id: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * EnvironmentUsageOut
+         * @description One story project that uses the environment, and the version it pins.
+         */
+        EnvironmentUsageOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Discovery Id */
+            discovery_id: string;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "created" | "mapped";
+            /** Pinned Version */
+            pinned_version: number;
+            /** Newest Version */
+            newest_version: number | null;
+            /** Newer Version Available */
+            newer_version_available: boolean;
+        };
         /** EnvironmentVersionOut */
         EnvironmentVersionOut: {
             /** Id */
@@ -2457,9 +2862,29 @@ export interface components {
              */
             source: "ai" | "manual";
             /** Changes */
-            changes: ("created" | "profile")[];
+            changes: ("created" | "profile" | "definition")[];
             profile: components["schemas"]["EnvironmentProfileOut"];
             image: components["schemas"]["PictureOut"] | null;
+            definition: components["schemas"]["EnvironmentDefinitionOut"] | null;
+            /** Job Id */
+            job_id: number | null;
+            /** Pinned By */
+            pinned_by: components["schemas"]["PinnedByOut"][];
+        };
+        /** EnvironmentVisualIdentityOut */
+        EnvironmentVisualIdentityOut: {
+            /** Walls */
+            walls: string;
+            /** Floor */
+            floor: string;
+            /** Windows */
+            windows: string;
+            /** Doors */
+            doors: string;
+            /** Furniture */
+            furniture: string;
+            /** Color Palette */
+            color_palette: string;
         };
         /** EnvironmentsOut */
         EnvironmentsOut: {
@@ -2660,7 +3085,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment";
             /**
              * Status
              * @enum {string}
@@ -2713,7 +3138,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment";
             /**
              * Status
              * @enum {string}
@@ -3096,6 +3521,31 @@ export interface components {
             /** Discovery Version */
             discovery_version: number;
         };
+        /**
+         * LinkedEnvironmentOut
+         * @description The library environment an entry is linked to, and the version the project pins.
+         */
+        LinkedEnvironmentOut: {
+            /** Environment Id */
+            environment_id: number;
+            /** Name */
+            name: string;
+            /** Archived */
+            archived: boolean;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "created" | "mapped";
+            /** Pinned Version */
+            pinned_version: number;
+            /** Newest Version */
+            newest_version: number | null;
+            /** Newer Version Available */
+            newer_version_available: boolean;
+            /** Discovery Version */
+            discovery_version: number;
+        };
         /** LookCandidateOut */
         LookCandidateOut: {
             /** Id */
@@ -3253,6 +3703,33 @@ export interface components {
             species: string[];
         };
         /**
+         * OrphanedEnvironmentLinkOut
+         * @description A link whose discovered environment is not in the newest list.
+         */
+        OrphanedEnvironmentLinkOut: {
+            /** Environment Id */
+            environment_id: number;
+            /** Name */
+            name: string;
+            /** Archived */
+            archived: boolean;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "created" | "mapped";
+            /** Pinned Version */
+            pinned_version: number;
+            /** Newest Version */
+            newest_version: number | null;
+            /** Newer Version Available */
+            newer_version_available: boolean;
+            /** Discovery Version */
+            discovery_version: number;
+            /** Discovery Id */
+            discovery_id: string;
+        };
+        /**
          * OrphanedLinkOut
          * @description A link whose discovered character is not in the newest list.
          */
@@ -3295,6 +3772,16 @@ export interface components {
             diff: components["schemas"]["ContractDiffOut"];
         };
         /**
+         * PictureImageOut
+         * @description A canonical picture: the Image lab image and where to show it.
+         */
+        PictureImageOut: {
+            /** Id */
+            id: number;
+            /** Url */
+            url: string;
+        };
+        /**
          * PictureOut
          * @description A canonical picture: the Image lab image and where to show it.
          */
@@ -3303,6 +3790,18 @@ export interface components {
             id: number;
             /** Url */
             url: string;
+        };
+        /**
+         * PinnedByOut
+         * @description A story project that pins a version.
+         */
+        PinnedByOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Discovery Id */
+            discovery_id: string;
         };
         /**
          * PoolCapacity
@@ -3336,7 +3835,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment";
             /** Running */
             running: number;
             /** Queued */
@@ -3512,6 +4011,8 @@ export interface components {
             version: number;
             /** Frozen */
             frozen: boolean;
+            /** From Project */
+            from_project: boolean;
             /**
              * Status
              * @enum {string}
@@ -8008,6 +8509,46 @@ export interface operations {
             };
         };
     };
+    list_environment_projects_api_lab_environments__environment_id__projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentUsageOut"][];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_references_api_lab_environments__environment_id__references_get: {
         parameters: {
             query?: never;
@@ -8122,6 +8663,377 @@ export interface operations {
                 };
             };
             /** @description The request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_environment_links_api_projects__project_id__environment_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_all_api_projects__project_id__environment_links_link_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered environment or library environment, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_link_api_projects__project_id__environment_links__discovery_id__create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered environment or library environment, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    map_link_api_projects__project_id__environment_links__discovery_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentMapIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered environment or library environment, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_link_api_projects__project_id__environment_links__discovery_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_environment_definitions_api_projects__project_id__environment_definitions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentDefinitionsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__environment_definitions_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or scenes, or list of environments, or the environment is not linked, is archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__environment_definitions__discovery_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or scenes, or list of environments, or the environment is not linked, is archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_picture_api_projects__project_id__environment_definitions__discovery_id__picture_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentPictureRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or scenes, or list of environments, or the environment is not linked, is archived, or needs confirming. */
             422: {
                 headers: {
                     [name: string]: unknown;

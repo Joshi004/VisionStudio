@@ -18,7 +18,10 @@ A picture made for the Character lab (Phase 25) best-effort nudges what it belon
 once it is stored: a look's angle reference (`character_looks.on_angle_image_stored`), the
 candidate of a look the story pipeline made (`character_looks.on_candidate_image_stored`, which
 chooses the master by itself) or a take's own picture (`character_takes.on_image_stored`). A
-plain Image lab run is none of these and all are no-ops for it.
+picture made for the one candidate of an environment's picture the story pipeline made
+(`environment_references.on_candidate_image_stored`, PHASE-013) becomes that environment
+version's canonical picture by itself. A plain Image lab run is none of these and all are
+no-ops for it.
 """
 
 from __future__ import annotations
@@ -36,7 +39,14 @@ from app.jobs import dispatcher, phases, store
 from app.jobs.gpu_job import GPU_URL_KEY
 from app.jobs.remote_image import RemoteImageHandler
 from app.providers import image_generator
-from app.services import character_images, character_looks, character_takes, frame_images, image_lab
+from app.services import (
+    character_images,
+    character_looks,
+    character_takes,
+    environment_references,
+    frame_images,
+    image_lab,
+)
 from app.services.frame_images import FrameRejected
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -207,6 +217,7 @@ class GenerateLabImageHandler(RemoteImageHandler):
         )
         if isinstance(run_id, int):
             await self._continue_character_lab(job.id, run_id)
+            await self._continue_environment_lab(job.id, run_id)
         # Best effort: a failure here is recorded and never fails the run.
         purge = await self._purge(base_url, job.provider_job_id)
         async with SessionLocal() as session:
@@ -230,3 +241,15 @@ class GenerateLabImageHandler(RemoteImageHandler):
             return
         if started or angles_started or released:
             dispatcher.nudge()
+
+    @staticmethod
+    async def _continue_environment_lab(job_id: int, run_id: int) -> None:
+        """Makes the picture the canonical picture of the environment version it was made for,
+        when it is the one candidate of a picture the story pipeline made (PHASE-013).
+        Best effort: a failure never fails the picture (it is stored), and the author can
+        still make one by hand in the Character lab.
+        """
+        try:
+            await environment_references.on_candidate_image_stored(run_id)
+        except Exception:
+            _logger.exception("job %d: the environment picture could not be attached", job_id)

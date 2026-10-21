@@ -1,7 +1,9 @@
+import { useState } from "react";
 import {
   Alert,
   Badge,
   Button,
+  Collapse,
   Grid,
   Group,
   Loader,
@@ -11,8 +13,11 @@ import {
   Title,
 } from "@mantine/core";
 
+import type { EnvironmentDefinition } from "../../api/environmentDefinitions";
 import { useEditEnvironment, useLibraryEnvironment } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
+import { EnvironmentDefinitionView } from "./EnvironmentDefinitionView";
+import { EnvironmentUsedByProjects } from "./EnvironmentUsedByProjects";
 import { EnvironmentVersionHistory } from "./EnvironmentVersionHistory";
 import { eraText } from "./environmentLabView";
 import { ReferencePicker } from "./ReferencePicker";
@@ -39,8 +44,40 @@ function Detail({ label, value }: { label: string; value: string | null }) {
 }
 
 /**
- * One environment: its profile and the version history on the left; on the right, its
- * canonical picture and the pictures being made for it. The profile is changed in the drawer.
+ * The structured definition (architecture, layout, look, landmarks, mood, continuity rules),
+ * read only. It is written by a project's Environment definitions stage, never edited here; the
+ * profile above is what a person edits.
+ */
+function DefinitionSection({ definition }: { definition: EnvironmentDefinition | null }) {
+  const [open, setOpen] = useState(false);
+  if (definition === null) {
+    return (
+      <Text size="xs" c="dimmed">
+        No definition yet. A project&apos;s Environment definitions stage writes one.
+      </Text>
+    );
+  }
+  return (
+    <Stack gap="xs">
+      <Group justify="space-between">
+        <Text size="sm" fw={600}>
+          Definition
+        </Text>
+        <Button size="compact-xs" variant="subtle" onClick={() => setOpen((value) => !value)}>
+          {open ? "Hide" : "Show"}
+        </Button>
+      </Group>
+      <Collapse expanded={open}>
+        <EnvironmentDefinitionView definition={definition} />
+      </Collapse>
+    </Stack>
+  );
+}
+
+/**
+ * One environment: its profile, definition, the projects that use it and the version history on
+ * the left; on the right, its canonical picture and the pictures being made for it. The profile
+ * is changed in the drawer.
  */
 export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPageProps) {
   const environment = useLibraryEnvironment(environmentId);
@@ -95,6 +132,15 @@ export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPa
                       archived
                     </Badge>
                   )}
+                  {data.origin !== null && (
+                    <Badge
+                      variant="light"
+                      color="teal"
+                      title={`Made from the environment "${data.origin.discovery_id}" of the project ${data.origin.project_name}`}
+                    >
+                      from project: {data.origin.project_name}
+                    </Badge>
+                  )}
                 </Group>
                 <Text size="sm" c="dimmed">
                   {eraText(data)}
@@ -128,6 +174,10 @@ export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPa
                 <Detail label="Atmosphere" value={data.atmosphere} />
                 <Detail label="Notes" value={data.notes} />
               </Stack>
+
+              <DefinitionSection definition={data.definition} />
+
+              <EnvironmentUsedByProjects environmentId={data.id} />
 
               <EnvironmentVersionHistory environmentId={data.id} />
             </Stack>

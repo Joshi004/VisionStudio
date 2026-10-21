@@ -89,13 +89,14 @@ class Job(Base):
         # story stage, since revision 0023, the two discovery stages, since revision 0024,
         # scene discovery, since revision 0025, character definition, since revision 0028, and
         # relation discovery, since revision 0030, voice design, since revision 0031, and the
-        # environment prompt, since revision 0032.
+        # environment prompt, since revision 0032, and environment definition, since revision
+        # 0033.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
             "'define_character', 'discover_relations', 'design_voice', "
-            "'write_environment_prompt')",
+            "'write_environment_prompt', 'define_environment')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -936,7 +937,7 @@ class ProjectCharacterLink(Base):
 class LibraryEnvironment(Base):
     """An environment of the Character lab's library (PHASE-012): a reusable, project-independent
     place an author builds once (profile, canonical reference picture) and a story project can
-    later link to and pin a version of (PHASE-013).
+    link to and pin a version of (`ProjectEnvironmentLink`, PHASE-013).
 
     This is the editable head, like `library_character`. Every change to the profile adds one
     immutable `library_environment_version` row (`services/environment_versions`). Never
@@ -945,6 +946,11 @@ class LibraryEnvironment(Base):
     `era_kind`, `era_years` and `era_setting` follow the same rules as a character's. A place
     has no mouth, species or voice, so the profile is only a description, the era, an optional
     atmosphere and optional notes.
+
+    An environment the pipeline made for a project carries that project and the discovered
+    environment's id in `origin_project_id` and `origin_discovery_id` (PHASE-013); one made in
+    the lab has neither. `definition` is the newest structured definition the Environment
+    Definition stage wrote (`Path_ahead.md` Section 13, plus the era), NULL until one exists.
     """
 
     __tablename__ = "library_environment"
@@ -968,6 +974,59 @@ class LibraryEnvironment(Base):
     atmosphere: Mapped[str | None] = mapped_column(default=None)
     notes: Mapped[str | None] = mapped_column(default=None)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Only for an environment the pipeline created from a project's discovered environment
+    # (PHASE-013): that project, and the discovered environment's slug id in it. NULL for an
+    # environment made in the lab, and for one whose project was deleted.
+    origin_project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    origin_discovery_id: Mapped[str | None] = mapped_column(default=None)
+    # The newest structured definition the Environment Definition stage wrote (PHASE-013). NULL
+    # until a definition is written. A lab edit of the profile never changes it.
+    definition: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+
+
+class ProjectEnvironmentLink(Base):
+    """Links one of a story project's discovered environments to a library environment and pins
+    one of that environment's versions (PHASE-013). The same shape as `ProjectCharacterLink`.
+
+    `discovery_id` is the slug `id` of the discovered environment inside the project's
+    `environment_discovery` content. Only that id ties the link to the list, so a re-run of
+    discovery that keeps the id keeps the link; a link whose id is no longer in the newest list
+    is kept and shown as orphaned. `pinned_version` is the number of a
+    `library_environment_version` of `environment_id`, found by `(environment_id,
+    pinned_version)` and not by a foreign key. A lab edit never moves it: "a newer version is
+    available" is worked out on read. `how` is `created` (the pipeline made the library
+    environment from the discovery entry) or `mapped` (the user chose an existing one).
+    `discovery_version` is the version of the discovered list the link was made from.
+
+    A project links each discovered environment once, and uses each library environment for at
+    most one discovered environment.
+    """
+
+    __tablename__ = "project_environment_link"
+    __table_args__ = (
+        CheckConstraint("how IN ('created', 'mapped')", name="how_valid"),
+        UniqueConstraint(
+            "project_id", "discovery_id", name="uq_project_environment_link_discovery"
+        ),
+        UniqueConstraint(
+            "project_id", "environment_id", name="uq_project_environment_link_environment"
+        ),
+        Index("idx_project_environment_link_environment", "environment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    discovery_id: Mapped[str]
+    environment_id: Mapped[int] = mapped_column(
+        ForeignKey("library_environment.id", ondelete="CASCADE")
+    )
+    pinned_version: Mapped[int]
+    how: Mapped[str]
+    discovery_version: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
 class LibraryEnvironmentVersion(Base):
@@ -979,7 +1038,10 @@ class LibraryEnvironmentVersion(Base):
     version. It is set (and may be replaced) only while the version is the environment's
     newest; once an edit adds a newer version, this one is frozen and keeps its own picture.
     An edit never carries the picture forward, because it was made for the old text.
-    Provenance (D-3): `source`, `version` and `created_at`; every change here is made by hand.
+    Provenance (D-3): `source`, `version` and `created_at`; a version the Environment Definition
+    stage wrote (PHASE-013) also records `job_id` and `inputs` (what it was built from) and the
+    `definition` as the head held it. All three are NULL for a version made by hand in the lab
+    (the definition is carried forward from the head when there is one).
     """
 
     __tablename__ = "library_environment_version"
@@ -1000,6 +1062,16 @@ class LibraryEnvironmentVersion(Base):
     reference_image_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
     )
+    # The structured definition at this version (PHASE-013), as the head held it. NULL when the
+    # environment had none.
+    definition: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # Provenance of a version the pipeline made (D-3): the job that wrote the definition, and
+    # what it was built from (`{"project_id", "discovery_id", "story_sha256", "entry_sha256",
+    # "artifacts"}`). Both are NULL for a version made by hand in the lab.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
 
 
 class EnvironmentReference(Base):
@@ -1011,12 +1083,18 @@ class EnvironmentReference(Base):
     started; each one's own state is read live from its `lab_run`) or `failed` (`error` says
     why). The attempt is made for one version (`version_id`), the environment's newest when it
     started.
+
+    An attempt the story pipeline made for a project (PHASE-013) carries that project and the
+    discovered environment in `project_id` and `discovery_id`. It makes one candidate, and the
+    candidate becomes the version's canonical picture by itself; a lab attempt makes four and
+    waits for the author to choose.
     """
 
     __tablename__ = "environment_reference"
     __table_args__ = (
         CheckConstraint("status IN ('writing_prompt', 'ready', 'failed')", name="status_valid"),
         Index("idx_environment_reference_environment", "environment_id"),
+        Index("idx_environment_reference_project", "project_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1035,6 +1113,12 @@ class EnvironmentReference(Base):
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
     error: Mapped[str | None] = mapped_column(default=None)
+    # Only for an attempt the story pipeline made (PHASE-013): the project and the discovered
+    # environment it was made for. NULL for an attempt made in the lab.
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    discovery_id: Mapped[str | None] = mapped_column(default=None)
 
 
 class EnvironmentReferenceCandidate(Base):

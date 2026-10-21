@@ -52,6 +52,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "environment-definitions",
     name: "Environment definitions",
     description: "Describes and illustrates each place.",
+    available: true,
   },
   {
     id: "scene-definitions",

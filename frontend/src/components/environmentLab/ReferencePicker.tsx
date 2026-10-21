@@ -124,10 +124,15 @@ function AttemptView({
       )}
       {attempt.status === "ready" && (
         <Stack gap="sm">
+          {attempt.from_project && (
+            <Badge variant="light" color="teal" w="fit-content">
+              made by a story project
+            </Badge>
+          )}
           {attempt.frozen ? (
             <Text size="xs" c="dimmed">
-              Made for version {attempt.version}, which is frozen: a newer version exists, so this
-              choice cannot be changed.
+              Made for version {attempt.version}, which is frozen: a newer version exists, or a
+              project pins this version with its picture, so this choice cannot be changed.
             </Text>
           ) : (
             <Text size="sm" fw={500}>
@@ -165,7 +170,9 @@ function AttemptView({
 /**
  * Making the picture of an environment's newest version: a model writes the prompt, four wide
  * pictures are drawn, and the one you choose becomes the version's canonical picture. Earlier
- * attempts are listed below, and are read-only once a newer version exists.
+ * attempts are listed below, and are read-only once a newer version exists or a project pins
+ * the version with its picture. A picture a story project made is one picture, taken as the
+ * version's canonical picture by itself.
  */
 export function ReferencePicker({ environment }: { environment: LibraryEnvironment }) {
   const references = useEnvironmentReferences(environment.id);
@@ -189,7 +196,7 @@ export function ReferencePicker({ environment }: { environment: LibraryEnvironme
         <Button
           size="compact-sm"
           loading={start.isPending}
-          disabled={environment.archived || writingPrompt}
+          disabled={environment.archived || environment.picture_locked || writingPrompt}
           onClick={() => start.mutate(environment.id)}
         >
           {environment.image === null ? "Make the picture" : "Make a new picture"}
@@ -203,6 +210,12 @@ export function ReferencePicker({ environment }: { environment: LibraryEnvironme
       {environment.archived && (
         <Alert color="orange" p="xs">
           This environment is archived. Unarchive it to make a picture.
+        </Alert>
+      )}
+      {environment.picture_locked && (
+        <Alert color="blue" p="xs">
+          A story project uses this version, and it already has its picture, so the picture cannot
+          be replaced. Edit the environment to make a new version, and make its picture here.
         </Alert>
       )}
       {start.isError && (

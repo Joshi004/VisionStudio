@@ -1,15 +1,19 @@
 """`/api/lab/environments`: the environment library of the Character lab (PHASE-012).
 
 A `library_environment` is a reusable place: a profile and one canonical reference picture per
-version. It belongs to no project (a story project links to one in PHASE-013).
+version. It belongs to no project. A story project links each discovered environment to one and
+pins a version of it (`/api/projects/{id}/environment-links`, PHASE-013); `GET /{id}/projects`
+lists the projects that use an environment, read-only, and an environment the pipeline made for
+a project carries its `origin` and the `definition` the Environment Definition stage wrote.
 
 - Every change of the profile adds an immutable version (`environment_versions`);
   `GET /{id}/versions` lists them, newest first, read-only. Each version has its own canonical
-  picture, which an edit never carries forward.
+  picture, which an edit never carries forward, and says which projects pin it.
 - `POST /{id}/references` starts an attempt for the newest version: a language model writes the
   prompt, then four 16:9 candidate pictures are made. `POST /references/{id}/choose` makes one
   the canonical picture of the version the attempt was made for. Only the newest version's
-  picture can be chosen or replaced.
+  picture can be chosen or replaced, and not one that a project pins and that already has its
+  picture.
 
 `POST .../references` answers at once with HTTP 202; the dispatcher does the work and the page
 polls. The rules are in `services/environment_library.py` and `environment_references.py`. A
@@ -27,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.environment_definitions import EnvironmentDefinitionOut
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobSummary, job_summary
 from app.db.models import (
@@ -36,12 +41,14 @@ from app.db.models import (
     LabRun,
     LibraryEnvironment,
     LibraryEnvironmentVersion,
+    Project,
 )
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.services import (
     environment_library,
+    environment_links,
     environment_references,
     environment_versions,
     image_lab,
@@ -120,6 +127,14 @@ class PictureOut(BaseModel):
     url: str
 
 
+class EnvironmentOriginOut(BaseModel):
+    """The story project and discovered environment a library environment was made from."""
+
+    project_id: int
+    project_name: str
+    discovery_id: str
+
+
 class EnvironmentOut(BaseModel):
     id: int
     created_at: datetime
@@ -137,6 +152,15 @@ class EnvironmentOut(BaseModel):
     # The canonical picture of the newest version. None until one is chosen, and again after an
     # edit adds a version (the picture belongs to the text it was made for).
     image: PictureOut | None
+    # True when the newest version is pinned by a project and already has its picture: that
+    # picture cannot be replaced. Edit the environment to make a version with no picture.
+    picture_locked: bool
+    # Set only for an environment the pipeline made from a project's discovered environment
+    # (PHASE-013). None for an environment made in the lab.
+    origin: EnvironmentOriginOut | None
+    # The newest structured definition the Environment Definition stage wrote (PHASE-013),
+    # read-only. None until one is written.
+    definition: EnvironmentDefinitionOut | None
 
 
 class EnvironmentsOut(BaseModel):
@@ -155,6 +179,11 @@ async def _environment_out(
     session: AsyncSession, environment: LibraryEnvironment
 ) -> EnvironmentOut:
     newest = await environment_versions.latest_version(session, environment.id)
+    origin_project = (
+        await session.get(Project, environment.origin_project_id)
+        if environment.origin_project_id is not None
+        else None
+    )
     return EnvironmentOut(
         id=environment.id,
         created_at=environment.created_at,
@@ -169,6 +198,23 @@ async def _environment_out(
         archived=environment.archived,
         version=newest.version if newest is not None else None,
         image=await _picture(session, newest.reference_image_id if newest is not None else None),
+        picture_locked=(
+            await environment_references.is_frozen(session, newest) if newest is not None else False
+        ),
+        origin=(
+            EnvironmentOriginOut(
+                project_id=origin_project.id,
+                project_name=origin_project.name,
+                discovery_id=environment.origin_discovery_id,
+            )
+            if origin_project is not None and environment.origin_discovery_id is not None
+            else None
+        ),
+        definition=(
+            EnvironmentDefinitionOut.model_validate(environment.definition)
+            if environment.definition is not None
+            else None
+        ),
     )
 
 
@@ -293,6 +339,14 @@ class EnvironmentProfileOut(BaseModel):
     notes: str | None
 
 
+class PinnedByOut(BaseModel):
+    """A story project that pins a version."""
+
+    project_id: int
+    project_name: str
+    discovery_id: str
+
+
 class EnvironmentVersionOut(BaseModel):
     id: int
     version: int
@@ -303,6 +357,13 @@ class EnvironmentVersionOut(BaseModel):
     profile: EnvironmentProfileOut
     # The canonical picture of this version. None when none was chosen for it.
     image: PictureOut | None
+    # The structured definition at this version (PHASE-013). None when it had none.
+    definition: EnvironmentDefinitionOut | None
+    # The job that wrote the definition, for a version the pipeline made. None for a version
+    # made by hand.
+    job_id: int | None
+    # The story projects that pin this version.
+    pinned_by: list[PinnedByOut]
 
 
 @router.get(
@@ -313,12 +374,14 @@ class EnvironmentVersionOut(BaseModel):
 async def list_versions(
     environment_id: EnvironmentId, session: SessionDep
 ) -> list[EnvironmentVersionOut]:
-    """Every version of this environment, newest first, each with what it changed and its own
-    picture. A version is never edited: it is added when the profile changes.
+    """Every version of this environment, newest first, each with what it changed, its own
+    picture and the projects that pin it. A version is never edited: it is added when the
+    profile changes.
     """
     if await environment_library.get_environment(session, environment_id) is None:
         raise _missing(f"There is no environment {environment_id}.")
     entries = await environment_versions.list_versions(session, environment_id)
+    usages = await environment_links.used_by(session, environment_id)
     return [
         EnvironmentVersionOut(
             id=entry.version.id,
@@ -328,8 +391,70 @@ async def list_versions(
             changes=entry.changes,
             profile=EnvironmentProfileOut.model_validate(entry.version.profile),
             image=await _picture(session, entry.version.reference_image_id),
+            definition=(
+                EnvironmentDefinitionOut.model_validate(entry.version.definition)
+                if entry.version.definition is not None
+                else None
+            ),
+            job_id=entry.version.job_id,
+            pinned_by=[
+                PinnedByOut(
+                    project_id=usage.link.project_id,
+                    project_name=usage.project_name,
+                    discovery_id=usage.link.discovery_id,
+                )
+                for usage in usages
+                if usage.link.pinned_version == entry.version.version
+            ],
         )
         for entry in entries
+    ]
+
+
+# --- The projects that use an environment (read-only) --------------------------------------
+
+
+class EnvironmentUsageOut(BaseModel):
+    """One story project that uses the environment, and the version it pins."""
+
+    project_id: int
+    project_name: str
+    # The project's discovered environment this one backs.
+    discovery_id: str
+    # `created`: the pipeline made the environment for the project. `mapped`: the user chose it.
+    how: Literal["created", "mapped"]
+    pinned_version: int
+    # The environment's newest version, and whether it is later than the pinned one. The pin
+    # does not move because of a lab edit.
+    newest_version: int | None
+    newer_version_available: bool
+
+
+@router.get(
+    "/lab/environments/{environment_id}/projects",
+    response_model=list[EnvironmentUsageOut],
+    responses=_NOT_FOUND,
+)
+async def list_environment_projects(
+    environment_id: EnvironmentId, session: SessionDep
+) -> list[EnvironmentUsageOut]:
+    """The story projects that use this environment, each with the version it pins.
+    Read-only: a project's link is changed from the project.
+    """
+    if await environment_library.get_environment(session, environment_id) is None:
+        raise _missing(f"There is no environment {environment_id}.")
+    usages = await environment_links.used_by(session, environment_id)
+    return [
+        EnvironmentUsageOut(
+            project_id=usage.link.project_id,
+            project_name=usage.project_name,
+            discovery_id=usage.link.discovery_id,
+            how=typing_cast(Literal["created", "mapped"], usage.link.how),
+            pinned_version=usage.link.pinned_version,
+            newest_version=usage.newest_version,
+            newer_version_available=usage.newer_version_available,
+        )
+        for usage in usages
     ]
 
 
@@ -349,8 +474,12 @@ class ReferenceOut(BaseModel):
     created_at: datetime
     # The number of the version this attempt was made for.
     version: int
-    # True once an edit added a newer version: the attempt is shown, but cannot be chosen from.
+    # True once an edit added a newer version, or when a project pins the version and it
+    # already has its picture: the attempt is shown, but cannot be chosen from.
     frozen: bool
+    # True for an attempt the story pipeline made (one candidate, taken as the picture by
+    # itself); False for one made in the lab.
+    from_project: bool
     status: ReferenceStatus
     prompt: str | None
     error: str | None
@@ -389,7 +518,13 @@ async def _reference_out(
         id=attempt.id,
         created_at=attempt.created_at,
         version=version.version if version is not None else 0,
-        frozen=newest_id is None or attempt.version_id != newest_id,
+        frozen=(
+            newest_id is None
+            or attempt.version_id != newest_id
+            or version is None
+            or await environment_references.is_frozen(session, version)
+        ),
+        from_project=attempt.project_id is not None,
         status=typing_cast(ReferenceStatus, attempt.status),
         prompt=attempt.prompt,
         error=attempt.error,

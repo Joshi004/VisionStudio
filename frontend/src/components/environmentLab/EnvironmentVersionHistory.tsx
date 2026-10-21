@@ -3,6 +3,7 @@ import { Accordion, Alert, Badge, Group, Loader, Stack, Text } from "@mantine/co
 import { useEnvironmentVersions, type EnvironmentVersion } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { formatDateTime } from "../../format";
+import { EnvironmentDefinitionView } from "./EnvironmentDefinitionView";
 import { eraText, VERSION_CHANGE_LABELS } from "./environmentLabView";
 
 const PICTURE_STYLE = {
@@ -39,6 +40,14 @@ function VersionDetails({ version }: { version: EnvironmentVersion }) {
         <Row label="Atmosphere" value={profile.atmosphere} />
         <Row label="Notes" value={profile.notes} />
       </Stack>
+      {version.definition !== null && (
+        <Stack gap={4}>
+          <Text size="sm" fw={600}>
+            Definition
+          </Text>
+          <EnvironmentDefinitionView definition={version.definition} />
+        </Stack>
+      )}
       {version.image !== null ? (
         <img
           src={version.image.url}
@@ -51,14 +60,20 @@ function VersionDetails({ version }: { version: EnvironmentVersion }) {
           No picture was chosen for this version.
         </Text>
       )}
+      {version.job_id !== null && (
+        <Text size="xs" c="dimmed">
+          Written by job {version.job_id} of a story project.
+        </Text>
+      )}
     </Stack>
   );
 }
 
 /**
  * The versions of one environment, newest first, read-only. A version is a snapshot of the
- * profile made when it changed, with the picture chosen for it. It is never edited, so an old
- * version always shows what it was and the picture it was made for.
+ * profile (and the structured definition, when the story pipeline wrote one) made when it
+ * changed, with the picture chosen for it and the projects that pin it. It is never edited, so
+ * an old version always shows what it was and the picture it was made for.
  */
 export function EnvironmentVersionHistory({ environmentId }: { environmentId: number }) {
   const versions = useEnvironmentVersions(environmentId);
@@ -95,6 +110,17 @@ export function EnvironmentVersionHistory({ environmentId }: { environmentId: nu
                   >
                     {version.image !== null ? "picture" : "no picture"}
                   </Badge>
+                  {version.pinned_by.map((project) => (
+                    <Badge
+                      key={`${project.project_id}:${project.discovery_id}`}
+                      variant="light"
+                      color="teal"
+                      size="sm"
+                      title={`The project ${project.project_name} uses this version as "${project.discovery_id}"`}
+                    >
+                      pinned by {project.project_name}
+                    </Badge>
+                  ))}
                   <Text size="xs" c="dimmed">
                     {formatDateTime(version.created_at)}
                   </Text>
