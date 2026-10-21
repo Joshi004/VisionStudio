@@ -2460,6 +2460,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shot References */
+        get: operations["get_shot_references_api_projects__project_id__shot_references_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-references/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Chooses the references of every shot that has none or an out of date manifest. The shots
+         *     that cannot be done are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__shot_references_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-references/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scene
+         * @description Chooses the references of every shot of one scene that has none or an out of date
+         *     manifest.
+         */
+        post: operations["run_scene_api_projects__project_id__shot_references__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-references/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Shot
+         * @description Chooses the references of one shot. Refused with the reason when it cannot be done.
+         */
+        post: operations["run_shot_api_projects__project_id__shot_references__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2539,6 +2618,33 @@ export interface components {
             baseline: string;
             /** Gesture Style */
             gesture_style: string;
+        };
+        /**
+         * CatalogPictureOut
+         * @description One picture that could have been chosen.
+         */
+        CatalogPictureOut: {
+            /** Lab Image Id */
+            lab_image_id: number;
+            /** Url */
+            url: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "character" | "environment";
+            /** Subject Id */
+            subject_id: string;
+            /** Subject Name */
+            subject_name: string;
+            /** View */
+            view: string;
+            /** Variant */
+            variant: string;
+            /** Is Resolved */
+            is_resolved: boolean;
+            /** Description */
+            description: string;
         };
         /** CharacterDefinitionOut */
         CharacterDefinitionOut: {
@@ -4889,6 +4995,35 @@ export interface components {
             /** Candidates */
             candidates: components["schemas"]["ReferenceCandidateOut"][];
         };
+        /**
+         * ReferencePictureOut
+         * @description One picture of the manifest, in the order it is sent.
+         */
+        ReferencePictureOut: {
+            /** Order */
+            order: number;
+            /** Lab Image Id */
+            lab_image_id: number;
+            /** Url */
+            url: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "character" | "environment";
+            /** Subject Id */
+            subject_id: string;
+            /** Subject Name */
+            subject_name: string;
+            /** View */
+            view: string;
+            /** Variant */
+            variant: string;
+            /** Fallback */
+            fallback: boolean;
+            /** Description */
+            description: string;
+        };
         /** RelationCharacterOut */
         RelationCharacterOut: {
             /** Id */
@@ -5347,6 +5482,22 @@ export interface components {
             /** Can Run */
             can_run: boolean;
         };
+        /**
+         * SceneShotReferencesOut
+         * @description One scene of the newest list of scenes.
+         */
+        SceneShotReferencesOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Shots */
+            shots: components["schemas"]["ShotReferenceEntryOut"][];
+        };
         /** SceneStoryContextOut */
         SceneStoryContextOut: {
             /** Before */
@@ -5800,6 +5951,113 @@ export interface components {
         ShotPlansRunOut: {
             /** Job Id */
             job_id: number;
+        };
+        /** ShotReferenceEntryOut */
+        ShotReferenceEntryOut: {
+            shot: components["schemas"]["ShotReferenceSkeletonOut"];
+            /**
+             * Definition Status
+             * @enum {string}
+             */
+            definition_status: "not_defined" | "defined" | "out_of_date";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_selected" | "selected" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            manifest: components["schemas"]["ShotReferenceManifestOut"] | null;
+            version: components["schemas"]["ShotReferenceVersionOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotReferenceManifestOut */
+        ShotReferenceManifestOut: {
+            /** Method */
+            method: string;
+            /** Shot Size */
+            shot_size: string;
+            /** Framing */
+            framing: string;
+            /** Focus Character Id */
+            focus_character_id: string | null;
+            /** References */
+            references: components["schemas"]["ReferencePictureOut"][];
+            /** Catalog */
+            catalog: components["schemas"]["CatalogPictureOut"][];
+            /** Notes */
+            notes: string[];
+        };
+        /** ShotReferenceSelectedOut */
+        ShotReferenceSelectedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string;
+            /** Version */
+            version: number;
+        };
+        /** ShotReferenceSkeletonOut */
+        ShotReferenceSkeletonOut: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            /** Description */
+            description: string;
+            /** Duration Seconds */
+            duration_seconds: number;
+        };
+        /** ShotReferenceSkippedOut */
+        ShotReferenceSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string | null;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * ShotReferenceVersionOut
+         * @description The provenance of the newest manifest of a shot (D-3).
+         */
+        ShotReferenceVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ShotReferencesOut */
+        ShotReferencesOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["SceneShotReferencesOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotReferencesRunOut */
+        ShotReferencesRunOut: {
+            /** Selected */
+            selected: components["schemas"]["ShotReferenceSelectedOut"][];
+            /** Skipped */
+            skipped: components["schemas"]["ShotReferenceSkippedOut"][];
         };
         /**
          * ShotSkeletonOut
@@ -12071,6 +12329,169 @@ export interface operations {
                 };
             };
             /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, or the StoryBible is missing. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_shot_references_api_projects__project_id__shot_references_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotReferencesOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__shot_references_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotReferencesRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot is not defined and current, a picture it needs is missing, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_scene_api_projects__project_id__shot_references__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotReferencesRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot is not defined and current, a picture it needs is missing, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_shot_api_projects__project_id__shot_references__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotReferencesRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot is not defined and current, a picture it needs is missing, or the scene or shot is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;

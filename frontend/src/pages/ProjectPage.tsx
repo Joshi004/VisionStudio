@@ -19,6 +19,7 @@ import { SceneEventsPanel } from "../components/story/SceneEventsPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
 import { ShotDefinitionsPanel } from "../components/story/ShotDefinitionsPanel";
 import { ShotPlansPanel } from "../components/story/ShotPlansPanel";
+import { ShotReferencesPanel } from "../components/story/ShotReferencesPanel";
 import { SpeechUnitsPanel } from "../components/story/SpeechUnitsPanel";
 import { StageList } from "../components/story/StageList";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
@@ -106,6 +107,7 @@ export function ProjectPage() {
           <SpeechUnitsPanel projectId={project.id} />
           <ShotPlansPanel projectId={project.id} />
           <ShotDefinitionsPanel projectId={project.id} />
+          <ShotReferencesPanel projectId={project.id} />
           <StageList />
         </>
       )}

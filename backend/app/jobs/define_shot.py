@@ -45,6 +45,7 @@ from app.services import (
     shot_continuity,
     shot_definition_writer,
     shot_definitions,
+    shot_references,
 )
 from app.services.llm_target import STORY_MODEL_KEY
 
@@ -283,6 +284,15 @@ class DefineShotHandler(JobHandler):
             row.version,
             outcome.usage,
         )
+
+        # The shot's reference pictures are chosen by code, with no model call (PHASE-024). Also
+        # a separate step: a shot that cannot be given its pictures yet is left for the user's
+        # **Select references**, and a failure here must not fail a job that has succeeded.
+        try:
+            async with SessionLocal() as session:
+                await shot_references.select_if_ready(session, project_id, read.scene_id, shot_id)
+        except Exception:
+            _logger.exception("job %d: the references of the shot could not be chosen", job_id)
 
         # When this was the last shot of its scene to be defined, the scene's continuity is
         # checked by itself (PHASE-023). A separate step: the definition is stored and this job

@@ -101,6 +101,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "reference-selection",
     name: "Reference selection",
     description: "Chooses the pictures and voices each shot is generated from.",
+    available: true,
   },
   {
     id: "generation-planning",

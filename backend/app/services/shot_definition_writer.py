@@ -56,8 +56,8 @@ SHOT_SIZES: Final = (
     "extreme_wide",
 )
 # The framing of the Character Lab (`character_library.FRAMINGS`) that PHASE-024 is meant to use
-# for each size. It is written here so that the list and its meaning stay together; nothing in
-# this phase reads it.
+# for each size. It is written here so that the list and its meaning stay together;
+# `services/reference_selection.framing_for` reads it (PHASE-024).
 FRAMING_OF_SIZE: Final = {
     "extreme_close_up": "close_up",
     "close_up": "close_up",

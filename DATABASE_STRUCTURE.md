@@ -88,6 +88,10 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-022 shot definition, 2026-10-21):** migration `0041`. The Shot Definition stage (`Path_ahead.md` Sections 26 and 27): **for each planned shot, a model writes its full cinematic specification.** (1) **A new job type, `define_shot`** (`provider='llm'`, restart rule `never_rerun`, the story model, D-12): one job per shot, deduped by `shot_key` (`scene_id/shot_id`). `job` is rebuilt for the new CHECK, as in `0040`; no row changes. (2) One new table, `shot_definition` (Section 4.44): one immutable row per run for one shot, following Section 2.1 and numbered per shot (`UNIQUE (project_id, scene_id, shot_id, version)`), with the id of the `shot_plan` row it was defined from. It is a project artifact: there is no pin. (3) `content` is the Section 26 specification. **Code writes `shot_id`, `scene_id`, `duration` (from the scene's timeline) and `audio_intent.dialogue` (from the shot's dialogue speech units); the model's values for them are ignored.** There is **no music field**. `composition.shot_size` must be one of seven sizes. (4) **A strict gate:** a shot can be defined only when its scene's shot plan is current and *ready for generation* (PHASE-021), and the project's `look_state_resolution` exists, is current and covers the scene. (5) `inputs` records the story hash, the artifacts (StoryBible, the scene definition, the shot plan, the look and state resolution, and the chosen character and environment definitions with their hashes) and the shot's length. (6) **Out of date is worked out on every read**: the scene's shots were planned again, the shot plan is itself out of date (which covers the story, the StoryBible, the scene, its events, speech and the definitions of its characters and environment), or the looks and states were resolved again or are out of date. See Sections 4.5, 4.44, 5 and 7.
 
+**Update (PHASE-024 shot reference manifest, 2026-10-21):** migration `0043`. The reference manifest (`Path_ahead.md` Section 28, steps 1 and 3): **for each defined shot, deterministic code chooses the minimum set of pictures the shot is generated from.** (1) **No job and no new job type**: the choice is made by code in the request, so the `job.type` CHECK is unchanged. (2) One new table, `shot_reference_manifest` (Section 4.46): one immutable row per selection for one shot, following Section 2.1 and numbered per shot (`UNIQUE (project_id, scene_id, shot_id, version)`). It is a project artifact: there is no pin. (3) `content` is the manifest: the framing, the focus character, the ordered `references` (at most 9, the environment last) and the `catalog` of candidate pictures with their text descriptions; `method` is `deterministic` so that a later phase (PHASE-033) can record another method. (4) The pictures come from what the project **pins** (`library_character_version.look_references` and `named_looks`, `library_environment_version.reference_image_id` and `states`), for the look and state the scene resolved to, with the default look as the fallback for an angle the resolved look lacks. (5) `inputs` records the shot definition, the look and state resolution and the pinned definitions of the characters and the environment it used. (6) **Out of date is computed on read** and never stored: the shot was defined again or its definition is out of date, the looks and states were resolved again, or a pinned version it used has moved. See Sections 4.46 and 5 ("The shot reference manifest") and 7.
+
+**Update (PHASE-023 shot continuity, 2026-10-21):** migration `0042`. The continuity check (`Path_ahead.md` Section 26, "Shot continuity"): **for each scene, a model judges whether the shots line up at every boundary, and the shots that do not are defined again.** (1) **A new job type, `check_shot_continuity`** (`provider='llm'`, restart rule `never_rerun`, the story model, D-12): one job per scene, deduped by `scene_id`. `job` is rebuilt for the new CHECK, as in `0041`; no row changes. (2) One new table, `shot_continuity_check` (Section 4.45): one immutable row per check of one scene, following Section 2.1 and numbered per scene (`UNIQUE (project_id, scene_id, version)`), with a `round` (how many re-definitions for continuity came before it). It is a project artifact: there is no pin. (3) `content` is `{boundaries, mismatch_count}`: **code lists the boundaries** (`b0` the scene's start and shot 1, `b1` ... the cuts, the last the final shot and the scene's end) with the two states compared, and the model only says whether each matches and what is wrong. (4) **The later shot of a failing cut is defined again** (the scene-start boundary defines the first shot again, the scene-end boundary the last), with what it must match passed as data: a **new optional `continuity` key** on a `define_shot` job's input (`{check_id, round, must_start_from, must_end_at, problems}`) and **`shot_definition.inputs.continuity`** (`{check_id, round}`) on the version it makes. (5) **One new global setting**, `shot_continuity_max_rounds` (group `Shot duration`, whole number, default 2, from 0 to 5), in Section 6. (6) **Out of date is worked out on every read**: a check covers the shot plan and the exact shot definitions it read; once any shot has a newer definition, the scene reads `not_checked`. Nothing waits for the check (generation is not gated by it). See Sections 4.5, 4.45, 5, 6 and 7.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -158,7 +162,7 @@ Rules that go with it:
 
 ## 3. Entity-relationship overview
 
-A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-014, its `scene_definition` rows (one version of one scene's definition each) and, from PHASE-015, its `scene_events` rows (one version of one scene's events each) and, from PHASE-018, its `speech_units` rows (one version of one scene's speech units each) and, from PHASE-019, its `speech_unit_audio` rows (one speech of one unit each) and, from PHASE-020, its `shot_plan` rows (one version of one scene's shot plan each) and, from PHASE-022, its `shot_definition` rows (one version of one shot's specification each) and, from PHASE-016, its `look_state_resolution` rows (one version of the resolution of the looks and states its scenes asked for) and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-013, its `project_environment_link` rows (the same for its discovered environments) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`, and, from PHASE-016, `character_named_look` and `environment_state`, the library's named looks and states). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
+A `project` owns its `asset` rows and, from PHASE-004, its `story_bible` rows and, from PHASE-005, its `character_discovery` and `environment_discovery` rows and, from PHASE-006, its `scene_discovery` rows and, from PHASE-014, its `scene_definition` rows (one version of one scene's definition each) and, from PHASE-015, its `scene_events` rows (one version of one scene's events each) and, from PHASE-018, its `speech_units` rows (one version of one scene's speech units each) and, from PHASE-019, its `speech_unit_audio` rows (one speech of one unit each) and, from PHASE-020, its `shot_plan` rows (one version of one scene's shot plan each) and, from PHASE-022, its `shot_definition` rows (one version of one shot's specification each) and, from PHASE-023, its `shot_continuity_check` rows (one check of one scene's shots each) and, from PHASE-024, its `shot_reference_manifest` rows (one selection of one shot's reference pictures each) and, from PHASE-016, its `look_state_resolution` rows (one version of the resolution of the looks and states its scenes asked for) and, from PHASE-008, its `project_character_link` rows (each links one of its discovered characters to a library character and pins a version of it) and, from PHASE-013, its `project_environment_link` rows (the same for its discovered environments) and, from PHASE-047, its `character_relations` rows (the relations between its discovered characters) and, from PHASE-011, its `narrator_voice` rows (the versions of its narrator's voice). Every other table is global and holds no `project_id`, except `job`, whose `project_id` is nullable: the tables are `setting`, `api_snapshot`, and, from Phase 13, `lab_run` and `lab_image`, from Phase 19, `lab_video_run`, from Phase 21, `voice` and `lab_voice_run` (since PHASE-011 a run the story pipeline made for a project names that project in its nullable `project_id`), and the Character lab's own tables (`library_character`, `character_look`, `character_look_candidate`, `character_reference`, `character_take` and, from PHASE-007, `library_character_version`, and, from PHASE-012, `library_environment`, `library_environment_version`, `environment_reference` and `environment_reference_candidate`, and, from PHASE-016, `character_named_look` and `environment_state`, the library's named looks and states). They describe the app, the GPU server or a manual test, not one video. The labs' jobs are rows of `job` too, with a NULL `project_id` (Phase 19). Migration `0022` dropped the tables of the narration pipeline: `transcript`, `scene`, `character`, `location` and `scene_character`.
 
 ```mermaid
 erDiagram
@@ -373,6 +377,12 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `shot_definition` | `project_id` | `project.id` | No (`CASCADE`). PHASE-022 |
 | `shot_definition` | `shot_plan_id` | `shot_plan.id` | Yes (the plan row the shot was defined from; `SET NULL`). PHASE-022 |
 | `shot_definition` | `job_id` | `job.id` | Yes (the `define_shot` job that wrote the version; `SET NULL`). PHASE-022 |
+| `shot_continuity_check` | `project_id` | `project.id` | No (`CASCADE`). PHASE-023 |
+| `shot_continuity_check` | `shot_plan_id` | `shot_plan.id` | Yes (the plan row the checked shots belong to; `SET NULL`). PHASE-023 |
+| `shot_continuity_check` | `job_id` | `job.id` | Yes (the `check_shot_continuity` job that wrote the check; `SET NULL`). PHASE-023 |
+| `shot_reference_manifest` | `project_id` | `project.id` | No (`CASCADE`). PHASE-024 |
+| `shot_reference_manifest` | `shot_definition_id` | `shot_definition.id` | Yes (the specification row the pictures were chosen for; `SET NULL`). PHASE-024 |
+| `shot_reference_manifest` | `job_id` | `job.id` | Yes (always NULL for now: no job makes a manifest; `SET NULL`). PHASE-024 |
 | `look_state_resolution` | `project_id` | `project.id` | No (`CASCADE`). PHASE-016 |
 | `look_state_resolution` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that wrote the version; `SET NULL`, and NULL for a manual version). PHASE-016 |
 | `character_named_look` | `character_id` | `library_character.id` | No (`CASCADE`). PHASE-016 |
@@ -480,13 +490,13 @@ CREATE TABLE asset (
 
 ### 4.5 `job`
 
-Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, migration `0032` (PHASE-012) added `write_environment_prompt`, migration `0033` (PHASE-013) added `define_environment`, migration `0034` (PHASE-014) added `define_scene`, migration `0035` (PHASE-015) added `extract_events`, migration `0036` (PHASE-016) added `resolve_looks_states`, migration `0039` (PHASE-019) added `synthesize_speech_unit`, migration `0040` (PHASE-020) added `plan_shots`, and migration `0041` (PHASE-022) added `define_shot`. (Source: Section 3.3, 4.2, 4.3.)
+Every unit of background work. This is where running-job information lives, so a restart never loses track of a 5–10 minute GPU job. Since migration `0022` the only job types were the six lab ones, migration `0023` (PHASE-004) added the first story job, `write_story_bible`, migration `0024` (PHASE-005) added `discover_characters` and `discover_environments`, migration `0025` (PHASE-006) added `discover_scenes`, migration `0028` (PHASE-009) added `define_character`, migration `0030` (PHASE-047) added `discover_relations`, migration `0031` (PHASE-011) added `design_voice`, migration `0032` (PHASE-012) added `write_environment_prompt`, migration `0033` (PHASE-013) added `define_environment`, migration `0034` (PHASE-014) added `define_scene`, migration `0035` (PHASE-015) added `extract_events`, migration `0036` (PHASE-016) added `resolve_looks_states`, migration `0039` (PHASE-019) added `synthesize_speech_unit`, migration `0040` (PHASE-020) added `plan_shots`, and migration `0041` (PHASE-022) added `define_shot`, and migration `0042` (PHASE-023) added `check_shot_continuity`. (Source: Section 3.3, 4.2, 4.3.)
 
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NULL | — | Owning project. NULL for the labs' jobs, which belong to no project; the Activity page shows them under the lab's name (Phases 19 and 21). Set for a story job (`write_story_bible`, PHASE-004; `discover_characters` and `discover_environments`, PHASE-005; `discover_scenes`, PHASE-006; `define_character`, PHASE-009; `discover_relations`, PHASE-047; `design_voice`, PHASE-011), which the Activity page shows under the project's name |
-| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` \| `plan_shots` \| `define_shot` (`define_shot`: PHASE-022, the definition of one planned shot, a job of the project, `provider='llm'`; `plan_shots`: PHASE-020, the shot plan of one story scene, a job of the project, `provider='llm'`; `synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
+| `type` | TEXT | NOT NULL | — | `lab_image` \| `lab_video` \| `write_lab_video_prompt` \| `lab_voice` \| `write_character_look_prompt` \| `write_character_take_prompt` \| `write_story_bible` \| `discover_characters` \| `discover_environments` \| `discover_scenes` \| `define_character` \| `discover_relations` \| `design_voice` \| `write_environment_prompt` \| `define_environment` \| `define_scene` \| `extract_events` \| `resolve_looks_states` \| `synthesize_speech_unit` \| `plan_shots` \| `define_shot` \| `check_shot_continuity` (`check_shot_continuity`: PHASE-023, the continuity check of one story scene's shots, a job of the project, `provider='llm'`; `define_shot`: PHASE-022, the definition of one planned shot, a job of the project, `provider='llm'`; `plan_shots`: PHASE-020, the shot plan of one story scene, a job of the project, `provider='llm'`; `synthesize_speech_unit`: PHASE-019, the speech of one speech unit, a job of the project, `provider='gpu'`; `resolve_looks_states`: PHASE-016, the resolution of the looks and states of all the scenes, one job per project, `provider='llm'`; `lab_video` and `write_lab_video_prompt`: Phase 19, the Video lab; `lab_voice`: Phase 21, Breeze TTS; `lab_image`: Phase 22, a run of the Image lab on the GPU server; the two `write_character_*` types: the Character lab's prompt writers; `write_story_bible`: PHASE-004, the Story Bible stage; `discover_characters` and `discover_environments`: PHASE-005, character and environment discovery; `discover_scenes`: PHASE-006, scene discovery; `define_character`: PHASE-009, the definition of one character; `discover_relations`: PHASE-047, the relations between the characters; `design_voice`: PHASE-011, the description of one story voice; `define_environment`: PHASE-013, the definition of one story environment (a job of the project, `provider='llm'`); `extract_events`: PHASE-015, the events of one story scene (a job of the project, `provider='llm'`); `write_environment_prompt`: PHASE-012, the prompt of a library environment's reference picture, a lab job with no project). The narration types (`transcribe`, `plan_scenes`, `draft_descriptions`, `write_image_prompt`, `generate_frame`, `generate_clip`, `render_final`, `auto_pipeline`, `generate_voiceover`, `write_last_frame_prompt`, `generate_last_frame`, `extract_cast`, `write_character_reference_prompt`, `generate_character_reference`, `assign_cast`) were removed in migration `0022`, with their rows |
 | `status` | TEXT | NOT NULL | `'queued'` | `queued` \| `running` \| `succeeded` \| `failed` \| `cancelled` |
 | `phase` | TEXT | NULL | — | Free-text UI label, e.g. "queued on cluster" |
 | `provider` | TEXT | NOT NULL | — | `gpu` \| `llm` \| `image` (Phase 17: the image model at the Bitdeer address; **no job uses it since Phase 22**, and the CHECK keeps it) \| `local` (no job type is local now, and the CHECK keeps it) |
@@ -505,7 +515,7 @@ Every unit of background work. This is where running-job information lives, so a
 CREATE TABLE job (
     id               INTEGER PRIMARY KEY,
     project_id       INTEGER REFERENCES project(id) ON DELETE CASCADE,
-    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt', 'define_environment', 'define_scene', 'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', 'plan_shots', 'define_shot')),
+    type             TEXT NOT NULL CHECK (type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', 'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', 'discover_characters', 'discover_environments', 'discover_scenes', 'define_character', 'discover_relations', 'design_voice', 'write_environment_prompt', 'define_environment', 'define_scene', 'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', 'plan_shots', 'define_shot', 'check_shot_continuity')),
     status           TEXT NOT NULL DEFAULT 'queued'
                        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
     phase            TEXT,
@@ -2059,6 +2069,78 @@ CREATE TABLE shot_definition (
 CREATE INDEX idx_shot_definition_project_scene ON shot_definition (project_id, scene_id);
 ```
 
+### 4.45 `shot_continuity_check`
+
+*Added in PHASE-023 (migration `0042`).* The continuity check's result (`Path_ahead.md` Section 26, "Shot continuity"): one row per **check of one scene's shots**. It has the shape and provenance of `shot_plan` (Section 4.43): `source`, `job_id`, `version`, `inputs`, `created_at`. A scene's checks are numbered from 1 (`UNIQUE (project_id, scene_id, version)`), and a stored row is never changed: checking again adds the next version. `scene_id` is the slug `id` of the scene (not a foreign key). `shot_plan_id` names the plan row the checked shots belong to. `round` is how many re-definitions for continuity came before this check: 0 for a check after a definition the user made or a button the user pressed, and the round of the re-definitions when the check followed them. The row is written by `services/shot_continuity.save_check` in the same transaction that finishes its `check_shot_continuity` job. The rules are in `services/shot_continuity.py` and `services/shot_continuity_writer.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NOT NULL | — | The scene's slug `id` |
+| `shot_plan_id` | INTEGER, FK → `shot_plan.id` | NULL | — | The plan row the checked shots belong to. `ON DELETE SET NULL` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... for this scene (the highest plus 1 when saved) |
+| `round` | INTEGER | NOT NULL | — | How many re-definitions for continuity came before this check |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`). Always `ai` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `check_shot_continuity` job that wrote it. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the check was made from (Section 5, "The shot continuity check") |
+| `content` | JSON | NOT NULL | — | The verdict (Section 5, "The shot continuity check") |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE shot_continuity_check (
+    id            INTEGER PRIMARY KEY,
+    project_id    INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scene_id      TEXT NOT NULL,
+    shot_plan_id  INTEGER REFERENCES shot_plan(id) ON DELETE SET NULL,
+    version       INTEGER NOT NULL,
+    round         INTEGER NOT NULL,
+    source        TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id        INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs        JSON NOT NULL,
+    content       JSON NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_shot_continuity_check_project_id UNIQUE (project_id, scene_id, version)
+);
+CREATE INDEX idx_shot_continuity_check_project_scene ON shot_continuity_check (project_id, scene_id);
+```
+
+### 4.46 `shot_reference_manifest`
+
+*Added in PHASE-024 (migration `0043`).* The reference manifest of a shot (`Path_ahead.md` Section 28): one row per **selection of one shot's reference pictures**. It has the shape and provenance of `shot_definition` (Section 4.44): `source`, `job_id`, `version`, `inputs`, `created_at`. A shot's manifests are numbered from 1 (`UNIQUE (project_id, scene_id, shot_id, version)`), and a stored row is never changed: choosing again adds the next version. `scene_id` is the slug `id` of the scene and `shot_id` the shot's id in the scene's shot plan (neither is a foreign key). `shot_definition_id` names the specification row the pictures were chosen for. There is **no job**: the row is written by `services/shot_references` in the request (or right after a `define_shot` job has committed), so `job_id` is always NULL for now and `source` is always `ai`. The rule is in `services/reference_selection.py` and the catalog and storage in `services/shot_references.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NOT NULL | — | The scene's slug `id` |
+| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's shot plan |
+| `shot_definition_id` | INTEGER, FK → `shot_definition.id` | NULL | — | The specification the pictures were chosen for. `ON DELETE SET NULL` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... for this shot (the highest plus 1 when saved) |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`). Always `ai` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | Always NULL for now. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the selection was made from (Section 5, "The shot reference manifest") |
+| `content` | JSON | NOT NULL | — | The manifest (Section 5, "The shot reference manifest") |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE shot_reference_manifest (
+    id                  INTEGER PRIMARY KEY,
+    project_id          INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scene_id            TEXT NOT NULL,
+    shot_id             TEXT NOT NULL,
+    shot_definition_id  INTEGER REFERENCES shot_definition(id) ON DELETE SET NULL,
+    version             INTEGER NOT NULL,
+    source              TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id              INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs              JSON NOT NULL,
+    content             JSON NOT NULL,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_shot_reference_manifest_project_id UNIQUE (project_id, scene_id, shot_id, version)
+);
+CREATE INDEX idx_shot_reference_manifest_project_scene ON shot_reference_manifest (project_id, scene_id);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -2716,6 +2798,59 @@ One job per shot. It belongs to a project, is `provider='llm'` with the restart 
 
 For a look or state that resolved to `default`, `look` and `state` carry `how: "default"` and null name and description. When the job starts it resolves the story model, loads the StoryBible named by `story_bible_id`, and adds what it sent (`instructions_sha256`, `server_url`, `endpoint`, the exact chat `request`). On success, in **one transaction**, `shot_definitions.save_shot_definition` adds the `shot_definition` row (`source='ai'`, `job_id`, `shot_plan_id`, `inputs`, `content`) and the job is marked succeeded; `output` holds the answer record, `scene_id`, `shot_id`, `version` and `seconds`.
 
+**Defined again for continuity (PHASE-023).** When the continuity check defines a shot again, the job input has one more optional key, `"continuity": {"check_id": 4, "round": 1, "must_start_from": {"arjun": "sitting up"} | null, "must_end_at": {"arjun": "at the door"} | null, "problems": ["..."]}`, and `inputs` has `"continuity": {"check_id": 4, "round": 1}`, which is stored on the `shot_definition` row the job makes. The model is shown `must_start_from`, `must_end_at` and `problems` as the data block `CONTINUITY TO MATCH`, never as text in the instructions. A shot the user defines has neither key. When the job succeeds it asks the continuity service whether the scene's check is due (Section 5, "The shot continuity check").
+
+### The shot continuity check (PHASE-023)
+
+`shot_continuity_check.content` is the verdict on one scene's shots (`Path_ahead.md` Section 26, "Shot continuity"). **Code lists the boundaries and writes their ids**; the model only says whether each matches and what is wrong (`services/shot_continuity_writer.check_answer`). For a scene of n shots there are n + 1 boundaries: `b0` joins the scene's `continuity_start` to shot 1's `continuity_start`, `b1` to `b(n-1)` join shot k's `continuity_end` to shot k+1's `continuity_start`, and `bn` joins the last shot's `continuity_end` to the scene's `continuity_end`.
+
+```json
+{ "boundaries": [
+    { "id": "b0", "before": "scene_start", "after": "shot_1",
+      "before_state": { "arjun": "asleep in bed" }, "after_state": { "arjun": "lying still, eyes closed" },
+      "matches": true, "problem": null },
+    { "id": "b1", "before": "shot_1", "after": "shot_2",
+      "before_state": { "arjun": "sitting up" }, "after_state": { "arjun": "lying down" },
+      "matches": false, "problem": "Arjun ends shot_1 sitting up but starts shot_2 lying down." },
+    { "id": "b2", "before": "shot_2", "after": "scene_end",
+      "before_state": { "arjun": "standing" }, "after_state": { "arjun": "standing at the door" },
+      "matches": true, "problem": null } ],
+  "mismatch_count": 1 }
+```
+
+- **Checks** (anything below makes the answer unusable, with the same two attempts as every stage; then the job fails with the reason and nothing is stored): every boundary is answered exactly once and no other id appears; `matches` is true or false; `problem` is required (one line, within its limit) when `matches` is false and is stored as null when it is true.
+- **Which shot is defined again** (`shot_continuity_writer.shots_to_redefine`): the earlier side of a cut is the anchor, so the **later** shot of a failing cut is defined again with the earlier shot's end state as `must_start_from`; a failing `b0` defines the first shot again (`must_start_from` is the scene's start); a failing last boundary defines the last shot again (`must_end_at` is the scene's end). A shot named by several failing boundaries is defined again once, with every target and problem.
+
+`shot_continuity_check.inputs`:
+
+```json
+{ "project_id": 4, "scene_id": "the_warning", "story_sha256": "9f2c...",
+  "artifacts": [ { "kind": "story_bible", "id": 7, "version": 2 },
+                 { "kind": "scene_definition", "id": 21, "version": 1 },
+                 { "kind": "shot_plan", "id": 12, "version": 1 },
+                 { "kind": "shot_definition", "id": 31, "version": 1, "shot_id": "shot_1" },
+                 { "kind": "shot_definition", "id": 32, "version": 2, "shot_id": "shot_2" } ] }
+```
+
+**When a check is current.** A scene's newest check covers the scene **on this read** only when its `shot_plan_id` is the scene's newest plan row and its `shot_definition` artifacts are exactly the newest definition of each shot. Otherwise the scene reads `not_checked`. The status of a scene is worked out on every read and never stored: `checking` (a check job is queued or running), `reconciling` (a `define_shot` job carrying `continuity` is queued or running), `not_checked`, `consistent` (the newest check covers the shots and has no mismatch) or `mismatches`.
+
+**The rounds.** A check's `round` is 0 when the newest definition of the scene's shots was made by the user (or no check came before), else the `continuity.round` of that definition when it was made for the scene's newest check. After a check with mismatches, if `round < shot_continuity_max_rounds`, each shot from `shots_to_redefine` is defined again with `continuity.round = round + 1`; when they have all been defined, the scene is checked again. At the limit, the remaining mismatches are shown and nothing more is queued. Pressing **Define** or **Check continuity** starts the count again.
+
+### `job.input` and `job.output` for a `check_shot_continuity` job (PHASE-023)
+
+One job per scene. It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, uses the **story model** (D-12) and is created with `dedupe_key="scene_id"`: while a `check_shot_continuity` job of **that scene** is queued or running, a second click (or the automatic check) returns that job. It is created in two ways: **automatically** by `services/shot_continuity.queue_check_if_ready` after a `define_shot` job succeeds, when every shot of the scene is defined and current, nothing is running for the scene and no check covers these definitions yet; and by **Check continuity** (`POST /api/projects/{id}/shot-continuity/{scene_id}/run`, or `.../run` for every scene), at round 0. A scene whose shots are not all defined and current, or that is not in the newest list of scenes, is refused with 422 and the reason. The input is a copy of everything the job needs as it was when it was queued:
+
+```json
+{ "scene_id": "the_warning", "story_bible_id": 7, "story_bible_version": 2, "shot_plan_id": 12, "round": 0,
+  "scene": { "index": 1, "id": "the_warning", "title": "The Warning", "description": "..." },
+  "characters": [ { "id": "arjun", "name": "Arjun" } ],
+  "shots": [ { "id": "shot_1", "visual_story": "...", "characters": [ ], "action": { }, "continuity_start": { }, "continuity_end": { } } ],
+  "boundaries": [ { "id": "b0", "before": "scene_start", "after": "shot_1", "before_state": { }, "after_state": { } } ],
+  "inputs": { "project_id": 4, "scene_id": "the_warning", "artifacts": [ ] } }
+```
+
+When the job starts it resolves the story model, loads the StoryBible named by `story_bible_id`, and adds what it sent (`instructions_sha256`, `server_url`, `endpoint`, the exact chat `request`). On success, in **one transaction**, `shot_continuity.save_check` adds the `shot_continuity_check` row (`source='ai'`, `job_id`, `shot_plan_id`, `round`, `inputs`, `content`) and the job is marked succeeded; `output` holds the answer record, `scene_id`, `version`, `round`, `mismatch_count` and `seconds`. After that commit, and as a separate step, `queue_redefinitions` defines the shots again (it never fails the job).
+
 ### The look and state resolution (PHASE-016)
 
 `look_state_resolution.content` says, for every scene of the newest list, what its environment state and each character's look resolved to. It is built by code (`look_state_resolution_writer.build_content`) from the checked answer; `how` is `default` (no record, the id is `null`), `reuse` (an existing named look or state) or `new` (created by this run):
@@ -2777,6 +2912,44 @@ Only requests that are **not** the default are listed (`plan` keeps `request_id:
 
 `character_look.inputs` (a look for a named look) and `environment_state.inputs`: `{"project_id", "discovery_id", "slug", "source_version", "source_image_id", "resolution_version"}` plus `named_look_id` for a look and `environment_version` for a state. `source_version` is the version of the library character or environment the project pinned, and `source_image_id` the canonical `lab_image` the edit started from. The edit prompts are not stored in these columns: they are in `lab_run.prompt`.
 
+### The shot reference manifest (PHASE-024)
+
+`shot_reference_manifest.content` is the minimum set of pictures one shot is generated from (`Path_ahead.md` Section 28, steps 1 and 3). **Code chooses; there is no model call** (`services/reference_selection.select`, a pure function):
+
+```json
+{ "shot_id": "shot_1", "scene_id": "the_warning", "method": "deterministic",
+  "shot_size": "close_up", "framing": "close_up", "focus_character_id": "arjun",
+  "references": [
+    { "order": 1, "lab_image_id": 41, "kind": "character", "subject_id": "arjun", "subject_name": "Arjun",
+      "view": "face", "variant": "default", "is_resolved": true, "fallback": false, "description": "..." },
+    { "order": 2, "lab_image_id": 42, "kind": "character", "subject_id": "arjun", "subject_name": "Arjun",
+      "view": "three_quarter", "variant": "default", "is_resolved": true, "fallback": false, "description": "..." },
+    { "order": 3, "lab_image_id": 77, "kind": "environment", "subject_id": "apartment", "subject_name": "Apartment",
+      "view": "environment", "variant": "default", "is_resolved": true, "fallback": false, "description": "..." } ],
+  "catalog": [ { "lab_image_id": 41, "kind": "character", "subject_id": "arjun", "subject_name": "Arjun",
+                 "view": "face", "variant": "default", "is_resolved": true, "description": "..." } ],
+  "notes": [] }
+```
+
+- **The rule.** The shot definition's `composition.shot_size` gives a Character Lab framing (`shot_definition_writer.FRAMING_OF_SIZE`) and the framing gives the angles (`character_library.references_for`: `close_up` is `face` and `three_quarter`, `medium` is `front` and `three_quarter`, `wide` is `front`). For each character **visible in the shot** (`shot_definition.content.characters`; an unseen speaker is not included, and narration never appears), the focus character first (`composition.focus` when it is one of them) and the others in the shot's order, each angle is taken from the look the scene resolved to; when that look has no picture of the angle, the default look's is used and `fallback` is true. The environment's picture (the resolved state's, else the canonical one) comes last. At most `H3_MAX_REFERENCE_IMAGES` (9) are kept: the environment stays and the last characters' pictures are left out, with a note. `variant` is `default` or the slug of the named look or state.
+- **The catalog** holds every candidate picture of the shot's characters and environment, with `description`, the prompt the picture was made from (`lab_run.prompt`; a text made from the look or state when the picture has none). It is stored so that PHASE-033 can choose from the same catalog.
+- **Where the pictures come from.** The **pinned** versions of the shot's characters and environment: the default look is `library_character_version.look_references`, a named look is `named_looks[slug].references`, the default environment picture is `library_environment_version.reference_image_id` and a state's is `states[slug].reference_image_id`. The slug of the look and the state comes from the newest `look_state_resolution` for the scene. A look or state the pin does not hold yet is not in the catalog, so its angles fall back to the default look.
+- **Refused, not stored.** A picture missing from both the resolved and the default look, a character that is not linked and defined, or an environment with no picture refuses the shot with a readable sentence naming what is missing. A shot can only be chosen while its newest definition exists, is current and is not being defined again.
+
+`shot_reference_manifest.inputs`:
+
+```json
+{ "project_id": 4, "scene_id": "the_warning", "shot_id": "shot_1",
+  "artifacts": [ { "kind": "shot_definition", "id": 31, "version": 1 },
+                 { "kind": "look_state_resolution", "id": 6, "version": 1 },
+                 { "kind": "character_definition", "id": 3, "version": 2, "discovery_id": "arjun", "name": "Arjun" },
+                 { "kind": "environment_definition", "id": 5, "version": 1, "discovery_id": "apartment", "name": "Apartment" } ] }
+```
+
+**When a manifest is current.** Worked out on every read, never stored. A shot's newest manifest reads `out_of_date` when: the newest `shot_definition` of the shot is not the recorded one, or that definition is itself out of date; the newest `look_state_resolution` is not the recorded one; or a recorded character or environment is no longer linked and defined, or its pinned version (or library id) is not the recorded one (which is how new pictures of a look or a state, pinned by PHASE-017, are noticed). A shot without a manifest reads `not_selected`.
+
+**When it is made.** Automatically, by `shot_references.select_if_ready`, right after a `define_shot` job has committed (a failure is logged and never fails the job); or by hand: `POST /api/projects/{id}/shot-references/{scene_id}/{shot_id}/run` (one shot; 422 with the reason when it cannot be done), `.../{scene_id}/run` (a scene) and `.../run` (all; shots that cannot be done are skipped with the reason). A shot whose manifest is current is not made again.
+
 ---
 
 ## 6. Global settings stored in `setting`
@@ -2801,6 +2974,7 @@ Only requests that are **not** the default are listed (`plan` keeps `request_id:
 | `shot_target_max_seconds` | `10` | whole seconds, from 1 to 14. The longest shot the planning stages are asked for. Must be between `shot_target_min_seconds` and `h3_max_shot_seconds` |
 | `h3_max_shot_seconds` | `14` | whole seconds, from 1 to 14. The longest shot H3 may be asked for. The upper limit is `H3_MAX_FRAMES // H3_FPS` (345 frames at 24 fps is 14.375 s); 15 s would need 362 frames. Must be at or above `shot_target_max_seconds` |
 | `shot_replan_max_tries` | `2` | whole number, from 0 to 5 (PHASE-021, group `Shot duration`). How many times a scene's shots are planned again by themselves when the timeline of the plan has a problem. Each is a paid model call. 0 turns it off. It is a count, not a length, so it is not part of the order above. A plan the user asks for starts the count again |
+| `shot_continuity_max_rounds` | `2` | whole number, from 0 to 5 (PHASE-023, group `Shot duration`). How many rounds of defining shots again a scene gets when its shots do not line up at a cut. Each round is one paid model call per shot defined again, plus one for the next check. 0 still checks the scene but defines nothing again. It is a count, not a length, so it is not part of the order above. Defining a shot, or pressing Check continuity, starts the count again |
 | `speech_words_per_minute` | `150` | from 60 to 300 (PHASE-018, group `Speech`). The pace used to estimate how long a speech unit takes to say: its words divided by this. A starting value and not a measurement, separate from `story_words_per_minute`. A plan made with another pace is out of date (`services/speech_unit_planner.py`) |
 | `narration_unit_max_seconds` | `0` | whole seconds, from 0 to 60 (PHASE-018, group `Speech`). A narration event estimated above this is cut at sentences, then clauses. **0 means use `shot_target_max_seconds`** |
 | `dialogue_shot_margin_seconds` | `2` | whole seconds, from 0 to 13 (PHASE-018, group `Speech`). Dialogue plays inside one shot, so a line estimated above `h3_max_shot_seconds` minus this margin is cut at sentence ends. A margin that leaves under 1 s refuses planning with a readable reason |
@@ -2855,6 +3029,8 @@ Mapping the flow onto table writes, so the structure's fit with the actual workf
 | Make the speech of the speech units (PHASE-019) | `POST /api/projects/{id}/speech-audio/{scene_id}/{unit_id}/run` (one unit) or `POST .../run` (Make all): refused with 422 when the scene or unit is not in the newest plan, the scene's plan is out of date or missing, the unit's voice does not exist (a speaker not linked, a linked character with no saved voice at the pinned version, or no narrator voice), or that very speech is already being made. Otherwise, in one transaction, one `INSERT job` (`type='synthesize_speech_unit'`, `provider='gpu'`, deduped by `audio_key`) and one `INSERT speech_unit_audio` (`path` NULL) per unit. Make all skips a unit that is ready, in progress or cannot be made, and an identical line already being made. When the job succeeds, `store_result` fills in the row's file and measured length and finishes the job in one transaction; nothing else is written. |
 | Plan the shots of a scene (PHASE-020) | `POST /api/projects/{id}/shot-plans/{scene_id}/run` (one scene) or `POST .../run` (Plan all): refused with 422 when the scene is not in the newest list, is not defined or its definition is out of date, its events or speech plan are missing or out of date, **any unit's speech is not ready** (the answer names them), or the characters and environment it chose are not linked and defined; it returns the running job when that scene is already being planned. Otherwise one `INSERT job` (`type='plan_shots'`, `provider='llm'`, `restart_rule='never_rerun'`, deduped by `scene_id`). Plan all skips a scene that is planned and current, one being planned, and one that cannot be planned, with a reason each. When the job succeeds, `save_shot_plan` inserts the next `shot_plan` version of the scene and finishes the job in one transaction; when the answer is unusable twice, the job fails with the reason and nothing is stored. |
 | Define the shots of a scene (PHASE-022) | `POST /api/projects/{id}/shot-definitions/{scene_id}/{shot_id}/run` (one shot), `POST .../{scene_id}/run` (every shot of one scene) or `POST .../run` (Define all): refused with 422 when the scene is not in the newest list, the shot is not in its newest shot plan, the plan is not current and **ready for generation**, or the looks and states are not resolved, current and covering the scene (the answer says which); it returns the running job when that shot is already being defined. Otherwise one `INSERT job` per shot (`type='define_shot'`, `provider='llm'`, `restart_rule='never_rerun'`, deduped by `shot_key`). Define all skips a shot that is defined and current, one being defined, and a scene that cannot be defined, with a reason each. When the job succeeds, `save_shot_definition` inserts the next `shot_definition` version of the shot and finishes the job in one transaction; when the answer is unusable twice, the job fails with the reason and nothing is stored. |
+| Check the continuity of a scene's shots (PHASE-023) | **Automatically** after a `define_shot` job succeeds (`shot_continuity.queue_check_if_ready`, in the job after its commit), when every shot of the scene is defined and current, nothing is running for the scene and no check covers these definitions; or by hand: `POST /api/projects/{id}/shot-continuity/{scene_id}/run` (one scene, round 0, refused with 422 when a shot is not defined and current, with the reason; it returns the running job when the scene is already being checked) or `POST .../run` (Check all, which skips a consistent scene, a scene being checked and one that cannot be checked, with a reason each). One `INSERT job` (`type='check_shot_continuity'`, `provider='llm'`, `restart_rule='never_rerun'`, deduped by `scene_id`). When the job succeeds, `save_check` inserts the next `shot_continuity_check` version of the scene and finishes the job in one transaction; when the answer is unusable twice, the job fails with the reason and nothing is stored. After that commit, if there are mismatches and the check's `round` is below `shot_continuity_max_rounds`, `queue_redefinitions` queues one `define_shot` job (with `continuity`) for each shot that must be defined again; the last of them to finish queues the next check. Nothing else reads the check: generation does not wait for it. |
+| Choose a shot's reference pictures (PHASE-024) | **Automatically** after a `define_shot` job succeeds (`shot_references.select_if_ready`, in the job after its commit), or by hand: `POST /api/projects/{id}/shot-references/{scene_id}/{shot_id}/run`, `.../{scene_id}/run` or `.../run` (Select all); each answers 200 with the shots chosen and those skipped with a reason. No job: one `INSERT shot_reference_manifest` (`source='ai'`, `job_id` NULL, the next `version` of the shot, `inputs`, `content`) per shot chosen, committed once per request; a shot with a missing picture stores nothing. Nothing is written to the Character Lab and no pin moves |
 
 Throughout, the **GPU API contract guard** (Section 6.5) reads/writes `api_snapshot` independently of any one project, and the **Settings page** (Section 3.7) reads/writes `setting` independently of any one project.
 

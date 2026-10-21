@@ -462,6 +462,46 @@ class ShotContinuityCheck(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
+class ShotReferenceManifest(Base):
+    """One version of one shot's reference manifest: the pictures it is generated from
+    (PHASE-024, `Path_ahead.md` Section 28).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every
+    selection is a new row with the next `version` of that shot, and a stored row is never
+    changed. `scene_id` is the slug `id` of the scene inside the project's `scene_discovery`
+    content, `shot_id` is the shot's id inside that scene's shot plan and `shot_definition_id` is
+    the specification row the pictures were chosen for. `inputs` records what the selection was
+    built from (the shot definition, the look and state resolution, and the pinned definitions
+    of the characters and the environment). `content` is the manifest: the ordered pictures and
+    the catalog they were chosen from. There is no job: deterministic code makes it.
+    """
+
+    __tablename__ = "shot_reference_manifest"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "shot_id", "version"),
+        Index("idx_shot_reference_manifest_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    # The shot definition row the pictures were chosen for. NULL when that row was deleted.
+    shot_definition_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_definition.id", ondelete="SET NULL"), default=None
+    )
+    version: Mapped[int]
+    source: Mapped[str]
+    # Always NULL for now: no job makes a manifest.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
 class SpeechUnits(Base):
     """One version of one scene's plan of speech units (PHASE-018, `Path_ahead.md` Section 19).
 
