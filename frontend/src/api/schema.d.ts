@@ -2201,6 +2201,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/speech-audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Speech Audio */
+        get: operations["get_speech_audio_api_projects__project_id__speech_audio_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/speech-audio/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts the speech of every unit that has no current audio. Every other unit is skipped,
+         *     with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__speech_audio_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/speech-audio/{scene_id}/{unit_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the speech of one unit, again if it is made. Refused while that very speech is
+         *     already being made.
+         */
+        post: operations["run_one_api_projects__project_id__speech_audio__scene_id___unit_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3452,7 +3511,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit";
             /**
              * Status
              * @enum {string}
@@ -3505,7 +3564,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit";
             /**
              * Status
              * @enum {string}
@@ -4407,7 +4466,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit";
             /** Running */
             running: number;
             /** Queued */
@@ -5168,6 +5227,86 @@ export interface components {
             approved: components["schemas"]["ApprovedSummaryOut"] | null;
             pending: components["schemas"]["PendingChangeOut"] | null;
             last_check: components["schemas"]["SourceCheckOut"] | null;
+        };
+        /**
+         * SpeechAudioOut
+         * @description The stored speech of a unit and its measured length.
+         */
+        SpeechAudioOut: {
+            /** Url */
+            url: string;
+            /** Measured Seconds */
+            measured_seconds: number;
+            /** Sample Rate */
+            sample_rate: number | null;
+        };
+        /** SpeechAudioRunAllOut */
+        SpeechAudioRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["SpeechAudioSkippedOut"][];
+        };
+        /** SpeechAudioRunOut */
+        SpeechAudioRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** SpeechAudioSkippedOut */
+        SpeechAudioSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Unit Id */
+            unit_id: string;
+            /** Reason */
+            reason: string;
+        };
+        /** SpeechAudioStateOut */
+        SpeechAudioStateOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Scenes */
+            scenes: components["schemas"]["SpeechSceneAudioOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** SpeechSceneAudioOut */
+        SpeechSceneAudioOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Units */
+            units: components["schemas"]["SpeechUnitAudioOut"][];
+        };
+        /**
+         * SpeechUnitAudioOut
+         * @description Where the audio of one speech unit stands.
+         */
+        SpeechUnitAudioOut: {
+            /** Unit Id */
+            unit_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unavailable" | "none" | "in_progress" | "failed" | "ready" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /** Voice Id */
+            voice_id: number | null;
+            /** Voice Name */
+            voice_name: string | null;
+            /** Mode */
+            mode: ("clone" | "direction") | null;
+            /** Instruction */
+            instruction: string | null;
+            audio: components["schemas"]["SpeechAudioOut"] | null;
+            /** Error */
+            error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
         };
         /** SpeechUnitDeliveryOut */
         SpeechUnitDeliveryOut: {
@@ -10702,6 +10841,128 @@ export interface operations {
                 };
             };
             /** @description The scene has no current events, the speech rules cannot be used, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_speech_audio_api_projects__project_id__speech_audio_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechAudioStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__speech_audio_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechAudioRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene or unit is not in the newest plan, the plan is out of date, or the unit has no voice to speak with yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__speech_audio__scene_id___unit_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                unit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechAudioRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene or unit is not in the newest plan, the plan is out of date, or the unit has no voice to speak with yet. */
             422: {
                 headers: {
                     [name: string]: unknown;

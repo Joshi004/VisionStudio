@@ -15,6 +15,14 @@ import {
 
 import { describeError } from "../../api/errors";
 import {
+  measuredSeconds,
+  useMakeAllSpeech,
+  useMakeOneSpeech,
+  useSpeechAudio,
+  type SpeechSceneAudio,
+  type SpeechUnitAudio,
+} from "../../api/speechAudio";
+import {
   usePlanAllSpeechUnits,
   usePlanOneSceneSpeechUnits,
   totalSeconds,
@@ -44,6 +52,10 @@ type EntryRowProps = {
   projectBlocked: boolean;
   busy: boolean;
   onPlan: () => void;
+  /** Where the audio of this scene's units stands (PHASE-019). */
+  sceneAudio: SpeechSceneAudio | undefined;
+  speechBusy: boolean;
+  onMake: (unitId: string) => void;
 };
 
 /**
@@ -56,12 +68,21 @@ function EntryRow({
   projectBlocked,
   busy,
   onPlan,
+  sceneAudio,
+  speechBusy,
+  onMake,
 }: EntryRowProps) {
   const [open, setOpen] = useState(false);
   const status = STATUS[entry.status];
   const planned = entry.status === "planned" || entry.status === "out_of_date";
   // Why this one scene cannot be planned, when that is about the scene itself.
   const reason = projectBlocked ? null : entry.blocked_reason;
+  const audioByUnit: Record<string, SpeechUnitAudio> = Object.fromEntries(
+    (sceneAudio?.units ?? []).map((unit) => [unit.unit_id, unit]),
+  );
+  const made = (sceneAudio?.units ?? []).filter(
+    (unit) => unit.audio !== null,
+  ).length;
 
   return (
     <Stack gap={6}>
@@ -94,6 +115,17 @@ function EntryRow({
               <Badge variant="light" color="gray">
                 {entry.units.units.length} units, about{" "}
                 {totalSeconds(entry.units).toFixed(1)} s
+              </Badge>
+            )}
+            {entry.units !== null && sceneAudio !== undefined && (
+              <Badge
+                variant="light"
+                color={made === entry.units.units.length ? "green" : "gray"}
+                title="Units with speech, and the measured length of that speech"
+              >
+                {made} of {entry.units.units.length} spoken
+                {made > 0 &&
+                  `, ${measuredSeconds(sceneAudio.units).toFixed(1)} s`}
               </Badge>
             )}
             {entry.units !== null && entry.units.warnings.length > 0 && (
@@ -152,6 +184,9 @@ function EntryRow({
             <SpeechUnitsView
               units={entry.units}
               characterNames={characterNames}
+              audio={audioByUnit}
+              busy={speechBusy}
+              onMake={onMake}
             />
           </ArtifactViewer>
         </Collapse>
@@ -170,6 +205,9 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
   const { data, isLoading, isError, error } = useSpeechUnits(projectId);
   const planAll = usePlanAllSpeechUnits(projectId);
   const planOne = usePlanOneSceneSpeechUnits(projectId);
+  const audio = useSpeechAudio(projectId);
+  const makeAll = useMakeAllSpeech(projectId);
+  const makeOne = useMakeOneSpeech(projectId);
 
   const busy = planAll.isPending || planOne.isPending;
   const entries = data?.entries ?? [];
@@ -183,6 +221,28 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
   ).length;
   const skipped = planAll.data?.skipped ?? [];
 
+  const audioByScene = Object.fromEntries(
+    (audio.data?.scenes ?? []).map((scene) => [scene.scene_id, scene]),
+  );
+  const speechBusy = makeAll.isPending || makeOne.isPending;
+  // What "Make all" would do: the units that may run and have no current audio.
+  const speechCount = (audio.data?.scenes ?? []).reduce(
+    (sum, scene) =>
+      sum +
+      scene.units.filter(
+        (unit) =>
+          unit.can_run &&
+          unit.status !== "ready" &&
+          unit.status !== "in_progress",
+      ).length,
+    0,
+  );
+  // The units "Make all" left alone, one line for each reason.
+  const leftAlone = new Map<string, number>();
+  for (const item of makeAll.data?.skipped ?? []) {
+    leftAlone.set(item.reason, (leftAlone.get(item.reason) ?? 0) + 1);
+  }
+
   return (
     <Paper withBorder p="md" radius="md">
       <Stack gap="sm">
@@ -194,18 +254,37 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
               each be turned into speech, with an estimated length. Long
               narration is cut at sentences and clauses; dialogue only when it
               would not fit one shot. The pace and the limits are in Settings,
-              under Speech.
+              under Speech. Each unit can then be spoken in its character&apos;s
+              saved voice (or the narrator&apos;s); the real length is measured
+              from the speech.
             </Text>
           </Stack>
-          <Button
-            onClick={() => planAll.mutate()}
-            loading={planAll.isPending}
-            disabled={
-              isLoading || isError || busy || projectBlocked || allCount === 0
-            }
-          >
-            Plan all
-          </Button>
+          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Button
+              onClick={() => planAll.mutate()}
+              loading={planAll.isPending}
+              disabled={
+                isLoading || isError || busy || projectBlocked || allCount === 0
+              }
+            >
+              Plan all
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => makeAll.mutate()}
+              loading={makeAll.isPending}
+              disabled={
+                audio.isLoading ||
+                audio.isError ||
+                speechBusy ||
+                projectBlocked ||
+                speechCount === 0
+              }
+              title="Speak every unit that has no current speech, in its saved voice"
+            >
+              Make all speech
+            </Button>
+          </Group>
         </Group>
 
         {isLoading && <Loader size="sm" />}
@@ -222,6 +301,37 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
         {planOne.isError && (
           <Alert color="red" title="Could not plan the speech units">
             {describeError(planOne.error)}
+          </Alert>
+        )}
+        {audio.isError && (
+          <Alert color="red" title="Could not load the speech audio">
+            {describeError(audio.error)}
+          </Alert>
+        )}
+        {makeAll.isError && (
+          <Alert color="red" title="Could not make the speech">
+            {describeError(makeAll.error)}
+          </Alert>
+        )}
+        {makeOne.isError && (
+          <Alert color="red" title="Could not make the speech">
+            {describeError(makeOne.error)}
+          </Alert>
+        )}
+        {makeAll.data !== undefined && leftAlone.size > 0 && (
+          <Alert
+            color="blue"
+            title={`Made ${makeAll.data.job_ids.length} speech${
+              makeAll.data.job_ids.length === 1 ? "" : "es"
+            }. Left alone:`}
+          >
+            <Stack gap={2}>
+              {[...leftAlone.entries()].map(([reason, count]) => (
+                <Text key={reason} size="sm">
+                  {count} {count === 1 ? "unit" : "units"}: {reason}
+                </Text>
+              ))}
+            </Stack>
           </Alert>
         )}
         {skipped.length > 0 && (
@@ -250,6 +360,9 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
             projectBlocked={projectBlocked}
             busy={busy}
             onPlan={() => planOne.mutate(entry.id)}
+            sceneAudio={audioByScene[entry.id]}
+            speechBusy={speechBusy}
+            onMake={(unitId) => makeOne.mutate({ sceneId: entry.id, unitId })}
           />
         ))}
       </Stack>

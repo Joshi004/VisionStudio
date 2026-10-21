@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { PROJECTS_KEY, isValidProjectId } from "./projects";
 import type { components } from "./schema";
+import { speechAudioKey } from "./speechAudio";
 
 export type SpeechUnits = components["schemas"]["SpeechUnitsOut"];
 export type SpeechUnitsEntry = components["schemas"]["SpeechUnitsEntryOut"];
@@ -27,6 +29,14 @@ export function totalSeconds(units: SpeechUnitsContent): number {
  */
 export function speechUnitsKey(projectId: number) {
   return [...PROJECTS_KEY, projectId, "speech-units"] as const;
+}
+
+/** A new plan changes which units have current audio, so the audio is loaded again too. */
+function refreshAfterPlanning(queryClient: QueryClient, projectId: number) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: speechUnitsKey(projectId) }),
+    queryClient.invalidateQueries({ queryKey: speechAudioKey(projectId) }),
+  ]);
 }
 
 async function fetchSpeechUnits(projectId: number) {
@@ -79,8 +89,7 @@ export function usePlanAllSpeechUnits(projectId: number) {
       return data;
     },
     // A refusal can mean something changed, so the state is loaded again either way.
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: speechUnitsKey(projectId) }),
+    onSettled: () => refreshAfterPlanning(queryClient, projectId),
   });
 }
 
@@ -104,7 +113,6 @@ export function usePlanOneSceneSpeechUnits(projectId: number) {
       }
       return data;
     },
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: speechUnitsKey(projectId) }),
+    onSettled: () => refreshAfterPlanning(queryClient, projectId),
   });
 }

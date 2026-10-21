@@ -91,14 +91,15 @@ class Job(Base):
         # relation discovery, since revision 0030, voice design, since revision 0031, and the
         # environment prompt, since revision 0032, and environment definition, since revision
         # 0033, and scene definition, since revision 0034, and event extraction, since
-        # revision 0035, and look and state resolution, since revision 0036.
+        # revision 0035, and look and state resolution, since revision 0036, and speech
+        # unit audio, since revision 0039.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
             "'discover_characters', 'discover_environments', 'discover_scenes', "
             "'define_character', 'discover_relations', 'design_voice', "
             "'write_environment_prompt', 'define_environment', 'define_scene', "
-            "'extract_events', 'resolve_looks_states')",
+            "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -373,6 +374,52 @@ class SpeechUnits(Base):
     )
     inputs: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SpeechUnitAudio(Base):
+    """One speech made, or being made, for one speech unit (PHASE-019, `Path_ahead.md`
+    Section 20).
+
+    `audio_key` is a hash of what the audio depends on (the text, the voice, the Breeze mode and
+    the instruction), not of the unit's id, which a new plan renumbers: a unit that did not change
+    keeps its audio. A row is made when the job is queued and is filled in, in the same
+    transaction that finishes the job: `path`, `size_bytes`, `sha256`, `sample_rate` and
+    `duration_s`, the length **measured** with ffprobe. They are NULL until then. `inputs` records
+    the `speech_units` row and where the voice came from (D-3).
+    """
+
+    __tablename__ = "speech_unit_audio"
+    __table_args__ = (
+        CheckConstraint("kind IN ('narration', 'dialogue')", name="kind_valid"),
+        CheckConstraint("mode IN ('clone', 'direction')", name="mode_valid"),
+        Index("idx_speech_unit_audio_project_key", "project_id", "audio_key"),
+        Index("idx_speech_unit_audio_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    unit_id: Mapped[str]
+    kind: Mapped[str]
+    # The discovered character's slug id, NULL for narration.
+    speaker_id: Mapped[str | None] = mapped_column(default=None)
+    text: Mapped[str]
+    mode: Mapped[str]
+    instruction: Mapped[str | None] = mapped_column(default=None)
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    audio_key: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    path: Mapped[str | None] = mapped_column(default=None)
+    size_bytes: Mapped[int | None] = mapped_column(default=None)
+    sha256: Mapped[str | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    sample_rate: Mapped[int | None] = mapped_column(default=None)
+    inputs: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

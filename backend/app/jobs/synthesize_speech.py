@@ -1,8 +1,8 @@
 """The shared part of the speech jobs: Breeze TTS on the GPU server (Phase 21).
 
 Speech jobs differ only in what they do with the finished WAV, so each extends
-`SpeechHandler` and implements `store_result` (today only `lab_voice`, one speech in the Voice
-lab; the story pipeline adds more).
+`SpeechHandler` and implements `store_result` (`lab_voice`, one speech in the Voice lab, and
+`synthesize_speech_unit`, one speech unit of a story).
 
 It is a remote job, so the three steps follow `JobHandler`:
 
