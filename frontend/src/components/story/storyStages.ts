@@ -95,6 +95,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "shot-definitions",
     name: "Shot definitions",
     description: "Describes each shot in detail: framing, action and continuity.",
+    available: true,
   },
   {
     id: "reference-selection",

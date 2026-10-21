@@ -10,8 +10,8 @@
   (`write_story_bible.py`, `discover_characters.py`, `discover_environments.py`,
   `discover_scenes.py`, `define_character.py`, `discover_relations.py`, `design_voice.py`,
   `define_environment.py`, `define_scene.py`, `extract_events.py`,
-  `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`) and the environment
-  library
+  `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`, `define_shot.py`)
+  and the environment library
   (`write_environment_prompt.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
@@ -36,6 +36,7 @@ def register_handlers() -> None:
     from app.jobs.define_character import DefineCharacterHandler
     from app.jobs.define_environment import DefineEnvironmentHandler
     from app.jobs.define_scene import DefineSceneHandler
+    from app.jobs.define_shot import DefineShotHandler
     from app.jobs.design_voice import DesignVoiceHandler
     from app.jobs.discover_characters import DiscoverCharactersHandler
     from app.jobs.discover_environments import DiscoverEnvironmentsHandler
@@ -74,3 +75,4 @@ def register_handlers() -> None:
     handlers.register(ResolveLooksStatesHandler())
     handlers.register(SynthesizeSpeechUnitHandler())
     handlers.register(PlanShotsHandler())
+    handlers.register(DefineShotHandler())

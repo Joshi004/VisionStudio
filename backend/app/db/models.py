@@ -92,7 +92,8 @@ class Job(Base):
         # environment prompt, since revision 0032, and environment definition, since revision
         # 0033, and scene definition, since revision 0034, and event extraction, since
         # revision 0035, and look and state resolution, since revision 0036, and speech
-        # unit audio, since revision 0039, and shot planning, since revision 0040.
+        # unit audio, since revision 0039, and shot planning, since revision 0040, and shot
+        # definition, since revision 0041.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -100,7 +101,7 @@ class Job(Base):
             "'define_character', 'discover_relations', 'design_voice', "
             "'write_environment_prompt', 'define_environment', 'define_scene', "
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
-            "'plan_shots')",
+            "'plan_shots', 'define_shot')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -371,6 +372,45 @@ class ShotPlan(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     scene_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotDefinition(Base):
+    """One version of one shot's cinematic specification (PHASE-022, `Path_ahead.md` Section 26).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version` of that shot, and a stored row is never changed.
+    `scene_id` is the slug `id` of the scene inside the project's `scene_discovery` content and
+    `shot_id` is the shot's id inside that scene's shot plan; `shot_plan_id` is the plan row the
+    shot was defined from. `inputs` records what the version was built from (the story hash, the
+    artifacts: StoryBible, the scene's definition, the shot plan, the look and state resolution
+    and the definitions of the scene's characters and environment) and the shot's length.
+    `content` is the specification.
+    """
+
+    __tablename__ = "shot_definition"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "shot_id", "version"),
+        Index("idx_shot_definition_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    # The shot plan row this was defined from. NULL when that row was deleted.
+    shot_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_plan.id", ondelete="SET NULL"), default=None
+    )
     version: Mapped[int]
     source: Mapped[str]
     # The job that produced it. NULL for a manual version.

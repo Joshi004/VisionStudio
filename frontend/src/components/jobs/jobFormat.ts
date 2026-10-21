@@ -21,6 +21,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   resolve_looks_states: "Look and state resolution",
   synthesize_speech_unit: "Speech unit audio",
   plan_shots: "Shot planning",
+  define_shot: "Shot definition",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
