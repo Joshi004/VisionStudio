@@ -29,11 +29,38 @@ import {
 } from "../../api/shotPlans";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { SceneTimelineView } from "./SceneTimelineView";
 import { ShotPlanView } from "./ShotPlanView";
 
 type ShotPlansPanelProps = {
   projectId: number;
 };
+
+/** What the timeline of a scene's newest plan says, as a badge. Nothing for a scene with no plan. */
+function timelineBadge(entry: ShotPlanEntry): {
+  label: string;
+  color: string;
+} | null {
+  const timeline = entry.timeline;
+  if (timeline === null) {
+    return null;
+  }
+  const blocking = timeline.problems.filter(
+    (problem) => problem.severity === "blocking",
+  ).length;
+  const flagged = timeline.problems.length - blocking;
+  if (blocking > 0) {
+    return { label: "Timeline blocked", color: "red" };
+  }
+  if (flagged > 0) {
+    return {
+      label:
+        flagged === 1 ? "Timeline: 1 warning" : `Timeline: ${flagged} warnings`,
+      color: "yellow",
+    };
+  }
+  return { label: "Timeline OK", color: "green" };
+}
 
 const STATUS: Record<
   ShotPlanEntry["status"],
@@ -52,6 +79,8 @@ type EntryRowProps = {
   characterNames: Record<string, string>;
   /** True when nothing can be planned yet; the reason is shown once, above the list. */
   projectBlocked: boolean;
+  /** How many automatic re-plans a scene gets (Settings, Shot duration). */
+  replanMaxTries: number;
   busy: boolean;
   onPlan: () => void;
 };
@@ -67,13 +96,23 @@ function EntryRow({
   audio,
   characterNames,
   projectBlocked,
+  replanMaxTries,
   busy,
   onPlan,
 }: EntryRowProps) {
   const [open, setOpen] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const job = entry.job;
   const active = isJobActive(job);
   const status = STATUS[entry.status];
+  const timeline = timelineBadge(entry);
+  const replanning = active && entry.replan_attempt > 0;
+  // The tries are used up and the plan still has problems.
+  const triesUsed =
+    !active &&
+    entry.timeline !== null &&
+    entry.timeline.problems.length > 0 &&
+    entry.replan_attempt >= replanMaxTries;
   const planned = entry.status === "planned" || entry.status === "out_of_date";
   // Why this one scene cannot be planned, when that is about the scene itself.
   const reason = projectBlocked || active ? null : entry.blocked_reason;
@@ -107,8 +146,22 @@ function EntryRow({
             )}
             {entry.shots !== null && entry.total_seconds !== null && (
               <Badge variant="light" color="gray">
-                {entry.shots.shots.length} shots, {entry.total_seconds.toFixed(1)}{" "}
-                s
+                {entry.shots.shots.length} shots,{" "}
+                {entry.total_seconds.toFixed(1)} s
+              </Badge>
+            )}
+            {timeline !== null && (
+              <Badge
+                variant="light"
+                color={timeline.color}
+                title={entry.generation_blocked_reason ?? undefined}
+              >
+                {timeline.label}
+              </Badge>
+            )}
+            {replanning && (
+              <Badge variant="light" color="blue">
+                Re-planning (try {entry.replan_attempt} of {replanMaxTries})
               </Badge>
             )}
             {job && job.status !== "succeeded" && <JobStatusBadge job={job} />}
@@ -126,6 +179,16 @@ function EntryRow({
               {text}
             </Text>
           ))}
+          {triesUsed && (
+            <Text size="xs" c="dimmed">
+              {replanMaxTries === 0
+                ? "Automatic re-planning is off."
+                : `The ${replanMaxTries} automatic re-plans are used.`}{" "}
+              {entry.generation_ready
+                ? "The remaining problems are warnings: generation may use these shots."
+                : "Generation stays blocked for this scene until the shots are planned again."}
+            </Text>
+          )}
           {job?.status === "failed" && (
             <Alert color="red" p="xs" title="The last planning failed">
               {job.error ?? "The job failed."}
@@ -133,6 +196,15 @@ function EntryRow({
           )}
         </Stack>
         <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+          {entry.timeline !== null && (
+            <Button
+              size="compact-xs"
+              variant="default"
+              onClick={() => setTimelineOpen((value) => !value)}
+            >
+              {timelineOpen ? "Hide the timeline" : "Show the timeline"}
+            </Button>
+          )}
           {entry.shots !== null && (
             <Button
               size="compact-xs"
@@ -153,6 +225,14 @@ function EntryRow({
           </Button>
         </Group>
       </Group>
+      {entry.timeline !== null && (
+        <Collapse expanded={timelineOpen}>
+          <SceneTimelineView
+            timeline={entry.timeline}
+            storyStartSeconds={entry.story_start_seconds}
+          />
+        </Collapse>
+      )}
       {entry.shots !== null && entry.version !== null && (
         <Collapse expanded={open}>
           <ArtifactViewer
@@ -220,7 +300,7 @@ export function ShotPlansPanel({ projectId }: ShotPlansPanelProps) {
               must be spoken first.
               {data?.target_min_seconds != null &&
                 data.target_max_seconds != null &&
-                ` Shots are asked to stay between ${data.target_min_seconds} and ${data.target_max_seconds} s.`}
+                ` Shots are asked to stay between ${data.target_min_seconds} and ${data.target_max_seconds} s. A scene whose timeline has a problem is planned again by itself, up to ${data.replan_max_tries} times.`}
             </Text>
           </Stack>
           <Button
@@ -286,6 +366,7 @@ export function ShotPlansPanel({ projectId }: ShotPlansPanelProps) {
             }
             characterNames={characterNames}
             projectBlocked={projectBlocked}
+            replanMaxTries={data?.replan_max_tries ?? 0}
             busy={busy}
             onPlan={() => planOne.mutate(entry.id)}
           />

@@ -13,6 +13,8 @@ export type ShotPlanEntry = components["schemas"]["ShotPlanEntryOut"];
 export type ShotPlanContent = components["schemas"]["ShotPlanContentOut"];
 export type Shot = components["schemas"]["ShotOut"];
 export type ShotPlanAll = components["schemas"]["ShotPlansRunAllOut"];
+export type SceneTimeline = components["schemas"]["SceneTimelineOut"];
+export type TimelineProblem = components["schemas"]["TimelineProblemOut"];
 
 /**
  * Every shot-plan query of a project starts with this key. It also starts with the project's
@@ -49,10 +51,21 @@ export function useShotPlans(projectId: number) {
     queryKey: shotPlansKey(projectId),
     queryFn: () => fetchShotPlans(projectId),
     enabled: isValidProjectId(projectId),
-    refetchInterval: (current) =>
-      current.state.data?.entries.some((entry) => isJobActive(entry.job))
+    refetchInterval: (current) => {
+      const data = current.state.data;
+      // A plan with timeline problems and tries left is planned again by itself, in a job that
+      // starts just after the one that made the plan has finished, so keep looking meanwhile.
+      const replanDue = (entry: ShotPlanEntry) =>
+        entry.status === "planned" &&
+        entry.timeline !== null &&
+        entry.timeline.problems.length > 0 &&
+        entry.replan_attempt < (data?.replan_max_tries ?? 0);
+      return data?.entries.some(
+        (entry) => isJobActive(entry.job) || replanDue(entry),
+      )
         ? ACTIVE_POLL_MS
-        : false,
+        : false;
+    },
   });
 }
 

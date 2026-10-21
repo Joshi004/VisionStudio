@@ -83,6 +83,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "speech-synthesis",
     name: "Speech synthesis",
     description: "Turns each speech unit into audio in the right voice.",
+    available: true,
   },
   {
     id: "shot-planning",

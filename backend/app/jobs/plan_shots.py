@@ -21,6 +21,11 @@ retried, every answer saved on the job the moment it arrives, and a restart neve
 unshown or a unit uncarried is unusable, so it is asked for once more; after that the job fails
 with the reason and nothing is stored.
 
+After the plan is saved, its timeline is checked (`services/scene_timeline`, PHASE-021). A plan
+with problems is planned again by a new job of the same type that carries `replan` (the attempt,
+the problems and the shots that failed), up to `shot_replan_max_tries` times. The re-plan is
+queued after this job has finished and committed, never inside it.
+
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt
 did and its token counts, never the story or the answer.
 """
@@ -34,10 +39,16 @@ from typing import Any, Final
 
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
-from app.jobs import llm_call, phases, store
+from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
-from app.services import discovery, llm_target, shot_planning_writer, shot_plans
+from app.services import (
+    discovery,
+    llm_target,
+    scene_timeline,
+    shot_planning_writer,
+    shot_plans,
+)
 from app.services.llm_target import STORY_MODEL_KEY
 
 _logger = logging.getLogger(__name__)
@@ -63,6 +74,25 @@ class _Input:
     target_max_seconds: int
     inputs: dict[str, Any]
     bible_id: int
+    # Set for an automatic re-plan (PHASE-021): `{attempt, problems, previous_shots}`.
+    replan: dict[str, Any] | None = None
+
+
+def _read_replan(value: Any) -> tuple[bool, dict[str, Any] | None]:
+    """`(True, replan)` when the job's `replan` is absent (None) or well formed, else `(False,
+    None)`.
+    """
+    if value is None:
+        return True, None
+    if (
+        isinstance(value, dict)
+        and isinstance(value.get("attempt"), int)
+        and not isinstance(value.get("attempt"), bool)
+        and isinstance(value.get("problems"), list)
+        and isinstance(value.get("previous_shots"), list)
+    ):
+        return True, value
+    return False, None
 
 
 def _read_input(job_input: dict[str, Any]) -> _Input | None:
@@ -79,6 +109,9 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     target_max = job_input.get("target_max_seconds")
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
+    replan_ok, replan = _read_replan(job_input.get("replan"))
+    if not replan_ok:
+        return None
     if (
         not isinstance(scene, dict)
         or not isinstance(scene.get("id"), str)
@@ -114,6 +147,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         target_max_seconds=target_max,
         inputs=inputs,
         bible_id=bible_id,
+        replan=replan,
     )
 
 
@@ -179,6 +213,14 @@ class PlanShotsHandler(JobHandler):
             target_min_seconds=read.target_min_seconds,
             target_max_seconds=read.target_max_seconds,
             model=target.model,
+            replan=(
+                {
+                    "previous_shots": read.replan["previous_shots"],
+                    "problems": read.replan["problems"],
+                }
+                if read.replan is not None
+                else None
+            ),
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
@@ -214,12 +256,17 @@ class PlanShotsHandler(JobHandler):
                 job_id=job_id,
                 inputs=read.inputs,
             )
+            # The timeline checks of PHASE-021: what is wrong with the plan, if anything.
+            timeline = await shot_plans.timeline_of(session, row)
+            problems = scene_timeline.problems_for_model(timeline) if timeline else []
+            plan_id = row.id
             output = {
                 **outcome.record(),
                 "content": None,
                 "scene_id": scene_id,
                 "version": row.version,
                 "shots": len(content["shots"]),
+                "timeline_problems": problems,
                 "seconds": round(time.monotonic() - started, 1),
             }
             if not await store.finish_job(session, job_id, output):
@@ -227,6 +274,21 @@ class PlanShotsHandler(JobHandler):
                 await session.rollback()
                 return
             await session.commit()
+
+        # A plan with problems is planned again by itself, up to the number of tries in the
+        # settings. This is a separate step: the plan is stored and this job is finished first.
+        if problems:
+            async with SessionLocal() as session:
+                replan = await shot_plans.queue_replan(session, project_id, plan_id, problems)
+            if replan is not None:
+                dispatcher.nudge()
+                _logger.info(
+                    "job %d: the plan of scene '%s' had %d timeline problems, re-plan job %d",
+                    job_id,
+                    scene_id,
+                    len(problems),
+                    replan.id,
+                )
 
         _logger.info(
             "job %d: shots of scene '%s' planned for project %d, version %d, %d shots, usage=%s",

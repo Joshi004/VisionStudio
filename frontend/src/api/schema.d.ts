@@ -5134,6 +5134,21 @@ export interface components {
             lighting_state: string;
         };
         /**
+         * SceneTimelineOut
+         * @description Where each shot and each speech unit of the scene's newest plan falls, in seconds from
+         *     the start of the scene, and what is wrong with it. Worked out on every read.
+         */
+        SceneTimelineOut: {
+            /** Total Seconds */
+            total_seconds: number;
+            /** Shots */
+            shots: components["schemas"]["TimelineShotOut"][];
+            /** Units */
+            units: components["schemas"]["TimelineUnitOut"][];
+            /** Problems */
+            problems: components["schemas"]["TimelineProblemOut"][];
+        };
+        /**
          * SceneUncoveredOut
          * @description A piece of the scene's text that no narration or dialogue event covers.
          */
@@ -5285,6 +5300,15 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            timeline: components["schemas"]["SceneTimelineOut"] | null;
+            /** Story Start Seconds */
+            story_start_seconds: number | null;
+            /** Replan Attempt */
+            replan_attempt: number;
+            /** Generation Ready */
+            generation_ready: boolean;
+            /** Generation Blocked Reason */
+            generation_blocked_reason: string | null;
         };
         /** ShotPlanSkippedOut */
         ShotPlanSkippedOut: {
@@ -5323,6 +5347,8 @@ export interface components {
             target_min_seconds: number | null;
             /** Target Max Seconds */
             target_max_seconds: number | null;
+            /** Replan Max Tries */
+            replan_max_tries: number;
             /** Entries */
             entries: components["schemas"]["ShotPlanEntryOut"][];
             /** Blocked Reason */
@@ -5996,6 +6022,52 @@ export interface components {
             takes: components["schemas"]["TakeOut"][];
             /** Next Before Id */
             next_before_id: number | null;
+        };
+        /** TimelineProblemOut */
+        TimelineProblemOut: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "flagged" | "blocking";
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Shot Id */
+            shot_id: string | null;
+            /** Unit Id */
+            unit_id: string | null;
+        };
+        /** TimelineShotOut */
+        TimelineShotOut: {
+            /** Shot Id */
+            shot_id: string;
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+        };
+        /**
+         * TimelineUnitOut
+         * @description A speech unit placed on the scene's timeline.
+         */
+        TimelineUnitOut: {
+            /** Unit Id */
+            unit_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "narration" | "dialogue";
+            /** Start Seconds */
+            start_seconds: number;
+            /** End Seconds */
+            end_seconds: number;
+            /** Shot Ids */
+            shot_ids: string[];
+            /** Delayed */
+            delayed: boolean;
         };
         /** ToolStatus */
         ToolStatus: {

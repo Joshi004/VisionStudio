@@ -112,6 +112,12 @@ neighbours or given a shot of its own.
 - Keep every shot inside the target range of the DURATION POLICY.
 - Do not invent events, characters or places the scene does not have.
 
+If the user message also holds PREVIOUS SHOTS and TIMELINE PROBLEMS, an earlier plan of this \
+same scene was checked by code and had the problems listed. Plan the whole scene again so that \
+none of those problems remains: for example, merge a shot that is too short with a neighbour, \
+split one that is too long, or lengthen a shot so that the line spoken in it fits. Each problem \
+has a "message" with the numbers. Keep what was fine, and still follow every rule above.
+
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
 
@@ -128,6 +134,7 @@ def build_request(
     target_min_seconds: int,
     target_max_seconds: int,
     model: str,
+    replan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
@@ -136,6 +143,10 @@ def build_request(
     description, definition}` and `environment` is `{id, name, description, definition}`;
     `events` is the scene's stored events; `units` is a list of `{id, event_id, kind,
     speaker_id, text, measured_seconds}`. The target range comes from the duration policy.
+
+    `replan` is set when this is an automatic re-plan (PHASE-021): `{previous_shots, problems}`,
+    the shots of the plan that failed the timeline checks and the problems found. Both reach the
+    model as data blocks, never as text in the instructions.
     """
     policy = {
         "target_min_seconds": target_min_seconds,
@@ -152,6 +163,15 @@ def build_request(
         "SPEECH UNITS (JSON):\n" + json.dumps(units, ensure_ascii=False, indent=2),
         "DURATION POLICY (JSON):\n" + json.dumps(policy, ensure_ascii=False, indent=2),
     ]
+    if replan is not None:
+        parts.append(
+            "PREVIOUS SHOTS (JSON):\n"
+            + json.dumps(replan["previous_shots"], ensure_ascii=False, indent=2)
+        )
+        parts.append(
+            "TIMELINE PROBLEMS (JSON):\n"
+            + json.dumps(replan["problems"], ensure_ascii=False, indent=2)
+        )
     return {
         "model": model,
         "messages": [

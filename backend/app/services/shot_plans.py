@@ -36,7 +36,8 @@ from typing import Any, Final, Literal, cast
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job, Project, SceneDiscovery, ShotPlan, StoryBible
+from app.core import settings as settings_service
+from app.db.models import Job, Project, SceneDiscovery, ShotPlan, SpeechUnits, StoryBible
 from app.jobs import store
 from app.services import (
     discovery,
@@ -44,6 +45,7 @@ from app.services import (
     event_extraction_writer,
     scene_definition_writer,
     scene_definitions,
+    scene_timeline,
     speech_synthesis,
     story_bible,
 )
@@ -100,6 +102,17 @@ class SceneEntry:
     # Whether the Plan button may be pressed, and the reason when it may not.
     can_run: bool
     blocked_reason: str | None
+    # The newest plan laid out in seconds, with its problems (PHASE-021). None when the scene has
+    # no plan, or the plan's speech cannot be read back, or the duration policy cannot be used.
+    timeline: scene_timeline.SceneTimeline | None
+    # Where the scene starts in the story, or None when a scene before it has no plan.
+    story_start_s: float | None
+    # 0 for a plan asked for by the user. n for the n-th automatic re-plan: the one being made
+    # when a re-plan job is active, otherwise the newest plan's.
+    replan_attempt: int
+    # Whether generation may use this scene's shots, and why not when it may not.
+    generation_ready: bool
+    generation_blocked_reason: str | None
 
     @property
     def content(self) -> dict[str, Any] | None:
@@ -115,6 +128,8 @@ class ShotPlansState:
     # be used.
     target_min_seconds: int | None
     target_max_seconds: int | None
+    # How many times a scene is planned again by itself when its timeline has a problem.
+    replan_max_tries: int
     entries: list[SceneEntry]
     # Why nothing can be planned yet, or None.
     blocked_reason: str | None
@@ -148,6 +163,7 @@ class _Loaded:
     # The characters and environments that are linked and defined, by `(kind, discovery id)`.
     current: dict[tuple[str, str], scene_definitions.CurrentDefinition]
     policy: duration_policy.DurationPolicy | None
+    replan_max_tries: int
     blocked_reason: str | None
 
 
@@ -178,6 +194,9 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         definitions=definitions,
         current=current,
         policy=policy,
+        replan_max_tries=await settings_service.get_int(
+            session, settings_service.SHOT_REPLAN_MAX_TRIES_KEY
+        ),
         blocked_reason=policy_problem or audio.blocked_reason,
     )
 
@@ -262,12 +281,19 @@ def _for_model(current: scene_definitions.CurrentDefinition) -> dict[str, Any]:
 
 
 async def _queue(
-    session: AsyncSession, project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAudio
+    session: AsyncSession,
+    project: Project,
+    loaded: _Loaded,
+    scene: speech_synthesis.SceneAudio,
+    replan: dict[str, Any] | None = None,
 ) -> tuple[Job, bool]:
     """Queues the job for this scene and returns `(job, created)`. `created` is False when the
     scene already has a job waiting or running, which is returned instead. Raises
     ShotPlansError when this scene cannot be planned. The caller has checked that the project
     is not blocked.
+
+    `replan` is set for an automatic re-plan (PHASE-021): `{attempt, problems, previous_shots}`.
+    The job is given all three; the plan it saves records the attempt and the problems.
     """
     story, bible, policy = loaded.story, loaded.bible, loaded.policy
     assert story is not None and bible is not None and policy is not None  # not blocked
@@ -347,12 +373,17 @@ async def _queue(
             "target_max_s": policy.target_max_s,
         },
     }
+    replan_input: dict[str, Any] = {}
+    if replan is not None:
+        inputs["replan"] = {"attempt": replan["attempt"], "problems": replan["problems"]}
+        replan_input = {"replan": replan}
     return await store.create_job(
         session,
         project_id=project.id,
         type=JOB_TYPE,
         provider="llm",
         input={
+            **replan_input,
             "story_bible_id": bible.id,
             "story_bible_version": bible.version,
             "scene_id": item["id"],
@@ -394,6 +425,31 @@ async def start_run(session: AsyncSession, project: Project, scene_id: str) -> J
     _blocked_by_story(loaded)
     scene = _find_scene(loaded, scene_id)
     job, _created = await _queue(session, project, loaded, scene)
+    return job
+
+
+async def start_replan(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    *,
+    attempt: int,
+    problems: list[dict[str, Any]],
+    previous_shots: list[dict[str, Any]],
+) -> Job:
+    """Queues the automatic re-plan of one scene (PHASE-021), and commits. `attempt` is the
+    number of this re-plan (1 for the first), `problems` what the timeline checks found in the
+    plan that failed, and `previous_shots` that plan's shots. The scene must pass the same gate
+    as `start_run`: if anything it is built from changed meanwhile, this raises ShotPlansError
+    and nothing is queued.
+    """
+    loaded = await _load(session, project)
+    if loaded.blocked_reason is not None:
+        raise ShotPlansError(loaded.blocked_reason)
+    _blocked_by_story(loaded)
+    scene = _find_scene(loaded, scene_id)
+    replan = {"attempt": attempt, "problems": problems, "previous_shots": previous_shots}
+    job, _created = await _queue(session, project, loaded, scene, replan)
     return job
 
 
@@ -574,12 +630,123 @@ async def _newest_rows(session: AsyncSession, project_id: int) -> dict[str, Shot
     return newest
 
 
+async def _unit_kinds(
+    session: AsyncSession, rows: dict[str, ShotPlan]
+) -> dict[int, dict[str, str]]:
+    """The kind (`narration` or `dialogue`) of each unit of the speech plans that the newest
+    shot plans were made from, by the id of the `speech_units` row and then the unit's id. The
+    plan records only the id of the row, so the kinds are read from the row itself.
+    """
+    ids: set[int] = set()
+    for row in rows.values():
+        recorded = (
+            _recorded(row.inputs, SPEECH_UNITS_KIND) if isinstance(row.inputs, dict) else None
+        )
+        if recorded is not None and isinstance(recorded.get("id"), int):
+            ids.add(recorded["id"])
+    if not ids:
+        return {}
+    statement = select(SpeechUnits).where(SpeechUnits.id.in_(ids))
+    return {
+        plan.id: {unit["id"]: unit["kind"] for unit in plan.content["units"]}
+        for plan in (await session.execute(statement)).scalars()
+    }
+
+
+def _unit_infos(
+    row: ShotPlan, kinds_by_plan: dict[int, dict[str, str]]
+) -> list[scene_timeline.UnitInfo] | None:
+    """The scene's units in plan order with their kinds and the lengths that were measured when
+    the shots were planned, or None when the plan's record of them cannot be read back.
+    """
+    recorded = _recorded(row.inputs, SPEECH_UNITS_KIND)
+    kinds = kinds_by_plan.get(recorded["id"]) if recorded and "id" in recorded else None
+    if kinds is None:
+        return None
+    infos: list[scene_timeline.UnitInfo] = []
+    for artifact in row.inputs.get("artifacts") or []:
+        if not isinstance(artifact, dict) or artifact.get("kind") != SPEECH_AUDIO_KIND:
+            continue
+        unit_id = artifact.get("unit_id")
+        seconds = artifact.get("duration_s")
+        kind = kinds.get(unit_id) if isinstance(unit_id, str) else None
+        if (
+            kind not in ("narration", "dialogue")
+            or isinstance(seconds, bool)
+            or not isinstance(seconds, int | float)
+        ):
+            return None
+        infos.append(scene_timeline.UnitInfo(unit_id, kind, float(seconds)))
+    return infos
+
+
+def _timeline_of(
+    row: ShotPlan | None,
+    policy: duration_policy.DurationPolicy | None,
+    kinds_by_plan: dict[int, dict[str, str]],
+) -> scene_timeline.SceneTimeline | None:
+    """The timeline of a scene's newest plan, or None when it cannot be worked out."""
+    if row is None or policy is None or not isinstance(row.inputs, dict):
+        return None
+    infos = _unit_infos(row, kinds_by_plan)
+    if infos is None:
+        return None
+    return scene_timeline.build_timeline(row.content["shots"], infos, policy)
+
+
+def _replan_attempt(row: ShotPlan | None, job: Job | None, active: bool) -> int:
+    """The number of the automatic re-plan being made, or else of the newest plan (0 for a plan
+    the user asked for).
+    """
+    source: Any = None
+    if active and job is not None and isinstance(job.input, dict):
+        source = job.input.get("replan")
+    elif row is not None and isinstance(row.inputs, dict):
+        source = row.inputs.get("replan")
+    attempt = source.get("attempt") if isinstance(source, dict) else 0
+    return attempt if isinstance(attempt, int) and not isinstance(attempt, bool) else 0
+
+
+def _generation_refusal(
+    status: Status, active: bool, timeline: scene_timeline.SceneTimeline | None
+) -> str | None:
+    """Why this scene's shots cannot go to generation yet, or None. Only a current plan whose
+    timeline has no blocking problem may; flagged problems (a shot outside the planning target
+    but inside the H3 bounds) are warnings.
+    """
+    if status == "not_planned":
+        return "The shots of this scene are not planned."
+    if active:
+        return "The shots of this scene are being planned."
+    if status == "out_of_date":
+        return "The shot plan of this scene is out of date."
+    if timeline is None:
+        return "The timeline of this scene cannot be worked out."
+    blocking = [problem for problem in timeline.problems if problem.severity == "blocking"]
+    if blocking:
+        more = f" (and {len(blocking) - 1} more)" if len(blocking) > 1 else ""
+        return f"The timeline has a blocking problem: {blocking[0].message}{more}"
+    return None
+
+
 async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> ShotPlansState:
     jobs = await _newest_jobs(session, project.id)
     rows = await _newest_rows(session, project.id)
+    kinds_by_plan = await _unit_kinds(session, rows)
+
+    # Each scene's timeline first, so that a scene's start in the story can be given.
+    timelines = {
+        scene.scene.item["id"]: _timeline_of(
+            rows.get(scene.scene.item["id"]), loaded.policy, kinds_by_plan
+        )
+        for scene in loaded.audio.scenes
+    }
+    starts = scene_timeline.story_offsets(
+        [timeline.total_s if timeline is not None else None for timeline in timelines.values()]
+    )
 
     entries: list[SceneEntry] = []
-    for scene in loaded.audio.scenes:
+    for scene, story_start in zip(loaded.audio.scenes, starts, strict=True):
         item = scene.scene.item
         row = rows.get(item["id"])
         job = jobs.get(item["id"])
@@ -593,6 +760,8 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         blocked_reason = loaded.blocked_reason or _scene_refusal(scene, definition, loaded.current)
         if blocked_reason is None and active:
             blocked_reason = "The shots are already being planned."
+        timeline = timelines[item["id"]]
+        generation_blocked = _generation_refusal(status, active, timeline)
         entries.append(
             SceneEntry(
                 item=item,
@@ -602,6 +771,11 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                 job=job,
                 can_run=blocked_reason is None,
                 blocked_reason=blocked_reason,
+                timeline=timeline,
+                story_start_s=story_start,
+                replan_attempt=_replan_attempt(row, job, active),
+                generation_ready=generation_blocked is None,
+                generation_blocked_reason=generation_blocked,
             )
         )
     policy = loaded.policy
@@ -609,6 +783,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         scenes_version=loaded.audio.scenes_version,
         target_min_seconds=policy.target_min_s if policy is not None else None,
         target_max_seconds=policy.target_max_s if policy is not None else None,
+        replan_max_tries=loaded.replan_max_tries,
         entries=entries,
         blocked_reason=loaded.blocked_reason,
     )
@@ -619,6 +794,71 @@ async def state(session: AsyncSession, project: Project) -> ShotPlansState:
     read; nothing here is stored.
     """
     return await _build(session, project, await _load(session, project))
+
+
+# --- Checking a saved plan and re-planning it (PHASE-021) ---------------------------------
+
+
+async def timeline_of(session: AsyncSession, row: ShotPlan) -> scene_timeline.SceneTimeline | None:
+    """The timeline of one stored plan under the duration policy as it is now, or None when it
+    cannot be worked out (the policy is unusable, or the plan's record of its speech is
+    incomplete). The same rules as the state uses.
+    """
+    try:
+        policy = await duration_policy.read_duration_policy(session)
+    except duration_policy.DurationPolicyError:
+        return None
+    kinds = await _unit_kinds(session, {row.scene_id: row})
+    return _timeline_of(row, policy, kinds)
+
+
+async def queue_replan(
+    session: AsyncSession, project_id: int, plan_id: int, problems: list[dict[str, Any]]
+) -> Job | None:
+    """Queues the automatic re-plan of the scene whose plan `plan_id` has these timeline
+    problems, and commits. Returns the job, or None when no re-plan is made: the tries are used
+    up (`shot_replan_max_tries`), a newer plan exists already, or the scene can no longer be
+    planned (something it is built from changed; the user presses Plan).
+    """
+    project = await session.get(Project, project_id)
+    row = await session.get(ShotPlan, plan_id)
+    if project is None or row is None or not problems:
+        return None
+    attempt = _replan_attempt(row, None, False)
+    max_tries = await settings_service.get_int(session, settings_service.SHOT_REPLAN_MAX_TRIES_KEY)
+    if attempt >= max_tries:
+        _logger.info(
+            "scene '%s' of project %d: %d problems remain, the %d re-plans are used",
+            row.scene_id,
+            project_id,
+            len(problems),
+            max_tries,
+        )
+        return None
+    newest = (await _newest_rows(session, project_id)).get(row.scene_id)
+    if newest is None or newest.id != row.id:
+        return None
+    previous_shots = [
+        {key: value for key, value in shot.items() if key != "scene_id"}
+        for shot in row.content["shots"]
+    ]
+    try:
+        return await start_replan(
+            session,
+            project,
+            row.scene_id,
+            attempt=attempt + 1,
+            problems=problems,
+            previous_shots=previous_shots,
+        )
+    except ShotPlansError as exc:
+        _logger.info(
+            "scene '%s' of project %d: not planned again by itself: %s",
+            row.scene_id,
+            project_id,
+            exc,
+        )
+        return None
 
 
 # --- Saving the plan ----------------------------------------------------------------------

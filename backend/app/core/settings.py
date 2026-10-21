@@ -131,6 +131,10 @@ SHOT_TARGET_MIN_KEY = "shot_target_min_seconds"
 SHOT_TARGET_MAX_KEY = "shot_target_max_seconds"
 H3_MAX_SHOT_KEY = "h3_max_shot_seconds"
 
+# How many times a scene's shots are planned again by themselves when the scene's timeline has
+# a problem (PHASE-021). Not part of the order below: it is a count, not a length.
+SHOT_REPLAN_MAX_TRIES_KEY = "shot_replan_max_tries"
+
 # From the smallest value to the largest: each setting must be at or below the next one.
 DURATION_ORDER: tuple[str, ...] = (
     H3_MIN_SHOT_KEY,
@@ -392,6 +396,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=H3_MAX_WHOLE_SECONDS,
         min_value=1,
         max_value=H3_MAX_WHOLE_SECONDS,
+    ),
+    SettingSpec(
+        key=SHOT_REPLAN_MAX_TRIES_KEY,
+        group=GROUP_DURATION,
+        label="Automatic re-plans of a scene's shots",
+        help=(
+            "When a scene's timeline has a problem (a shot outside the planning target, a shot "
+            "outside the H3 bounds, or speech that does not fit its shots), the scene's shots "
+            "are planned again automatically, up to this many times. Each re-plan is a paid "
+            "model call. 0 turns automatic re-planning off. Pressing Plan yourself starts the "
+            "count again."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=5,
     ),
     SettingSpec(
         key=SPEECH_WPM_KEY,
