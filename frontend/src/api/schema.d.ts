@@ -2400,6 +2400,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-continuity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shot Continuity */
+        get: operations["get_shot_continuity_api_projects__project_id__shot_continuity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-continuity/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a check for every scene whose shots are all defined and current, that is not
+         *     consistent already and is not already being checked. The others are skipped, with the
+         *     reason.
+         */
+        post: operations["run_all_api_projects__project_id__shot_continuity_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-continuity/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scene
+         * @description Starts the check of one scene. If it already has a check waiting or running, that job's
+         *     id is returned and no second job is made.
+         */
+        post: operations["run_scene_api_projects__project_id__shot_continuity__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2792,6 +2852,38 @@ export interface components {
         ConnectionTestResult: {
             health: components["schemas"]["ConnectionTest"];
             contract: components["schemas"]["ContractCheckOut"] | null;
+        };
+        /**
+         * ContinuityMismatchOut
+         * @description A boundary that does not line up. `before` and `after` are a shot id, `scene_start` or
+         *     `scene_end`.
+         */
+        ContinuityMismatchOut: {
+            /** Id */
+            id: string;
+            /** Before */
+            before: string;
+            /** After */
+            after: string;
+            /** Problem */
+            problem: string;
+        };
+        /**
+         * ContinuityVersionOut
+         * @description The provenance of the newest check of a scene (D-3).
+         */
+        ContinuityVersionOut: {
+            /** Version */
+            version: number;
+            /** Round */
+            round: number;
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** ContractCheckOut */
         ContractCheckOut: {
@@ -3651,7 +3743,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity";
             /**
              * Status
              * @enum {string}
@@ -3704,7 +3796,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity";
             /**
              * Status
              * @enum {string}
@@ -4606,7 +4698,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity";
             /** Running */
             running: number;
             /** Queued */
@@ -4902,6 +4994,36 @@ export interface components {
         RunOut: {
             /** Job Id */
             job_id: number;
+        };
+        /** SceneContinuityOut */
+        SceneContinuityOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_checked" | "checking" | "reconciling" | "consistent" | "mismatches";
+            version: components["schemas"]["ContinuityVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Round */
+            round: number;
+            /** Max Rounds */
+            max_rounds: number;
+            /** Mismatches */
+            mismatches: components["schemas"]["ContinuityMismatchOut"][];
+            /** Round Limit Reached */
+            round_limit_reached: boolean;
+            /** Shots */
+            shots: components["schemas"]["ShotContinuityFlagOut"][];
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
         };
         /**
          * SceneDefinitionEntryOut
@@ -5393,6 +5515,55 @@ export interface components {
             angle: string;
             /** Focus */
             focus: string;
+        };
+        /**
+         * ShotContinuityFlagOut
+         * @description One shot of a scene and where its continuity stands.
+         */
+        ShotContinuityFlagOut: {
+            /** Shot Id */
+            shot_id: string;
+            /**
+             * Flag
+             * @enum {string}
+             */
+            flag: "not_checked" | "ok" | "mismatch";
+            /** Problems */
+            problems: string[];
+            /** Redefined Round */
+            redefined_round: number | null;
+        };
+        /** ShotContinuityOut */
+        ShotContinuityOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Max Rounds */
+            max_rounds: number;
+            /** Entries */
+            entries: components["schemas"]["SceneContinuityOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotContinuityRunManyOut */
+        ShotContinuityRunManyOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["ShotContinuitySkippedOut"][];
+        };
+        /** ShotContinuityRunOneOut */
+        ShotContinuityRunOneOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** ShotContinuitySkippedOut */
+        ShotContinuitySkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
         };
         /** ShotDefinitionContentOut */
         ShotDefinitionContentOut: {
@@ -11779,6 +11950,127 @@ export interface operations {
                 };
             };
             /** @description The scene's shots are not planned, current and ready for generation, the looks and states are not resolved and current, the scene is not in the newest list of scenes, or the shot is not in its shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_shot_continuity_api_projects__project_id__shot_continuity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotContinuityOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__shot_continuity_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotContinuityRunManyOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, or the StoryBible is missing. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_scene_api_projects__project_id__shot_continuity__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotContinuityRunOneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene's shots are not all defined and current, the scene is not in the newest list of scenes, or the StoryBible is missing. */
             422: {
                 headers: {
                     [name: string]: unknown;

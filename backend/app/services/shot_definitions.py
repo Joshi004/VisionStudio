@@ -358,10 +358,15 @@ async def _queue(
     loaded: _Loaded,
     scene_id: str,
     shot_id: str,
+    continuity: dict[str, Any] | None = None,
 ) -> tuple[Job, bool]:
     """Queues the job for this shot and returns `(job, created)`. `created` is False when the
     shot already has a job waiting or running, which is returned instead. Raises
     ShotDefinitionsError when this shot cannot be defined.
+
+    `continuity` is set only by the continuity check (PHASE-023) when it defines a shot again:
+    `{check_id, round, must_start_from, must_end_at, problems}`. It travels on the job as data
+    for the model, and `check_id` and `round` are recorded on the version the job makes.
     """
     refusal = _scene_refusal(loaded, scene_id)
     if refusal is not None:
@@ -449,6 +454,10 @@ async def _queue(
         ],
         "shot": {"id": shot_id, "duration_seconds": duration},
     }
+    job_continuity: dict[str, Any] = {}
+    if continuity is not None:
+        inputs["continuity"] = {"check_id": continuity["check_id"], "round": continuity["round"]}
+        job_continuity = {"continuity": continuity}
     return await store.create_job(
         session,
         project_id=project.id,
@@ -478,6 +487,7 @@ async def _queue(
             "duration": duration,
             "characters": characters,
             "environment": environment,
+            **job_continuity,
             # Written onto the version the job makes (D-3).
             "inputs": inputs,
         },
@@ -489,14 +499,23 @@ def _shot_key(scene_id: str, shot_id: str) -> str:
     return f"{scene_id}/{shot_id}"
 
 
-async def start_shot(session: AsyncSession, project: Project, scene_id: str, shot_id: str) -> Job:
+async def start_shot(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    continuity: dict[str, Any] | None = None,
+) -> Job:
     """Queues the job that defines one shot, and commits. If that shot already has a job
     waiting or running, that job is returned and no new one is made. Raises
     ShotDefinitionsError.
+
+    `continuity` is for the continuity check (PHASE-023): see `_queue`. A press of Define in the
+    workspace never passes it.
     """
     loaded = await _load(session, project)
     _find_scene(loaded, scene_id)
-    job, _created = await _queue(session, project, loaded, scene_id, shot_id)
+    job, _created = await _queue(session, project, loaded, scene_id, shot_id, continuity)
     return job
 
 

@@ -36,12 +36,13 @@ from typing import Any, Final
 
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
-from app.jobs import llm_call, phases, store
+from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import (
     discovery,
     llm_target,
+    shot_continuity,
     shot_definition_writer,
     shot_definitions,
 )
@@ -77,6 +78,8 @@ class _Input:
     environment: dict[str, Any]
     inputs: dict[str, Any]
     bible_id: int
+    # Set only when the continuity check defines this shot again (PHASE-023).
+    continuity: dict[str, Any] | None
 
 
 def _is_number(value: Any) -> bool:
@@ -104,6 +107,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     environment = job_input.get("environment")
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
+    continuity = job_input.get("continuity")
     if (
         not isinstance(scene, dict)
         or not isinstance(scene_id, str)
@@ -128,6 +132,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         or not isinstance(environment, dict)
         or not isinstance(inputs, dict)
         or not isinstance(bible_id, int)
+        or not (continuity is None or isinstance(continuity, dict))
     ):
         return None
     return _Input(
@@ -148,6 +153,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         environment=environment,
         inputs=inputs,
         bible_id=bible_id,
+        continuity=continuity,
     )
 
 
@@ -215,6 +221,7 @@ class DefineShotHandler(JobHandler):
             characters=read.characters,
             environment=read.environment,
             model=target.model,
+            continuity=read.continuity,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
@@ -276,6 +283,20 @@ class DefineShotHandler(JobHandler):
             row.version,
             outcome.usage,
         )
+
+        # When this was the last shot of its scene to be defined, the scene's continuity is
+        # checked by itself (PHASE-023). A separate step: the definition is stored and this job
+        # is finished first. A failure here must not fail a job that has already succeeded.
+        try:
+            async with SessionLocal() as session:
+                check = await shot_continuity.queue_check_if_ready(
+                    session, project_id, read.scene_id
+                )
+        except Exception:
+            _logger.exception("job %d: the continuity check could not be queued", job_id)
+            return
+        if check is not None:
+            dispatcher.nudge()
 
     # --- Small helpers ------------------------------------------------------------------
 

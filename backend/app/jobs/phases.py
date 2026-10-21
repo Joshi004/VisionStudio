@@ -170,6 +170,10 @@ SAVING_SHOT_PLAN: Final = "saving the shot plan"
 # `define_shot` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_SHOT_DEFINITION: Final = "saving the shot definition"
 
+# --- Running: shot continuity check (PHASE-023) ------------------------------------------
+# `check_shot_continuity` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_CONTINUITY_CHECK: Final = "saving the continuity check"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

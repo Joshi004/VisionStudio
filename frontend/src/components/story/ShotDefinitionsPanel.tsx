@@ -17,6 +17,13 @@ import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import { useSceneEvents } from "../../api/sceneEvents";
 import {
+  useCheckAllContinuity,
+  useCheckSceneContinuity,
+  useShotContinuity,
+  type SceneContinuity,
+  type ShotContinuityFlag,
+} from "../../api/shotContinuity";
+import {
   useDefineAllShots,
   useDefineOneShot,
   useDefineSceneShots,
@@ -41,8 +48,28 @@ const STATUS: Record<
   out_of_date: { label: "Out of date", color: "yellow" },
 };
 
+const CONTINUITY_STATUS: Record<
+  SceneContinuity["status"],
+  { label: string; color: string }
+> = {
+  not_checked: { label: "Continuity not checked", color: "gray" },
+  checking: { label: "Checking continuity", color: "blue" },
+  reconciling: { label: "Reconciling", color: "blue" },
+  consistent: { label: "Continuity OK", color: "green" },
+  mismatches: { label: "Continuity mismatch", color: "orange" },
+};
+
+/** A boundary's side as a person reads it: a shot's id, or the scene's start or end. */
+function boundaryName(side: string): string {
+  if (side === "scene_start") return "the scene's start";
+  if (side === "scene_end") return "the scene's end";
+  return `shot ${side}`;
+}
+
 type ShotRowProps = {
   entry: ShotDefinitionEntry;
+  /** Where this shot's continuity stands; undefined until the continuity state has loaded. */
+  continuity: ShotContinuityFlag | undefined;
   characterNames: Record<string, string>;
   /** True when the whole scene cannot be defined; the reason is shown once, on the scene. */
   sceneBlocked: boolean;
@@ -53,6 +80,7 @@ type ShotRowProps = {
 /** One shot: its status, why it is out of date, the job's failure, and its specification. */
 function ShotRow({
   entry,
+  continuity,
   characterNames,
   sceneBlocked,
   busy,
@@ -92,6 +120,26 @@ function ShotRow({
             <Badge variant="light" color="gray">
               {shot.duration_seconds.toFixed(1)} s
             </Badge>
+            {continuity?.flag === "mismatch" && (
+              <Badge
+                variant="light"
+                color="orange"
+                title={continuity.problems.join("\n")}
+                style={{ textTransform: "none" }}
+              >
+                Does not line up
+              </Badge>
+            )}
+            {continuity?.redefined_round != null && (
+              <Badge
+                variant="light"
+                color="grape"
+                title="This version was made by the continuity check, to line up with its neighbour"
+                style={{ textTransform: "none" }}
+              >
+                Re-defined for continuity (round {continuity.redefined_round})
+              </Badge>
+            )}
             {job && job.status !== "succeeded" && <JobStatusBadge job={job} />}
             <Text size="sm" style={{ wordBreak: "break-word" }}>
               {shot.description}
@@ -156,23 +204,93 @@ function ShotRow({
 
 type SceneRowProps = {
   scene: SceneShotDefinitions;
+  /** The scene's continuity; undefined until the continuity state has loaded. */
+  continuity: SceneContinuity | undefined;
   characterNames: Record<string, string>;
   projectBlocked: boolean;
   busy: boolean;
   onDefineScene: () => void;
   onDefineShot: (shotId: string) => void;
+  onCheckContinuity: () => void;
 };
+
+/** The continuity of one scene: its status, the boundaries that do not line up, and the button. */
+function ContinuityLine({
+  continuity,
+  busy,
+  onCheck,
+}: {
+  continuity: SceneContinuity;
+  busy: boolean;
+  onCheck: () => void;
+}) {
+  const status = CONTINUITY_STATUS[continuity.status];
+  const running =
+    continuity.status === "checking" || continuity.status === "reconciling";
+  const label =
+    continuity.status === "reconciling"
+      ? `Reconciling (round ${continuity.round} of ${continuity.max_rounds})`
+      : continuity.status === "mismatches"
+        ? `${continuity.mismatches.length} ${
+            continuity.mismatches.length === 1 ? "mismatch" : "mismatches"
+          }`
+        : status.label;
+  return (
+    <Stack gap={4}>
+      <Group gap="xs">
+        <Badge variant="light" color={status.color}>
+          {label}
+        </Badge>
+        {continuity.status === "mismatches" &&
+          continuity.round_limit_reached && (
+            <Text size="xs" c="dimmed">
+              The {continuity.max_rounds} automatic rounds are used.
+            </Text>
+          )}
+        {continuity.job?.status === "failed" && !running && (
+          <Text size="xs" c="red">
+            The last check failed: {continuity.job.error ?? "the job failed."}
+          </Text>
+        )}
+        <Button
+          size="compact-xs"
+          variant="default"
+          loading={running}
+          disabled={!continuity.can_run || busy}
+          onClick={onCheck}
+        >
+          Check continuity
+        </Button>
+      </Group>
+      {!continuity.can_run && !running && continuity.blocked_reason && (
+        <Text size="xs" c="dimmed">
+          {continuity.blocked_reason}
+        </Text>
+      )}
+      {continuity.mismatches.map((item) => (
+        <Text key={item.id} size="xs" c="orange.8">
+          {boundaryName(item.before)} to {boundaryName(item.after)}:{" "}
+          {item.problem}
+        </Text>
+      ))}
+    </Stack>
+  );
+}
 
 /** One scene: how many of its shots are defined, why they cannot be, and its shots. */
 function SceneRow({
   scene,
+  continuity,
   characterNames,
   projectBlocked,
   busy,
   onDefineScene,
   onDefineShot,
+  onCheckContinuity,
 }: SceneRowProps) {
-  const defined = scene.shots.filter((shot) => shot.status === "defined").length;
+  const defined = scene.shots.filter(
+    (shot) => shot.status === "defined",
+  ).length;
   const outOfDate = scene.shots.filter(
     (shot) => shot.status === "out_of_date",
   ).length;
@@ -223,6 +341,13 @@ function SceneRow({
               {reason}
             </Text>
           )}
+          {continuity !== undefined && scene.shots.length > 0 && (
+            <ContinuityLine
+              continuity={continuity}
+              busy={busy}
+              onCheck={onCheckContinuity}
+            />
+          )}
         </Stack>
         <Button
           size="compact-sm"
@@ -241,6 +366,9 @@ function SceneRow({
             <ShotRow
               key={entry.shot.id}
               entry={entry}
+              continuity={continuity?.shots.find(
+                (flag) => flag.shot_id === entry.shot.id,
+              )}
               characterNames={characterNames}
               sceneBlocked={scene.blocked_reason !== null}
               busy={busy}
@@ -264,12 +392,32 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
   const defineAll = useDefineAllShots(projectId);
   const defineScene = useDefineSceneShots(projectId);
   const defineOne = useDefineOneShot(projectId);
+  const checkAll = useCheckAllContinuity(projectId);
+  const checkScene = useCheckSceneContinuity(projectId);
   // Characters are shown by name; the event list already carries them for its own panel.
   const sceneEvents = useSceneEvents(projectId).data;
 
-  const busy =
-    defineAll.isPending || defineScene.isPending || defineOne.isPending;
   const entries = data?.entries ?? [];
+  // A check follows the last shot of a scene to be defined, so the continuity is asked again
+  // while any shot is being defined.
+  const definitionsActive = entries.some((scene) =>
+    scene.shots.some((shot) => isJobActive(shot.job)),
+  );
+  const continuity = useShotContinuity(projectId, definitionsActive).data;
+  const continuityByScene = new Map(
+    (continuity?.entries ?? []).map((scene) => [scene.id, scene]),
+  );
+  const busy =
+    defineAll.isPending ||
+    defineScene.isPending ||
+    defineOne.isPending ||
+    checkAll.isPending ||
+    checkScene.isPending;
+  // What "Check all continuity" would start: scenes that can be checked and are not consistent.
+  const checkAllCount = (continuity?.entries ?? []).filter(
+    (scene) => scene.can_run && scene.status !== "consistent",
+  ).length;
+  const checkSkipped = checkAll.data?.skipped ?? [];
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
   const characterNames = Object.fromEntries(
     (sceneEvents?.characters ?? []).map((character) => [
@@ -302,18 +450,37 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
               action, where it starts and ends, and the ambience and sounds. The
               length and the dialogue come from the timeline, not from the
               model. A scene's shots can be defined once its timeline is ready
-              for generation and its looks and states are resolved.
+              for generation and its looks and states are resolved. Once every
+              shot of a scene is defined, the scene's continuity is checked:
+              where each shot ends must be where the next one starts. Shots that
+              do not line up are defined again, a few rounds at most.
             </Text>
           </Stack>
-          <Button
-            onClick={() => defineAll.mutate()}
-            loading={defineAll.isPending}
-            disabled={
-              isLoading || isError || busy || projectBlocked || allCount === 0
-            }
-          >
-            Define all
-          </Button>
+          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Button
+              variant="default"
+              onClick={() => checkAll.mutate()}
+              loading={checkAll.isPending}
+              disabled={
+                isLoading ||
+                isError ||
+                busy ||
+                projectBlocked ||
+                checkAllCount === 0
+              }
+            >
+              Check all continuity
+            </Button>
+            <Button
+              onClick={() => defineAll.mutate()}
+              loading={defineAll.isPending}
+              disabled={
+                isLoading || isError || busy || projectBlocked || allCount === 0
+              }
+            >
+              Define all
+            </Button>
+          </Group>
         </Group>
 
         {isLoading && <Loader size="sm" />}
@@ -333,6 +500,29 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
                 {describeError(mutation.error)}
               </Alert>
             ),
+        )}
+        {[checkAll, checkScene].map(
+          (mutation, position) =>
+            mutation.isError && (
+              <Alert
+                key={position}
+                color="red"
+                title="Could not start the continuity check"
+              >
+                {describeError(mutation.error)}
+              </Alert>
+            ),
+        )}
+        {checkSkipped.length > 0 && (
+          <Alert color="blue" title="Continuity not checked">
+            <Stack gap={2}>
+              {checkSkipped.map((item) => (
+                <Text key={item.scene_id} size="sm">
+                  {item.title}: {item.reason}
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
         )}
         {skipped.length > 0 && (
           <Alert color="blue" title="Not started">
@@ -356,6 +546,7 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
           <SceneRow
             key={scene.id}
             scene={scene}
+            continuity={continuityByScene.get(scene.id)}
             characterNames={characterNames}
             projectBlocked={projectBlocked}
             busy={busy}
@@ -363,6 +554,7 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
             onDefineShot={(shotId) =>
               defineOne.mutate({ sceneId: scene.id, shotId })
             }
+            onCheckContinuity={() => checkScene.mutate(scene.id)}
           />
         ))}
       </Stack>

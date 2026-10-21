@@ -135,6 +135,10 @@ H3_MAX_SHOT_KEY = "h3_max_shot_seconds"
 # a problem (PHASE-021). Not part of the order below: it is a count, not a length.
 SHOT_REPLAN_MAX_TRIES_KEY = "shot_replan_max_tries"
 
+# How many rounds of defining shots again a scene gets when its shots do not line up at a cut
+# (PHASE-023). Also a count, not a length, so it is not part of the order below.
+SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
+
 # From the smallest value to the largest: each setting must be at or below the next one.
 DURATION_ORDER: tuple[str, ...] = (
     H3_MIN_SHOT_KEY,
@@ -407,6 +411,23 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "are planned again automatically, up to this many times. Each re-plan is a paid "
             "model call. 0 turns automatic re-planning off. Pressing Plan yourself starts the "
             "count again."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=5,
+    ),
+    SettingSpec(
+        key=SHOT_CONTINUITY_MAX_ROUNDS_KEY,
+        group=GROUP_DURATION,
+        label="Automatic continuity rounds for a scene's shots",
+        help=(
+            "When neighbouring shots of a scene do not line up (one shot ends in a state the "
+            "next does not start from), the shots that do not fit are defined again "
+            "automatically, and the scene is checked again, up to this many rounds. Each round "
+            "is one paid model call per shot defined again, plus one for the check. 0 still "
+            "checks the scene but defines nothing again. Defining a shot yourself, or pressing "
+            "Check continuity, starts the count again."
         ),
         value_type="integer",
         default=2,

@@ -25,6 +25,7 @@ from app.api import (
     scene_events,
     scenes,
     settings,
+    shot_continuity,
     shot_definitions,
     shot_plans,
     speech_audio,
@@ -64,3 +65,4 @@ api_router.include_router(speech_units.router, tags=["speech-units"])
 api_router.include_router(speech_audio.router, tags=["speech-audio"])
 api_router.include_router(shot_plans.router, tags=["shot-plans"])
 api_router.include_router(shot_definitions.router, tags=["shot-definitions"])
+api_router.include_router(shot_continuity.router, tags=["shot-continuity"])

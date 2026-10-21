@@ -10,7 +10,8 @@
   (`write_story_bible.py`, `discover_characters.py`, `discover_environments.py`,
   `discover_scenes.py`, `define_character.py`, `discover_relations.py`, `design_voice.py`,
   `define_environment.py`, `define_scene.py`, `extract_events.py`,
-  `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`, `define_shot.py`)
+  `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`, `define_shot.py`,
+  `check_shot_continuity.py`)
   and the environment library
   (`write_environment_prompt.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
@@ -33,6 +34,7 @@ def register_handlers() -> None:
     handler modules can import the rest of the package without a cycle.
     """
     from app.jobs import handlers
+    from app.jobs.check_shot_continuity import CheckShotContinuityHandler
     from app.jobs.define_character import DefineCharacterHandler
     from app.jobs.define_environment import DefineEnvironmentHandler
     from app.jobs.define_scene import DefineSceneHandler
@@ -76,3 +78,4 @@ def register_handlers() -> None:
     handlers.register(SynthesizeSpeechUnitHandler())
     handlers.register(PlanShotsHandler())
     handlers.register(DefineShotHandler())
+    handlers.register(CheckShotContinuityHandler())
