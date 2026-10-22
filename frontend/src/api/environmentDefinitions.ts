@@ -134,6 +134,35 @@ export function useDefineOneEnvironment(projectId: number) {
   });
 }
 
+/**
+ * "Replace picture" (PHASE-039): makes a new canonical picture for an environment that has one.
+ * The project moves to a new version, so what used the old picture reads out of date.
+ */
+export function useReplaceEnvironmentPicture(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (discoveryId: string) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/environment-definitions/{discovery_id}/replace-picture",
+        { params: { path: { project_id: projectId, discovery_id: discoveryId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not replace the picture (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        refreshAfterRun(queryClient, projectId),
+        // The pin moved, so everything that read the old picture is judged again.
+        queryClient.invalidateQueries({ queryKey: [...PROJECTS_KEY, projectId] }),
+      ]),
+  });
+}
+
 /** Makes the picture of the pinned version again, after a picture failed. */
 export function useRetryEnvironmentPicture(projectId: number) {
   const queryClient = useQueryClient();

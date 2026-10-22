@@ -44,6 +44,7 @@ from app.services import (
     duration_policy,
     event_extraction_writer,
     h3_lengths,
+    provenance,
     scene_definition_writer,
     scene_definitions,
     scene_timeline,
@@ -643,6 +644,55 @@ def _newer_than_recorded(inputs: dict[str, Any], kind: str, newest: int | None) 
     return not isinstance(version, int) or (newest is not None and newest > version)
 
 
+def _audio_reasons(
+    row: ShotPlan,
+    policy: duration_policy.DurationPolicy | None,
+    now: dict[str, speech_synthesis.UnitEntry],
+) -> list[str]:
+    """The lines whose audio was made again so that they no longer fit their shot, one sentence
+    each. The plan is laid out twice, with the lengths it recorded and with the lengths now, and
+    only a blocking problem the first layout did not have is a reason. A line that is not ready
+    keeps its recorded length here: its own stage says it is out of date.
+    """
+    if policy is None or not isinstance(row.inputs, dict):
+        return []
+    recorded: list[scene_timeline.UnitInfo] = []
+    current: list[scene_timeline.UnitInfo] = []
+    for artifact in row.inputs.get("artifacts") or []:
+        if not isinstance(artifact, dict) or artifact.get("kind") != SPEECH_AUDIO_KIND:
+            continue
+        unit_id = artifact.get("unit_id")
+        seconds = artifact.get("duration_s")
+        item = now.get(unit_id) if isinstance(unit_id, str) else None
+        if (
+            item is None
+            or isinstance(seconds, bool)
+            or not isinstance(seconds, int | float)
+            or item.unit["kind"] not in ("narration", "dialogue")
+        ):
+            return []  # The plan of the units changed; its own reason says so.
+        before = scene_timeline.UnitInfo(unit_id, item.unit["kind"], float(seconds))
+        recorded.append(before)
+        audio = item.audio
+        if item.status == "ready" and audio is not None and audio.duration_s is not None:
+            current.append(
+                scene_timeline.UnitInfo(unit_id, item.unit["kind"], float(audio.duration_s))
+            )
+        else:
+            current.append(before)
+    shots = row.content["shots"]
+    known = {
+        (problem.code, problem.shot_id, problem.unit_id)
+        for problem in scene_timeline.build_timeline(shots, recorded, policy).problems
+    }
+    return [
+        f"The speech was made again and no longer fits: {problem.message}"
+        for problem in scene_timeline.build_timeline(shots, current, policy).problems
+        if problem.severity == "blocking"
+        and (problem.code, problem.shot_id, problem.unit_id) not in known
+    ]
+
+
 def _out_of_date_reasons(
     row: ShotPlan,
     loaded: _Loaded,
@@ -672,7 +722,7 @@ def _out_of_date_reasons(
     else:
         if definition.status == "out_of_date":
             reasons.append("The definition of the scene is out of date.")
-        if _newer_than_recorded(inputs, SCENE_DEFINITION_KIND, definition.row.version):
+        if not provenance.same_row(_recorded(inputs, SCENE_DEFINITION_KIND), definition.row):
             reasons.append("The scene has been defined again since these shots were planned.")
 
     events = scene.scene.events
@@ -681,7 +731,7 @@ def _out_of_date_reasons(
     else:
         if events.status == "out_of_date":
             reasons.append("The events of the scene are out of date.")
-        if _newer_than_recorded(inputs, SCENE_EVENTS_KIND, events.row.version):
+        if not provenance.same_row(_recorded(inputs, SCENE_EVENTS_KIND), events.row):
             reasons.append("The events of the scene were extracted again since these shots.")
 
     if scene.scene.row is None:
@@ -689,24 +739,19 @@ def _out_of_date_reasons(
     else:
         if scene.scene.status == "out_of_date":
             reasons.append("The speech units of the scene are out of date.")
-        if _newer_than_recorded(inputs, SPEECH_UNITS_KIND, scene.scene.row.version):
+        if not provenance.same_row(_recorded(inputs, SPEECH_UNITS_KIND), scene.scene.row):
             reasons.append("The speech units were planned again since these shots were planned.")
 
+    # Making a line again does not by itself invalidate the plan: the plan holds lengths, and
+    # only a line that no longer fits its shot does (PHASE-039). The shots that carry the
+    # line are told by their own generation request.
     now = {item.unit["id"]: item for item in scene.units}
+    reasons.extend(_audio_reasons(row, loaded.policy, now))
     for artifact in inputs.get("artifacts") or []:
         if not isinstance(artifact, dict):
             continue
         kind = artifact.get("kind")
-        if kind == SPEECH_AUDIO_KIND:
-            unit_id = artifact.get("unit_id")
-            item = now.get(unit_id)
-            if item is None:
-                continue  # The plan changed; the line above says so.
-            if item.status != "ready" or item.audio is None:
-                reasons.append(f"The speech of {unit_id} is no longer ready.")
-            elif item.audio.id != artifact.get("id"):
-                reasons.append(f"The speech of {unit_id} has been made again.")
-        elif kind in (CHARACTER_DEFINITION_KIND, ENVIRONMENT_DEFINITION_KIND):
+        if kind in (CHARACTER_DEFINITION_KIND, ENVIRONMENT_DEFINITION_KIND):
             discovery_id = artifact.get("discovery_id")
             name = artifact.get("name") or discovery_id
             here = loaded.current.get((kind, discovery_id))
@@ -1032,8 +1077,24 @@ async def save_shot_plan(
     return row
 
 
+async def accept_as_is(session: AsyncSession, project: Project, scene_id: str) -> ShotPlan:
+    """Keeps the scene's newest plan as it is and records that it was made from what is
+    current now (PHASE-039). The shots are checked again like an edit, so a plan that no longer
+    fits the events or speech is refused with the reason. Raises ShotPlansError.
+    """
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is None:
+        raise ShotPlansError(f"Scene '{scene_id}' has no shot plan to accept.")
+    return await save_manual(session, project, scene_id, newest.content["shots"], accepting=newest)
+
+
 async def save_manual(
-    session: AsyncSession, project: Project, scene_id: str, shots: list[dict[str, Any]]
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shots: list[dict[str, Any]],
+    *,
+    accepting: ShotPlan | None = None,
 ) -> ShotPlan:
     """Stores the user's edit of a scene's shots as its next plan (`source` is `manual`), and
     commits (PHASE-038). Each shot is `{source_event_ids, speech_unit_ids, type,
@@ -1046,7 +1107,8 @@ async def save_manual(
     shot outside the planning target range is only a warning, as it is after a model plan.
     Each shot's length is moved onto a length H3 makes (`h3_lengths`), as for a model plan, so the
     stored length can differ from the one typed. The version records exactly what a job would
-    (D-3). Nothing is planned again by itself afterwards. Raises ShotPlansError.
+    (D-3). Nothing is planned again by itself afterwards. With `accepting` (PHASE-039) it also
+    records which version the user accepted as it is. Raises ShotPlansError.
     """
     loaded = await _load(session, project)
     if loaded.blocked_reason is not None:
@@ -1099,5 +1161,7 @@ async def save_manual(
         inputs=prepared.inputs,
         source=SOURCE_MANUAL,
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row

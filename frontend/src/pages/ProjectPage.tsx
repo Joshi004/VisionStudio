@@ -27,6 +27,7 @@ import { ShotTakesPanel } from "../components/story/ShotTakesPanel";
 import { StoryRenderPanel } from "../components/story/StoryRenderPanel";
 import { SpeechUnitsPanel } from "../components/story/SpeechUnitsPanel";
 import { StageList } from "../components/story/StageList";
+import { StalenessPanel } from "../components/story/StalenessPanel";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
 import { StoryEditor } from "../components/story/StoryEditor";
 import { StoryPipelinePanel } from "../components/story/StoryPipelinePanel";
@@ -88,6 +89,7 @@ export function ProjectPage() {
           <StoryEditor project={project} />
           <CastPanel projectId={project.id} />
           <StoryPipelinePanel projectId={project.id} />
+          <StalenessPanel projectId={project.id} />
           <StoryBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
           <DiscoveryPanel
             projectId={project.id}

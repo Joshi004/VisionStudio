@@ -20,6 +20,7 @@ import {
   useDefineAllEnvironments,
   useDefineOneEnvironment,
   useEnvironmentDefinitions,
+  useReplaceEnvironmentPicture,
   useRetryEnvironmentPicture,
   type EnvironmentDefinitionEntry,
 } from "../../api/environmentDefinitions";
@@ -49,14 +50,15 @@ type PictureProps = {
   entry: EnvironmentDefinitionEntry;
   busy: boolean;
   onRetry: () => void;
+  onReplace: () => void;
 };
 
 /**
  * The canonical picture of the version the project pins. It is made by itself once the
- * definition is saved, so this shows how that is going, the picture when it is ready, and a
- * Retry when it failed or was never started.
+ * definition is saved, so this shows how that is going, the picture when it is ready (with
+ * Replace picture), and a Retry when it failed or was never started.
  */
-function PictureBlock({ entry, busy, onRetry }: PictureProps) {
+function PictureBlock({ entry, busy, onRetry, onReplace }: PictureProps) {
   const picture = entry.picture;
   if (picture.status === "unavailable") {
     return null;
@@ -94,6 +96,13 @@ function PictureBlock({ entry, busy, onRetry }: PictureProps) {
             />
           </PromptHoverCard>
         </div>
+      )}
+      {picture.status === "ready" && entry.status === "defined" && (
+        <Group gap="xs">
+          <Button size="compact-xs" variant="default" disabled={busy} onClick={onReplace}>
+            Replace picture
+          </Button>
+        </Group>
       )}
       {picture.status === "failed" && (
         <Alert color="red" p="xs" title="The picture could not be made">
@@ -133,6 +142,7 @@ type EntryRowProps = {
   busy: boolean;
   onDefine: () => void;
   onRetryPicture: () => void;
+  onReplacePicture: () => void;
 };
 
 /**
@@ -140,7 +150,14 @@ type EntryRowProps = {
  * project pins, why its definition is out of date, the job's failure when the last run failed,
  * its picture, and the definition itself, read only.
  */
-function EntryRow({ entry, projectBlocked, busy, onDefine, onRetryPicture }: EntryRowProps) {
+function EntryRow({
+  entry,
+  projectBlocked,
+  busy,
+  onDefine,
+  onRetryPicture,
+  onReplacePicture,
+}: EntryRowProps) {
   const [open, setOpen] = useState(false);
   const job = entry.job;
   const active = isJobActive(job);
@@ -207,7 +224,14 @@ function EntryRow({ entry, projectBlocked, busy, onDefine, onRetryPicture }: Ent
               {job.error ?? "The job failed."}
             </Alert>
           )}
-          {defined && <PictureBlock entry={entry} busy={busy} onRetry={onRetryPicture} />}
+          {defined && (
+            <PictureBlock
+              entry={entry}
+              busy={busy}
+              onRetry={onRetryPicture}
+              onReplace={onReplacePicture}
+            />
+          )}
         </Stack>
         <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
           {entry.definition !== null && (
@@ -256,10 +280,17 @@ export function EnvironmentDefinitionsPanel({ projectId }: EnvironmentDefinition
   const defineAll = useDefineAllEnvironments(projectId);
   const defineOne = useDefineOneEnvironment(projectId);
   const retryPicture = useRetryEnvironmentPicture(projectId);
+  const replacePicture = useReplaceEnvironmentPicture(projectId);
   // The environment waiting for the user to agree to overwrite its profile.
   const [confirming, setConfirming] = useState<EnvironmentDefinitionEntry | null>(null);
+  // The environment waiting for the user to agree to a new picture.
+  const [replacing, setReplacing] = useState<EnvironmentDefinitionEntry | null>(null);
 
-  const busy = defineAll.isPending || defineOne.isPending || retryPicture.isPending;
+  const busy =
+    defineAll.isPending ||
+    defineOne.isPending ||
+    retryPicture.isPending ||
+    replacePicture.isPending;
   const entries = data?.entries ?? [];
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
   // What "Define all" would start: the linked environments made for this project that may run
@@ -319,6 +350,11 @@ export function EnvironmentDefinitionsPanel({ projectId }: EnvironmentDefinition
             {describeError(retryPicture.error)}
           </Alert>
         )}
+        {replacePicture.isError && (
+          <Alert color="red" title="Could not replace the picture">
+            {describeError(replacePicture.error)}
+          </Alert>
+        )}
         {skipped.length > 0 && (
           <Alert color="blue" title="Not started">
             <Stack gap={2}>
@@ -351,9 +387,41 @@ export function EnvironmentDefinitionsPanel({ projectId }: EnvironmentDefinition
             busy={busy}
             onDefine={() => define(entry)}
             onRetryPicture={() => retryPicture.mutate(entry.id)}
+            onReplacePicture={() => setReplacing(entry)}
           />
         ))}
       </Stack>
+
+      <Modal
+        opened={replacing !== null}
+        onClose={() => setReplacing(null)}
+        title="Replace the picture?"
+        centered
+      >
+        {replacing && (
+          <Stack gap="md">
+            <Text size="sm">
+              A new reference picture is drawn for {replacing.name}. The project then uses a new
+              version of the environment, and the old picture stays with its old version. The
+              pictures of its states and the shots that used the old picture will read as out of
+              date. Nothing is made again by itself.
+            </Text>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setReplacing(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  replacePicture.mutate(replacing.id);
+                  setReplacing(null);
+                }}
+              >
+                Replace picture
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
 
       <Modal
         opened={confirming !== null}

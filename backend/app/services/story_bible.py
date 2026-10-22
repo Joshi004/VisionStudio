@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, Project, StoryBible
 from app.jobs import store
-from app.services import story_bible_writer
+from app.services import provenance, story_bible_writer
 
 JOB_TYPE: Final = "write_story_bible"
 SOURCE_AI: Final = "ai"
@@ -146,13 +146,28 @@ async def _add_version(
     return bible
 
 
+async def accept_as_is(session: AsyncSession, project: Project) -> StoryBible:
+    """Keeps the newest StoryBible as it is and records that it was made from the story as
+    saved now (PHASE-039). Raises StoryBibleError.
+    """
+    newest = await latest(session, project.id)
+    if newest is None:
+        raise StoryBibleError("There is no Story Bible to accept.")
+    return await save_manual(session, project, newest.content, accepting=newest)
+
+
 async def save_manual(
-    session: AsyncSession, project: Project, content: dict[str, Any]
+    session: AsyncSession,
+    project: Project,
+    content: dict[str, Any],
+    *,
+    accepting: StoryBible | None = None,
 ) -> StoryBible:
     """Stores the user's edited StoryBible as the next version (`source` is `manual`), and
     commits (PHASE-037). The content is checked the way the model's answer is
     (`story_bible_writer.check_bible`), so `language` stays `en` and the limits hold. The
-    version records the hash of the story as saved now. Raises StoryBibleError.
+    version records the hash of the story as saved now. With `accepting` (PHASE-039) it also
+    records which version the user accepted as it is. Raises StoryBibleError.
     """
     story = project.script_text
     if story is None or not story.strip():
@@ -172,6 +187,8 @@ async def save_manual(
         story_sha256=story_sha256(story),
         content=checked,
     )
+    if accepting is not None:
+        bible.inputs = provenance.accepted_inputs(bible.inputs, accepting, bible.content)
     await session.commit()
     return bible
 

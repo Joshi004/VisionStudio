@@ -41,6 +41,7 @@ from app.services import (
     character_definitions,
     discovery,
     event_extraction_writer,
+    provenance,
     scene_definition_writer,
     scene_definitions,
     story_bible,
@@ -150,6 +151,9 @@ class _Loaded:
     definitions: dict[str, scene_definitions.SceneEntry]
     # The newest list's characters that are linked and defined, by discovery id.
     current: dict[str, _Character]
+    # The status of the definition of each character of the newest list that is not defined
+    # and current, by discovery id (PHASE-039).
+    not_ready_status: dict[str, str]
     blocked_reason: str | None
 
 
@@ -198,9 +202,11 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         for entry in (await scene_definitions.state(session, project)).entries
     }
     current: dict[str, _Character] = {}
+    not_ready_status: dict[str, str] = {}
     if characters is not None:
         for entry in (await character_definitions.state(session, project)).entries:
             if entry.status != "defined" or entry.entry.info is None or entry.version is None:
+                not_ready_status[entry.item["id"]] = entry.status
                 continue
             link = entry.entry.info.link
             current[entry.item["id"]] = _Character(
@@ -218,6 +224,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         characters=characters,
         definitions=definitions,
         current=current,
+        not_ready_status=not_ready_status,
         blocked_reason=_blocked_reason(story, bible, scenes, characters),
     )
 
@@ -462,6 +469,7 @@ def _out_of_date_reasons(
     definition: scene_definitions.SceneEntry | None,
     current: dict[str, _Character],
     listed: set[str],
+    not_ready_status: dict[str, str],
 ) -> list[str]:
     """Why events written for this scene are no longer current, one sentence each. `listed` is
     the ids of the newest list of characters.
@@ -484,18 +492,12 @@ def _out_of_date_reasons(
         reasons.append("The text of the scene has changed.")
 
     recorded_definition = _recorded(inputs, SCENE_DEFINITION_KIND)
-    recorded_definition_version = (
-        recorded_definition.get("version") if recorded_definition else None
-    )
     if definition is None or definition.row is None:
         reasons.append("The scene has no definition now.")
     else:
         if definition.status == "out_of_date":
             reasons.append("The definition of the scene is out of date.")
-        if (
-            not isinstance(recorded_definition_version, int)
-            or definition.row.version > recorded_definition_version
-        ):
+        if not provenance.same_row(recorded_definition, definition.row):
             reasons.append("The scene has been defined again since these events were made.")
 
     for artifact in inputs.get("artifacts") or []:
@@ -507,7 +509,13 @@ def _out_of_date_reasons(
             reasons.append(f"{name} is no longer in the list of characters.")
             continue
         now = current.get(discovery_id)
-        if now is None or now.library_id != artifact.get("id"):
+        if now is None:
+            reasons.append(
+                scene_definitions.unusable_reason(
+                    name, "character", not_ready_status.get(discovery_id)
+                )
+            )
+        elif now.library_id != artifact.get("id"):
             reasons.append(f"{name} is now linked to a different character, or not linked.")
         elif scene_definition_writer.definition_sha256(now.definition) != artifact.get(
             "definition_sha256"
@@ -573,7 +581,14 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Ev
         reasons: list[str] = []
         if row is not None and isinstance(row.inputs, dict):
             reasons = _out_of_date_reasons(
-                row, loaded.story, newest_bible_version, item, definition, loaded.current, listed
+                row,
+                loaded.story,
+                newest_bible_version,
+                item,
+                definition,
+                loaded.current,
+                listed,
+                loaded.not_ready_status,
             )
             status = "out_of_date" if reasons else "extracted"
         blocked_reason = loaded.blocked_reason or _scene_refusal(definition)
@@ -650,11 +665,23 @@ async def save_events(
     return row
 
 
+async def accept_as_is(session: AsyncSession, project: Project, scene_id: str) -> SceneEvents:
+    """Keeps the scene's newest events as they are and records that they were made from what
+    is current now (PHASE-039). Raises SceneEventsError.
+    """
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is None:
+        raise SceneEventsError(f"Scene '{scene_id}' has no events to accept.")
+    return await save_manual(session, project, scene_id, newest.content["events"], accepting=newest)
+
+
 async def save_manual(
     session: AsyncSession,
     project: Project,
     scene_id: str,
     events: list[dict[str, Any]],
+    *,
+    accepting: SceneEvents | None = None,
 ) -> SceneEvents:
     """Stores the user's edited events of one scene as its next version (`source` is
     `manual`), and commits (PHASE-037). It needs what a run needs (the scene's definition
@@ -662,7 +689,8 @@ async def save_manual(
     checked the way the model's answer is (`check_answer`): the types and fields, every speaker a
     discovered character, ids `evt_1`, `evt_2`, ... set by code in the order given, and every
     speech event found in the scene's text in order. The stretches of the text no speech event
-    covers are worked out again. Raises SceneEventsError.
+    covers are worked out again. With `accepting` (PHASE-039) it also records which version the
+    user accepted as it is. Raises SceneEventsError.
     """
     loaded = await _load(session, project)
     if loaded.blocked_reason is not None:
@@ -695,5 +723,7 @@ async def save_manual(
         inputs=prepared.inputs,
         source=SOURCE_MANUAL,
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row

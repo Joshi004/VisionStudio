@@ -48,6 +48,7 @@ from app.core import settings as settings_service
 from app.db.models import Job, Project, ShotContinuityCheck
 from app.jobs import store
 from app.services import (
+    provenance,
     scene_definitions,
     shot_continuity_writer,
     shot_definitions,
@@ -199,16 +200,21 @@ def _not_ready_reason(
 
 def _covers(row: ShotContinuityCheck, entry: shot_definitions.SceneEntry) -> bool:
     """Whether this check read exactly the shot plan and the shot definitions the scene has now."""
-    if entry.plan is None or row.shot_plan_id != entry.plan.id:
+    if entry.plan is None or not provenance.same_id(row.shot_plan_id, entry.plan):
         return False
     artifacts = row.inputs.get("artifacts") if isinstance(row.inputs, dict) else None
     recorded = {
-        (artifact.get("shot_id"), artifact.get("id"))
+        artifact.get("shot_id"): artifact
         for artifact in artifacts or []
         if isinstance(artifact, dict) and artifact.get("kind") == SHOT_DEFINITION_KIND
     }
-    current = {(shot.shot["id"], shot.row.id) for shot in entry.shots if shot.row is not None}
-    return len(current) == len(entry.shots) and recorded == current
+    if len(recorded) != len(entry.shots):
+        return False
+    # A definition the user accepted as it was stands for the one it replaces (PHASE-039).
+    return all(
+        shot.row is not None and provenance.same_row(recorded.get(shot.shot["id"]), shot.row)
+        for shot in entry.shots
+    )
 
 
 def _continuity_of(row: Any) -> dict[str, Any] | None:

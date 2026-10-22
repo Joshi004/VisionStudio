@@ -55,6 +55,7 @@ from app.services import (
     discovery,
     environment_definitions,
     environment_versions,
+    provenance,
     scene_definition_writer,
     story_bible,
 )
@@ -172,6 +173,9 @@ class _Loaded:
     current: dict[tuple[str, str], CurrentDefinition]
     # Every entry of the two newest lists that is not defined and current, with its status.
     not_ready: list[tuple[str, str]]
+    # The same entries by `(kind, discovery id)`, with the status of their definition (PHASE-039:
+    # so a definition that is only out of date is not reported as unlinked).
+    not_ready_status: dict[tuple[str, str], str]
     blocked_reason: str | None
 
 
@@ -238,12 +242,14 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
 
     current: dict[tuple[str, str], CurrentDefinition] = {}
     not_ready: list[tuple[str, str]] = []
+    not_ready_status: dict[tuple[str, str], str] = {}
     if characters is not None:
         for entry in (await character_definitions.state(session, project)).entries:
             item = entry.item
             if entry.status != "defined" or entry.entry.info is None:
                 word = _STATUS_WORDS.get(entry.status, entry.status)
                 not_ready.append((CHARACTER_DEFINITION_KIND, f"{item['name']} ({word})"))
+                not_ready_status[(CHARACTER_DEFINITION_KIND, item["id"])] = entry.status
                 continue
             link = entry.entry.info.link
             current[(CHARACTER_DEFINITION_KIND, item["id"])] = CurrentDefinition(
@@ -263,6 +269,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
             if env_entry.status != "defined" or env_entry.entry.info is None:
                 word = _STATUS_WORDS.get(env_entry.status, env_entry.status)
                 not_ready.append((ENVIRONMENT_DEFINITION_KIND, f"{item['name']} ({word})"))
+                not_ready_status[(ENVIRONMENT_DEFINITION_KIND, item["id"])] = env_entry.status
                 continue
             link_env = env_entry.entry.info.link
             pinned = await environment_versions.get_version(
@@ -286,6 +293,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         environments=environments,
         current=current,
         not_ready=not_ready,
+        not_ready_status=not_ready_status,
         blocked_reason=_blocked_reason(story, bible, scenes, characters, environments, not_ready),
     )
 
@@ -514,6 +522,15 @@ def _recorded_version(inputs: dict[str, Any], kind: str) -> int | None:
     return None
 
 
+def unusable_reason(name: str, what: str, status: str | None) -> str:
+    """Why a character or environment a stage was built from cannot be read now. A definition
+    that is only out of date is said to be that, not reported as unlinked (PHASE-039).
+    """
+    if status == "out_of_date":
+        return f"The definition of {name} is out of date."
+    return f"{name} is now linked to a different {what}, or not linked."
+
+
 def _out_of_date_reasons(
     inputs: dict[str, Any],
     story: str | None,
@@ -521,6 +538,7 @@ def _out_of_date_reasons(
     scene_hash: str,
     current: dict[tuple[str, str], CurrentDefinition],
     listed: dict[str, set[str]],
+    not_ready_status: dict[tuple[str, str], str],
 ) -> list[str]:
     """Why a definition written for this scene is no longer current, one sentence each.
     `listed` is the ids of the newest lists of characters and environments, by artifact kind.
@@ -551,7 +569,9 @@ def _out_of_date_reasons(
             reasons.append(f"{name} is no longer in the list of {what}s.")
             continue
         now = current.get((kind, discovery_id))
-        if now is None or now.library_id != artifact.get("id"):
+        if now is None:
+            reasons.append(unusable_reason(name, what, not_ready_status.get((kind, discovery_id))))
+        elif now.library_id != artifact.get("id"):
             reasons.append(f"{name} is now linked to a different {what}, or not linked.")
         elif scene_definition_writer.definition_sha256(now.definition) != artifact.get(
             "definition_sha256"
@@ -624,6 +644,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> De
                 scene_definition_writer.scene_sha256(item, previous, next_),
                 loaded.current,
                 listed,
+                loaded.not_ready_status,
             )
             status = "out_of_date" if reasons else "defined"
         blocked_reason = loaded.blocked_reason
@@ -725,15 +746,31 @@ async def save_definition(
     return row
 
 
+async def accept_as_is(session: AsyncSession, project: Project, scene_id: str) -> SceneDefinition:
+    """Keeps the scene's newest definition as it is and records that it was made from what is
+    current now (PHASE-039). Raises SceneDefinitionError.
+    """
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is None:
+        raise SceneDefinitionError(f"Scene '{scene_id}' has no definition to accept.")
+    return await save_manual(session, project, scene_id, newest.content, accepting=newest)
+
+
 async def save_manual(
-    session: AsyncSession, project: Project, scene_id: str, definition: dict[str, Any]
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    definition: dict[str, Any],
+    *,
+    accepting: SceneDefinition | None = None,
 ) -> SceneDefinition:
     """Stores the user's edited definition of one scene as its next version (`source` is
     `manual`), and commits (PHASE-037). It needs what a run needs (everything linked and
     defined, the lists current) and is refused while the scene is being defined. The definition
     is checked the way the model's answer is (`check_definition`), and the version records
     exactly what a job would: the lists, the StoryBible and the definitions of the environment
-    and characters it chose. Raises SceneDefinitionError.
+    and characters it chose. With `accepting` (PHASE-039) it also records which version the
+    user accepted as it is. Raises SceneDefinitionError.
     """
     loaded = await _load(session, project)
     if loaded.blocked_reason is not None:
@@ -769,5 +806,7 @@ async def save_manual(
         shown=shown,
         source=SOURCE_MANUAL,
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row

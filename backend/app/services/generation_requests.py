@@ -36,6 +36,7 @@ from app.db.models import GenerationRequest, Project, ShotDefinition
 from app.services import (
     duration_policy,
     generation_planner,
+    provenance,
     shot_plans,
     shot_references,
     speech_synthesis,
@@ -242,6 +243,18 @@ def _shot_seconds(ctx: _Context, scene_id: str, shot_id: str) -> float | None:
     return round(span.end_s - span.start_s, 3) if span is not None else None
 
 
+def _whose(unit: speech_synthesis.UnitEntry | None) -> str:
+    """ "Arjun's " for a line of dialogue (the speaker's id as a name), else "the narrator's "
+    or nothing: it makes the reason say whose voice the line is in.
+    """
+    if unit is None:
+        return ""
+    if unit.unit.get("kind") == "narration":
+        return "the narrator's "
+    speaker = unit.unit.get("speaker_id")
+    return f"{str(speaker).replace('_', ' ').title()}'s " if isinstance(speaker, str) else ""
+
+
 def _out_of_date_reasons(
     row: GenerationRequest, ctx: _Context, scene_id: str, entry: shot_references.ShotEntry
 ) -> list[str]:
@@ -250,7 +263,7 @@ def _out_of_date_reasons(
     recorded = _recorded(row.inputs, MANIFEST_KIND)
     if entry.row is None:
         reasons.append("The shot has no reference pictures now.")
-    elif recorded is None or recorded.get("id") != entry.row.id:
+    elif not provenance.same_row(recorded, entry.row):
         reasons.append(
             "The references of the shot were chosen again since the request was planned."
         )
@@ -262,10 +275,15 @@ def _out_of_date_reasons(
             continue
         unit_id = str(artifact.get("unit_id"))
         unit = ctx.audio.get((scene_id, unit_id))
+        whose = _whose(unit)
         if unit is None or unit.status != "ready" or unit.audio is None:
-            reasons.append(f"The speech of the line '{unit_id}' is no longer ready.")
+            first = unit.reasons[0] if unit is not None and unit.reasons else None
+            reasons.append(
+                f"The speech of {whose}line '{unit_id}' is no longer ready"
+                + (f": {first}" if first is not None else ".")
+            )
         elif unit.audio.id != artifact.get("id"):
-            reasons.append(f"The speech of the line '{unit_id}' was made again.")
+            reasons.append(f"The speech of {whose}line '{unit_id}' was made again.")
 
     seconds = _shot_seconds(ctx, scene_id, row.shot_id)
     if seconds is not None and seconds != row.content.get("target_seconds"):

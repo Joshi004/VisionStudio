@@ -35,6 +35,7 @@ from app.api import (
     shot_takes,
     speech_audio,
     speech_units,
+    staleness,
     story_bible,
     story_pipeline,
     story_renders,
@@ -80,3 +81,4 @@ api_router.include_router(shot_takes.router, tags=["shot-takes"])
 api_router.include_router(story_renders.router, tags=["story-renders"])
 api_router.include_router(story_pipeline.router, tags=["story-pipeline"])
 api_router.include_router(project_cast.router, tags=["project-cast"])
+api_router.include_router(staleness.router, tags=["staleness"])

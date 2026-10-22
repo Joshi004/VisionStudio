@@ -39,6 +39,7 @@ from app.db.models import GenerationRequest, Job, Project, ShotDefinition, ShotP
 from app.jobs import store
 from app.services import (
     generation_requests,
+    provenance,
     scene_definitions,
     shot_definitions,
     shot_prompt_writer,
@@ -621,12 +622,28 @@ async def save_shot_prompt(
     return row
 
 
+async def accept_as_is(
+    session: AsyncSession, project: Project, scene_id: str, shot_id: str
+) -> ShotPrompt:
+    """Keeps the shot's newest prompt as it is and records that it was made from what is
+    current now (PHASE-039). The prompt is built again from its pieces, so one that no longer
+    fits the shot's request is refused with the reason. Raises ShotPromptsError.
+    """
+    newest = (await _newest_rows(session, project.id)).get(_shot_key(scene_id, shot_id))
+    pieces = newest.content.get("pieces") if newest is not None else None
+    if newest is None or not isinstance(pieces, dict):
+        raise ShotPromptsError(f"Shot '{shot_id}' has no prompt to accept.")
+    return await save_manual(session, project, scene_id, shot_id, pieces, accepting=newest)
+
+
 async def save_manual(
     session: AsyncSession,
     project: Project,
     scene_id: str,
     shot_id: str,
     pieces: dict[str, Any],
+    *,
+    accepting: ShotPrompt | None = None,
 ) -> ShotPrompt:
     """Stores the user's edit of one shot's prompt as its next version (`source` is `manual`),
     and commits (PHASE-038). `pieces` are the creative pieces the model writes (the style, the
@@ -638,7 +655,8 @@ async def save_manual(
 
     It needs what a compile needs (the shot's request planned and current) and is refused while
     the prompt is being compiled. The version records exactly what a job would. Nothing is
-    sent to the GPU: generating the clip is the user's own press. Raises ShotPromptsError.
+    sent to the GPU: generating the clip is the user's own press. With `accepting` (PHASE-039)
+    it also records which version the user accepted as it is. Raises ShotPromptsError.
     """
     current = await state(session, project)
     _scene, shot = _find_shot(current, scene_id, shot_id)
@@ -667,5 +685,7 @@ async def save_manual(
         inputs=_inputs(project.id, scene_id, shot_id, request, context),
         source=SOURCE_MANUAL,
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row

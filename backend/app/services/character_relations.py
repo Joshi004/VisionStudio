@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import CharacterDiscovery, CharacterRelations, Job, Project, StoryBible
 from app.jobs import store
 from app.services import character_relation_writer as writer
-from app.services import discovery, story_bible
+from app.services import discovery, provenance, story_bible
 
 JOB_TYPE: Final = "discover_relations"
 SOURCE_AI: Final = "ai"
@@ -241,11 +241,26 @@ async def save_version(
     )
 
 
+async def accept_as_is(session: AsyncSession, project: Project) -> CharacterRelations:
+    """Keeps the newest relations as they are and records that they were made from the story,
+    StoryBible and characters as they are now (PHASE-039). Raises CharacterRelationError.
+    """
+    newest = await latest(session, project.id)
+    if newest is None:
+        raise CharacterRelationError("There are no relations to accept.")
+    return await save_manual(session, project, newest.content["relations"], accepting=newest)
+
+
 async def save_manual(
-    session: AsyncSession, project: Project, relations: list[dict[str, Any]]
+    session: AsyncSession,
+    project: Project,
+    relations: list[dict[str, Any]],
+    *,
+    accepting: CharacterRelations | None = None,
 ) -> CharacterRelations:
     """Stores the user's whole edited list as the next version (`source` is `manual`), and
-    commits. The list is checked the same way the model's answer is. Raises
+    commits. The list is checked the same way the model's answer is. With `accepting`
+    (PHASE-039) it also records which version the user accepted as it is. Raises
     CharacterRelationError.
     """
     story, bible, newest = await _require_inputs(session, project)
@@ -262,6 +277,8 @@ async def save_manual(
         inputs=_inputs(story, bible, newest),
         relations=checked["relations"],
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row
 

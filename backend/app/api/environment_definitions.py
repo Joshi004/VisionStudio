@@ -13,6 +13,9 @@
   the library is overwritten only when the body says `confirm_overwrite: true`.
 - `POST .../{discovery_id}/picture` starts the canonical picture of the pinned version again,
   for a defined environment that has none (it failed, or was never started).
+- `POST .../{discovery_id}/replace-picture` makes a new canonical picture for a defined
+  environment that has one (PHASE-039): a new version with no picture is pinned and its picture
+  is started; the old picture stays with the old version.
 
 A job writes the definition onto the library environment, as a new version the project pins,
 and starts its picture (`services/environment_definitions.py`). The answers never return ORM
@@ -342,6 +345,28 @@ async def run_picture(
     project = await load_project(session, project_id)
     try:
         attempt = await environment_definitions.start_picture(session, project, discovery_id)
+    except environment_definitions.EnvironmentDefinitionError as exc:
+        raise _refused(exc) from exc
+    dispatcher.nudge()
+    return EnvironmentPictureRunOut(reference_id=attempt.id)
+
+
+@router.post(
+    "/projects/{project_id}/environment-definitions/{discovery_id}/replace-picture",
+    response_model=EnvironmentPictureRunOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def replace_picture(
+    project_id: int, discovery_id: DiscoveryId, session: SessionDep
+) -> EnvironmentPictureRunOut:
+    """Makes a new canonical picture for a defined environment that already has one (PHASE-039).
+    The old picture stays with its version; the project moves to a new version and what used
+    the old picture reads out of date.
+    """
+    project = await load_project(session, project_id)
+    try:
+        attempt = await environment_definitions.replace_picture(session, project, discovery_id)
     except environment_definitions.EnvironmentDefinitionError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()

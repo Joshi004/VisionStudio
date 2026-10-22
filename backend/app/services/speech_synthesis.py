@@ -279,14 +279,21 @@ def _job_error(job: Job | None) -> str:
 
 
 def _reasons(
-    previous: SpeechUnitAudio, text: str, voice_id: int, mode: str, instruction: str | None
+    previous: SpeechUnitAudio,
+    text: str,
+    voice_id: int,
+    mode: str,
+    instruction: str | None,
+    speaker: str,
 ) -> list[str]:
-    """Why audio made for the unit earlier no longer matches it."""
+    """Why audio made for the unit earlier no longer matches it. `speaker` is who speaks it
+    ("The narrator", or the character's name), so the reason says whose voice changed.
+    """
     reasons: list[str] = []
     if previous.text != text:
         reasons.append("The text of this unit has changed since the speech was made.")
     if previous.voice_id != voice_id:
-        reasons.append("The voice has changed since the speech was made.")
+        reasons.append(f"{speaker}'s voice has changed since the speech was made.")
     if previous.mode != mode or previous.instruction != instruction:
         reasons.append("The delivery has changed since the speech was made.")
     return reasons or ["This unit has changed since the speech was made."]
@@ -300,6 +307,7 @@ def _unit_entry(
     by_key: dict[str, list[SpeechUnitAudio]],
     by_unit: dict[tuple[str, str], list[SpeechUnitAudio]],
     jobs: dict[int, Job],
+    speaker: str,
 ) -> UnitEntry:
     mode = choose_mode(unit)
     instruction = instruction_for(unit)
@@ -347,7 +355,7 @@ def _unit_entry(
             status = "none"
         else:
             status = "out_of_date"
-            reasons = _reasons(earlier, text, voice.id, mode, instruction)
+            reasons = _reasons(earlier, text, voice.id, mode, instruction, speaker)
 
     blocked = scene_refusal
     if blocked is None and status == "in_progress":
@@ -400,8 +408,15 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
         scene_refusal = planned.blocked_reason or _scene_refusal(entry)
         for unit in content["units"] if content is not None else []:
             choice = _choice_for(unit, narrator, characters)
+            speaker = (
+                "The narrator"
+                if unit["kind"] == "narration"
+                else str(names.get(unit["speaker_id"], unit["speaker_id"]))
+            )
             units.append(
-                _unit_entry(unit, entry.item["id"], scene_refusal, choice, by_key, by_unit, jobs)
+                _unit_entry(
+                    unit, entry.item["id"], scene_refusal, choice, by_key, by_unit, jobs, speaker
+                )
             )
         scenes.append(SceneAudio(scene=entry, units=units))
     return AudioState(

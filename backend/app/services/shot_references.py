@@ -33,6 +33,8 @@ made from, stores the result and says where each shot stands.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
@@ -54,6 +56,7 @@ from app.db.models import (
 from app.jobs import store
 from app.services import (
     look_state_resolution,
+    provenance,
     reference_selection,
     scene_definitions,
     shot_definitions,
@@ -341,7 +344,7 @@ async def _catalog(
             session, current, slug, item.description if item is not None else None
         )
         raw.append((character_id, current.name, "character", pictures))
-        artifacts.append(_artifact(CHARACTER_KIND, character_id, current))
+        artifacts.append(_artifact(CHARACTER_KIND, character_id, current, slug, pictures))
 
     if resolved.environment is None:
         raise ShotReferencesError("The environment of this scene was not resolved.")
@@ -353,7 +356,7 @@ async def _catalog(
     state_slug = state_item.id if state_item.how != "default" else None
     pictures = await _environment_pictures(session, environment, state_slug, state_item.description)
     raw.append((environment_id, environment.name, "environment", pictures))
-    artifacts.append(_artifact(ENVIRONMENT_KIND, environment_id, environment))
+    artifacts.append(_artifact(ENVIRONMENT_KIND, environment_id, environment, state_slug, pictures))
 
     prompts = await _prompts(
         session, {picture[0] for _id, _name, _kind, group in raw for picture in group}
@@ -384,11 +387,26 @@ async def _catalog(
     return catalog, artifacts
 
 
+def _signature(pictures: list[tuple[int, str, str, bool, str | None]]) -> str:
+    """A hash of the pictures a subject offers for one look or state: which picture is there
+    for each view and variant. It changes when one of them is made again and not when the pin
+    moves for another reason (a new voice), which is what makes a manifest narrow (PHASE-039).
+    """
+    ids = sorted((variant, view, image_id) for image_id, view, variant, _r, _t in pictures)
+    text = json.dumps(ids, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _artifact(
-    kind: str, discovery_id: str, current: scene_definitions.CurrentDefinition
+    kind: str,
+    discovery_id: str,
+    current: scene_definitions.CurrentDefinition,
+    variant: str | None,
+    pictures: list[tuple[int, str, str, bool, str | None]],
 ) -> dict[str, Any]:
     """The record of the pinned definition a manifest was built from, in the artifact shape of
-    D-3 (the same as a shot definition records).
+    D-3. `variant` is the slug of the look or state the scene resolved to (None for the
+    default) and `pictures_sha256` the hash of the pictures it offered (PHASE-039).
     """
     return {
         "kind": kind,
@@ -396,6 +414,8 @@ def _artifact(
         "version": current.version,
         "discovery_id": discovery_id,
         "name": current.name,
+        "variant": variant,
+        "pictures_sha256": _signature(pictures),
     }
 
 
@@ -414,41 +434,133 @@ def _recorded(inputs: Any, kind: str) -> dict[str, Any] | None:
     return None
 
 
+_Signatures = dict[tuple[str, str, str | None], str | None]
+
+
+def _resolved_variants(ctx: _Context, scene_id: str) -> dict[tuple[str, str], str | None] | None:
+    """The look or state the scene resolves to now, by `(kind, discovery id)`: the slug of the
+    named look or state, None for the default. None when the scene is not resolved.
+    """
+    resolved = next((scene for scene in ctx.resolution.scenes if scene.scene_id == scene_id), None)
+    if resolved is None or not resolved.resolved:
+        return None
+    variants: dict[tuple[str, str], str | None] = {
+        (CHARACTER_KIND, look.subject_id): look.id if look.how != "default" else None
+        for look in resolved.looks
+    }
+    if resolved.environment is not None:
+        environment = resolved.environment
+        variants[(ENVIRONMENT_KIND, environment.subject_id)] = (
+            environment.id if environment.how != "default" else None
+        )
+    return variants
+
+
 def _out_of_date_reasons(
-    row: ShotReferenceManifest, entry: shot_definitions.ShotEntry, ctx: _Context
+    row: ShotReferenceManifest,
+    entry: shot_definitions.ShotEntry,
+    ctx: _Context,
+    scene_id: str,
+    signatures: _Signatures,
 ) -> list[str]:
-    """Why a manifest made for this shot is no longer current, one sentence each."""
+    """Why a manifest made for this shot is no longer current, one sentence each.
+
+    A manifest that recorded the look or state and the pictures of each subject it used
+    (PHASE-039) is judged by those: only a change to the look or state the scene resolves to
+    for this shot's subjects, or to the pictures they offer, makes it out of date. An older
+    manifest is judged by the resolution row and the pinned version, as before.
+    """
     reasons: list[str] = []
     recorded = _recorded(row.inputs, SHOT_DEFINITION_KIND)
     if entry.row is None:
         reasons.append("The shot has no definition now.")
-    elif recorded is None or recorded.get("id") != entry.row.id:
+    elif not provenance.same_row(recorded, entry.row):
         reasons.append("The shot was defined again since its references were chosen.")
     elif entry.status == "out_of_date":
         reasons.append("The definition of the shot is out of date.")
 
+    subjects = [
+        artifact
+        for artifact in _artifacts(row.inputs)
+        if isinstance(artifact, dict) and artifact.get("kind") in (CHARACTER_KIND, ENVIRONMENT_KIND)
+    ]
+    narrow = bool(subjects) and all("pictures_sha256" in artifact for artifact in subjects)
+
     newest = ctx.resolution.version
     recorded_resolution = _recorded(row.inputs, RESOLUTION_KIND)
+    variants = _resolved_variants(ctx, scene_id) if narrow else None
     if newest is None:
         reasons.append("The looks and states are no longer resolved.")
-    elif recorded_resolution is None or recorded_resolution.get("id") != newest.id:
+    elif narrow:
+        if variants is None:
+            reasons.append("The scene is no longer part of the resolved looks and states.")
+    elif not provenance.same_row(recorded_resolution, newest):
         reasons.append("The looks and states were resolved again since the references were chosen.")
 
-    for artifact in _artifacts(row.inputs):
-        if not isinstance(artifact, dict) or artifact.get("kind") not in (
-            CHARACTER_KIND,
-            ENVIRONMENT_KIND,
-        ):
-            continue
-        name = artifact.get("name") or artifact.get("discovery_id")
-        current = ctx.current.get((artifact["kind"], artifact.get("discovery_id")))
+    for artifact in subjects:
+        kind = artifact["kind"]
+        discovery_id = artifact.get("discovery_id")
+        name = artifact.get("name") or discovery_id
+        current = ctx.current.get((kind, discovery_id))
         if current is None:
             reasons.append(f"'{name}' is no longer linked and defined.")
-        elif current.library_id != artifact.get("id") or current.version != artifact.get("version"):
-            reasons.append(
-                f"'{name}' changed (its pictures may be new) since the references were chosen."
-            )
+        elif current.library_id != artifact.get("id"):
+            reasons.append(f"'{name}' is now linked to something else.")
+        elif not narrow:
+            if current.version != artifact.get("version"):
+                reasons.append(
+                    f"'{name}' changed (its pictures may be new) since the references were chosen."
+                )
+        else:
+            if variants is not None and variants.get((kind, discovery_id)) != artifact.get(
+                "variant"
+            ):
+                reasons.append(
+                    f"The look or state of '{name}' in this scene changed since the "
+                    "references were chosen."
+                )
+            elif signatures.get((kind, discovery_id, artifact.get("variant"))) != artifact.get(
+                "pictures_sha256"
+            ):
+                reasons.append(
+                    f"The pictures of '{name}' changed since the references were chosen."
+                )
     return reasons
+
+
+async def _signatures(
+    session: AsyncSession, ctx: _Context, rows: dict[str, ShotReferenceManifest]
+) -> _Signatures:
+    """The signature of the pictures each recorded subject offers now, by `(kind, discovery id,
+    variant)`, for every manifest that recorded one. None for a subject that cannot be read.
+    """
+    found: _Signatures = {}
+    for row in rows.values():
+        for artifact in _artifacts(row.inputs):
+            if (
+                not isinstance(artifact, dict)
+                or artifact.get("kind") not in (CHARACTER_KIND, ENVIRONMENT_KIND)
+                or "pictures_sha256" not in artifact
+            ):
+                continue
+            kind, discovery_id = artifact["kind"], artifact.get("discovery_id")
+            variant = artifact.get("variant")
+            key = (kind, discovery_id, variant)
+            if key in found:
+                continue
+            current = ctx.current.get((kind, discovery_id))
+            found[key] = None
+            if current is None:
+                continue
+            try:
+                if kind == CHARACTER_KIND:
+                    group = await _character_pictures(session, current, variant, None)
+                else:
+                    group = await _environment_pictures(session, current, variant, None)
+            except ShotReferencesError:
+                continue
+            found[key] = _signature(group)
+    return found
 
 
 def _refusal(entry: shot_definitions.ShotEntry) -> str | None:
@@ -496,15 +608,20 @@ async def _newest_jobs(session: AsyncSession, project_id: int) -> dict[str, Job]
 
 
 async def _current(session: AsyncSession, project: Project, ctx: _Context) -> ShotReferencesState:
+    rows = await _newest_rows(session, project.id)
     return _build(
         ctx,
-        await _newest_rows(session, project.id),
+        rows,
         await _newest_jobs(session, project.id),
+        await _signatures(session, ctx, rows),
     )
 
 
 def _build(
-    ctx: _Context, rows: dict[str, ShotReferenceManifest], jobs: dict[str, Job]
+    ctx: _Context,
+    rows: dict[str, ShotReferenceManifest],
+    jobs: dict[str, Job],
+    signatures: _Signatures,
 ) -> ShotReferencesState:
     entries: list[SceneEntry] = []
     for scene in ctx.definitions.entries:
@@ -516,7 +633,7 @@ def _build(
             status: Status = "not_selected"
             reasons: list[str] = []
             if row is not None:
-                reasons = _out_of_date_reasons(row, entry, ctx)
+                reasons = _out_of_date_reasons(row, entry, ctx, scene.item["id"], signatures)
                 status = "out_of_date" if reasons else "selected"
             blocked = _refusal(entry)
             if blocked is None and job is not None and job.status in store.ACTIVE_STATUSES:
@@ -902,18 +1019,35 @@ async def select_all(
     return result
 
 
+async def accept_as_is(
+    session: AsyncSession, project: Project, scene_id: str, shot_id: str
+) -> ShotReferenceManifest:
+    """Keeps the shot's newest choice of pictures as it is and records that it was made from
+    what is current now (PHASE-039). Refused when one of the pictures is not one the shot can
+    use now (choose the references again then). Raises ShotReferencesError.
+    """
+    newest = (await _newest_rows(session, project.id)).get(_key(scene_id, shot_id))
+    if newest is None:
+        raise ShotReferencesError(f"Shot '{shot_id}' has no references to accept.")
+    image_ids = [reference["lab_image_id"] for reference in newest.content["references"]]
+    return await save_manual(session, project, scene_id, shot_id, image_ids, accepting=newest)
+
+
 async def save_manual(
     session: AsyncSession,
     project: Project,
     scene_id: str,
     shot_id: str,
     image_ids: list[int],
+    *,
+    accepting: ShotReferenceManifest | None = None,
 ) -> ShotReferenceManifest:
     """Stores the user's choice of pictures for one shot, in the order given, as its next
     manifest (`source` is `manual`, `method` is `manual`), and commits (PHASE-038). It needs what
     a selection needs (the shot defined and current) and is refused while the references are
     being chosen. The pictures must be ones the shot can use now (`reference_selection.manual`)
-    and the manifest records exactly what a selection would. Raises ShotReferencesError.
+    and the manifest records exactly what a selection would. With `accepting` (PHASE-039) it
+    also records which version the user accepted as it is. Raises ShotReferencesError.
 
     What follows (the generation request, the prompt) is the caller's to start: see
     `services/shot_chain.py`.
@@ -946,6 +1080,8 @@ async def save_manual(
         inputs=_inputs(project.id, scene_id, shot_id, definition_row, ctx, artifacts),
         source=SOURCE_MANUAL,
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await _commit(session)
     return row
 

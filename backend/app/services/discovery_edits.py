@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Project, SceneDefinition, SceneEvents, StoryBible
 from app.jobs import store
-from app.services import discovery, scene_discovery_writer, story_bible
+from app.services import discovery, provenance, scene_discovery_writer, story_bible
 from app.services import discovery_writer as writer
 from app.services.discovery import DiscoveryError
 
@@ -119,9 +119,12 @@ async def save_manual_list(
     project: Project,
     kind: writer.Kind,
     items: list[dict[str, Any]],
+    *,
+    accepting: discovery.Discovery | None = None,
 ) -> discovery.Discovery:
     """Stores the user's whole edited list of characters (or environments) as the next version
-    (`source` is `manual`), and commits. Raises DiscoveryError, with a message fit for the user.
+    (`source` is `manual`), and commits. With `accepting` (PHASE-039) it also records which
+    version the user accepted as it is. Raises DiscoveryError, with a message fit for the user.
     """
     story, bible = await _require_inputs(session, project, kind)
     try:
@@ -163,16 +166,23 @@ async def save_manual_list(
         # The edit is the user's own list: a cast that changed earlier does not make it stale.
         cast_sha256=await discovery.current_cast_sha256(session, project.id, kind),
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row
 
 
 async def save_manual_scenes(
-    session: AsyncSession, project: Project, scenes: list[dict[str, Any]]
+    session: AsyncSession,
+    project: Project,
+    scenes: list[dict[str, Any]],
+    *,
+    accepting: discovery.Discovery | None = None,
 ) -> discovery.Discovery:
     """Stores the user's whole edited list of scenes as the next version (`source` is
     `manual`), and commits. Each scene is `{id, title, description, starts_with}`; code cuts the
-    story again at the opening words. Raises DiscoveryError, with a message fit for the user.
+    story again at the opening words. With `accepting` (PHASE-039) it also records which version
+    the user accepted as it is. Raises DiscoveryError, with a message fit for the user.
     """
     story, bible = await _require_inputs(session, project, "scenes")
     try:
@@ -190,5 +200,24 @@ async def save_manual_scenes(
         bible_version=bible.version,
         content=cast(dict[str, Any], checked),
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row
+
+
+async def accept_as_is(
+    session: AsyncSession, project: Project, kind: discovery.StageKind
+) -> discovery.Discovery:
+    """Keeps the newest list of characters, environments or scenes as it is and records that
+    it was made from the story and StoryBible as they are now (PHASE-039). Raises
+    DiscoveryError.
+    """
+    newest = await discovery.latest(session, kind, project.id)
+    if newest is None:
+        raise DiscoveryError(f"There are no {kind} to accept.")
+    if kind == "scenes":
+        return await save_manual_scenes(
+            session, project, newest.content["scenes"], accepting=newest
+        )
+    return await save_manual_list(session, project, kind, newest.content[kind], accepting=newest)

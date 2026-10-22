@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, Project, SpeechUnitAudio, StoryRender
 from app.jobs import store
-from app.services import shot_plans, shot_takes, story_render_plan
+from app.services import provenance, shot_plans, shot_takes, speech_synthesis, story_render_plan
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -103,17 +103,29 @@ def _recorded_audio(plan_inputs: Any) -> dict[str, dict[str, Any]]:
 
 
 async def _unit_sources(
-    session: AsyncSession, entry: shot_plans.SceneEntry
+    session: AsyncSession,
+    entry: shot_plans.SceneEntry,
+    speech: dict[tuple[str, str], speech_synthesis.UnitEntry],
 ) -> list[story_render_plan.UnitSource]:
+    """The narration the render uses: the speech made now for each unit when there is some, or
+    else the speech the shot plan was measured from (PHASE-039: making a line again does not
+    make the plan out of date, so the plan's record can be older than the speech).
+    """
     timeline = entry.timeline
     if timeline is None or entry.row is None:
         return []
     recorded = _recorded_audio(entry.row.inputs)
     units: list[story_render_plan.UnitSource] = []
     for span in timeline.units:
-        artifact = recorded.get(span.unit_id)
-        audio_id = artifact.get("id") if artifact is not None else None
-        audio = await session.get(SpeechUnitAudio, audio_id) if isinstance(audio_id, int) else None
+        made = speech.get((entry.item["id"], span.unit_id))
+        if made is not None and made.status == "ready" and made.audio is not None:
+            audio: SpeechUnitAudio | None = made.audio
+        else:
+            artifact = recorded.get(span.unit_id)
+            audio_id = artifact.get("id") if artifact is not None else None
+            audio = (
+                await session.get(SpeechUnitAudio, audio_id) if isinstance(audio_id, int) else None
+            )
         units.append(
             story_render_plan.UnitSource(
                 unit_id=span.unit_id,
@@ -145,10 +157,22 @@ def _take_source(entry: shot_takes.ShotEntry | None) -> story_render_plan.TakeSo
     )
 
 
+def _speech_by_unit(
+    audio: speech_synthesis.AudioState,
+) -> dict[tuple[str, str], speech_synthesis.UnitEntry]:
+    """Where each unit's speech stands now, by `(scene id, unit id)`."""
+    return {
+        (scene.scene.item["id"], unit.unit["id"]): unit
+        for scene in audio.scenes
+        for unit in scene.units
+    }
+
+
 async def _scene_sources(
     session: AsyncSession,
     plans: shot_plans.ShotPlansState,
     takes: shot_takes.ShotTakesState,
+    speech: dict[tuple[str, str], speech_synthesis.UnitEntry],
 ) -> list[story_render_plan.SceneSource]:
     shots_by_scene = {
         scene.item["id"]: {shot.shot["id"]: shot for shot in scene.shots} for scene in takes.entries
@@ -170,7 +194,7 @@ async def _scene_sources(
                         take=_take_source(take_entry),
                     )
                 )
-            units = await _unit_sources(session, entry)
+            units = await _unit_sources(session, entry, speech)
         scenes.append(
             story_render_plan.SceneSource(
                 scene_id=scene_id,
@@ -207,6 +231,7 @@ def _render_reasons(
     row: StoryRender,
     plans: shot_plans.ShotPlansState,
     takes: shot_takes.ShotTakesState,
+    speech: dict[tuple[str, str], speech_synthesis.UnitEntry],
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each."""
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
@@ -221,7 +246,7 @@ def _render_reasons(
         if entry is None:
             continue
         label = f"scene {scene.get('index')}"
-        if entry.row is None or entry.row.id != scene.get("plan_id"):
+        if not provenance.same_id(scene.get("plan_id"), entry.row):
             reasons.append(f"The shots of {label} were planned again since this video was made.")
         elif entry.status == "out_of_date":
             reasons.append(f"The shot plan of {label} is out of date.")
@@ -244,6 +269,21 @@ def _render_reasons(
                 f"{label} has another selected take now (take "
                 f"{selected.row.take_number}; this video used take {shot.get('take_number')})."
             )
+        elif selected.reasons:
+            reasons.append(f"{label} is out of date: {selected.reasons[0]}")
+
+    # The narration the video was made with, against the speech made now (PHASE-039).
+    for unit in recorded.get("narration") or []:
+        if not isinstance(unit, dict):
+            continue
+        made = speech.get((str(unit.get("scene_id")), str(unit.get("unit_id"))))
+        if made is None:
+            continue  # the scenes' own reason says so
+        label = f"The narration {unit.get('unit_id')}"
+        if made.status != "ready" or made.audio is None:
+            reasons.append(f"{label} is no longer ready.")
+        elif made.audio.id != unit.get("audio_id"):
+            reasons.append(f"{label} was made again since this video was made.")
     return reasons
 
 
@@ -271,6 +311,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     """
     plans = await shot_plans.state(session, project)
     takes = await shot_takes.state(session, project)
+    speech = _speech_by_unit(await speech_synthesis.state(session, project))
     job = await store.latest_job(session, project.id, JOB_TYPE)
     renders = await _all_renders(session, project.id)
     jobs = await _jobs_of(session, renders)
@@ -278,13 +319,13 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None:
-        plan, blocked = _plan_of(project, await _scene_sources(session, plans, takes))
+        plan, blocked = _plan_of(project, await _scene_sources(session, plans, takes, speech))
     if blocked is None and job is not None and job.status in store.ACTIVE_STATUSES:
         blocked = _ALREADY_RENDERING
 
     entries: list[RenderEntry] = []
     for row in renders:
-        reasons = _render_reasons(row, plans, takes)
+        reasons = _render_reasons(row, plans, takes, speech)
         entries.append(
             RenderEntry(
                 row=row,
@@ -318,10 +359,11 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
 
     plans = await shot_plans.state(session, project)
     takes = await shot_takes.state(session, project)
+    speech = _speech_by_unit(await speech_synthesis.state(session, project))
     blocked = plans.blocked_reason or takes.blocked_reason
     if blocked is not None:
         raise StoryRendersError(blocked)
-    plan, blocked = _plan_of(project, await _scene_sources(session, plans, takes))
+    plan, blocked = _plan_of(project, await _scene_sources(session, plans, takes, speech))
     if plan is None:
         raise StoryRendersError(blocked or "The story cannot be rendered now.")
 

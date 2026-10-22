@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Project, SpeechUnits
-from app.services import duration_policy, scene_events, speech_unit_planner
+from app.services import duration_policy, provenance, scene_events, speech_unit_planner
 from app.services.speech_unit_planner import SpeechRules
 
 _logger = logging.getLogger(__name__)
@@ -181,7 +181,7 @@ def _out_of_date_reasons(
     if events.row is None:
         reasons.append("The scene has no events now.")
     else:
-        if recorded is None or recorded.get("version") != events.row.version:
+        if not provenance.same_row(recorded, events.row):
             reasons.append("The events of the scene were extracted again since these units.")
         if events.status == "out_of_date":
             reasons.append("The events of the scene are out of date.")
@@ -381,8 +381,26 @@ async def plan_all(
     return PlanAllResult(planned=planned, skipped=skipped)
 
 
+async def accept_as_is(session: AsyncSession, project: Project, scene_id: str) -> None:
+    """Keeps the scene's newest cuts of its speech as they are and records that they were made
+    from the events as they are now (PHASE-039). Raises SpeechUnitsError.
+    """
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is None:
+        raise SpeechUnitsError(f"Scene '{scene_id}' has no speech units to accept.")
+    cuts = [
+        {"event_id": unit["event_id"], "text": unit["text"]} for unit in newest.content["units"]
+    ]
+    await save_manual(session, project, scene_id, cuts, accepting=newest)
+
+
 async def save_manual(
-    session: AsyncSession, project: Project, scene_id: str, units: list[dict[str, Any]]
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    units: list[dict[str, Any]],
+    *,
+    accepting: SpeechUnits | None = None,
 ) -> None:
     """Stores the user's own cuts of one scene's speech events as the scene's next version
     (`source` is `manual`), and commits (PHASE-037). `units` is a list of `{event_id, text}` in
@@ -419,8 +437,10 @@ async def save_manual(
             )
         parts_by_event.setdefault(event_id, []).append(unit["text"])
     try:
-        await _add_plan(session, project, entry, rules, parts_by_event=parts_by_event)
+        row = await _add_plan(session, project, entry, rules, parts_by_event=parts_by_event)
     except ValueError as exc:
         await session.rollback()
         raise SpeechUnitsError(str(exc)) from exc
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await _commit(session)

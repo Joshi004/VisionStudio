@@ -84,6 +84,8 @@ class LookStateImageItemOut(BaseModel):
     image: PictureOut | None
     can_run: bool
     blocked_reason: str | None
+    # Why the pictures of a `ready` item are out of date (PHASE-039); empty when they are not.
+    reasons: list[str]
 
 
 class LookStateImagesOut(BaseModel):
@@ -141,6 +143,7 @@ async def _item_out(session: SessionDep, item: ImageItem) -> LookStateImageItemO
         ),
         can_run=item.can_run,
         blocked_reason=item.blocked_reason,
+        reasons=item.reasons,
     )
 
 

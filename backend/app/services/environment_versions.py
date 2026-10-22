@@ -149,6 +149,7 @@ async def record_version_if_changed(
     inputs: dict[str, Any] | None = None,
     carry_picture: bool = False,
     keep_picture: bool = False,
+    new_picture: bool = False,
 ) -> LibraryEnvironmentVersion | None:
     """Adds the environment's next version when it differs from the newest one, and returns
     it; returns None when nothing that a version freezes has changed. Flushes (the environment
@@ -170,17 +171,27 @@ async def record_version_if_changed(
     changed. The Environment Definition stage passes it for an environment the user reuses from
     the library (PHASE-048): the picture is the look the user wants to keep, so the new text
     does not start a new one.
+
+    `new_picture` (PHASE-039, "Replace picture") writes a version even though nothing it freezes
+    changed, and it starts with no picture: the old picture stays with the old version, and a
+    new one is made for this one. It never carries a picture forward.
     """
     newest = await latest_version(session, environment.id)
     profile = profile_of(environment)
     definition = environment.definition
     states = await _states_part(session, environment)
-    if newest is not None and _same(newest, profile, definition, states, inputs):
+    if (
+        not new_picture
+        and newest is not None
+        and _same(newest, profile, definition, states, inputs)
+    ):
         return None
     same_text = newest is not None and newest.profile == profile and newest.definition == definition
     carried_picture = (
         newest.reference_image_id
-        if newest is not None and (keep_picture or (carry_picture and same_text))
+        if newest is not None
+        and not new_picture
+        and (keep_picture or (carry_picture and same_text))
         else None
     )
     version = LibraryEnvironmentVersion(

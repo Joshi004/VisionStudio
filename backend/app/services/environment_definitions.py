@@ -467,6 +467,72 @@ async def start_picture(
         raise EnvironmentDefinitionError(str(exc)) from exc
 
 
+async def replace_picture(
+    session: AsyncSession, project: Project, discovery_id: str
+) -> EnvironmentReference:
+    """Makes a new canonical picture for an environment that already has one (PHASE-039), and
+    commits. The picture of a pinned version is frozen, so the old one is kept with its
+    version: a new version is written with the same definition and inputs and no picture, the
+    project's pin moves to it, and the picture is started for it like the pipeline starts one.
+    Everything that used the old picture then reads out of date, and nothing is made again by
+    itself. Raises EnvironmentDefinitionError.
+
+    It needs the environment linked, defined and current, with a picture, whose pinned version
+    is the environment's newest (a newer one made in the lab would otherwise be left behind),
+    and no picture being made.
+    """
+    current = await state(session, project)
+    entry = next((entry for entry in current.entries if entry.item["id"] == discovery_id), None)
+    if entry is None:
+        raise EnvironmentDefinitionError(
+            f"There is no environment '{discovery_id}' in the newest list of environments."
+        )
+    info = entry.entry.info
+    if info is None:
+        raise EnvironmentDefinitionError("Link the environment first.")
+    if entry.status != "defined" or entry.version is None:
+        raise EnvironmentDefinitionError(
+            "Define the environment first, and bring its definition up to date: the new "
+            "picture is made from the definition."
+        )
+    if info.environment.archived:
+        raise EnvironmentDefinitionError(
+            f"{info.environment.name} is archived. Unarchive it in the Character Lab."
+        )
+    if entry.picture.status == "in_progress":
+        raise EnvironmentDefinitionError("The picture is being made.")
+    pinned = entry.version
+    if pinned.reference_image_id is None:
+        raise EnvironmentDefinitionError("There is no picture to replace. Use Retry picture.")
+    newest = await environment_versions.latest_version(session, info.link.environment_id)
+    if newest is None or newest.version != pinned.version:
+        raise EnvironmentDefinitionError(
+            "A newer version of this environment exists in the Character Lab than the one the "
+            "project uses. Move the project to it first."
+        )
+
+    version = await environment_versions.record_version_if_changed(
+        session, info.environment, source="ai", inputs=pinned.inputs, new_picture=True
+    )
+    assert version is not None  # `new_picture` always adds a version
+    info.link.pinned_version = version.version
+    info.link.updated_at = utcnow()
+    try:
+        attempt = await environment_references.start_reference(
+            session,
+            info.link.environment_id,
+            pipeline=environment_references.PipelineAttempt(
+                project_id=project.id, discovery_id=discovery_id, version_id=version.id
+            ),
+            commit=False,
+        )
+    except environment_references.EnvironmentReferenceError as exc:
+        await session.rollback()
+        raise EnvironmentDefinitionError(str(exc)) from exc
+    await session.commit()
+    return attempt
+
+
 # --- Reading the state --------------------------------------------------------------------
 
 

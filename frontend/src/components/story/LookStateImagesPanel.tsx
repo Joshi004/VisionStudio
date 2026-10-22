@@ -101,10 +101,20 @@ function ItemRow({ item, busy, onMake, onRedo, redoingAngle }: ItemRowProps) {
             <Badge variant="light" color={status.color}>
               {status.label}
             </Badge>
+            {item.reasons.length > 0 && (
+              <Badge variant="light" color="yellow">
+                Out of date
+              </Badge>
+            )}
           </Group>
           <Text size="xs" c="dimmed">
             {item.description}
           </Text>
+          {item.reasons.map((reason) => (
+            <Text key={reason} size="xs" c="yellow.8">
+              {reason}
+            </Text>
+          ))}
           {item.scenes.length > 0 && (
             <Text size="xs" c="dimmed">
               Used in: {item.scenes.join(", ")}

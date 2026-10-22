@@ -131,6 +131,10 @@ class ImageItem:
     blocked_reason: str | None = None
     source_image_id: int | None = None
     source_version: int | None = None
+    # Why the pictures of a `ready` item are out of date (PHASE-039), one sentence each: they
+    # were edited from a canonical picture that was replaced since. The status stays `ready` so
+    # the one-click run does not count it as unfinished; making them again is PHASE-040.
+    reasons: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -271,6 +275,18 @@ async def _look_item(
     elif refusal is not None and status == "none":
         status = "unavailable"
 
+    reasons: list[str] = []
+    if (
+        status == "ready"
+        and look is not None
+        and look.reference_image_id is not None
+        and front is not None
+        and look.reference_image_id != front.lab_image_id
+    ):
+        reasons.append(
+            f"The canonical picture of {use.subject_id} was replaced since this look was made."
+        )
+
     stage: Stage | None = None
     if progress is not None and progress.stage == "making_master":
         stage = "making_master"
@@ -295,6 +311,7 @@ async def _look_item(
         blocked_reason=blocked,
         source_image_id=front.lab_image_id if front is not None else None,
         source_version=front.version if front is not None else None,
+        reasons=reasons,
     )
 
 
@@ -385,6 +402,20 @@ async def _state_item(
 
     source = entry.version if entry is not None else None
     info = entry.entry.info if entry is not None else None
+    made_from = record.inputs.get("source_image_id") if isinstance(record.inputs, dict) else None
+    reasons: list[str] = []
+    if (
+        status == "ready"
+        and isinstance(made_from, int)
+        and source is not None
+        and source.reference_image_id is not None
+        and made_from != source.reference_image_id
+    ):
+        reasons.append(
+            "The canonical picture of "
+            f"{entry.item['name'] if entry is not None else use.subject_id} "
+            "was replaced since this state's picture was made."
+        )
     return ImageItem(
         kind=STATE,
         record_id=record.id,
@@ -402,6 +433,7 @@ async def _state_item(
         blocked_reason=blocked,
         source_image_id=source.reference_image_id if source is not None else None,
         source_version=info.link.pinned_version if info is not None else None,
+        reasons=reasons,
     )
 
 

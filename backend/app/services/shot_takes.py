@@ -67,6 +67,7 @@ from app.services import (
     dialogue_check,
     ffmpeg,
     generation_planner,
+    provenance,
     shot_prompts,
     take_validation,
     video_lab,
@@ -321,7 +322,7 @@ def _take_reasons(row: ShotTake, prompt: shot_prompts.ShotEntry) -> list[str]:
     current = prompt.row
     if current is None:
         return ["The shot has no compiled prompt now."]
-    if row.shot_prompt_id != current.id:
+    if not provenance.same_id(row.shot_prompt_id, current):
         return ["The prompt of the shot was compiled again since this take was made."]
     if prompt.status == "out_of_date":
         return ["The prompt of the shot is out of date."]

@@ -1964,6 +1964,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/environment-definitions/{discovery_id}/replace-picture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace Picture
+         * @description Makes a new canonical picture for a defined environment that already has one (PHASE-039).
+         *     The old picture stays with its version; the project moves to a new version and what used
+         *     the old picture reads out of date.
+         */
+        post: operations["replace_picture_api_projects__project_id__environment_definitions__discovery_id__replace_picture_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/scene-definitions": {
         parameters: {
             query?: never;
@@ -3185,10 +3207,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/staleness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Staleness
+         * @description Everything out of date in the project, by step, with the reasons.
+         */
+        get: operations["get_staleness_api_projects__project_id__staleness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/staleness/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept As Is
+         * @description Keeps one out-of-date artifact as it is, then answers what is still out of date.
+         */
+        post: operations["accept_as_is_api_projects__project_id__staleness_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AcceptIn
+         * @description Which artifact to accept as it is. `scene_id` and `shot_id` are given for the stages
+         *     that work per scene or per shot.
+         */
+        AcceptIn: {
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "story_bible" | "character_discovery" | "environment_discovery" | "scene_discovery" | "relations" | "scene_definitions" | "events" | "speech_units" | "shot_plans" | "shot_definitions" | "references" | "prompts";
+            /** Scene Id */
+            scene_id?: string | null;
+            /** Shot Id */
+            shot_id?: string | null;
+        };
         /** ApproveRequest */
         ApproveRequest: {
             /** Expected */
@@ -5299,6 +5377,8 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Reasons */
+            reasons: string[];
         };
         /** LookStateImagesOut */
         LookStateImagesOut: {
@@ -8227,6 +8307,45 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** StalenessGroupOut */
+        StalenessGroupOut: {
+            /** Step */
+            step: string;
+            /** Label */
+            label: string;
+            /** Items */
+            items: components["schemas"]["StalenessItemOut"][];
+        };
+        /**
+         * StalenessItemOut
+         * @description One out-of-date artifact. The key fields say which one: the stage uses `scene_id`,
+         *     `shot_id`, `discovery_id` or `unit_id`, and leaves the others out.
+         */
+        StalenessItemOut: {
+            /** Stage */
+            stage: string;
+            /** Title */
+            title: string;
+            /** Reasons */
+            reasons: string[];
+            /** Acceptable */
+            acceptable: boolean;
+            /** Scene Id */
+            scene_id?: string | null;
+            /** Shot Id */
+            shot_id?: string | null;
+            /** Discovery Id */
+            discovery_id?: string | null;
+            /** Unit Id */
+            unit_id?: string | null;
+        };
+        /** StalenessOut */
+        StalenessOut: {
+            /** Count */
+            count: number;
+            /** Groups */
+            groups: components["schemas"]["StalenessGroupOut"][];
         };
         /**
          * StatePictureOut
@@ -13502,6 +13621,47 @@ export interface operations {
             };
         };
     };
+    replace_picture_api_projects__project_id__environment_definitions__discovery_id__replace_picture_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentPictureRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or scenes, or list of environments, or the environment is not linked, is archived, or needs confirming. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_scene_definitions_api_projects__project_id__scene_definitions_get: {
         parameters: {
             query?: never;
@@ -16096,6 +16256,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_staleness_api_projects__project_id__staleness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StalenessOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_as_is_api_projects__project_id__staleness_accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StalenessOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The artifact is not out of date, cannot be accepted as it is, or its stage refused (for example because the stage before it is not ready). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

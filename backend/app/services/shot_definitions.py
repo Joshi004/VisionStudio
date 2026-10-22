@@ -35,6 +35,8 @@ shot's id, its duration (from the scene's timeline, PHASE-021) and its dialogue.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Final, Literal
@@ -46,6 +48,7 @@ from app.db.models import Job, Project, ShotDefinition, ShotPlan, StoryBible
 from app.jobs import store
 from app.services import (
     look_state_resolution,
+    provenance,
     scene_definition_writer,
     scene_definitions,
     scene_timeline,
@@ -378,6 +381,103 @@ def _unit_map(speech: speech_units.SceneEntry | None) -> dict[str, dict[str, Any
     return {unit["id"]: unit for unit in content["units"]} if content is not None else {}
 
 
+def _skeleton_sha256(shot: dict[str, Any], duration: float, speech: list[dict[str, Any]]) -> str:
+    """A hash of what the plan says about one shot: its skeleton and the speech it carries with
+    the measured places of each line. It changes when this shot changes and not when another
+    shot of the scene does (PHASE-039).
+    """
+    payload = {"shot": _skeleton(shot, duration), "speech": speech}
+    text = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def current_skeleton_sha256(
+    plan: shot_plans.SceneEntry,
+    shot: dict[str, Any],
+    units: dict[str, dict[str, Any]],
+) -> str | None:
+    """`_skeleton_sha256` of a shot of the scene's newest plan as it stands now, or None when
+    the plan's timeline cannot be read.
+    """
+    if plan.timeline is None:
+        return None
+    placed = _durations(plan.timeline)
+    if shot["id"] not in placed:
+        return None
+    start_s, duration = placed[shot["id"]]
+    try:
+        speech, _dialogue = _speech_in_shot(shot, start_s, duration, plan.timeline, units)
+    except KeyError:
+        return None
+    return _skeleton_sha256(shot, duration, speech)
+
+
+def _resolved_record(resolved: look_state_resolution.SceneResolution) -> dict[str, Any]:
+    """What the scene's looks and state resolved to, by subject: the slug of the named look or
+    state, or None for the default. Written onto `inputs` by `_shot_fields`; `save_shot_definition`
+    narrows it to what the shot uses.
+    """
+    return {
+        "looks": {look.subject_id: look.id for look in resolved.looks},
+        "environment": {
+            "id": resolved.environment.subject_id if resolved.environment is not None else None,
+            "state": resolved.environment.id if resolved.environment is not None else None,
+        },
+    }
+
+
+def _used_character_ids(content: dict[str, Any], scene_character_ids: list[str]) -> list[str]:
+    """The characters of the scene a shot uses: the ones visible in it and the ones who speak
+    a line of its dialogue, in the order of the scene's characters.
+    """
+    used = {
+        character["id"]
+        for character in content.get("characters") or []
+        if isinstance(character, dict) and isinstance(character.get("id"), str)
+    }
+    audio = content.get("audio_intent")
+    for line in (audio.get("dialogue") if isinstance(audio, dict) else None) or []:
+        if isinstance(line, dict) and isinstance(line.get("speaker_id"), str):
+            used.add(line["speaker_id"])
+    return [character_id for character_id in scene_character_ids if character_id in used]
+
+
+def _narrowed_inputs(inputs: dict[str, Any], content: dict[str, Any]) -> dict[str, Any]:
+    """The `inputs` a saved specification records (PHASE-039): the characters it uses, each with
+    the look the scene resolved to for it, and the environment with its state; the definitions
+    of the characters it does not use are left out of the artifacts. `resolved` (everything the
+    scene resolved) is replaced by `uses`.
+    """
+    stored = {key: value for key, value in inputs.items() if key != "resolved"}
+    resolved = inputs.get("resolved")
+    if not isinstance(resolved, dict):
+        return stored
+    scene_ids = [
+        artifact["discovery_id"]
+        for artifact in inputs.get("artifacts") or []
+        if isinstance(artifact, dict)
+        and artifact.get("kind") == CHARACTER_DEFINITION_KIND
+        and isinstance(artifact.get("discovery_id"), str)
+    ]
+    used = _used_character_ids(content, scene_ids)
+    looks = resolved.get("looks") if isinstance(resolved.get("looks"), dict) else {}
+    stored["uses"] = {
+        "characters": used,
+        "looks": {character_id: looks.get(character_id) for character_id in used},
+        "environment": resolved.get("environment"),
+    }
+    stored["artifacts"] = [
+        artifact
+        for artifact in inputs.get("artifacts") or []
+        if not (
+            isinstance(artifact, dict)
+            and artifact.get("kind") == CHARACTER_DEFINITION_KIND
+            and artifact.get("discovery_id") not in used
+        )
+    ]
+    return stored
+
+
 def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) -> dict[str, Any]:
     """Everything the model is shown about one shot, as the fields of a job's input (without
     the dedupe key): the scene and its definition, the shot with its neighbours, its events and
@@ -466,7 +566,13 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
                 for kind, discovery_id in chosen
             ),
         ],
-        "shot": {"id": shot_id, "duration_seconds": duration},
+        "shot": {
+            "id": shot_id,
+            "duration_seconds": duration,
+            "skeleton_sha256": _skeleton_sha256(shot, duration, speech),
+        },
+        # Narrowed to what the shot uses by `save_shot_definition` (PHASE-039).
+        "resolved": _resolved_record(resolved),
     }
     return {
         "story_bible_id": bible.id,
@@ -799,30 +905,68 @@ def _recorded(inputs: dict[str, Any], kind: str) -> dict[str, Any] | None:
     return None
 
 
+def _uses_reasons(
+    uses: dict[str, Any], resolved: look_state_resolution.SceneResolution
+) -> list[str]:
+    """Why the looks and the state a shot used are not what the scene resolves to now. Only the
+    characters the shot uses are looked at (PHASE-039).
+    """
+    reasons: list[str] = []
+    now = {look.subject_id: look for look in resolved.looks}
+    looks = uses.get("looks") if isinstance(uses.get("looks"), dict) else {}
+    for character_id, slug in looks.items():
+        item = now.get(character_id)
+        if (item.id if item is not None else None) != slug:
+            name = item.subject_name if item is not None else character_id
+            reasons.append(f"The look of {name} in this scene changed since this shot was defined.")
+    environment = uses.get("environment")
+    recorded_state = environment.get("state") if isinstance(environment, dict) else None
+    now_state = resolved.environment.id if resolved.environment is not None else None
+    if now_state != recorded_state:
+        reasons.append("The state of the place in this scene changed since this shot was defined.")
+    return reasons
+
+
 def _out_of_date_reasons(
     row: ShotDefinition,
     loaded: _Loaded,
     plan: shot_plans.SceneEntry,
     resolved: look_state_resolution.SceneResolution | None,
+    skeleton_sha256: str | None,
 ) -> list[str]:
-    """Why a specification made for this shot is no longer current, one sentence each."""
+    """Why a specification made for this shot is no longer current, one sentence each.
+
+    A specification that recorded what its shot uses (PHASE-039) is judged by that: its own
+    skeleton in the plan, and the looks and state of the characters it uses. Planning the scene
+    again, or resolving the looks again, only makes it out of date when that changed it. An
+    older specification is judged by the row ids, as before.
+    """
     inputs = row.inputs
     reasons: list[str] = []
+    shot = inputs.get("shot") if isinstance(inputs.get("shot"), dict) else {}
+    recorded_skeleton = shot.get("skeleton_sha256")
     if plan.row is None:
         reasons.append("The scene has no shot plan now.")
     else:
         if plan.status == "out_of_date":
             reasons.append("The shot plan of the scene is out of date.")
-        recorded_plan = _recorded(inputs, SHOT_PLAN_KIND)
-        if recorded_plan is None or recorded_plan.get("id") != plan.row.id:
+        if isinstance(recorded_skeleton, str) and skeleton_sha256 is not None:
+            if recorded_skeleton != skeleton_sha256:
+                reasons.append("This shot was changed when the scene's shots were planned again.")
+        elif not provenance.same_row(_recorded(inputs, SHOT_PLAN_KIND), plan.row):
             reasons.append("The shots of the scene were planned again since this shot was defined.")
 
     newest = loaded.resolution.version
-    recorded_resolution = _recorded(inputs, RESOLUTION_KIND)
+    uses = inputs.get("uses")
     if newest is None:
         reasons.append("The looks and states are no longer resolved.")
+    elif isinstance(uses, dict):
+        if resolved is None or not resolved.resolved:
+            reasons.append("The scene is no longer part of the resolved looks and states.")
+        else:
+            reasons.extend(_uses_reasons(uses, resolved))
     else:
-        if recorded_resolution is None or recorded_resolution.get("id") != newest.id:
+        if not provenance.same_row(_recorded(inputs, RESOLUTION_KIND), newest):
             reasons.append("The looks and states were resolved again since this shot was defined.")
         elif loaded.resolution.reasons:
             reasons.append("The resolved looks and states are out of date.")
@@ -877,6 +1021,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         refusal = _scene_refusal(loaded, scene_id)
         resolved = loaded.resolution_by_scene.get(scene_id)
         placed = _durations(plan.timeline) if plan.timeline is not None else {}
+        units = _unit_map(loaded.speech.get(scene_id))
         shots: list[ShotEntry] = []
         for shot in plan.content["shots"] if plan.content is not None else []:
             key = _shot_key(scene_id, shot["id"])
@@ -886,7 +1031,9 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             status: Status = "not_defined"
             reasons: list[str] = []
             if row is not None and isinstance(row.inputs, dict):
-                reasons = _out_of_date_reasons(row, loaded, plan, resolved)
+                reasons = _out_of_date_reasons(
+                    row, loaded, plan, resolved, current_skeleton_sha256(plan, shot, units)
+                )
                 status = "out_of_date" if reasons else "defined"
             blocked = refusal
             if blocked is None and active:
@@ -966,7 +1113,7 @@ async def save_shot_definition(
         version=(highest or 0) + 1,
         source=source,
         job_id=job_id,
-        inputs=inputs,
+        inputs=_narrowed_inputs(inputs, content),
         content=content,
     )
     session.add(row)
@@ -983,19 +1130,35 @@ async def save_shot_definition(
     return row
 
 
+async def accept_as_is(
+    session: AsyncSession, project: Project, scene_id: str, shot_id: str
+) -> ShotDefinition:
+    """Keeps the shot's newest specification as it is and records that it was made from what
+    is current now (PHASE-039). Nothing after it is started: what was made from it stays as it
+    is. Raises ShotDefinitionsError.
+    """
+    newest = (await _newest_rows(session, project.id)).get(_shot_key(scene_id, shot_id))
+    if newest is None:
+        raise ShotDefinitionsError(f"Shot '{shot_id}' has no specification to accept.")
+    return await save_manual(session, project, scene_id, shot_id, newest.content, accepting=newest)
+
+
 async def save_manual(
     session: AsyncSession,
     project: Project,
     scene_id: str,
     shot_id: str,
     answer: dict[str, Any],
+    *,
+    accepting: ShotDefinition | None = None,
 ) -> ShotDefinition:
     """Stores the user's edited specification of one shot as its next version (`source` is
     `manual`), and commits (PHASE-038). It needs what a run needs (a current plan, ready for
     generation, the looks and states resolved, everything linked) and is refused while the shot
     is being defined or repaired. The specification is checked the way the model's answer is
     (`shot_definition_writer.check_answer`: the id, the scene, the duration and the dialogue are
-    set by code, as for a job), and the version records exactly what a job would. Raises
+    set by code, as for a job), and the version records exactly what a job would. With
+    `accepting` (PHASE-039) it also records which version the user accepted as it is. Raises
     ShotDefinitionsError.
 
     What follows a saved specification (references, generation request, prompt, continuity) is
@@ -1036,5 +1199,7 @@ async def save_manual(
         inputs=fields["inputs"],
         source=SOURCE_MANUAL,
     )
+    if accepting is not None:
+        row.inputs = provenance.accepted_inputs(row.inputs, accepting, row.content)
     await session.commit()
     return row
