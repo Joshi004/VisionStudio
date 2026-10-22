@@ -95,7 +95,8 @@ class Job(Base):
         # unit audio, since revision 0039, and shot planning, since revision 0040, and shot
         # definition, since revision 0041, and shot continuity, since revision 0042, and the
         # repair of a cut between two shots, since revision 0045, and the compilation of a
-        # shot's H3 prompt, since revision 0046.
+        # shot's H3 prompt, since revision 0046, and the generation of a shot's clip, since
+        # revision 0047.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -104,7 +105,7 @@ class Job(Base):
             "'write_environment_prompt', 'define_environment', 'define_scene', "
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
             "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
-            "'compile_shot_prompt')",
+            "'compile_shot_prompt', 'generate_shot')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -580,6 +581,56 @@ class ShotPrompt(Base):
     )
     inputs: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotTake(Base):
+    """One take of one shot: one run of the video model for it (PHASE-027, `Path_ahead.md`
+    Section 31).
+
+    The row is made when the job is queued; `path`, `size_bytes`, `sha256`, `width`, `height`,
+    `frame_count`, `duration_s` and `audio` are NULL until the job finishes, and are filled in
+    the same transaction that finishes it. `scene_id` is the slug `id` of the scene inside the
+    project's `scene_discovery` content and `shot_id` is the shot's id inside that scene's shot
+    plan. `shot_prompt_id` and `generation_request_id` are the rows the take was made from
+    (`inputs` records them with their versions, D-3). A shot's takes are numbered from 1 and a
+    stored take is never changed, except that `selected_at` is set each time the take is chosen:
+    when its job finishes, and when the user selects it. The selected take of a shot is its
+    ready take with the newest `selected_at`.
+    """
+
+    __tablename__ = "shot_take"
+    __table_args__ = (
+        UniqueConstraint("project_id", "scene_id", "shot_id", "take_number"),
+        Index("idx_shot_take_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    take_number: Mapped[int]
+    # The rows the take was made from. NULL when that row was deleted.
+    shot_prompt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_prompt.id", ondelete="SET NULL"), default=None
+    )
+    generation_request_id: Mapped[int | None] = mapped_column(
+        ForeignKey("generation_request.id", ondelete="SET NULL"), default=None
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    seed: Mapped[int]
+    inputs: Mapped[Any] = mapped_column(JSON)
+    path: Mapped[str | None] = mapped_column(default=None)
+    size_bytes: Mapped[int | None] = mapped_column(default=None)
+    sha256: Mapped[str | None] = mapped_column(default=None)
+    width: Mapped[int | None] = mapped_column(default=None)
+    height: Mapped[int | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    selected_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

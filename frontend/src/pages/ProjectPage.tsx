@@ -22,6 +22,7 @@ import { ShotDefinitionsPanel } from "../components/story/ShotDefinitionsPanel";
 import { ShotPlansPanel } from "../components/story/ShotPlansPanel";
 import { ShotPromptsPanel } from "../components/story/ShotPromptsPanel";
 import { ShotReferencesPanel } from "../components/story/ShotReferencesPanel";
+import { ShotTakesPanel } from "../components/story/ShotTakesPanel";
 import { SpeechUnitsPanel } from "../components/story/SpeechUnitsPanel";
 import { StageList } from "../components/story/StageList";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
@@ -112,6 +113,7 @@ export function ProjectPage() {
           <ShotReferencesPanel projectId={project.id} />
           <GenerationRequestsPanel projectId={project.id} />
           <ShotPromptsPanel projectId={project.id} />
+          <ShotTakesPanel projectId={project.id} />
           <StageList />
         </>
       )}

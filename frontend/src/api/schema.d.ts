@@ -2720,6 +2720,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-takes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shot Takes */
+        get: operations["get_shot_takes_api_projects__project_id__shot_takes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every shot that has no current take and is not already being
+         *     generated. The shots that cannot be generated are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__shot_takes_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scene
+         * @description Starts a job for every shot of one scene that has no current take and is not already
+         *     being generated.
+         */
+        post: operations["run_scene_api_projects__project_id__shot_takes__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Shot
+         * @description Starts the job that makes one more take of a shot. If it already has a job waiting or
+         *     running, that job's id is returned and no second take is made.
+         */
+        post: operations["run_shot_api_projects__project_id__shot_takes__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/{scene_id}/{shot_id}/takes/{take_id}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select Take
+         * @description Makes a ready take the selected one of its shot. The other shots do not change.
+         */
+        post: operations["select_take_api_projects__project_id__shot_takes__scene_id___shot_id__takes__take_id__select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4145,7 +4245,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot";
             /**
              * Status
              * @enum {string}
@@ -4198,7 +4298,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot";
             /**
              * Status
              * @enum {string}
@@ -5100,7 +5200,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot";
             /** Running */
             running: number;
             /** Queued */
@@ -5953,6 +6053,22 @@ export interface components {
             /** Shots */
             shots: components["schemas"]["ShotReferenceEntryOut"][];
         };
+        /**
+         * SceneShotTakesOut
+         * @description One scene of the newest list of scenes.
+         */
+        SceneShotTakesOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Shots */
+            shots: components["schemas"]["ShotTakesEntryOut"][];
+        };
         /** SceneStoryContextOut */
         SceneStoryContextOut: {
             /** Before */
@@ -6002,6 +6118,16 @@ export interface components {
             label: string;
             /** Is Set */
             is_set: boolean;
+        };
+        /** SelectedTakeOut */
+        SelectedTakeOut: {
+            /** Take Id */
+            take_id: number;
+            /**
+             * Selected At
+             * Format: date-time
+             */
+            selected_at: string;
         };
         /** ServerStatusOut */
         ServerStatusOut: {
@@ -6626,6 +6752,103 @@ export interface components {
             duration_seconds: number;
             /** Start Seconds */
             start_seconds: number | null;
+        };
+        /** ShotTakeOut */
+        ShotTakeOut: {
+            /** Id */
+            id: number;
+            /** Take Number */
+            take_number: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "generating" | "ready" | "failed";
+            /** Selected */
+            selected: boolean;
+            /** Seed */
+            seed: number;
+            /** Url */
+            url: string | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Frame Count */
+            frame_count: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Has Audio */
+            has_audio: boolean | null;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /** Reasons */
+            reasons: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Selected At */
+            selected_at: string | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+        };
+        /** ShotTakesEntryOut */
+        ShotTakesEntryOut: {
+            shot: components["schemas"]["TakeShotSkeletonOut"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_generated" | "generated" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /**
+             * Prompt Status
+             * @enum {string}
+             */
+            prompt_status: "not_compiled" | "compiled" | "out_of_date";
+            /** Takes */
+            takes: components["schemas"]["ShotTakeOut"][];
+            /** Selected Take Id */
+            selected_take_id: number | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotTakesOut */
+        ShotTakesOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["SceneShotTakesOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotTakesRunManyOut */
+        ShotTakesRunManyOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["ShotTakesSkippedOut"][];
+        };
+        /** ShotTakesRunOneOut */
+        ShotTakesRunOneOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** ShotTakesSkippedOut */
+        ShotTakesSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string | null;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
         };
         /** SkippedOut */
         SkippedOut: {
@@ -7276,6 +7499,20 @@ export interface components {
             first_frame_ref: components["schemas"]["FirstFrameOut"] | null;
             last_frame_ref: components["schemas"]["FirstFrameOut"] | null;
             audio_ref: components["schemas"]["TakeAudioOut"] | null;
+        };
+        /** TakeShotSkeletonOut */
+        TakeShotSkeletonOut: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            /** Description */
+            description: string;
+            /** Duration Seconds */
+            duration_seconds: number;
         };
         /** TakesOut */
         TakesOut: {
@@ -13405,6 +13642,212 @@ export interface operations {
                 };
             };
             /** @description The shot's generation request is not planned and current, the shot's specification cannot be read now, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_shot_takes_api_projects__project_id__shot_takes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotTakesOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__shot_takes_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotTakesRunManyOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_scene_api_projects__project_id__shot_takes__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotTakesRunManyOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_shot_api_projects__project_id__shot_takes__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotTakesRunOneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    select_take_api_projects__project_id__shot_takes__scene_id___shot_id__takes__take_id__select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectedTakeOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -89,7 +89,8 @@ def _audio_input(value: object) -> _AudioInput | None:
     source, audio_id = value.get("source"), value.get("id")
     path, mime = value.get("path"), value.get("mime")
     if (
-        source in ("voice_run", "voice")
+        # `speech_unit`: the audio of a story's dialogue line (`generate_shot`, PHASE-027).
+        source in ("voice_run", "voice", "speech_unit")
         and isinstance(audio_id, int)
         and not isinstance(audio_id, bool)
         and isinstance(path, str)

@@ -11,7 +11,7 @@
   `discover_scenes.py`, `define_character.py`, `discover_relations.py`, `design_voice.py`,
   `define_environment.py`, `define_scene.py`, `extract_events.py`,
   `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`, `define_shot.py`,
-  `check_shot_continuity.py`, `repair_shot_cut.py`, `compile_shot_prompt.py`)
+  `check_shot_continuity.py`, `repair_shot_cut.py`, `compile_shot_prompt.py`, `generate_shot.py`)
   and the environment library
   (`write_environment_prompt.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
@@ -48,6 +48,7 @@ def register_handlers() -> None:
     from app.jobs.extract_events import ExtractEventsHandler
     from app.jobs.generate_lab_image import GenerateLabImageHandler
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
+    from app.jobs.generate_shot import GenerateShotHandler
     from app.jobs.lab_voice import LabVoiceHandler
     from app.jobs.plan_shots import PlanShotsHandler
     from app.jobs.repair_shot_cut import RepairShotCutHandler
@@ -83,3 +84,4 @@ def register_handlers() -> None:
     handlers.register(CheckShotContinuityHandler())
     handlers.register(RepairShotCutHandler())
     handlers.register(CompileShotPromptHandler())
+    handlers.register(GenerateShotHandler())

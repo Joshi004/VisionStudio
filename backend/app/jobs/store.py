@@ -38,7 +38,7 @@ IMAGE_LAB_NAME = "Image lab"
 CHARACTER_LAB_NAME = "Character lab"
 
 # Job types that can be cancelled while they run, because the server has a cancel for them.
-REMOTE_CANCEL_TYPES = frozenset({"lab_video", "lab_image"})
+REMOTE_CANCEL_TYPES = frozenset({"lab_video", "lab_image", "generate_shot"})
 
 # One backend process, so a module lock is enough to make "create, unless one is active" atomic.
 _create_lock = asyncio.Lock()

@@ -31,6 +31,7 @@ from app.api import (
     shot_plans,
     shot_prompts,
     shot_references,
+    shot_takes,
     speech_audio,
     speech_units,
     story_bible,
@@ -72,3 +73,4 @@ api_router.include_router(shot_continuity.router, tags=["shot-continuity"])
 api_router.include_router(shot_references.router, tags=["shot-references"])
 api_router.include_router(generation_requests.router, tags=["generation-requests"])
 api_router.include_router(shot_prompts.router, tags=["shot-prompts"])
+api_router.include_router(shot_takes.router, tags=["shot-takes"])

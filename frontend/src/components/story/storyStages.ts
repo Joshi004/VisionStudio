@@ -119,6 +119,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "shot-generation",
     name: "Shot generation",
     description: "Makes each shot's video clip.",
+    available: true,
   },
   {
     id: "final-render",
