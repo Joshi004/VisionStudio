@@ -2820,6 +2820,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/story-renders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Story Renders */
+        get: operations["get_story_renders_api_projects__project_id__story_renders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-renders/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Render
+         * @description Starts the job that renders the story. If a render is already waiting or running, that
+         *     job's id is returned and no second render is made.
+         */
+        post: operations["run_render_api_projects__project_id__story_renders_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4245,7 +4283,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story";
             /**
              * Status
              * @enum {string}
@@ -4298,7 +4336,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story";
             /**
              * Status
              * @enum {string}
@@ -5200,7 +5238,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story";
             /** Running */
             running: number;
             /** Queued */
@@ -5547,6 +5585,53 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** RenderNarrationOut */
+        RenderNarrationOut: {
+            /** Units */
+            units: number;
+            /** Loudness Lufs */
+            loudness_lufs: number | null;
+            /** Gain Db */
+            gain_db: number | null;
+        };
+        /**
+         * RenderTakeOut
+         * @description The take a render used for one shot.
+         */
+        RenderTakeOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Scene Index */
+            scene_index: number;
+            /** Shot Id */
+            shot_id: string;
+            /** Take Id */
+            take_id: number;
+            /** Take Number */
+            take_number: number;
+            /** Frames */
+            frames: number;
+            /** Sound */
+            sound: string | null;
+            /** Loudness Lufs */
+            loudness_lufs: number | null;
+            /** Gain Db */
+            gain_db: number | null;
+        };
+        /** RenderWarningOut */
+        RenderWarningOut: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "take_out_of_date" | "take_without_sound";
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string;
+            /** Message */
+            message: string;
         };
         /**
          * RequestAudioOut
@@ -7242,6 +7327,68 @@ export interface components {
             limit_seconds: number;
             /** Over Limit */
             over_limit: boolean;
+        };
+        /** StoryRenderOut */
+        StoryRenderOut: {
+            /** Id */
+            id: number;
+            /** Render Number */
+            render_number: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "current" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /** Url */
+            url: string;
+            /** Duration S */
+            duration_s: number | null;
+            /** Frame Count */
+            frame_count: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Has Audio */
+            has_audio: boolean;
+            /** Warnings */
+            warnings: components["schemas"]["RenderWarningOut"][];
+            /** Takes */
+            takes: components["schemas"]["RenderTakeOut"][];
+            narration: components["schemas"]["RenderNarrationOut"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+        };
+        /** StoryRenderRunOut */
+        StoryRenderRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** StoryRendersOut */
+        StoryRendersOut: {
+            /** Can Render */
+            can_render: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Warnings */
+            warnings: components["schemas"]["RenderWarningOut"][];
+            /** Planned Frames */
+            planned_frames: number | null;
+            /** Fps */
+            fps: number;
+            /** Planned Seconds */
+            planned_seconds: number | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Renders */
+            renders: components["schemas"]["StoryRenderOut"][];
         };
         /**
          * StoryVoiceEntryOut
@@ -13848,6 +13995,86 @@ export interface operations {
                 };
             };
             /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_story_renders_api_projects__project_id__story_renders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryRendersOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_render_api_projects__project_id__story_renders_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryRenderRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The story cannot be rendered now: a scene's shots are not ready, a shot has no clip, or a clip or a speech file is missing or too short. */
             422: {
                 headers: {
                     [name: string]: unknown;

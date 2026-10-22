@@ -54,8 +54,14 @@ class ClipAudio:
     # How long the sound is, as ffprobe reports it. LTX sound is 17 to 45 ms shorter than
     # its video, so the rest of the scene is filled with silence.
     duration_s: float | None
-    # The gain given to this clip's sound, in dB (0 or less). See `clip_gain_db`.
+    # The gain given to this clip's sound, in dB. See `clip_gain_db` (the story render's own
+    # gain, `story_render_plan.shot_gain_db`, may also be a small boost).
     gain_db: float
+    # The stretches of the clip, in its own seconds, in which narration plays and the sound is
+    # lowered by `duck_db` (negative), with ramps of `duck_ramp_s`. See `duck_volume_filter`.
+    duck_windows: tuple[tuple[float, float], ...] = ()
+    duck_db: float = 0.0
+    duck_ramp_s: float = 0.0
 
 
 def clip_gain_db(volume: float, voice_lufs: float | None, clip_lufs: float | None) -> float:
@@ -87,6 +93,41 @@ def stereo_filters(channels: int | None) -> list[str]:
     if channels == 2:
         return []
     return [_STEREO]
+
+
+def duck_volume_filter(
+    windows: Sequence[tuple[float, float]], depth_db: float, ramp_s: float
+) -> str:
+    """A `volume` filter that lowers the sound by `depth_db` (negative) inside each window and
+    brings it back with linear ramps (PHASE-028).
+
+    `windows` are `(start, end)` in the sound's own seconds. The sound reaches its full depth at
+    `start` (the fall begins `ramp_s` earlier) and starts to come back at `end` (it is whole
+    again `ramp_s` later). Where two windows' ramps meet, the deeper one wins. The expression is
+    evaluated per audio frame (`eval=frame`), so the gain moves in steps of one frame (about
+    21 ms for 1024 samples at 48 kHz), which is smooth enough for ramps of a quarter second.
+
+    Every number is a formatted float and never text from outside, and the expression is quoted
+    so the commas inside it are not read as filter separators.
+    """
+    if depth_db >= 0:
+        raise ValueError("The ducking depth must be below 0 dB.")
+    if ramp_s <= 0:
+        raise ValueError("The ducking ramp must be longer than 0 s.")
+    if not windows:
+        raise ValueError("A ducking filter needs at least one window.")
+    drop = 1 - 10 ** (depth_db / 20)
+    # 0 outside the window and its ramps, 1 inside it. The product of the rise and the fall is
+    # both ramps at once, whatever the window's length.
+    depths = [
+        f"(clip((t-({start - ramp_s:.6f}))/{ramp_s:.6f},0,1)"
+        f"*clip((({end + ramp_s:.6f})-t)/{ramp_s:.6f},0,1))"
+        for start, end in windows
+    ]
+    deepest = depths[0]
+    for other in depths[1:]:
+        deepest = f"max({deepest},{other})"
+    return f"volume='1-{drop:.6f}*{deepest}':eval=frame"
 
 
 def sample_count(frames: int, fps: int) -> int:
@@ -139,6 +180,12 @@ def trim_args(
             f"aresample={SAMPLE_RATE}",
             f"volume={audio.gain_db:.2f}dB",
             "asetpts=PTS-STARTPTS",
+            # After `asetpts`, so the ducking's `t` is the clip's own time, from 0.
+            *(
+                [duck_volume_filter(audio.duck_windows, audio.duck_db, audio.duck_ramp_s)]
+                if audio.duck_windows
+                else []
+            ),
             f"atrim=end={available:.6f}",
             f"afade=t=in:st=0:d={fade:.6f}",
             f"afade=t=out:st={available - fade:.6f}:d={fade:.6f}",
@@ -233,6 +280,175 @@ def join_args(
         file_input(list_path),
         "-i",
         file_input(voiceover),
+        "-filter_complex",
+        graph,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[mix]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "18",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        str(fps),
+        "-fps_mode",
+        "cfr",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-ar",
+        str(SAMPLE_RATE),
+        "-ac",
+        "2",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        file_input(dest),
+    ]
+
+
+# --- The story render (PHASE-028) ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NarrationInput:
+    """One narration speech and where it starts on the story's timeline."""
+
+    path: Path
+    channels: int | None
+    start_sample: int
+    # How long the speech is, in seconds, as it was measured.
+    seconds: float
+
+
+def narration_track_args(
+    units: Sequence[NarrationInput], dest: Path, *, total_samples: int
+) -> list[str]:
+    """The narration layer: one 48 kHz stereo WAV of exactly `total_samples` samples with each
+    speech at its own start sample and silence everywhere else.
+
+    The pieces are joined with the `concat` filter (silence, speech, silence, speech, ...) rather
+    than delayed and mixed, so every start is a sample-exact position and nothing can overlap. A
+    speech is cut to its slot (it never runs into the next speech or past the end) and padded
+    with silence to its measured length. The units must be in order of their start.
+    """
+    if not units:
+        raise ValueError("The narration track needs at least one speech.")
+    labels: list[str] = []
+    steps: list[str] = []
+    cursor = 0
+    inputs: list[str] = []
+    for position, unit in enumerate(units):
+        next_start = (
+            units[position + 1].start_sample if position + 1 < len(units) else total_samples
+        )
+        start = max(unit.start_sample, cursor)
+        length = min(round(unit.seconds * SAMPLE_RATE), next_start - start, total_samples - start)
+        if length < 1:
+            continue
+        if start > cursor:
+            gap = f"gap{position}"
+            steps.append(
+                f"anullsrc=r={SAMPLE_RATE}:cl=stereo,atrim=end_sample={start - cursor},"
+                f"asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}"
+                f":channel_layouts=stereo[{gap}]"
+            )
+            labels.append(gap)
+        index = len(inputs) // 2  # `inputs` holds `-i` and a path for each file
+        inputs += ["-i", file_input(unit.path)]
+        speech = f"speech{position}"
+        chain = [
+            *stereo_filters(unit.channels),
+            f"aresample={SAMPLE_RATE}",
+            f"aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo",
+            f"apad=whole_len={length}",
+            f"atrim=end_sample={length}",
+            "asetpts=PTS-STARTPTS",
+        ]
+        steps.append(f"[{index}:a:0]" + ",".join(chain) + f"[{speech}]")
+        labels.append(speech)
+        cursor = start + length
+    if not inputs:
+        raise ValueError("No narration speech fits on the timeline.")
+    if cursor < total_samples:
+        steps.append(
+            f"anullsrc=r={SAMPLE_RATE}:cl=stereo,atrim=end_sample={total_samples - cursor},"
+            f"asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}"
+            ":channel_layouts=stereo[tail]"
+        )
+        labels.append("tail")
+
+    graph = ";".join(steps) + ";" + "".join(f"[{label}]" for label in labels)
+    graph += f"concat=n={len(labels)}:v=0:a=1[out]"
+    return [
+        *_BASE,
+        *inputs,
+        "-filter_complex",
+        graph,
+        "-map",
+        "[out]",
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        str(SAMPLE_RATE),
+        "-ac",
+        "2",
+        "-f",
+        "wav",
+        file_input(dest),
+    ]
+
+
+def story_mix_args(
+    list_path: Path,
+    dest: Path,
+    *,
+    fps: int,
+    narration: Path | None,
+    narration_gain_db: float,
+) -> list[str]:
+    """Stage 2 of the story render: join the trimmed shots, lay the narration layer over their
+    sound, and encode the finished video.
+
+    The shots' sound is already at its level and ducked under the narration (stage 1). The two
+    are mixed as they are (`normalize=0`, so neither is made quieter by the mix), and a limiter
+    keeps a boosted peak from clipping. The shots' sound is the first input and sets the length
+    (`duration=first`): the joined shots, exactly the timeline's frames. With no narration the
+    shots' sound is only limited.
+    """
+    stereo = f"aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo"
+    limiter = "alimiter=limit=0.97:level=0"
+    if narration is None:
+        graph = f"[0:a:0]{stereo},{limiter},{stereo}[mix]"
+        extra_input: list[str] = []
+    else:
+        graph = (
+            f"[0:a:0]{stereo}[shots];"
+            f"[1:a:0]volume={narration_gain_db:.2f}dB,{stereo}[narration];"
+            "[shots][narration]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+            f"{limiter},{stereo}[mix]"
+        )
+        extra_input = ["-i", file_input(narration)]
+    return [
+        *_BASE,
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-protocol_whitelist",
+        "file",
+        "-i",
+        file_input(list_path),
+        *extra_input,
         "-filter_complex",
         graph,
         "-map",

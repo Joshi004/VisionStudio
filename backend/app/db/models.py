@@ -96,7 +96,7 @@ class Job(Base):
         # definition, since revision 0041, and shot continuity, since revision 0042, and the
         # repair of a cut between two shots, since revision 0045, and the compilation of a
         # shot's H3 prompt, since revision 0046, and the generation of a shot's clip, since
-        # revision 0047.
+        # revision 0047, and the render of the story's video, since revision 0048.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -105,7 +105,7 @@ class Job(Base):
             "'write_environment_prompt', 'define_environment', 'define_scene', "
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
             "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
-            "'compile_shot_prompt', 'generate_shot')",
+            "'compile_shot_prompt', 'generate_shot', 'render_story')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -631,6 +631,43 @@ class ShotTake(Base):
     duration_s: Mapped[float | None] = mapped_column(default=None)
     audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     selected_at: Mapped[datetime | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class StoryRender(Base):
+    """One finished render of a project's story video (PHASE-028, `Path_ahead.md` Section 33).
+
+    The row is made only when a `render_story` job succeeds, in the same transaction that finishes
+    it, so it always has its video; a failed render leaves its failed job and nothing else.
+    Renders are numbered from 1 per project and a stored render is never changed. `inputs` holds
+    the frozen timeline the job rendered (the takes it used for each shot, the narration units, the
+    audio values and the plans' ids and versions, D-3) and its warnings; `levels` the loudness
+    that was measured and the gain that was applied to each shot's sound and to the narration.
+    Whether a render is out of date is worked out on every read, never stored.
+    """
+
+    __tablename__ = "story_render"
+    __table_args__ = (
+        UniqueConstraint("project_id", "render_number"),
+        Index("idx_story_render_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    render_number: Mapped[int]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    levels: Mapped[Any] = mapped_column(JSON)
+    path: Mapped[str]
+    size_bytes: Mapped[int]
+    sha256: Mapped[str]
+    width: Mapped[int | None] = mapped_column(default=None)
+    height: Mapped[int | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

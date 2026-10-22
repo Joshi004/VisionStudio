@@ -26,6 +26,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   repair_shot_cut: "Cut repair",
   compile_shot_prompt: "Shot prompt",
   generate_shot: "Shot clip",
+  render_story: "Story video",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

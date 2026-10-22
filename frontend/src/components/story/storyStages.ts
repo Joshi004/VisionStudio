@@ -125,5 +125,6 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "final-render",
     name: "Final render",
     description: "Joins the shots on one timeline into the finished video.",
+    available: true,
   },
 ];

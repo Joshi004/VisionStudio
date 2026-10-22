@@ -182,6 +182,20 @@ SAVING_CUT_REPAIR: Final = "saving the repaired shots"
 # `compile_shot_prompt` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_SHOT_PROMPT: Final = "saving the shot prompt"
 
+# --- Running: the story render (PHASE-028) ------------------------------------------------
+# `render_story` is a local job: every step is an FFmpeg run on this machine.
+CHECKING_RENDER_CLIPS: Final = "checking the clips"
+MEASURING_LEVELS: Final = "measuring the sound levels"
+PLACING_NARRATION: Final = "placing the narration"
+JOINING_STORY: Final = "joining the shots and mixing the sound"
+CHECKING_STORY_VIDEO: Final = "checking the video"
+SAVING_STORY_VIDEO: Final = "saving the video"
+
+
+def trimming_shot(number: int, total: int) -> str:
+    return f"trimming shot {number} of {total}"
+
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES
