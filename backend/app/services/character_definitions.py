@@ -12,7 +12,8 @@ last step is this stage's own change to the pin; a lab edit never moves it.
   StoryBible or the link is missing, and when the character was chosen from the library
   (`how = "mapped"`) and the user has not confirmed the overwrite.
 - `start_all` queues a job for every linked entry that the pipeline made (`how = "created"`)
-  and that is not archived or already being defined. A mapped character is never touched by it.
+  and that is not archived or already being defined. A mapped character is never touched by it,
+  except one from the project's cast (see below) that still needs a definition.
   The jobs run side by side when the pool allows (`store.create_job` with `dedupe_key`).
 - `state` is what the story workspace shows: for each entry its link, its status, why it is out
   of date, the definition the pinned version holds and the newest job. **Out of date is
@@ -21,6 +22,13 @@ last step is this stage's own change to the pin; a lab edit never moves it.
   and description are compared with what its `inputs` recorded.
 - `save_definition` is called by the job and flushes without committing; the job commits it
   together with finishing itself.
+
+A mapped character that is in the project's cast (`services/project_cast.py`, PHASE-048) is a
+**reused** character, and the user already chose to use it, so nothing asks before it is
+defined. Its mode decides the rest: with `as_is` a pinned version that holds a definition counts
+as `defined` whatever project it was written for, and is never judged out of date; with
+`rewrite_text` the normal rules apply, so a definition is written for this story. Either way a
+definition that is written treats the character's current profile as fixed (`keep_look`).
 
 The relations between the project's characters (`services/character_relations.py`, PHASE-047)
 are part of the model's input: each of the other characters carries what it is to this one
@@ -56,6 +64,7 @@ from app.services import (
     character_relations,
     character_versions,
     discovery,
+    project_cast,
     story_bible,
 )
 from app.services.character_links import EntryState
@@ -183,8 +192,20 @@ def _entry_refusal(entry: EntryState) -> str | None:
     return None
 
 
-def _needs_confirmation(entry: EntryState) -> bool:
-    return entry.info is not None and entry.info.link.how == "mapped"
+def _reuse(entry: EntryState, modes: dict[int, project_cast.Mode]) -> project_cast.Mode | None:
+    """The cast mode of the entry when it is a reused character, else None."""
+    if entry.info is None:
+        return None
+    return project_cast.reuse_mode(modes, entry.info.link.character_id, entry.info.link.how)
+
+
+def _needs_confirmation(entry: EntryState, modes: dict[int, project_cast.Mode]) -> bool:
+    """Whether defining the entry overwrites a character the user chose by hand. A character
+    from the project's cast does not: choosing it for the cast was the confirmation.
+    """
+    return (
+        entry.info is not None and entry.info.link.how == "mapped" and _reuse(entry, modes) is None
+    )
 
 
 def _other(other: dict[str, Any], this_id: str, relations: list[dict[str, str]]) -> dict[str, str]:
@@ -207,6 +228,8 @@ async def _queue(
     entry: EntryState,
     items: list[dict[str, Any]],
     relations: character_relations.RelationsState,
+    *,
+    keep_look: bool,
 ) -> tuple[Job, bool]:
     """Queues the job for one linked entry, and returns `(job, created)`. `created` is False
     when the entry already has a job waiting or running, which is returned instead.
@@ -255,6 +278,8 @@ async def _queue(
                 if other["id"] != item["id"]
             ],
             "character_id": entry.info.link.character_id,
+            # A reused character: its current profile is fixed (PHASE-048).
+            "keep_look": keep_look,
             # Written onto the version the job makes (D-3).
             "inputs": inputs,
         },
@@ -301,14 +326,25 @@ async def start_run(
     refusal = _entry_refusal(entry)
     if refusal is not None:
         raise CharacterDefinitionError(refusal)
-    if _needs_confirmation(entry) and not confirm_overwrite:
+    modes = await project_cast.cast_modes(session, project.id, "characters")
+    if _needs_confirmation(entry, modes) and not confirm_overwrite:
         raise CharacterDefinitionError(
             f"{entry.item['name']} was chosen from the Character Lab. Defining it overwrites "
             "its appearance, outfit, personality, voice description, age, gender, species and "
             "era, so it has to be confirmed."
         )
     relations = await character_relations.state(session, project)
-    job, _created = await _queue(session, project, story, bible, newest, entry, items, relations)
+    job, _created = await _queue(
+        session,
+        project,
+        story,
+        bible,
+        newest,
+        entry,
+        items,
+        relations,
+        keep_look=_reuse(entry, modes) is not None,
+    )
     return job
 
 
@@ -321,6 +357,8 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     story, bible = await _require_inputs(session, project)
     newest, items, entries = await _entries(session, project)
     relations = await character_relations.state(session, project)
+    modes = await project_cast.cast_modes(session, project.id, "characters")
+    current = {item.item["id"]: item for item in (await state(session, project)).entries}
     job_ids: list[int] = []
     skipped: list[Skipped] = []
     for entry in entries:
@@ -329,7 +367,11 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         if refusal is not None:
             skipped.append(Skipped(entry.item["id"], name, refusal))
             continue
-        if _needs_confirmation(entry):
+        reuse = _reuse(entry, modes)
+        if reuse == "as_is" and current[entry.item["id"]].status == "defined":
+            skipped.append(Skipped(entry.item["id"], name, "Reused from the library as it is."))
+            continue
+        if _needs_confirmation(entry, modes):
             skipped.append(
                 Skipped(
                     entry.item["id"],
@@ -338,7 +380,17 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
                 )
             )
             continue
-        job, created = await _queue(session, project, story, bible, newest, entry, items, relations)
+        job, created = await _queue(
+            session,
+            project,
+            story,
+            bible,
+            newest,
+            entry,
+            items,
+            relations,
+            keep_look=reuse is not None,
+        )
         if created:
             job_ids.append(job.id)
         else:
@@ -423,6 +475,7 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
     links = await character_links.state(session, project.id)
     jobs = await _newest_jobs(session, project.id)
     relations = (await character_relations.state(session, project)).relations
+    modes = await project_cast.cast_modes(session, project.id, "characters")
 
     entries: list[EntryDefinition] = []
     for entry in links.entries:
@@ -438,9 +491,18 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
                 session, entry.info.link.character_id, entry.info.link.pinned_version
             )
             inputs = pinned.inputs if pinned is not None else None
-            # Only a definition written for this entry in this project counts: a pinned
-            # version made by hand in the lab, or defined for another project, does not.
             if (
+                _reuse(entry, modes) == "as_is"
+                and pinned is not None
+                and pinned.definition is not None
+            ):
+                # A character reused as it is: its own definition counts, whatever project
+                # wrote it, and it is never out of date (the story did not make it).
+                version = pinned
+                status = "defined"
+            # Otherwise only a definition written for this entry in this project counts: a
+            # pinned version made by hand in the lab, or defined for another project, does not.
+            elif (
                 pinned is not None
                 and pinned.definition is not None
                 and isinstance(inputs, dict)
@@ -471,7 +533,7 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
                 job=job,
                 can_run=blocked_reason is None,
                 blocked_reason=blocked_reason,
-                needs_confirmation=_needs_confirmation(entry),
+                needs_confirmation=_needs_confirmation(entry, modes),
             )
         )
     return DefinitionsState(

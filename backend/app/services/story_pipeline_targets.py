@@ -265,7 +265,10 @@ def _discovery_adapter(kind: discovery.StageKind) -> Adapter:
         row = await discovery.latest(session, kind, project.id)
         job = await store.latest_job(session, project.id, discovery.SPECS[kind].job_type)
         bible_version = bible.version if bible is not None else None
-        done = row is not None and not discovery.is_out_of_date(story, row, bible_version)
+        cast_sha256 = await discovery.current_cast_sha256(session, project.id, kind)
+        done = row is not None and not discovery.is_out_of_date(
+            story, row, bible_version, current_cast_sha256=cast_sha256
+        )
         block: str | None = None
         if _blank(story):
             block = _STORY_FIRST

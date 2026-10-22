@@ -66,6 +66,9 @@ class _Input:
     inputs: dict[str, Any]
     environment_id: int
     bible_id: int
+    # A reused environment (PHASE-048): the model keeps to its current profile, and its
+    # canonical picture is kept.
+    keep_picture: bool
 
 
 def _read_input(job_input: dict[str, Any]) -> _Input | None:
@@ -99,6 +102,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         inputs=inputs,
         environment_id=environment_id,
         bible_id=bible_id,
+        keep_picture=job_input.get("keep_picture") is True,
     )
 
 
@@ -174,6 +178,7 @@ class DefineEnvironmentHandler(JobHandler):
             current_profile=card,
             today_year=date.today().year,
             model=target.model,
+            keep_picture=read.keep_picture,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
@@ -209,6 +214,7 @@ class DefineEnvironmentHandler(JobHandler):
                     definition=definition,
                     job_id=job_id,
                     inputs=read.inputs,
+                    keep_picture=read.keep_picture,
                 )
             except environment_definitions.EnvironmentDefinitionError as exc:
                 await session.rollback()

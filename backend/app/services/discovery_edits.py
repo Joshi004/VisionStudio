@@ -131,6 +131,13 @@ async def save_manual_list(
 
     newest = await discovery.latest(session, kind, project.id)
     if newest is not None:
+        # An item the edit keeps stays matched to its library item (PHASE-048).
+        matched = {
+            item["id"]: item["library_id"] for item in newest.content[kind] if "library_id" in item
+        }
+        for item in checked[kind]:
+            if item["id"] in matched:
+                item["library_id"] = matched[item["id"]]
         kept = {item["id"] for item in checked[kind]}
         removed = [item for item in newest.content[kind] if item["id"] not in kept]
         if removed:
@@ -153,6 +160,8 @@ async def save_manual_list(
         bible_id=bible.id,
         bible_version=bible.version,
         content=checked,
+        # The edit is the user's own list: a cast that changed earlier does not make it stale.
+        cast_sha256=await discovery.current_cast_sha256(session, project.id, kind),
     )
     await session.commit()
     return row

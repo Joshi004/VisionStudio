@@ -48,7 +48,7 @@ from app.db.models import (
     ProjectCharacterLink,
 )
 from app.db.types import utcnow
-from app.services import character_library, character_versions, discovery
+from app.services import character_library, character_versions, discovery, project_cast
 
 _KIND: Final = "characters"
 
@@ -253,36 +253,51 @@ async def create(session: AsyncSession, project: Project, discovery_id: str) -> 
 
 
 async def link_all(session: AsyncSession, project: Project) -> int:
-    """Makes a library character for every unlinked entry of the newest list, all in one
-    commit, and returns how many were made (0 when everything is linked already). Raises
-    CharacterLinkError when no list exists.
+    """Links every unlinked entry of the newest list, all in one commit, and returns how many
+    were linked (0 when everything is linked already). Raises CharacterLinkError when no list
+    exists.
+
+    An entry that discovery matched to a character of the project's cast (its `library_id`,
+    PHASE-048) is mapped to that library character. Every other entry gets a new library
+    character made from it.
     """
     newest = await _newest_discovery(session, project.id)
     if newest is None:
         raise CharacterLinkError("Find the characters first: there is nothing to link yet.")
-    linked = {link.discovery_id for link in await _project_links(session, project.id)}
+    links = await _project_links(session, project.id)
+    linked = {link.discovery_id for link in links}
+    used = {link.character_id for link in links}
+    in_cast = await project_cast.cast_modes(session, project.id, _KIND)
     made = 0
     for item in _items(newest):
         if item["id"] in linked:
             continue
-        await _create_one(session, project.id, newest, item)
+        library_id = item.get("library_id")
+        if isinstance(library_id, int) and library_id in in_cast and library_id not in used:
+            await _map_one(session, project.id, newest, item["id"], library_id)
+            used.add(library_id)
+        else:
+            await _create_one(session, project.id, newest, item)
         made += 1
     if made:
         await _commit(session)
     return made
 
 
-async def map_to_existing(
-    session: AsyncSession, project: Project, discovery_id: str, character_id: int
+async def _map_one(
+    session: AsyncSession,
+    project_id: int,
+    newest: CharacterDiscovery,
+    discovery_id: str,
+    character_id: int,
 ) -> None:
-    """Links the entry to an existing library character and pins its newest version. Commits.
-    Raises CharacterLinkError for an entry that is not in the newest list, a character that is
-    missing or archived, or one that the project already uses for another entry.
+    """Links the entry to an existing library character and pins its newest version. Flushes;
+    the caller commits. Raises CharacterLinkError for a character that is missing or archived,
+    or one that the project already uses for another entry.
 
     If the entry is already linked to this character, nothing changes (the pin stays where it
     is). If it is linked to another one, the link moves to this one.
     """
-    newest, _item = await _require_entry(session, project.id, discovery_id)
     character = await session.get(LibraryCharacter, character_id)
     if character is None:
         raise CharacterLinkError(f"There is no character {character_id} in the Character Lab.")
@@ -291,12 +306,12 @@ async def map_to_existing(
             f"{character.name} is archived. Unarchive it in the Character Lab to use it."
         )
 
-    existing = await _link_for(session, project.id, discovery_id)
+    existing = await _link_for(session, project_id, discovery_id)
     if existing is not None and existing.character_id == character_id:
         return
 
     statement = select(ProjectCharacterLink).where(
-        ProjectCharacterLink.project_id == project.id,
+        ProjectCharacterLink.project_id == project_id,
         ProjectCharacterLink.character_id == character_id,
     )
     used_for = (await session.execute(statement)).scalars().first()
@@ -314,7 +329,7 @@ async def map_to_existing(
     if existing is None:
         session.add(
             ProjectCharacterLink(
-                project_id=project.id,
+                project_id=project_id,
                 discovery_id=discovery_id,
                 character_id=character_id,
                 pinned_version=version.version,
@@ -328,6 +343,21 @@ async def map_to_existing(
         existing.how = "mapped"
         existing.discovery_version = newest.version
         existing.updated_at = utcnow()
+    await session.flush()
+
+
+async def map_to_existing(
+    session: AsyncSession, project: Project, discovery_id: str, character_id: int
+) -> None:
+    """Links the entry to an existing library character and pins its newest version. Commits.
+    Raises CharacterLinkError for an entry that is not in the newest list, a character that is
+    missing or archived, or one that the project already uses for another entry.
+
+    If the entry is already linked to this character, nothing changes (the pin stays where it
+    is). If it is linked to another one, the link moves to this one.
+    """
+    newest, _item = await _require_entry(session, project.id, discovery_id)
+    await _map_one(session, project.id, newest, discovery_id, character_id)
     await _commit(session)
 
 

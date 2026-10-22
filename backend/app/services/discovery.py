@@ -34,7 +34,7 @@ from app.db.models import (
     StoryBible,
 )
 from app.jobs import store
-from app.services import story_bible
+from app.services import project_cast, story_bible
 
 SOURCE_AI: Final = "ai"
 SOURCE_MANUAL: Final = "manual"
@@ -104,19 +104,50 @@ async def start_run(
             f"The newest {kind} were written by you. Finding them again adds a new version "
             "from the model, so it has to be confirmed."
         )
+    job_input: dict[str, Any] = {
+        "story_text": story,
+        "story_sha256": story_bible.story_sha256(story),
+        "story_bible_id": bible.id,
+        "story_bible_version": bible.version,
+    }
+    cast_kind = cast_kind_of(kind)
+    if cast_kind is not None:
+        # The library items the user put in the project's cast (PHASE-048). The model is shown
+        # them, and the hash is recorded on the version so a changed cast makes it out of date.
+        members = await project_cast.usable_members(session, project.id, cast_kind)
+        job_input["cast"] = project_cast.prompt_entries(members)
+        job_input["cast_sha256"] = project_cast.cast_sha256(members)
     job, _created = await store.create_job(
         session,
         project_id=project.id,
         type=SPECS[kind].job_type,
         provider="llm",
-        input={
-            "story_text": story,
-            "story_sha256": story_bible.story_sha256(story),
-            "story_bible_id": bible.id,
-            "story_bible_version": bible.version,
-        },
+        input=job_input,
     )
     return job
+
+
+def cast_kind_of(kind: StageKind) -> project_cast.Kind | None:
+    """The cast kind of a discovery kind: characters and environments have a cast, scenes do
+    not.
+    """
+    if kind == "characters":
+        return "characters"
+    if kind == "environments":
+        return "environments"
+    return None
+
+
+async def current_cast_sha256(
+    session: AsyncSession, project_id: int, kind: StageKind
+) -> str | None:
+    """The hash of the project's cast of this kind, or None for scenes (they have no cast)."""
+    cast_kind = cast_kind_of(kind)
+    if cast_kind is None:
+        return None
+    return project_cast.cast_sha256(
+        await project_cast.usable_members(session, project_id, cast_kind)
+    )
 
 
 async def get_bible(session: AsyncSession, project_id: int, bible_id: int) -> StoryBible | None:
@@ -162,10 +193,12 @@ async def save_version(
     bible_id: int,
     bible_version: int,
     content: dict[str, Any],
+    cast_sha256: str | None = None,
 ) -> Discovery:
     """Adds the next version, made by the model (`source` is `ai`), recording the story hash
-    and the StoryBible it was made from. Flushes but does not commit: the job commits it
-    together with finishing itself, so a job is never "succeeded" without its result.
+    and the StoryBible it was made from (and the cast it was shown, for characters and
+    environments). Flushes but does not commit: the job commits it together with finishing
+    itself, so a job is never "succeeded" without its result.
     """
     return await add_version(
         session,
@@ -177,6 +210,7 @@ async def save_version(
         bible_id=bible_id,
         bible_version=bible_version,
         content=content,
+        cast_sha256=cast_sha256,
     )
 
 
@@ -191,22 +225,27 @@ async def add_version(
     bible_id: int,
     bible_version: int,
     content: dict[str, Any],
+    cast_sha256: str | None = None,
 ) -> Discovery:
     """Adds the next version with the given source (`ai` from a job, `manual` from an edit).
-    Flushes but does not commit.
+    `cast_sha256` is the hash of the project's cast at that time (characters and environments
+    only; None for scenes). Flushes but does not commit.
     """
     model = SPECS[kind].model
     statement = select(func.max(model.version)).where(model.project_id == project_id)
     highest = (await session.execute(statement)).scalar_one_or_none()
+    inputs: dict[str, Any] = {
+        "story_sha256": story_sha256,
+        "artifacts": [{"kind": BIBLE_KIND, "id": bible_id, "version": bible_version}],
+    }
+    if cast_sha256 is not None:
+        inputs["cast_sha256"] = cast_sha256
     row = model(
         project_id=project_id,
         version=(highest or 0) + 1,
         source=source,
         job_id=job_id,
-        inputs={
-            "story_sha256": story_sha256,
-            "artifacts": [{"kind": BIBLE_KIND, "id": bible_id, "version": bible_version}],
-        },
+        inputs=inputs,
         content=content,
     )
     session.add(row)
@@ -226,11 +265,19 @@ def recorded_bible_version(row: Discovery) -> int | None:
 
 
 def is_out_of_date(
-    story_text: str | None, row: Discovery, newest_bible_version: int | None
+    story_text: str | None,
+    row: Discovery,
+    newest_bible_version: int | None,
+    *,
+    current_cast_sha256: str | None = None,
 ) -> bool:
     """Whether the story is no longer the text this version was made from, or the project has a
     newer StoryBible than the one it read. Worked out on every read. A story that is now empty
     counts as out of date.
+
+    With `current_cast_sha256` (characters and environments), a version that was shown another
+    cast is out of date too. A version with no recorded cast was made before the cast existed,
+    and counts as made with an empty one.
     """
     if story_text is None or not story_text.strip():
         return True
@@ -240,4 +287,8 @@ def is_out_of_date(
     recorded_bible = recorded_bible_version(row)
     if recorded_bible is None:
         return True
+    if current_cast_sha256 is not None:
+        recorded_cast = row.inputs.get("cast_sha256", project_cast.EMPTY_CAST_SHA256)
+        if recorded_cast != current_cast_sha256:
+            return True
     return newest_bible_version is not None and newest_bible_version > recorded_bible

@@ -114,6 +114,17 @@ async def latest_version(
     return (await session.execute(statement)).scalars().first()
 
 
+async def get_version(
+    session: AsyncSession, character_id: int, version: int
+) -> LibraryCharacterVersion | None:
+    """One version of the character, found by its number, or None when there is no such one."""
+    statement = select(LibraryCharacterVersion).where(
+        LibraryCharacterVersion.character_id == character_id,
+        LibraryCharacterVersion.version == version,
+    )
+    return (await session.execute(statement)).scalars().first()
+
+
 async def _look_part(
     session: AsyncSession,
     character: LibraryCharacter,

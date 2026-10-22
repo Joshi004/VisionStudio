@@ -64,6 +64,8 @@ class _Input:
     inputs: dict[str, Any]
     character_id: int
     bible_id: int
+    # A reused character (PHASE-048): the model keeps to its current profile.
+    keep_look: bool
 
 
 def _read_input(job_input: dict[str, Any]) -> _Input | None:
@@ -94,6 +96,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         inputs=inputs,
         character_id=character_id,
         bible_id=bible_id,
+        keep_look=job_input.get("keep_look") is True,
     )
 
 
@@ -168,6 +171,7 @@ class DefineCharacterHandler(JobHandler):
             current_profile=card,
             today_year=date.today().year,
             model=target.model,
+            keep_look=read.keep_look,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

@@ -1559,6 +1559,55 @@ class ProjectEnvironmentLink(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
+class ProjectCastCharacter(Base):
+    """A library character the user put in a story project's cast (PHASE-048).
+
+    The cast is sent to the model when the project's characters are discovered, so the model can
+    say which discovered character is one of these. `mode` says what the pipeline does with a
+    cast character that a discovered one was linked to: `as_is` keeps its definition, look and
+    voice, `rewrite_text` keeps its look and voice but writes the text definition again for this
+    story. A project lists each library character at most once.
+    """
+
+    __tablename__ = "project_cast_character"
+    __table_args__ = (
+        CheckConstraint("mode IN ('as_is', 'rewrite_text')", name="mode_valid"),
+        UniqueConstraint("project_id", "character_id", name="uq_project_cast_character_character"),
+        Index("idx_project_cast_character_character", "character_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("library_character.id", ondelete="CASCADE")
+    )
+    mode: Mapped[str] = mapped_column(default="as_is", server_default=text("'as_is'"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ProjectCastEnvironment(Base):
+    """A library environment the user put in a story project's cast (PHASE-048). The same shape
+    and meaning as `ProjectCastCharacter`; `rewrite_text` keeps the canonical picture.
+    """
+
+    __tablename__ = "project_cast_environment"
+    __table_args__ = (
+        CheckConstraint("mode IN ('as_is', 'rewrite_text')", name="mode_valid"),
+        UniqueConstraint(
+            "project_id", "environment_id", name="uq_project_cast_environment_environment"
+        ),
+        Index("idx_project_cast_environment_environment", "environment_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    environment_id: Mapped[int] = mapped_column(
+        ForeignKey("library_environment.id", ondelete="CASCADE")
+    )
+    mode: Mapped[str] = mapped_column(default="as_is", server_default=text("'as_is'"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
 class LibraryEnvironmentVersion(Base):
     """One immutable snapshot of a library environment's profile (PHASE-012), plus its canonical
     reference picture.

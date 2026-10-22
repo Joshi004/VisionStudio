@@ -19,6 +19,9 @@ Re-choosing by hand is the Character Lab's own 3-sample audition: it writes a `m
 and never moves a pin. The narrator can be chosen by hand from the saved voices
 (`choose_narrator`), which adds a `manual` version.
 
+- A character reused from the project's cast (PHASE-048) that has no voice job in this project,
+  and whose pinned version already holds a saved voice, is `ready` with that voice: nothing is
+  designed for it and its voice is not replaced.
 - `state` is what the story workspace shows for the characters, and `narrator_state` for the
   narrator. **All of it is worked out on every read** from the jobs, the runs and the saved
   voices and is never stored (D-3): a voice is `in_progress` while its description or its
@@ -59,12 +62,15 @@ from app.jobs import store
 from app.services import (
     character_definitions,
     character_looks,
+    character_versions,
+    project_cast,
     story_bible,
     voice_design_writer,
     voice_lab,
     voices,
 )
 from app.services.character_definitions import EntryDefinition
+from app.services.character_links import LinkInfo
 from app.services.voice_lab import VoiceLabForm, VoiceLabInputError
 
 _logger = logging.getLogger(__name__)
@@ -300,12 +306,29 @@ def _character_reasons(run: LabVoiceRun, entry: EntryDefinition) -> list[str]:
     return []
 
 
+async def _reused_voice(
+    session: AsyncSession, info: LinkInfo, modes: dict[int, project_cast.Mode]
+) -> Voice | None:
+    """The saved voice of a reused character's pinned version, or None when the character is not
+    reused or its pinned version has no voice.
+    """
+    if project_cast.reuse_mode(modes, info.character.id, info.link.how) is None:
+        return None
+    version = await character_versions.get_version(
+        session, info.character.id, info.link.pinned_version
+    )
+    if version is None or version.voice_id is None:
+        return None
+    return await session.get(Voice, version.voice_id)
+
+
 async def state(session: AsyncSession, project: Project) -> VoicesState:
     """The newest list of characters with where each one's voice stands. Worked out on every
     read; nothing here is stored.
     """
     definitions = await character_definitions.state(session, project)
     jobs = await _newest_jobs(session, project.id)
+    modes = await project_cast.cast_modes(session, project.id, "characters")
     entries: list[EntryVoice] = []
     for entry in definitions.entries:
         info = entry.entry.info
@@ -322,7 +345,12 @@ async def state(session: AsyncSession, project: Project) -> VoicesState:
 
         status: Status
         reasons: list[str] = []
-        if progress is None:
+        reused_voice = (
+            await _reused_voice(session, info, modes) if progress is None and info else None
+        )
+        if reused_voice is not None:
+            status = "ready"
+        elif progress is None:
             status = "none" if refusal is None else "unavailable"
         elif progress.stage is not None:
             status = "in_progress"
@@ -341,7 +369,7 @@ async def state(session: AsyncSession, project: Project) -> VoicesState:
                 status=status,
                 stage=progress.stage if progress is not None else None,
                 instruction=progress.instruction if progress is not None else None,
-                voice=progress.voice if progress is not None else None,
+                voice=progress.voice if progress is not None else reused_voice,
                 error=progress.error if progress is not None and progress.failed else None,
                 reasons=reasons,
                 can_run=blocked is None,

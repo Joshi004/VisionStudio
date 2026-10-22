@@ -25,6 +25,7 @@ import {
   type LinkedEnvironment,
 } from "../../api/environmentLinks";
 import { describeError } from "../../api/errors";
+import { CAST_MODE_LABELS, useProjectCast, type CastMode } from "../../api/projectCast";
 
 type EnvironmentLinksPanelProps = {
   projectId: number;
@@ -37,10 +38,13 @@ function labPath(environmentId: number): string {
 /** Where a linked entry points: the library environment, the version pinned, and what is newer. */
 function LinkedLine({
   link,
+  castMode,
   disabled,
   onUnlink,
 }: {
   link: LinkedEnvironment;
+  // The mode of the cast member the entry is linked to, or undefined when it is not in the cast.
+  castMode: CastMode | undefined;
   disabled: boolean;
   onUnlink: () => void;
 }) {
@@ -55,6 +59,15 @@ function LinkedLine({
       <Badge variant="light" title="The version of the environment this project uses">
         pins v{link.pinned_version}
       </Badge>
+      {castMode !== undefined && link.how === "mapped" && (
+        <Badge
+          variant="light"
+          color="teal"
+          title="This item is in the project's cast, so the pipeline reuses it without asking."
+        >
+          from cast: {CAST_MODE_LABELS[castMode].toLowerCase()}
+        </Badge>
+      )}
       {link.newer_version_available && (
         <Badge
           variant="light"
@@ -97,6 +110,7 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
   const create = useCreateEnvironmentLink(projectId);
   const map = useMapEnvironmentLink(projectId);
   const unlink = useUnlinkEnvironment(projectId);
+  const cast = useProjectCast(projectId);
 
   // The picker lists the whole library, so the pages are loaded one after the other.
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = library;
@@ -105,6 +119,13 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
       void fetchNextPage();
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // The cast members by library id, to mark the entries that were linked from the cast.
+  const castModes = new Map<number, CastMode>(
+    (cast.data?.environments ?? []).map(
+      (member) => [member.library_id, member.mode] as [number, CastMode],
+    ),
+  );
 
   // One change at a time: every button waits for the one before it.
   const busy = linkAll.isPending || create.isPending || map.isPending || unlink.isPending;
@@ -202,6 +223,7 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
               {entry.link ? (
                 <LinkedLine
                   link={entry.link}
+                  castMode={castModes.get(entry.link.environment_id)}
                   disabled={busy}
                   onUnlink={() => unlink.mutate(entry.id)}
                 />
@@ -266,6 +288,7 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
                   </Badge>
                   <LinkedLine
                     link={link}
+                    castMode={castModes.get(link.environment_id)}
                     disabled={busy}
                     onUnlink={() => unlink.mutate(link.discovery_id)}
                   />

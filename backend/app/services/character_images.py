@@ -22,6 +22,9 @@ never moves a pin.
   look changes that library character's current look.
 - `start_all` starts a look for every defined character the pipeline made that has no images
   yet or whose images are out of date, skipping (with the reason) the others.
+- A character reused from the project's cast (PHASE-048) that the pipeline has made no look
+  for, and whose pinned version already holds all five angles, is `ready` with those pictures:
+  nothing is drawn for it and its look is not changed.
 - `state` is what the story workspace shows: per entry its definition's state, the newest look
   the pipeline made for it, its progress, why it failed and whether its images are out of
   date. **All of it is worked out on every read** and never stored (D-3): a look is
@@ -70,7 +73,9 @@ from app.services import (
     character_library,
     character_looks,
     character_relations,
+    character_versions,
     image_lab,
+    project_cast,
 )
 from app.services.character_definitions import EntryDefinition
 from app.services.character_links import LinkInfo
@@ -362,6 +367,21 @@ async def pinned_front(session: AsyncSession, info: LinkInfo) -> Front | None:
     return None
 
 
+async def _has_pinned_look(session: AsyncSession, info: LinkInfo) -> bool:
+    """Whether the character's pinned version holds a picture for every angle."""
+    version = await character_versions.get_version(
+        session, info.character.id, info.link.pinned_version
+    )
+    if version is None:
+        return False
+    angles = {
+        picture.get("angle")
+        for picture in version.look_references or []
+        if isinstance(picture, dict) and isinstance(picture.get("lab_image_id"), int)
+    }
+    return all(angle in angles for angle in character_library.ANGLES)
+
+
 def _likeness(
     entry_id: str, relations: list[dict[str, str]], entries: dict[str, EntryDefinition]
 ) -> str | None:
@@ -503,8 +523,12 @@ async def state(session: AsyncSession, project: Project) -> ImagesState:
     for entry_id, entry in by_definition.items():
         if entry.entry.info is not None:
             fronts[entry_id] = await pinned_front(session, entry.entry.info)
+    modes = await project_cast.cast_modes(session, project.id, "characters")
 
     first_pass: list[EntryImages] = []
+    # The entries that are `ready` only because the reused character's pinned version holds
+    # its pictures: they have no look of this project, so the relations do not apply to them.
+    reused_ready: set[str] = set()
     for entry in definitions.entries:
         info = entry.entry.info
         look = looks.get((entry.item["id"], info.character.id)) if info is not None else None
@@ -513,7 +537,15 @@ async def state(session: AsyncSession, project: Project) -> ImagesState:
 
         status: Status
         reasons: list[str] = []
-        if look is None or progress is None:
+        if (
+            look is None
+            and info is not None
+            and project_cast.reuse_mode(modes, info.character.id, info.link.how) is not None
+            and await _has_pinned_look(session, info)
+        ):
+            status = "ready"
+            reused_ready.add(entry.item["id"])
+        elif look is None or progress is None:
             status = "none" if refusal is None else "unavailable"
         elif look.status == "ready":
             reasons = _out_of_date_reasons(look, entry)
@@ -533,7 +565,13 @@ async def state(session: AsyncSession, project: Project) -> ImagesState:
                 status=status,
                 look=look,
                 stage=progress.stage if progress is not None else None,
-                angles_ready=progress.angles_ready if progress is not None else 0,
+                angles_ready=(
+                    progress.angles_ready
+                    if progress is not None
+                    else len(character_library.ANGLES)
+                    if entry.item["id"] in reused_ready
+                    else 0
+                ),
                 failed_angles=progress.failed_angles if progress is not None else [],
                 error=progress.error if progress is not None else None,
                 reasons=reasons,
@@ -545,7 +583,9 @@ async def state(session: AsyncSession, project: Project) -> ImagesState:
 
     by_id = {item.definition.item["id"]: item for item in first_pass}
     entries = [
-        _with_relations(item, plans[item.definition.item["id"]], by_id, fronts)
+        item
+        if item.definition.item["id"] in reused_ready
+        else _with_relations(item, plans[item.definition.item["id"]], by_id, fronts)
         for item in first_pass
     ]
     return ImagesState(

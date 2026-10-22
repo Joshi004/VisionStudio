@@ -183,6 +183,18 @@ characters:
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
 
+# Added to the instructions for a character the author chose from the library and wants to
+# reuse (PHASE-048): its pictures and voice are made already, so its profile is fixed.
+_KEEP_LOOK_RULE: Final = """
+
+This is an existing character that the author reuses, and its pictures and voice are made \
+already. So the CURRENT PROFILE is fixed. Copy its look, wardrobe and voice into \
+"visual_identity", "default_wardrobe" and "voice_identity" exactly as it states them (the age, \
+sex, species, build, height, skin tone, face shape, hair, eyes, distinctive features, clothes, \
+pitch, texture, accent and energy), and write only what it does not state. Never change \
+something it states, even when the story would suit another detail better. Adapt only \
+"behavior" and "era" to this story."""
+
 
 def build_request(
     *,
@@ -193,9 +205,13 @@ def build_request(
     current_profile: str | None,
     today_year: int,
     model: str,
+    keep_look: bool = False,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
+
+    With `keep_look` (a character reused from the library), the instructions say that the
+    current profile is fixed. It only has an effect when there is a `current_profile`.
 
     `entry` is the character to define, `others` the rest of the story's characters (each
     `{id, name, description}`, and `relation_to_this` when the project's relations say what it
@@ -212,10 +228,13 @@ def build_request(
         parts.append("CURRENT PROFILE:\n" + current_profile)
     parts.append(f"TODAY'S YEAR: {today_year}")
     parts.append("STORY:\n" + story_text)
+    instructions = (
+        _INSTRUCTIONS + _KEEP_LOOK_RULE if keep_look and current_profile else _INSTRUCTIONS
+    )
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": _INSTRUCTIONS},
+            {"role": "system", "content": instructions},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,

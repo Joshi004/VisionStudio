@@ -172,6 +172,7 @@ async def _state(session: AsyncSession, project: Project, kind: Kind) -> Discove
     versions = await discovery_service.list_versions(session, kind, project.id)
     job = await store.latest_job(session, project.id, discovery_service.SPECS[kind].job_type)
     newest_bible = await story_bible_service.latest(session, project.id)
+    cast_sha256 = await discovery_service.current_cast_sha256(session, project.id, kind)
     return DiscoveryState(
         latest=_discovery_out(kind, latest) if latest is not None else None,
         versions=[_version_out(row) for row in versions],
@@ -190,6 +191,7 @@ async def _state(session: AsyncSession, project: Project, kind: Kind) -> Discove
                 project.script_text,
                 latest,
                 newest_bible.version if newest_bible is not None else None,
+                current_cast_sha256=cast_sha256,
             )
             if latest is not None
             else False

@@ -21,6 +21,7 @@ from app.api import (
     jobs,
     look_state_images,
     look_state_resolution,
+    project_cast,
     projects,
     scene_definitions,
     scene_events,
@@ -78,3 +79,4 @@ api_router.include_router(shot_prompts.router, tags=["shot-prompts"])
 api_router.include_router(shot_takes.router, tags=["shot-takes"])
 api_router.include_router(story_renders.router, tags=["story-renders"])
 api_router.include_router(story_pipeline.router, tags=["story-pipeline"])
+api_router.include_router(project_cast.router, tags=["project-cast"])

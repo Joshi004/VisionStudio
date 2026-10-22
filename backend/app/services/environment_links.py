@@ -48,7 +48,7 @@ from app.db.models import (
     ProjectEnvironmentLink,
 )
 from app.db.types import utcnow
-from app.services import discovery, environment_library, environment_versions
+from app.services import discovery, environment_library, environment_versions, project_cast
 
 _KIND: Final = "environments"
 
@@ -261,36 +261,51 @@ async def create(session: AsyncSession, project: Project, discovery_id: str) -> 
 
 
 async def link_all(session: AsyncSession, project: Project) -> int:
-    """Makes a library environment for every unlinked entry of the newest list, all in one
-    commit, and returns how many were made (0 when everything is linked already). Raises
-    EnvironmentLinkError when no list exists.
+    """Links every unlinked entry of the newest list, all in one commit, and returns how many
+    were linked (0 when everything is linked already). Raises EnvironmentLinkError when no list
+    exists.
+
+    An entry that discovery matched to an environment of the project's cast (its `library_id`,
+    PHASE-048) is mapped to that library environment. Every other entry gets a new library
+    environment made from it.
     """
     newest = await _newest_discovery(session, project.id)
     if newest is None:
         raise EnvironmentLinkError("Find the environments first: there is nothing to link yet.")
-    linked = {link.discovery_id for link in await _project_links(session, project.id)}
+    links = await _project_links(session, project.id)
+    linked = {link.discovery_id for link in links}
+    used = {link.environment_id for link in links}
+    in_cast = await project_cast.cast_modes(session, project.id, _KIND)
     made = 0
     for item in _items(newest):
         if item["id"] in linked:
             continue
-        await _create_one(session, project.id, newest, item)
+        library_id = item.get("library_id")
+        if isinstance(library_id, int) and library_id in in_cast and library_id not in used:
+            await _map_one(session, project.id, newest, item["id"], library_id)
+            used.add(library_id)
+        else:
+            await _create_one(session, project.id, newest, item)
         made += 1
     if made:
         await _commit(session)
     return made
 
 
-async def map_to_existing(
-    session: AsyncSession, project: Project, discovery_id: str, environment_id: int
+async def _map_one(
+    session: AsyncSession,
+    project_id: int,
+    newest: EnvironmentDiscovery,
+    discovery_id: str,
+    environment_id: int,
 ) -> None:
-    """Links the entry to an existing library environment and pins its newest version. Commits.
-    Raises EnvironmentLinkError for an entry that is not in the newest list, an environment
-    that is missing or archived, or one that the project already uses for another entry.
+    """Links the entry to an existing library environment and pins its newest version. Flushes;
+    the caller commits. Raises EnvironmentLinkError for an environment that is missing or
+    archived, or one that the project already uses for another entry.
 
     If the entry is already linked to this environment, nothing changes (the pin stays where it
     is). If it is linked to another one, the link moves to this one.
     """
-    newest, _item = await _require_entry(session, project.id, discovery_id)
     environment = await session.get(LibraryEnvironment, environment_id)
     if environment is None:
         raise EnvironmentLinkError(
@@ -301,12 +316,12 @@ async def map_to_existing(
             f"{environment.name} is archived. Unarchive it in the Character Lab to use it."
         )
 
-    existing = await _link_for(session, project.id, discovery_id)
+    existing = await _link_for(session, project_id, discovery_id)
     if existing is not None and existing.environment_id == environment_id:
         return
 
     statement = select(ProjectEnvironmentLink).where(
-        ProjectEnvironmentLink.project_id == project.id,
+        ProjectEnvironmentLink.project_id == project_id,
         ProjectEnvironmentLink.environment_id == environment_id,
     )
     used_for = (await session.execute(statement)).scalars().first()
@@ -325,7 +340,7 @@ async def map_to_existing(
     if existing is None:
         session.add(
             ProjectEnvironmentLink(
-                project_id=project.id,
+                project_id=project_id,
                 discovery_id=discovery_id,
                 environment_id=environment_id,
                 pinned_version=version.version,
@@ -339,6 +354,21 @@ async def map_to_existing(
         existing.how = "mapped"
         existing.discovery_version = newest.version
         existing.updated_at = utcnow()
+    await session.flush()
+
+
+async def map_to_existing(
+    session: AsyncSession, project: Project, discovery_id: str, environment_id: int
+) -> None:
+    """Links the entry to an existing library environment and pins its newest version. Commits.
+    Raises EnvironmentLinkError for an entry that is not in the newest list, an environment
+    that is missing or archived, or one that the project already uses for another entry.
+
+    If the entry is already linked to this environment, nothing changes (the pin stays where it
+    is). If it is linked to another one, the link moves to this one.
+    """
+    newest, _item = await _require_entry(session, project.id, discovery_id)
+    await _map_one(session, project.id, newest, discovery_id, environment_id)
     await _commit(session)
 
 

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject } from "../api/projects";
+import { CastPanel } from "../components/story/CastPanel";
 import { CharacterDefinitionsPanel } from "../components/story/CharacterDefinitionsPanel";
 import { CharacterImagesPanel } from "../components/story/CharacterImagesPanel";
 import { CharacterLinksPanel } from "../components/story/CharacterLinksPanel";
@@ -85,6 +86,7 @@ export function ProjectPage() {
           </Group>
 
           <StoryEditor project={project} />
+          <CastPanel projectId={project.id} />
           <StoryPipelinePanel projectId={project.id} />
           <StoryBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
           <DiscoveryPanel

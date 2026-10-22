@@ -60,23 +60,40 @@ class DiscoveryHandler(JobHandler):
     kind: ClassVar[discovery.StageKind]
     saving_phase: ClassVar[str]
 
-    def build_body(self, story: str, bible_content: dict[str, Any], model: str) -> dict[str, Any]:
-        """The request body sent to the model. Characters and environments by default."""
-        return writer.build_request(cast(writer.Kind, self.kind), story, bible_content, model=model)
+    def build_body(
+        self, story: str, bible_content: dict[str, Any], model: str, library_cast: object
+    ) -> dict[str, Any]:
+        """The request body sent to the model. Characters and environments by default.
+        `library_cast` is the cast the job was started with (PHASE-048); scenes ignore it.
+        """
+        return writer.build_request(
+            cast(writer.Kind, self.kind),
+            story,
+            bible_content,
+            model=model,
+            cast=library_cast if isinstance(library_cast, list) else None,
+        )
 
-    def check(self, content: str, story: str) -> dict[str, Any]:
+    def check(self, content: str, story: str, library_cast: object) -> dict[str, Any]:
         """The model's text read and checked, as the content that is stored. Raises ValueError,
         with a message fit for the user, when it cannot be used. Characters and environments
-        by default; the story is not needed for them.
+        by default; the story is not needed for them, and the cast tells which `library_id`
+        values the answer may use.
         """
-        return writer.check_items(cast(writer.Kind, self.kind), writer.parse_answer(content))
+        return writer.check_items(
+            cast(writer.Kind, self.kind),
+            writer.parse_answer(content),
+            writer.cast_library_ids(library_cast),
+        )
 
-    def _read(self, result: llm.ChatResult, story: str) -> tuple[str | None, dict[str, Any] | None]:
+    def _read(
+        self, result: llm.ChatResult, story: str, library_cast: object
+    ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`."""
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
         try:
-            return None, self.check(result.content, story)
+            return None, self.check(result.content, story, library_cast)
         except ValueError as exc:
             return str(exc), None
 
@@ -109,9 +126,14 @@ class DiscoveryHandler(JobHandler):
         bible_content = bible.content
         bible_row_id = bible.id
         bible_version = bible.version
+        # The cast and its hash, set by `discovery.start_run` for characters and environments.
+        library_cast = job_input.get("cast")
+        cast_sha256 = job_input.get("cast_sha256")
+        if not isinstance(cast_sha256, str):
+            cast_sha256 = None
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        body = self.build_body(story, bible_content, target.model)
+        body = self.build_body(story, bible_content, target.model, library_cast)
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),
@@ -125,7 +147,7 @@ class DiscoveryHandler(JobHandler):
             job_id,
             target,
             body,
-            lambda result: self._read(result, story),
+            lambda result: self._read(result, story, library_cast),
             timeout_s=REQUEST_TIMEOUT_S,
         )
         content: dict[str, Any] | None = outcome.value
@@ -144,6 +166,7 @@ class DiscoveryHandler(JobHandler):
                 bible_id=bible_row_id,
                 bible_version=bible_version,
                 content=content,
+                cast_sha256=cast_sha256,
             )
             output = {
                 **outcome.record(),

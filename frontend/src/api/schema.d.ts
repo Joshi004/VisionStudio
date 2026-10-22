@@ -3017,6 +3017,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/cast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Cast */
+        get: operations["get_cast_api_projects__project_id__cast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/cast/{kind}/{library_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Cast Member
+         * @description Puts a library item in the cast with this mode, or changes the mode of one already in it.
+         */
+        put: operations["put_cast_member_api_projects__project_id__cast__kind___library_id__put"];
+        post?: never;
+        /**
+         * Delete Cast Member
+         * @description Takes the library item out of the cast. The item itself stays in its lab.
+         */
+        delete: operations["delete_cast_member_api_projects__project_id__cast__kind___library_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3096,6 +3137,36 @@ export interface components {
             baseline: string;
             /** Gesture Style */
             gesture_style: string;
+        };
+        /** CastMemberIn */
+        CastMemberIn: {
+            /**
+             * Mode
+             * @default as_is
+             * @enum {string}
+             */
+            mode: "as_is" | "rewrite_text";
+        };
+        /** CastMemberOut */
+        CastMemberOut: {
+            /** Library Id */
+            library_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "as_is" | "rewrite_text";
+            /** Archived */
+            archived: boolean;
+        };
+        /** CastOut */
+        CastOut: {
+            /** Characters */
+            characters: components["schemas"]["CastMemberOut"][];
+            /** Environments */
+            environments: components["schemas"]["CastMemberOut"][];
         };
         /**
          * CatalogPictureOut
@@ -15191,6 +15262,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_cast_api_projects__project_id__cast_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CastOut"];
+                };
+            };
+            /** @description No such project or cast member. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_cast_member_api_projects__project_id__cast__kind___library_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                kind: "characters" | "environments";
+                library_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CastMemberIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CastOut"];
+                };
+            };
+            /** @description No such project or cast member. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such library item, it is archived, or the cast is full. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_cast_member_api_projects__project_id__cast__kind___library_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                kind: "characters" | "environments";
+                library_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project or cast member. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

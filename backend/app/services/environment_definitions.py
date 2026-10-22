@@ -17,7 +17,8 @@ version the project pins.
   library (`how = "mapped"`) and the user has not confirmed the overwrite.
 - `start_all` queues a job for every linked entry that the pipeline made (`how = "created"`),
   that is not archived, not already defined and current, and not already being defined. A
-  mapped environment is never touched by it. The jobs run side by side when the pool allows
+  mapped environment is never touched by it, except one from the project's cast (see below)
+  that still needs a definition. The jobs run side by side when the pool allows
   (`store.create_job` with `dedupe_key`).
 - `start_picture` starts the picture again for an entry that is defined but has no picture
   (it failed, or was never started).
@@ -29,6 +30,14 @@ version the project pins.
   its `inputs` recorded.
 - `save_definition` is called by the job and flushes without committing; the job commits it
   together with finishing itself.
+
+A mapped environment that is in the project's cast (`services/project_cast.py`, PHASE-048) is a
+**reused** environment, and the user already chose to use it, so nothing asks before it is
+defined. Its mode decides the rest: with `as_is` a pinned version that holds a definition counts
+as `defined` whatever project it was written for, and is never judged out of date; with
+`rewrite_text` the normal rules apply, so a definition is written for this story. Either way a
+definition that is written treats the environment's current profile as fixed and keeps the
+canonical picture it already has (`keep_picture`).
 
 The scenes are an input because Section 13 gives the model "the scenes using the environment".
 Scene discovery records no environment ids (D-15), so the model is given the whole list of
@@ -70,6 +79,7 @@ from app.services import (
     environment_references,
     environment_versions,
     image_lab,
+    project_cast,
     story_bible,
 )
 from app.services.environment_links import EntryState
@@ -249,8 +259,20 @@ def _entry_refusal(entry: EntryState) -> str | None:
     return None
 
 
-def _needs_confirmation(entry: EntryState) -> bool:
-    return entry.info is not None and entry.info.link.how == "mapped"
+def _reuse(entry: EntryState, modes: dict[int, project_cast.Mode]) -> project_cast.Mode | None:
+    """The cast mode of the entry when it is a reused environment, else None."""
+    if entry.info is None:
+        return None
+    return project_cast.reuse_mode(modes, entry.info.link.environment_id, entry.info.link.how)
+
+
+def _needs_confirmation(entry: EntryState, modes: dict[int, project_cast.Mode]) -> bool:
+    """Whether defining the entry overwrites an environment the user chose by hand. One from
+    the project's cast does not: choosing it for the cast was the confirmation.
+    """
+    return (
+        entry.info is not None and entry.info.link.how == "mapped" and _reuse(entry, modes) is None
+    )
 
 
 def _other(other: dict[str, Any]) -> dict[str, str]:
@@ -265,6 +287,8 @@ async def _queue(
     newest: discovery.Discovery,
     entry: EntryState,
     items: list[dict[str, Any]],
+    *,
+    keep_picture: bool,
 ) -> tuple[Job, bool]:
     """Queues the job for one linked entry, and returns `(job, created)`. `created` is False
     when the entry already has a job waiting or running, which is returned instead.
@@ -304,6 +328,8 @@ async def _queue(
             "others": [_other(other) for other in items if other["id"] != item["id"]],
             "scenes": environment_definition_writer.scenes_for_prompt(run.scenes.content["scenes"]),
             "environment_id": entry.info.link.environment_id,
+            # A reused environment: its profile is fixed and its picture is kept (PHASE-048).
+            "keep_picture": keep_picture,
             # Written onto the version the job makes (D-3).
             "inputs": inputs,
         },
@@ -352,12 +378,15 @@ async def start_run(
     refusal = _entry_refusal(entry)
     if refusal is not None:
         raise EnvironmentDefinitionError(refusal)
-    if _needs_confirmation(entry) and not confirm_overwrite:
+    modes = await project_cast.cast_modes(session, project.id, "environments")
+    if _needs_confirmation(entry, modes) and not confirm_overwrite:
         raise EnvironmentDefinitionError(
             f"{entry.item['name']} was chosen from the Character Lab. Defining it overwrites "
             "its description, atmosphere and era, so it has to be confirmed."
         )
-    job, _created = await _queue(session, project, run, newest, entry, items)
+    job, _created = await _queue(
+        session, project, run, newest, entry, items, keep_picture=_reuse(entry, modes) is not None
+    )
     return job
 
 
@@ -371,6 +400,7 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     run = await _require_inputs(session, project)
     newest, items, entries = await _entries(session, project)
     current = {item.item["id"]: item for item in (await state(session, project)).entries}
+    modes = await project_cast.cast_modes(session, project.id, "environments")
     job_ids: list[int] = []
     skipped: list[Skipped] = []
     for entry in entries:
@@ -379,7 +409,7 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         if refusal is not None:
             skipped.append(Skipped(entry.item["id"], name, refusal))
             continue
-        if _needs_confirmation(entry):
+        if _needs_confirmation(entry, modes):
             skipped.append(
                 Skipped(
                     entry.item["id"],
@@ -391,7 +421,10 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         if current[entry.item["id"]].status == "defined":
             skipped.append(Skipped(entry.item["id"], name, "Already defined and up to date."))
             continue
-        job, created = await _queue(session, project, run, newest, entry, items)
+        keep_picture = _reuse(entry, modes) is not None
+        job, created = await _queue(
+            session, project, run, newest, entry, items, keep_picture=keep_picture
+        )
         if created:
             job_ids.append(job.id)
         else:
@@ -616,6 +649,7 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
     links = await environment_links.state(session, project.id)
     jobs = await _newest_jobs(session, project.id)
     attempts = await _newest_attempts(session, project.id)
+    modes = await project_cast.cast_modes(session, project.id, "environments")
 
     entries: list[EntryDefinition] = []
     for entry in links.entries:
@@ -632,9 +666,18 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
                 session, entry.info.link.environment_id, entry.info.link.pinned_version
             )
             inputs = pinned.inputs if pinned is not None else None
-            # Only a definition written for this entry in this project counts: a pinned
-            # version made by hand in the lab, or defined for another project, does not.
             if (
+                _reuse(entry, modes) == "as_is"
+                and pinned is not None
+                and pinned.definition is not None
+            ):
+                # An environment reused as it is: its own definition counts, whatever project
+                # wrote it, and it is never out of date (the story did not make it).
+                version = pinned
+                status = "defined"
+            # Otherwise only a definition written for this entry in this project counts: a
+            # pinned version made by hand in the lab, or defined for another project, does not.
+            elif (
                 pinned is not None
                 and pinned.definition is not None
                 and isinstance(inputs, dict)
@@ -669,7 +712,7 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
                 job=job,
                 can_run=blocked_reason is None,
                 blocked_reason=blocked_reason,
-                needs_confirmation=_needs_confirmation(entry),
+                needs_confirmation=_needs_confirmation(entry, modes),
                 picture=picture,
             )
         )
@@ -709,11 +752,15 @@ async def save_definition(
     definition: dict[str, Any],
     job_id: int,
     inputs: dict[str, Any],
+    keep_picture: bool = False,
 ) -> LibraryEnvironmentVersion:
     """Writes the definition onto the library environment, adds its next version, moves the
     project's pin to it and starts the version's canonical picture. Flushes but does not
     commit: the job commits it together with finishing itself, so a job is never "succeeded"
     without its result.
+
+    With `keep_picture` (a reused environment) the new version keeps the canonical picture the
+    environment already has, so no new picture is started for it.
 
     The profile fields the definition fills are overwritten (the name and the notes are not).
     If the environment already holds exactly this definition, built from the same inputs, no
@@ -744,7 +791,7 @@ async def save_definition(
     environment.updated_at = utcnow()
 
     version = await environment_versions.record_version_if_changed(
-        session, environment, source="ai", job_id=job_id, inputs=inputs
+        session, environment, source="ai", job_id=job_id, inputs=inputs, keep_picture=keep_picture
     )
     if version is None:
         version = await environment_versions.latest_version(session, environment_id)
