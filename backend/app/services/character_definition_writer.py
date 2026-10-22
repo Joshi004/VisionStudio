@@ -54,13 +54,17 @@ _TEXT_FIELDS: Final[dict[str, dict[str, int]]] = {
     "default_wardrobe": {"upper": 150, "lower": 150, "footwear": 100},
     "voice_identity": {
         "age_character": 60,
-        "pitch": 40,
+        "pitch": 60,
         "texture": 120,
         "accent": 80,
         "default_energy": 60,
     },
     "behavior": {"baseline": 300, "gesture_style": 200},
 }
+
+# The prompt states the limits above, but the check accepts this much more: the model often
+# misses a stated length by a few characters, and that should not fail the definition.
+LIMIT_SLACK: Final = 1.25
 
 # The profile fields a definition writes, and the most characters each may hold.
 _PROFILE_TEXT_LIMITS: Final[dict[str, int]] = {
@@ -235,7 +239,7 @@ def _object(parent: dict[str, Any], key: str, path: str) -> dict[str, Any]:
 
 def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars`.
+    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -243,9 +247,10 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     text = " ".join(value.split())
     if not text:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
-    if len(text) > max_chars:
+    accepted_chars = int(max_chars * LIMIT_SLACK)
+    if len(text) > accepted_chars:
         raise ValueError(
-            f'The "{path}" of the model\'s answer was longer than {max_chars} characters.'
+            f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
         )
     return text
 

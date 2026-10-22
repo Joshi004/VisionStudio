@@ -32,7 +32,7 @@ _logger = logging.getLogger(__name__)
 PROMPT_JOB: Final = "write_environment_prompt"
 
 NAME_MAX_CHARS: Final = 80
-DESCRIPTION_MAX_CHARS: Final = 2000
+DESCRIPTION_MAX_CHARS: Final = 2500
 ATMOSPHERE_MAX_CHARS: Final = 500
 NOTES_MAX_CHARS: Final = 1000
 ERA_SETTING_MAX_CHARS: Final = 200

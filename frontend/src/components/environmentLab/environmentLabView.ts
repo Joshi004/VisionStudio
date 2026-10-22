@@ -6,7 +6,7 @@ export type EraKind = LibraryEnvironment["era_kind"];
 
 export const LIMITS = {
   name: 80,
-  description: 2000,
+  description: 2500,
   atmosphere: 500,
   notes: 1000,
   eraSetting: 200,

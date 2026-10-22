@@ -40,6 +40,9 @@ TIME_PERIOD_MAX_CHARS: Final = 120
 NARRATION_MAX_CHARS: Final = 400
 WORLD_RULES_MAX_ITEMS: Final = 10
 WORLD_RULE_MAX_CHARS: Final = 300
+# The prompt states the limits above, but the check accepts this much more: the model often
+# misses a stated length by a few characters, and that should not fail the StoryBible.
+LIMIT_SLACK: Final = 1.25
 
 _SYSTEM_PROMPT: Final = f"""You are the story editor of a studio that turns written stories \
 into short films. You read one complete story and write its StoryBible: a short record of the \
@@ -112,7 +115,7 @@ def _one_line(value: str) -> str:
 
 def _text(value: object, name: str, max_chars: int) -> str:
     """One piece of text on one line. Raises ValueError when it is not text, is empty, or is
-    longer than `max_chars`.
+    longer than `max_chars` with `LIMIT_SLACK` allowed on top.
     """
     if value is None:
         raise ValueError(f'There is no "{name}".')
@@ -121,8 +124,9 @@ def _text(value: object, name: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{name}" was empty.')
-    if len(text) > max_chars:
-        raise ValueError(f'The "{name}" was longer than {max_chars} characters.')
+    accepted_chars = int(max_chars * LIMIT_SLACK)
+    if len(text) > accepted_chars:
+        raise ValueError(f'The "{name}" was longer than {accepted_chars} characters.')
     return text
 
 

@@ -58,6 +58,9 @@ LANDMARKS_MAX_ITEMS: Final = 6
 LANDMARK_MAX_CHARS: Final = 50
 RULES_MAX_ITEMS: Final = 4
 RULE_MAX_CHARS: Final = 100
+# The prompt states the limits above, but the check accepts this much more: the model often
+# misses a stated length by a few characters, and that should not fail the definition.
+LIMIT_SLACK: Final = 1.25
 
 # The profile columns a definition run overwrites: `to_profile` fills them. The name and the
 # notes are never part of it.
@@ -216,7 +219,7 @@ def _one_line(value: str) -> str:
 
 def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars`.
+    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -224,9 +227,10 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
-    if len(text) > max_chars:
+    accepted_chars = int(max_chars * LIMIT_SLACK)
+    if len(text) > accepted_chars:
         raise ValueError(
-            f'The "{path}" of the model\'s answer was longer than {max_chars} characters.'
+            f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
         )
     return text
 
@@ -235,7 +239,7 @@ def _text_list(
     parent: dict[str, Any], key: str, path: str, max_items: int, max_chars: int
 ) -> list[str]:
     """A list of from 1 to `max_items` pieces of text on one line, each at most `max_chars`
-    characters. Raises ValueError otherwise.
+    characters (with `LIMIT_SLACK` allowed on top). Raises ValueError otherwise.
     """
     values = parent.get(key)
     if not isinstance(values, list):
@@ -244,15 +248,16 @@ def _text_list(
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
     if len(values) > max_items:
         raise ValueError(f'The "{path}" of the model\'s answer had more than {max_items} items.')
+    accepted_chars = int(max_chars * LIMIT_SLACK)
     items: list[str] = []
     for position, value in enumerate(values, start=1):
         if not isinstance(value, str) or not _one_line(value):
             raise ValueError(f'Item {position} of the "{path}" of the model\'s answer was no text.')
         text = _one_line(value)
-        if len(text) > max_chars:
+        if len(text) > accepted_chars:
             raise ValueError(
                 f'Item {position} of the "{path}" of the model\'s answer was longer than '
-                f"{max_chars} characters."
+                f"{accepted_chars} characters."
             )
         items.append(text)
     return items

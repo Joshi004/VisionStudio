@@ -51,6 +51,9 @@ LOOK_MAX_CHARS: Final = 100
 MOOD_MAX_CHARS: Final = 80
 GOAL_MAX_CHARS: Final = 300
 CONTINUITY_MAX_CHARS: Final = 200
+# The prompt states the limits above, but the check accepts this much more: the model often
+# misses a stated length by a few characters, and that should not fail the definition.
+LIMIT_SLACK: Final = 1.25
 
 # What the model is shown as the form of its answer. It is built from a dict so the braces and
 # quotes are always valid JSON.
@@ -219,7 +222,7 @@ def _optional_object(parent: dict[str, Any], key: str) -> dict[str, Any]:
 
 def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars`.
+    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -227,8 +230,9 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{path}" was empty.')
-    if len(text) > max_chars:
-        raise ValueError(f'The "{path}" was longer than {max_chars} characters.')
+    accepted_chars = int(max_chars * LIMIT_SLACK)
+    if len(text) > accepted_chars:
+        raise ValueError(f'The "{path}" was longer than {accepted_chars} characters.')
     return text
 
 

@@ -52,6 +52,10 @@ MAX_EVENTS: Final = 100
 SPEECH_MAX_CHARS: Final = 2000
 DESCRIPTION_MAX_CHARS: Final = 300
 EMOTION_MAX_CHARS: Final = 100
+# The prompt states the description and emotion limits, but the check accepts this much more:
+# the model often misses a stated length by a few characters, and that should not fail the
+# scene. Speech is copied from the story, so `SPEECH_MAX_CHARS` is checked exactly.
+LIMIT_SLACK: Final = 1.25
 
 # What the model is shown as the form of its answer. It is built from a dict so the braces and
 # quotes are always valid JSON.
@@ -168,9 +172,11 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _text(event: dict[str, Any], key: str, position: int, max_chars: int) -> str:
+def _text(
+    event: dict[str, Any], key: str, position: int, max_chars: int, slack: float = LIMIT_SLACK
+) -> str:
     """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars`.
+    empty, or is longer than `max_chars` with `slack` allowed on top (1.0 for no slack).
     """
     value = event.get(key)
     if not isinstance(value, str):
@@ -178,8 +184,11 @@ def _text(event: dict[str, Any], key: str, position: int, max_chars: int) -> str
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{key}" of event {position} was empty.')
-    if len(text) > max_chars:
-        raise ValueError(f'The "{key}" of event {position} was longer than {max_chars} characters.')
+    accepted_chars = int(max_chars * slack)
+    if len(text) > accepted_chars:
+        raise ValueError(
+            f'The "{key}" of event {position} was longer than {accepted_chars} characters.'
+        )
     return text
 
 
@@ -207,7 +216,7 @@ def _event(entry: Any, position: int, character_ids: Collection[str]) -> dict[st
             f"{', '.join(EVENT_TYPES)}."
         )
     if kind == "narration":
-        return {"type": kind, "text": _text(entry, "text", position, SPEECH_MAX_CHARS)}
+        return {"type": kind, "text": _text(entry, "text", position, SPEECH_MAX_CHARS, 1.0)}
     if kind == "dialogue":
         speaker = entry.get("speaker_id")
         if not isinstance(speaker, str) or speaker not in character_ids:
@@ -217,7 +226,7 @@ def _event(entry: Any, position: int, character_ids: Collection[str]) -> dict[st
         event: dict[str, Any] = {
             "type": kind,
             "speaker_id": speaker,
-            "text": _text(entry, "text", position, SPEECH_MAX_CHARS),
+            "text": _text(entry, "text", position, SPEECH_MAX_CHARS, 1.0),
         }
         delivery = _delivery(entry, position)
         if delivery is not None:
