@@ -156,7 +156,10 @@ they are doing) when the shot starts and when it ends, at most {CONTINUITY_MAX_C
 each. The shot starts where the previous shot ended: if this is the first shot of the scene it \
 starts from the scene definition's "continuity_start", and if it is the last shot of the scene it \
 ends at the scene definition's "continuity_end". You may leave out a character who has nothing \
-to track.
+to track. When the SHOT has "continues_previous" set to true, it carries straight on from the end \
+of the shot before it with no cut: its "action"."start_state", its "composition" and its \
+"continuity_start" must continue exactly what the previous shot's end left on screen, with the \
+same place, the same people and no jump.
 - "audio_intent": "ambient" is the background sound of the place, at most {AMBIENT_MAX_CHARS} \
 characters (write "silence" when there is none). "sound_events" lists the distinct sounds that \
 happen in this shot, each at most {SOUND_EVENT_MAX_CHARS} characters, at most {MAX_SOUND_EVENTS}, \

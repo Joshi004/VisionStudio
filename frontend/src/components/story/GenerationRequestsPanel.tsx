@@ -41,6 +41,7 @@ const STATUS: Record<
 const ROUTE_LABELS: Record<string, string> = {
   reference: "Reference clip (pictures and speech)",
   text: "Text clip (no pictures)",
+  first_frame: "Continuation clip (first frame, no other pictures)",
 };
 
 function humanize(value: string): string {
@@ -53,6 +54,9 @@ function seconds(value: number): string {
 
 /** What a picture is, in a few words: whose, which angle, which look or state. */
 function pictureLabel(picture: RequestPicture): string {
+  if (picture.kind === "anchor") {
+    return picture.subject_name;
+  }
   const view = picture.kind === "environment" ? "place" : humanize(picture.view);
   const variant =
     picture.variant === "default" ? "" : `, ${humanize(picture.variant)}`;
@@ -62,6 +66,20 @@ function pictureLabel(picture: RequestPicture): string {
 /** One picture of the request. A character is shown at 2:3 and a place at 16:9. */
 function Thumbnail({ picture }: { picture: RequestPicture }) {
   const environment = picture.kind === "environment";
+  if (picture.kind === "anchor") {
+    // The last frame of the shot before: it is cut from that shot's selected take when this
+    // shot is generated, so there is no picture to show yet.
+    return (
+      <Stack gap={2} w={160}>
+        <Text size="xs" c="dimmed">
+          Cut from the selected take when the shot is generated.
+        </Text>
+        <Text size="xs" style={{ wordBreak: "break-word" }}>
+          &lt;{picture.label}&gt; {pictureLabel(picture)}
+        </Text>
+      </Stack>
+    );
+  }
   return (
     <Stack gap={2} w={environment ? 160 : 90}>
       {picture.url !== null ? (
@@ -180,6 +198,16 @@ function ShotRow({ entry, busy, onPlan }: ShotRowProps) {
               {request.pictures.length === 1 ? "picture" : "pictures"},{" "}
               {request.audios.length}{" "}
               {request.audios.length === 1 ? "audio" : "audios"}
+            </Text>
+          )}
+          {request?.anchor != null && (
+            <Text size="xs" c="dimmed">
+              Continues {request.anchor.from_shot_id}: the last frame of its
+              selected take is{" "}
+              {request.anchor.use === "first_frame"
+                ? "this clip's first frame"
+                : `one more reference picture (Picture ${request.anchor.picture_order})`}
+              .
             </Text>
           )}
           {!entry.can_run && entry.blocked_reason !== null && (

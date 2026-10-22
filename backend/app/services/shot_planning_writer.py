@@ -64,6 +64,7 @@ _ANSWER_FORM: Final = json.dumps(
                 "speech_unit_ids": ["an id from SPEECH UNITS, or none"],
                 "type": "one of the allowed types",
                 "target_duration": 2.5,
+                "continues_previous": False,
                 "description": "one plain sentence",
             }
         ]
@@ -88,6 +89,11 @@ from SPEECH UNITS, in order, or an empty list when nobody speaks. A unit may onl
 shot whose source_event_ids include the unit's event.
 - "type": one of: {", ".join(SHOT_TYPES)}.
 - "target_duration": the length of the shot in seconds, a number.
+- "continues_previous": true or false. True only when this shot carries straight on from the \
+end of the shot before it with no cut: the camera keeps rolling, the same place and the same \
+people, and the action carries straight over. Use false for a normal cut, a change of angle, \
+a change of place, a jump in time and for the first shot of the scene. Most shots are false; \
+a shot that continues the previous one starts exactly where that one ends, so use it sparingly.
 - "description": one plain sentence in English, at most {DESCRIPTION_MAX_CHARS} characters, of \
 what the audience sees. Give no camera movement, lens or framing detail beyond what the sentence \
 needs; a later step decides those.
@@ -218,6 +224,13 @@ def _duration(shot: dict[str, Any], position: int) -> float:
     if rounded <= 0:
         raise ValueError(f'The "target_duration" of shot {position} was not above zero.')
     return rounded
+
+
+def _continues_previous(shot: dict[str, Any], position: int) -> bool:
+    """Whether the shot carries on from the shot before it (PHASE-032). A missing or unusable
+    value reads as False (a normal cut), and the first shot of a scene never continues.
+    """
+    return position > 1 and shot.get("continues_previous") is True
 
 
 def _ids(shot: dict[str, Any], key: str, position: int, known: set[str], *, what: str) -> list[str]:
@@ -379,6 +392,7 @@ def check_shots(
                 "speech_unit_ids": speech_unit_ids,
                 "type": kind,
                 "target_duration": _duration(entry, position),
+                "continues_previous": _continues_previous(entry, position),
                 "description": _description(entry, position),
             }
         )
@@ -393,9 +407,9 @@ def check_answer(
 ) -> dict[str, Any]:
     """Runs `check_shots` and returns the content that is stored: `{scene_id, shots}`, each
     shot `{id, scene_id, source_event_ids, speech_unit_ids, type, target_duration,
-    description}` with the id (`shot_1`, `shot_2`, ...) and the scene id set here, never read
-    from the model. Raises ValueError, with a message fit for the user, for the first problem
-    found.
+    continues_previous, description}` with the id (`shot_1`, `shot_2`, ...) and the scene id set
+    here, never read from the model. Raises ValueError, with a message fit for the user, for the
+    first problem found.
     """
     checked = check_shots(answer, events, units)
     shots = [

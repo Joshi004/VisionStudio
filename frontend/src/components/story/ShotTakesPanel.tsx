@@ -215,6 +215,16 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
           </Text>
         </Stack>
       )}
+      {take.anchor != null && (
+        <Text size="xs" c="dimmed" ml={8}>
+          Continues shot {take.anchor.from_shot_id}: starts from{" "}
+          {take.anchor.frame_index !== null
+            ? `frame ${take.anchor.frame_index}`
+            : "the last frame"}{" "}
+          of its take {take.anchor.take_number}
+          {take.anchor.use === "reference" ? " (as a reference picture)" : ""}.
+        </Text>
+      )}
       {take.reasons.map((text) => (
         <Text key={text} size="xs" c="yellow.8">
           {text}
@@ -337,6 +347,16 @@ function ShotRow({
             >
               {shot.duration_seconds} s target
             </Badge>
+            {entry.continues_from != null && (
+              <Badge
+                variant="light"
+                color="indigo"
+                style={{ textTransform: "none" }}
+                title="No cut: this shot starts from the last frame of the shot before it"
+              >
+                Continues {entry.continues_from}
+              </Badge>
+            )}
             {hasTakes && (
               <Badge variant="light" color="gray">
                 {takes.length} {takes.length === 1 ? "take" : "takes"}

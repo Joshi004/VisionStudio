@@ -48,6 +48,26 @@ _logger = logging.getLogger(__name__)
 JOB_TYPE: Final = shot_takes.JOB_TYPE
 
 
+async def start_dependents(take_id: int | None) -> None:
+    """Queues the shot that continues the shot of a take that has just become selected, when the
+    take was made as part of **Generate all** or **Generate scene** (PHASE-032). Best effort and
+    never raises: the take is already saved. Also called by the dialogue check job.
+    """
+    if take_id is None:
+        return
+    try:
+        async with SessionLocal() as session:
+            job = await shot_takes.start_dependents(session, take_id)
+    except Exception:
+        _logger.exception("take %d: the shot that continues it could not be queued", take_id)
+        return
+    if job is not None:
+        dispatcher.nudge()
+        _logger.info(
+            "take %d selected: the shot that continues it queued as job %d", take_id, job.id
+        )
+
+
 class GenerateShotHandler(GenerateLabVideoHandler):
     job_type = JOB_TYPE
 
@@ -104,6 +124,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
 
         # The take and the finished job are saved together or not at all.
         retry_take_id: int | None = None
+        selected_take_id: int | None = None
         queued_dialogue_check = False
         async with SessionLocal() as session:
             statement = select(ShotTake).where(ShotTake.job_id == job.id)
@@ -130,6 +151,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
                         take.selected_at = await shot_takes.selection_time(
                             session, take.project_id, take.scene_id, take.shot_id
                         )
+                        selected_take_id = take.id
                 elif validation["kind"] == "clip":
                     retry_take_id = take.id
                 output["take_id"] = take.id
@@ -172,6 +194,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
             await store.merge_output(session, job.id, {"purge": purge})
 
         await self._retry(retry_take_id)
+        await start_dependents(selected_take_id)
 
     @staticmethod
     async def _record_unreadable(

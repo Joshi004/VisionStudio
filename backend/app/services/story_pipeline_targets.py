@@ -1217,6 +1217,8 @@ async def _evaluate_shot_generation(
     targets: list[Target] = []
     for scene in state.entries:
         scene_id = scene.item["id"]
+        # The shot before the one being looked at, for a shot that continues it (PHASE-032).
+        previous: Target | None = None
         for shot in scene.shots:
             shot_id = shot.shot["id"]
             # A clip being made, or a clip whose speech is being compared with its dialogue.
@@ -1226,23 +1228,29 @@ async def _evaluate_shot_generation(
             unchecked = shot.status == "unchecked"
             done = shot.status == "generated" and not generating
             active = generating or (unchecked and checking)
+            # A shot that continues the one before it starts from that shot's take, so it waits
+            # until that shot is done. A run starts it with a single press, which does not chain.
+            waits_for: tuple[str, ...] = ()
+            if shot.continues_from is not None and previous is not None and not previous.done:
+                waits_for = (previous.key,)
             block: str | None = None
             if not done and not active:
                 if shot.status == "failed":
                     block = _failed_shot_reason(shot)
-                elif not unchecked and not shot.can_run:
+                elif not unchecked and not shot.can_run and not waits_for:
                     block = shot.blocked_reason
-            targets.append(
-                Target(
-                    _shot_key(scene_id, shot_id),
-                    _shot_label(scene.item, shot.shot),
-                    done,
-                    active=active,
-                    block=block,
-                    last_error=_failure(shot.job),
-                    ref=(scene_id, shot_id, _CHECK if unchecked else _GENERATE),
-                )
+            target = Target(
+                _shot_key(scene_id, shot_id),
+                _shot_label(scene.item, shot.shot),
+                done,
+                active=active,
+                block=block,
+                last_error=_failure(shot.job),
+                waits_for=waits_for,
+                ref=(scene_id, shot_id, _CHECK if unchecked else _GENERATE),
             )
+            targets.append(target)
+            previous = target
     return StepView(targets)
 
 

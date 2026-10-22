@@ -16,6 +16,10 @@
 - `POST .../{scene_id}/{shot_id}/takes/{take_id}/select` makes a ready take the shot's selected
   one.
 
+A shot that continues the one before it (PHASE-032) names it in `continues_from`, waits (its
+`blocked_reason` says so) until that shot has a take that passed its checks, and carries on each
+take the `anchor` it was cut from. **Generate all** and **Generate scene** chain such shots.
+
 A job makes a new take (`services/shot_takes.py`); nothing is written to the Character Lab and no
 other shot changes. The answers never return ORM objects.
 """
@@ -27,13 +31,15 @@ from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import Job
+from app.db.models import Asset, Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
 from app.services import shot_takes, storage
@@ -98,6 +104,24 @@ class TakeDialogueOut(BaseModel):
     checked_at: datetime | None
 
 
+AnchorUse = Literal["first_frame", "reference"]
+
+
+class TakeAnchorOut(BaseModel):
+    """PHASE-032: what a take of a continuity shot was cut from. Its first frame (or one more
+    reference picture) is frame `frame_index` of take `take_number` of the shot `from_shot_id`,
+    the frame that take shows last at its shot's target duration.
+    """
+
+    from_shot_id: str
+    take_id: int
+    take_number: int
+    frame_index: int | None
+    use: AnchorUse
+    # The frame's own address, so it can be looked at. None when the file is gone.
+    url: str | None
+
+
 class ShotTakeOut(BaseModel):
     id: int
     take_number: int
@@ -130,6 +154,8 @@ class ShotTakeOut(BaseModel):
     dialogue_check: TakeDialogueOut | None
     # The newest job of the take's dialogue check, whatever its status.
     dialogue_job: DiscoveryJobOut | None
+    # The take of the shot before it that this take continues (PHASE-032), or None.
+    anchor: TakeAnchorOut | None = None
 
 
 class TakeShotSkeletonOut(BaseModel):
@@ -153,6 +179,9 @@ class ShotTakesEntryOut(BaseModel):
     job: DiscoveryJobOut | None
     can_run: bool
     blocked_reason: str | None
+    # PHASE-032: the id of the shot before it when this shot continues it with no cut, else
+    # None. While that shot has no current, passing take, `blocked_reason` says this shot waits.
+    continues_from: str | None = None
 
 
 class SceneShotTakesOut(BaseModel):
@@ -250,7 +279,23 @@ def _dialogue_check_out(result: dict[str, Any] | None) -> TakeDialogueOut | None
     )
 
 
-def _take_out(entry: TakeEntry) -> ShotTakeOut:
+def _anchor_out(entry: TakeEntry, frame_urls: dict[int, str]) -> TakeAnchorOut | None:
+    anchor = entry.anchor
+    if anchor is None:
+        return None
+    frame_index = anchor.get("frame_index")
+    asset_id = anchor.get("asset_id")
+    return TakeAnchorOut(
+        from_shot_id=str(anchor.get("from_shot_id")),
+        take_id=int(anchor["take_id"]),
+        take_number=int(anchor["take_number"]),
+        frame_index=frame_index if isinstance(frame_index, int) else None,
+        use=cast(AnchorUse, anchor.get("use")),
+        url=frame_urls.get(asset_id) if isinstance(asset_id, int) else None,
+    )
+
+
+def _take_out(entry: TakeEntry, frame_urls: dict[int, str]) -> ShotTakeOut:
     row = entry.row
     audio = row.audio
     return ShotTakeOut(
@@ -283,10 +328,11 @@ def _take_out(entry: TakeEntry) -> ShotTakeOut:
         ],
         dialogue_check=_dialogue_check_out(entry.dialogue_result),
         dialogue_job=_job_out(entry.dialogue_job),
+        anchor=_anchor_out(entry, frame_urls),
     )
 
 
-def _shot_out(entry: ShotEntry) -> ShotTakesEntryOut:
+def _shot_out(entry: ShotEntry, frame_urls: dict[int, str]) -> ShotTakesEntryOut:
     shot = entry.shot
     selected = entry.selected
     return ShotTakesEntryOut(
@@ -299,22 +345,38 @@ def _shot_out(entry: ShotEntry) -> ShotTakesEntryOut:
         status=entry.status,
         reasons=entry.reasons,
         prompt_status=cast(PromptStatus, entry.prompt_status),
-        takes=[_take_out(take) for take in entry.takes],
+        takes=[_take_out(take, frame_urls) for take in entry.takes],
         selected_take_id=selected.row.id if selected is not None else None,
         job=_job_out(entry.job),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
+        continues_from=entry.continues_from,
     )
 
 
-def _scene_out(entry: SceneEntry) -> SceneShotTakesOut:
+def _scene_out(entry: SceneEntry, frame_urls: dict[int, str]) -> SceneShotTakesOut:
     return SceneShotTakesOut(
         id=entry.item["id"],
         index=entry.item["index"],
         title=entry.item["title"],
         description=entry.item["description"],
-        shots=[_shot_out(shot) for shot in entry.shots],
+        shots=[_shot_out(shot, frame_urls) for shot in entry.shots],
     )
+
+
+async def _frame_urls(result: shot_takes.ShotTakesState, session: AsyncSession) -> dict[int, str]:
+    """The address of every anchor frame the takes name, by asset id (PHASE-032)."""
+    ids: set[int] = set()
+    for scene in result.entries:
+        for shot in scene.shots:
+            for take in shot.takes:
+                asset_id = take.anchor.get("asset_id") if take.anchor is not None else None
+                if isinstance(asset_id, int):
+                    ids.add(asset_id)
+    if not ids:
+        return {}
+    rows = (await session.execute(select(Asset.id, Asset.path).where(Asset.id.in_(ids)))).all()
+    return {asset_id: storage.media_url(path) for asset_id, path in rows}
 
 
 def _run_many_out(started: shot_takes.StartResult) -> ShotTakesRunManyOut:
@@ -344,9 +406,10 @@ def _refused(exc: shot_takes.ShotTakesError) -> HTTPException:
 async def get_shot_takes(project_id: int, session: SessionDep) -> ShotTakesOut:
     project = await load_project(session, project_id)
     result = await shot_takes.state(session, project)
+    frame_urls = await _frame_urls(result, session)
     return ShotTakesOut(
         scenes_version=result.scenes_version,
-        entries=[_scene_out(entry) for entry in result.entries],
+        entries=[_scene_out(entry, frame_urls) for entry in result.entries],
         blocked_reason=result.blocked_reason,
         unchecked_count=result.unchecked_count,
         check_job=_job_out(result.check_job),

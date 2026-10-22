@@ -260,6 +260,45 @@ async def decode_problem(path: Path, *, timeout_s: float = 300.0) -> str | None:
     return first_line[:200] or f"ffmpeg exited with code {result.returncode}."
 
 
+async def extract_frame(
+    clip: Path, frame_index: int, destination: Path, *, timeout_s: float = 120.0
+) -> str | None:
+    """Writes one frame of a video as a lossless PNG: the frame at `frame_index`, counted from 0
+    in the order the clip plays. `destination` must not exist yet. Returns None on success, else
+    a short message. Never raises.
+
+    The filter is the render's own (`trim=start_frame=..:end_frame=..`, `render_commands`), so a
+    frame index means the same thing here as there.
+    """
+    if frame_index < 0:
+        return "The frame number is below zero."
+    args = [
+        "-v",
+        "error",
+        "-i",
+        file_input(clip),
+        "-an",
+        "-vf",
+        f"trim=start_frame={frame_index}:end_frame={frame_index + 1},setpts=PTS-STARTPTS",
+        "-frames:v",
+        "1",
+        destination.resolve().as_posix(),
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not cut a frame: %s", exc)
+        return str(exc)
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        _logger.info("ffmpeg frame exit code %s: %s", result.returncode, stderr[:_STDERR_LOG_CHARS])
+        first_line = stderr.splitlines()[0] if stderr else ""
+        return first_line[:200] or f"ffmpeg exited with code {result.returncode}."
+    if not destination.is_file() or destination.stat().st_size == 0:
+        return f"The clip has no frame number {frame_index}."
+    return None
+
+
 def _frame_rate(value: object) -> float | None:
     """ffprobe prints a rate as a fraction such as "24/1"."""
     if not isinstance(value, str) or "/" not in value:

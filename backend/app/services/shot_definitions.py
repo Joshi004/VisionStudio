@@ -308,6 +308,7 @@ def _skeleton(shot: dict[str, Any], duration: float) -> dict[str, Any]:
         "source_event_ids": shot["source_event_ids"],
         "speech_unit_ids": shot["speech_unit_ids"],
         "duration_seconds": duration,
+        "continues_previous": shot.get("continues_previous") is True,
     }
 
 

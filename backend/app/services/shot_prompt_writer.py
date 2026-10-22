@@ -32,7 +32,11 @@ Two formats, by the route of the generation request (`generation_planner`):
   `character_take_prompt_writer.assemble_h3_reference_prompt`, which assumes one character and a
   first frame, is not used; the wording of its lines is.
 - `generate` (no pictures and no dialogue): the three-field base format, assembled with
-  `lab_prompt_writer.assemble_h3_prompt`. Labels do not exist in it.
+  `lab_prompt_writer.assemble_h3_prompt`. Labels do not exist in it. A continuity shot with no
+  dialogue (route `first_frame`, PHASE-032) uses it too, with H3's first-frame line put first by
+  code (`video_generator.h3_prompt_prefix`). A continuity shot with dialogue stays in the
+  reference format, where the last frame of the shot before is one more picture and code writes
+  its definition and retention lines.
 
 - `layout` works out the subjects, the speakers and their cues from the request.
 - `build_request` makes the exact request body sent to the model. The instructions are the
@@ -52,6 +56,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Final
 
+from app.providers import video_generator
 from app.services import discovery_writer, lab_prompt_writer
 from app.services.character_take_prompt_writer import (
     H3_GENERATE_MAX_WORDS,
@@ -75,6 +80,11 @@ FORMAT_GENERATE: Final = "generate"
 # free of the planner.
 _ROUTE_REFERENCE: Final = "reference"
 _ROUTE_TEXT: Final = "text"
+# PHASE-032 (`generation_planner.ROUTE_FIRST_FRAME`, `ANCHOR_*`, `ANCHOR_PICTURE_KIND`).
+_ROUTE_FIRST_FRAME: Final = "first_frame"
+ANCHOR_FIRST_FRAME: Final = "first_frame"
+ANCHOR_REFERENCE: Final = "reference"
+_ANCHOR_KIND: Final = "anchor"
 
 # The pieces of the model's answer for the reference format. `subject_k` is one piece for each
 # `<Subject k>`.
@@ -181,6 +191,12 @@ class Layout:
     seconds: float
     subjects: list[Subject]
     speakers: list[Speaker]
+    # PHASE-032, a continuity shot: how it uses the last frame of the shot before it
+    # (`first_frame` or `reference`), that shot's id, and, for `reference`, the `<Picture n>`
+    # number of the frame. All None for other shots.
+    anchor_use: str | None = None
+    anchor_from: str | None = None
+    anchor_picture: int | None = None
 
     def subject_for_speaker(self, speaker: Speaker) -> Subject | None:
         return next((item for item in self.subjects if item.number == speaker.subject), None)
@@ -218,7 +234,7 @@ class Layout:
 
     def for_model(self) -> dict[str, Any]:
         """The labels as the model is shown them (by id, not by name)."""
-        return {
+        labels: dict[str, Any] = {
             "format": self.format,
             "shot_seconds": self.seconds,
             "subjects": [
@@ -248,6 +264,19 @@ class Layout:
                 for speaker in self.speakers
             ],
         }
+        if self.anchor_use is not None:
+            labels["anchor"] = {
+                "continues_from_shot": self.anchor_from,
+                "how": (
+                    "the clip starts on this frame"
+                    if self.anchor_use == ANCHOR_FIRST_FRAME
+                    else "a reference picture, the last frame of the shot before"
+                ),
+                "picture": (
+                    f"<Picture {self.anchor_picture}>" if self.anchor_picture is not None else None
+                ),
+            }
+        return labels
 
 
 def layout(request: dict[str, Any]) -> Layout:
@@ -260,7 +289,7 @@ def layout(request: dict[str, Any]) -> Layout:
     endpoint = request.get("endpoint")
     seconds = request.get("target_seconds")
     if (
-        route not in (_ROUTE_REFERENCE, _ROUTE_TEXT)
+        route not in (_ROUTE_REFERENCE, _ROUTE_TEXT, _ROUTE_FIRST_FRAME)
         or not isinstance(pictures, list)
         or not isinstance(audios, list)
         or not isinstance(endpoint, str)
@@ -273,11 +302,47 @@ def layout(request: dict[str, Any]) -> Layout:
     if route == _ROUTE_REFERENCE and not pictures:
         raise ShotPromptError("A reference generation request has no pictures.")
 
+    # PHASE-032: the anchor of a continuity shot, if the request has one.
+    anchor = request.get("anchor")
+    anchor_use: str | None = None
+    anchor_from: str | None = None
+    anchor_picture: int | None = None
+    if anchor is not None:
+        use = anchor.get("use") if isinstance(anchor, dict) else None
+        from_shot = anchor.get("from_shot_id") if isinstance(anchor, dict) else None
+        anchor_order = anchor.get("picture_order") if isinstance(anchor, dict) else None
+        if use not in (ANCHOR_FIRST_FRAME, ANCHOR_REFERENCE) or not isinstance(from_shot, str):
+            raise ShotPromptError("The generation request of this shot cannot be read.")
+        anchor_use, anchor_from = use, from_shot
+        if use == ANCHOR_REFERENCE:
+            if not isinstance(anchor_order, int) or isinstance(anchor_order, bool):
+                raise ShotPromptError("The generation request of this shot cannot be read.")
+            anchor_picture = anchor_order
+    if route == _ROUTE_FIRST_FRAME:
+        if anchor_use != ANCHOR_FIRST_FRAME or pictures or audios:
+            raise ShotPromptError(
+                "A first-frame generation request has no first frame, or has pictures or audios."
+            )
+    elif route == _ROUTE_REFERENCE and anchor_use == ANCHOR_REFERENCE:
+        found = any(
+            isinstance(picture, dict)
+            and picture.get("kind") == _ANCHOR_KIND
+            and picture.get("order") == anchor_picture
+            for picture in pictures
+        )
+        if not found:
+            raise ShotPromptError("The anchor picture of this generation request is missing.")
+    elif anchor_use is not None:
+        raise ShotPromptError("The anchor of this generation request does not fit its route.")
+
     subjects: list[Subject] = []
     by_key: dict[tuple[str, str], int] = {}
     for position, picture in enumerate(pictures, start=1):
         if not isinstance(picture, dict):
             raise ShotPromptError("The generation request of this shot cannot be read.")
+        if picture.get("kind") == _ANCHOR_KIND:
+            # The last frame of the shot before is not a subject: the app defines it.
+            continue
         key = (str(picture.get("kind")), str(picture.get("subject_id")))
         index = by_key.get(key)
         if index is None:
@@ -341,10 +406,14 @@ def layout(request: dict[str, Any]) -> Layout:
     return Layout(
         format=FORMAT_REFERENCE if route == _ROUTE_REFERENCE else FORMAT_GENERATE,
         endpoint=endpoint,
-        picture_count=len(pictures),
+        # A first-frame clip names its one picture in the line the app writes first.
+        picture_count=1 if route == _ROUTE_FIRST_FRAME else len(pictures),
         seconds=float(seconds),
         subjects=subjects,
         speakers=speakers,
+        anchor_use=anchor_use,
+        anchor_from=anchor_from,
+        anchor_picture=anchor_picture,
     )
 
 
@@ -443,6 +512,28 @@ character from its definition and the look given for the scene.
 definition's "ambient" and "sound_events". No speech, no music.
 """
 
+_FIRST_FRAME_RULES: Final = """\
+
+This shot continues the shot before it with no cut (PHASE-032). The clip starts on a first frame \
+that is the last frame of that shot, and the app writes the first line that tells the video \
+model so. No other picture is sent, so describe every character and the place in full from \
+CHARACTERS, ENVIRONMENT and the SHOT DEFINITION. The CONTINUITY block says how this shot starts. \
+Open with the composition, place, light and people exactly as that start gives them, and carry \
+straight on with the action. Describe no cut, no new angle and no new place. Still write no \
+label of any kind.
+"""
+
+_ANCHOR_REFERENCE_RULES: Final = """\
+
+This shot continues the shot before it with no cut (PHASE-032). LABELS has an "anchor": a picture \
+that is the last frame of that shot, sent as one more reference. It is not a subject and has no \
+"subject_N": the app defines it and keeps it exactly. The CONTINUITY block says how this shot \
+starts. In "shot", restate the composition that picture gives (shot size, angle, where each \
+subject sits, light) as the start, and carry straight on with the action. Describe no cut, no new \
+angle and no new place. Write the anchor's <Picture N> label only to say that the shot starts \
+from it.
+"""
+
 REFERENCE_INSTRUCTIONS: Final = _COMMON_RULES + _REFERENCE_RULES
 GENERATE_INSTRUCTIONS: Final = _COMMON_RULES + _GENERATE_RULES
 
@@ -462,6 +553,19 @@ def answer_form(shot_layout: Layout) -> dict[str, str]:
 
 def _dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def continuity_block(shot_layout: Layout, shot_definition: dict[str, Any]) -> dict[str, Any]:
+    """How a continuity shot starts, for the model: the id of the shot it continues and the start
+    of this shot's own definition, which the definition stage made match the end of that shot.
+    """
+    action = shot_definition.get("action")
+    return {
+        "continues_from_shot": shot_layout.anchor_from,
+        "start_state": action.get("start_state") if isinstance(action, dict) else None,
+        "composition": shot_definition.get("composition"),
+        "continuity_start": shot_definition.get("continuity_start"),
+    }
 
 
 def build_request(
@@ -485,10 +589,22 @@ def build_request(
     wanted = {subject.subject_id for subject in shot_layout.subjects} | {
         speaker.speaker_id for speaker in shot_layout.speakers
     }
+    if shot_layout.anchor_use == ANCHOR_FIRST_FRAME:
+        # No reference picture is sent, so the model gets the definition of every character the
+        # shot shows to describe them in words.
+        wanted |= {
+            str(entry["id"])
+            for entry in shot_definition.get("characters") or []
+            if isinstance(entry, dict) and "id" in entry
+        }
     shown = [character for character in characters if character.get("id") in wanted]
     instructions = (
         GENERATE_INSTRUCTIONS if shot_layout.format == FORMAT_GENERATE else REFERENCE_INSTRUCTIONS
     )
+    if shot_layout.anchor_use == ANCHOR_FIRST_FRAME:
+        instructions += _FIRST_FRAME_RULES
+    elif shot_layout.anchor_use == ANCHOR_REFERENCE:
+        instructions += _ANCHOR_REFERENCE_RULES
     parts = [
         "STORY BIBLE (JSON):\n" + _dump(bible_content),
         "SCENE (JSON):\n" + _dump(scene),
@@ -496,9 +612,13 @@ def build_request(
         "CHARACTERS (JSON):\n" + _dump(shown),
         "ENVIRONMENT (JSON):\n" + _dump(environment),
         "LABELS (JSON):\n" + _dump(shot_layout.for_model()),
-        "ANSWER FORM (JSON; the values here are only stand-ins):\n"
-        + json.dumps(answer_form(shot_layout)),
     ]
+    if shot_layout.anchor_use is not None:
+        parts.append("CONTINUITY (JSON):\n" + _dump(continuity_block(shot_layout, shot_definition)))
+    parts.append(
+        "ANSWER FORM (JSON; the values here are only stand-ins):\n"
+        + json.dumps(answer_form(shot_layout))
+    )
     return {
         "model": model,
         "messages": [
@@ -585,6 +705,18 @@ def _assemble_reference(pieces: dict[str, str], shot_layout: Layout) -> str:
                 f"{subject.label} (appears in [Shot 1]): fully_preserved - the character's "
                 "identity, face, hair, build and clothing defined above are retained."
             )
+    if shot_layout.anchor_picture is not None:
+        # The last frame of the shot before, written by code (PHASE-032): the model does not
+        # describe it, so it can never contradict the picture.
+        label = f"<Picture {shot_layout.anchor_picture}>"
+        definitions.append(
+            f"{label} is the first frame of [Shot 1], the last frame of the shot before it: "
+            "[Shot 1] carries straight on from it with no cut."
+        )
+        retention.append(
+            f"{label} ([Shot 1] first frame): fully_preserved - the shot begins from this exact "
+            "composition, subjects, clothing, place and light."
+        )
     for speaker in shot_layout.speakers:
         definitions.append(_audio_definition(speaker))
         retention.append(_audio_retention(speaker))
@@ -751,6 +883,13 @@ def check_answer(answer: Any, shot_layout: Layout) -> dict[str, Any]:
     _check_speech(pieces[shot_key], shot_layout)
 
     prompt = _assemble_reference(pieces, shot_layout) if reference else _assemble_generate(pieces)
+    if shot_layout.anchor_use == ANCHOR_FIRST_FRAME:
+        # H3's first line when a first frame is given. It does not depend on the frame count
+        # here (only a first and a last frame do), so 0 is passed. The prompt is stored the way
+        # it is sent, so the take's request body needs no prefix of its own.
+        prefix = video_generator.h3_prompt_prefix(0, True, False, prompt)
+        if prefix:
+            prompt = f"{prefix}\n\n{prompt}"
     if len(prompt) > H3_PROMPT_MAX_CHARS:
         raise ValueError(
             f"The prompt has {len(prompt):,} characters, more than the {H3_PROMPT_MAX_CHARS:,} "

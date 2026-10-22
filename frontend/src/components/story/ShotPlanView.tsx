@@ -107,6 +107,16 @@ export function ShotPlanView({
               <Badge variant="light" color="gray" style={{ flexShrink: 0 }}>
                 {seconds(shot.target_duration)}
               </Badge>
+              {shot.continues_previous && (
+                <Badge
+                  variant="light"
+                  color="indigo"
+                  style={{ flexShrink: 0 }}
+                  title="No cut: this shot starts from the last frame of the shot before it"
+                >
+                  Continues previous shot
+                </Badge>
+              )}
               <Text size="sm" style={{ wordBreak: "break-word" }}>
                 {shot.description}
               </Text>

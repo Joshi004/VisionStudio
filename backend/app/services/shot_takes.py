@@ -58,8 +58,10 @@ from app.jobs import store
 from app.providers import contract_guard, video_generator
 from app.services import (
     api_contract,
+    continuity_anchor,
     dialogue_check,
     ffmpeg,
+    generation_planner,
     shot_prompts,
     take_validation,
     video_lab,
@@ -129,6 +131,12 @@ class TakeEntry:
     # made (its technical check for a clip older than PHASE-029, its dialogue check for a take
     # with dialogue) and no job is making it now.
     unchecked: bool
+    # PHASE-032: for a take of a continuity shot, what its first frame (or extra reference
+    # picture) was cut from: `{from_shot_id, take_id, take_number, frame_index, asset_id, use}`.
+    anchor: dict[str, Any] | None = None
+    # True when the take was queued by **Generate all** or **Generate scene**, so that the shot
+    # that continues it is queued by itself once this take is selected.
+    chain: bool = False
 
 
 @dataclass(frozen=True)
@@ -148,6 +156,10 @@ class ShotEntry:
     job: Job | None
     can_run: bool
     blocked_reason: str | None
+    # PHASE-032: the id of the shot before it when this shot continues it with no cut, and the
+    # same id while that shot has no current, passing take yet (the shot has to wait for it).
+    continues_from: str | None = None
+    waiting_on: str | None = None
 
     @property
     def selected(self) -> TakeEntry | None:
@@ -283,6 +295,73 @@ def _take_reasons(row: ShotTake, prompt: shot_prompts.ShotEntry) -> list[str]:
     return []
 
 
+def _continues_from(prompt: shot_prompts.ShotEntry) -> str | None:
+    """The id of the shot this shot continues, from the anchor its generation request records
+    (PHASE-032), or None for a shot that is not a continuity shot.
+    """
+    request = prompt.request
+    anchor = request.content.get("anchor") if request is not None else None
+    from_shot = anchor.get("from_shot_id") if isinstance(anchor, dict) else None
+    return from_shot if isinstance(from_shot, str) else None
+
+
+def _wait_reason(continues_from: str | None, previous: ShotEntry | None) -> tuple[str | None, bool]:
+    """Why a continuity shot cannot be generated yet, and whether it is only waiting (True) or
+    cannot be done at all (False). `previous` is the shot before it in the plan. Its anchor is
+    cut from the predecessor's selected take, so the predecessor needs a current, passing one.
+    """
+    if continues_from is None:
+        return None, False
+    if previous is None or previous.shot["id"] != continues_from:
+        return (
+            f"The shot '{continues_from}', which this shot continues, is not the shot before it "
+            "in the shot plan now. Plan the shots of this scene again.",
+            False,
+        )
+    if previous.status != "generated":
+        return (
+            f"Waits for shot '{continues_from}': it has no current take that passed its checks "
+            "yet, and this shot starts from the last frame of that take.",
+            True,
+        )
+    return None, False
+
+
+def _anchor_of(row: ShotTake) -> dict[str, Any] | None:
+    anchor = row.inputs.get("anchor") if isinstance(row.inputs, dict) else None
+    return anchor if isinstance(anchor, dict) else None
+
+
+def _anchor_reasons(row: ShotTake, previous: ShotEntry | None) -> list[str]:
+    """Why a take of a continuity shot is out of date because of the shot it continues: that
+    shot has another selected take now (it was generated again, or another take was selected),
+    has none, or is itself out of date. A shot's take is cut from one take of its predecessor.
+    """
+    anchor = _anchor_of(row)
+    if anchor is None:
+        return []
+    from_shot = anchor.get("from_shot_id")
+    number = anchor.get("take_number")
+    if previous is None or previous.shot["id"] != from_shot:
+        return [
+            f"The shot '{from_shot}', which this take continues, is not the shot before it now."
+        ]
+    selected = previous.selected
+    if selected is None:
+        return [
+            f"The shot '{from_shot}' has no current take now. "
+            f"This take continues its take {number}."
+        ]
+    if selected.row.id != anchor.get("take_id"):
+        return [
+            f"The shot '{from_shot}' has another selected take since this take was made. This "
+            f"take continues its take {number}."
+        ]
+    if previous.status == "out_of_date":
+        return [f"The shot '{from_shot}', which this take continues, is out of date."]
+    return []
+
+
 async def _takes_by_shot(session: AsyncSession, project_id: int) -> dict[str, list[ShotTake]]:
     """Every take of the project, by its `scene/shot` key, the newest take first."""
     statement = (
@@ -404,6 +483,9 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
         for prompt in scene.shots:
             rows = grouped.get(_shot_key(scene_id, prompt.shot["id"]), [])
             selected_id = _selected_id(rows, lines_by_take)
+            # The shot before this one, already worked out (PHASE-032).
+            previous = shots[-1] if shots else None
+            continues_from = _continues_from(prompt)
             takes = []
             for row in rows:
                 lines = lines_by_take[row.id]
@@ -417,7 +499,11 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                             checking_dialogue=checking(row),
                         ),
                         selected=row.id == selected_id,
-                        reasons=_take_reasons(row, prompt) if _is_ready(row) else [],
+                        reasons=(
+                            [*_take_reasons(row, prompt), *_anchor_reasons(row, previous)]
+                            if _is_ready(row)
+                            else []
+                        ),
                         validation=row.validation if isinstance(row.validation, dict) else None,
                         retry_attempt=_retry_attempt(row),
                         dialogue=lines,
@@ -426,6 +512,10 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                         ),
                         dialogue_job=dialogue_jobs.get(row.id),
                         unchecked=_needs_a_check(row),
+                        anchor=_anchor_of(row),
+                        chain=bool(row.inputs.get("chain"))
+                        if isinstance(row.inputs, dict)
+                        else False,
                     )
                 )
             status: Status = "not_generated"
@@ -437,6 +527,9 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
             elif takes and not _already_generating_takes(takes):
                 status = "unchecked" if any(take.unchecked for take in takes) else "failed"
             blocked = _refusal(prompt, takes)
+            wait, only_waiting = _wait_reason(continues_from, previous)
+            if blocked is None and wait is not None:
+                blocked = wait
             shots.append(
                 ShotEntry(
                     shot=prompt.shot,
@@ -448,6 +541,8 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                     job=takes[0].job if takes else None,
                     can_run=blocked is None,
                     blocked_reason=blocked,
+                    continues_from=continues_from,
+                    waiting_on=continues_from if only_waiting else None,
                 )
             )
         entries.append(SceneEntry(item=scene.item, shots=shots))
@@ -496,13 +591,20 @@ def _stored_file_exists(relative_path: str | None) -> bool:
 
 
 async def _inputs_of_request(
-    session: AsyncSession, content: dict[str, Any]
+    session: AsyncSession, content: dict[str, Any], anchor_ref: dict[str, Any] | None = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """The pictures and the audios of a generation request as the job reads them, in the order
-    the prompt names them, after checking that every file is still there. Raises ShotTakesError.
+    the prompt names them, after checking that every file is still there. `anchor_ref` is the
+    frame cut for a continuity shot (PHASE-032), put where the request's `anchor` picture is.
+    Raises ShotTakesError.
     """
     references: list[dict[str, Any]] = []
     for picture in content["pictures"]:
+        if picture.get("kind") == generation_planner.ANCHOR_PICTURE_KIND:
+            if anchor_ref is None:
+                raise ShotTakesError("The last frame of the shot before this one was not made.")
+            references.append(anchor_ref)
+            continue
         image = await session.get(LabImage, picture["lab_image_id"])
         if image is None or not _stored_file_exists(image.path):
             raise ShotTakesError(
@@ -575,6 +677,52 @@ async def _next_take_number(
     return ((await session.execute(statement)).scalar_one_or_none() or 0) + 1
 
 
+def _predecessor(scene: SceneEntry, shot: ShotEntry) -> ShotEntry | None:
+    """The shot a continuity shot continues, from the same scene (PHASE-032), or None."""
+    if shot.continues_from is None:
+        return None
+    return next((item for item in scene.shots if item.shot["id"] == shot.continues_from), None)
+
+
+async def _make_anchor(
+    session: AsyncSession,
+    project: Project,
+    anchor_request: dict[str, Any],
+    predecessor: ShotEntry | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The frame a continuity shot starts from, cut from the selected take of the shot it
+    continues at that shot's target duration. Returns the job's reference to the frame
+    (`{"source": "asset", "id"}`) and the record kept on the take. Flushes, does not commit.
+    Raises ShotTakesError.
+    """
+    from_shot = str(anchor_request["from_shot_id"])
+    selected = predecessor.selected if predecessor is not None else None
+    if predecessor is None or predecessor.shot["id"] != from_shot or selected is None:
+        raise ShotTakesError(
+            f"Waits for shot '{from_shot}': it has no current take that passed its checks yet."
+        )
+    try:
+        asset = await continuity_anchor.anchor_asset(
+            session,
+            project_id=project.id,
+            take=selected.row,
+            target_seconds=predecessor.duration_s,
+            from_shot_id=from_shot,
+        )
+    except continuity_anchor.AnchorError as exc:
+        raise ShotTakesError(str(exc)) from exc
+    provenance = asset.provenance if isinstance(asset.provenance, dict) else {}
+    record = {
+        "from_shot_id": from_shot,
+        "take_id": selected.row.id,
+        "take_number": selected.row.take_number,
+        "frame_index": provenance.get("frame_index"),
+        "asset_id": asset.id,
+        "use": anchor_request["use"],
+    }
+    return {"source": "asset", "id": asset.id}, record
+
+
 async def _queue(
     session: AsyncSession,
     project: Project,
@@ -582,11 +730,19 @@ async def _queue(
     shot: ShotEntry,
     prompt: ShotPrompt,
     retry: dict[str, Any] | None = None,
+    *,
+    chain: bool = False,
+    predecessor: ShotEntry | None = None,
 ) -> tuple[Job, bool]:
     """Adds the take and queues the job of one shot that `can_run`. Flushes, does not commit.
     Returns `(job, created)`: the job already generating the shot when it was not created (no
     take is added then). `retry` is `{attempt, of_take_id, problems}` for the automatic retry of
-    a failed clip, and is recorded on the take. Raises ShotTakesError.
+    a failed clip, and is recorded on the take.
+
+    `predecessor` is the shot a continuity shot continues (PHASE-032): the frame its selected
+    take ends on is cut now and sent as the clip's first frame, or as one more reference
+    picture (`generation_planner`, Q-7). `chain` records that the shot that continues this one
+    is to be queued by itself once this take is selected. Raises ShotTakesError.
     """
     request_row = (
         await session.get(GenerationRequest, prompt.generation_request_id)
@@ -603,7 +759,18 @@ async def _queue(
             "Compile it again."
         )
 
-    references, audios = await _inputs_of_request(session, content)
+    anchor_request = content.get("anchor")
+    anchor_ref: dict[str, Any] | None = None
+    anchor_record: dict[str, Any] | None = None
+    if isinstance(anchor_request, dict):
+        anchor_ref, anchor_record = await _make_anchor(
+            session, project, anchor_request, predecessor
+        )
+    references, audios = await _inputs_of_request(
+        session,
+        content,
+        anchor_ref if anchor_record and anchor_record["use"] == "reference" else None,
+    )
     seed = secrets.randbelow(video_lab.SEED_LIMIT)
     body = await _build_body(session, content, prompt_content["prompt"], seed)
 
@@ -622,7 +789,10 @@ async def _queue(
             "video_model": video_models.H3_MODEL,
             "endpoint": content["endpoint"],
             "request": body,
-            "first_frame": None,
+            # A continuity shot with no dialogue starts on the last frame of the shot before.
+            "first_frame": (
+                anchor_ref if anchor_record and anchor_record["use"] == "first_frame" else None
+            ),
             "last_frame": None,
             "references": references,
             "audios": audios,
@@ -657,6 +827,11 @@ async def _queue(
             "dialogue": dialogue_check.lines_as_json(dialogue_check.lines_of(content["audios"])),
             # Only a take made by the automatic retry of a failed clip has this (PHASE-029).
             **({"retry": retry} if retry is not None else {}),
+            # Only a take of a continuity shot has an anchor (PHASE-032): the take of the shot
+            # before it that its first frame was cut from. Out of date is worked out from it.
+            **({"anchor": anchor_record} if anchor_record is not None else {}),
+            # Set by Generate all and Generate scene (PHASE-032).
+            **({"chain": True} if chain else {}),
         },
     )
     session.add(take)
@@ -678,13 +853,17 @@ async def start_shot(session: AsyncSession, project: Project, scene_id: str, sho
     ShotTakesError.
     """
     current = await state(session, project)
-    _scene, shot = _find_shot(current, scene_id, shot_id)
+    scene, shot = _find_shot(current, scene_id, shot_id)
     if shot.blocked_reason is not None and not _already_generating(shot):
         raise ShotTakesError(shot.blocked_reason)
     prompt = await _newest_prompt(session, project.id, scene_id, shot_id)
     if prompt is None:
         raise ShotTakesError("Compile this shot's prompt first: the clip is generated from it.")
-    job, _created = await _queue(session, project, scene_id, shot, prompt)
+    # One shot is made by itself: the shots that continue it are not queued after it, they read
+    # "out of date" until they are generated (PHASE-032).
+    job, _created = await _queue(
+        session, project, scene_id, shot, prompt, predecessor=_predecessor(scene, shot)
+    )
     await session.commit()
     return job
 
@@ -710,14 +889,35 @@ async def _newest_prompt(
     return (await session.execute(statement)).scalars().first()
 
 
+def _chain_will_start(previous: ShotEntry | None, started: set[str]) -> bool:
+    """Whether the shot after `previous` is going to be queued by itself: `previous` was queued
+    by the press that is going on, or its newest take is being made as part of a chain.
+    """
+    if previous is None:
+        return False
+    if previous.shot["id"] in started:
+        return True
+    making = next(
+        (take for take in previous.takes if take.state in ("generating", "checking_dialogue")),
+        None,
+    )
+    return making is not None and making.chain
+
+
 async def _start_shots(
     session: AsyncSession, project: Project, scene: SceneEntry, result: StartResult
 ) -> None:
     """Queues a job for every shot of the scene that has no current take and is not being
     generated, adding to `result`.
+
+    The takes made here are chained (PHASE-032): a shot that continues the one before it cannot
+    start before that shot has a take, so it is not queued now but by itself, once the take of
+    the shot before it is selected (`start_dependents`).
     """
     scene_id = scene.item["id"]
     title = scene.item["title"]
+    started: set[str] = set()
+    by_id = {entry.shot["id"]: entry for entry in scene.shots}
     for shot in scene.shots:
         shot_id = shot.shot["id"]
         if shot.status == "generated":
@@ -737,6 +937,18 @@ async def _start_shots(
                 )
             )
             continue
+        if shot.waiting_on is not None and _chain_will_start(by_id.get(shot.waiting_on), started):
+            result.skipped.append(
+                Skipped(
+                    scene_id,
+                    shot_id,
+                    title,
+                    f"Starts by itself once the take of shot '{shot.waiting_on}' is selected.",
+                )
+            )
+            # The shot after this one starts by itself in its turn, so it counts as started.
+            started.add(shot_id)
+            continue
         if shot.blocked_reason is not None:
             result.skipped.append(Skipped(scene_id, shot_id, title, shot.blocked_reason))
             continue
@@ -747,12 +959,21 @@ async def _start_shots(
             )
             continue
         try:
-            job, created = await _queue(session, project, scene_id, shot, prompt)
+            job, created = await _queue(
+                session,
+                project,
+                scene_id,
+                shot,
+                prompt,
+                chain=True,
+                predecessor=by_id.get(shot.continues_from) if shot.continues_from else None,
+            )
         except ShotTakesError as exc:
             result.skipped.append(Skipped(scene_id, shot_id, title, str(exc)))
             continue
         if created:
             result.job_ids.append(job.id)
+            started.add(shot_id)
         else:
             result.skipped.append(Skipped(scene_id, shot_id, title, "Already being generated."))
 
@@ -986,7 +1207,7 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
 
     try:
         current = await state(session, project)
-        _scene, shot = _find_shot(current, take.scene_id, take.shot_id)
+        scene, shot = _find_shot(current, take.scene_id, take.shot_id)
         prompt = await _newest_prompt(session, project.id, take.scene_id, take.shot_id)
         if shot.blocked_reason is not None or prompt is None or prompt.id != take.shot_prompt_id:
             _logger.info(
@@ -1006,7 +1227,17 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
                 if isinstance(p, dict) and isinstance(p.get("code"), str)
             ],
         }
-        job, created = await _queue(session, project, take.scene_id, shot, prompt, retry)
+        job, created = await _queue(
+            session,
+            project,
+            take.scene_id,
+            shot,
+            prompt,
+            retry,
+            # A retry keeps what the failed take was part of: a chain goes on through it.
+            chain=_is_chained(take),
+            predecessor=_predecessor(scene, shot),
+        )
     except ShotTakesError as exc:
         await session.rollback()
         _logger.info(
@@ -1014,6 +1245,84 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
             take.shot_id,
             take.scene_id,
             take.project_id,
+            exc,
+        )
+        return None
+    await session.commit()
+    return job if created else None
+
+
+# --- Shots that continue a shot (PHASE-032) -------------------------------------------------
+
+
+def _is_chained(take: ShotTake) -> bool:
+    return isinstance(take.inputs, dict) and bool(take.inputs.get("chain"))
+
+
+async def start_dependents(session: AsyncSession, take_id: int) -> Job | None:
+    """Queues the shot that continues the shot of take `take_id`, with a new take, and commits.
+    Called when that take has just become the shot's selected take. Returns the job, or None
+    when nothing is queued: the take was not made by **Generate all** or **Generate scene** (a
+    single press does not cascade), it is not the shot's selected take (any more), no shot
+    continues it, or the shot that does cannot be generated now or is current already.
+    """
+    take = await session.get(ShotTake, take_id)
+    if take is None or take.selected_at is None or not _is_chained(take):
+        return None
+    # Read now: a rollback below expires the rows, and they cannot be loaded again for the log.
+    scene_id, shot_id, project_id = take.scene_id, take.shot_id, take.project_id
+    project = await session.get(Project, project_id)
+    if project is None:
+        return None
+    current = await state(session, project)
+    scene = next((entry for entry in current.entries if entry.item["id"] == scene_id), None)
+    if scene is None:
+        return None
+    position = next(
+        (index for index, entry in enumerate(scene.shots) if entry.shot["id"] == shot_id),
+        None,
+    )
+    if position is None or position + 1 >= len(scene.shots):
+        return None
+    shot, dependent = scene.shots[position], scene.shots[position + 1]
+    selected = shot.selected
+    if (
+        dependent.continues_from != shot.shot["id"]
+        or selected is None
+        or selected.row.id != take.id
+    ):
+        return None
+    if dependent.status in ("generated", "unchecked") or dependent.blocked_reason is not None:
+        _logger.info(
+            "shot '%s' of scene '%s' of project %d: not started after '%s': %s",
+            dependent.shot["id"],
+            scene_id,
+            project_id,
+            shot_id,
+            dependent.blocked_reason or f"it is {dependent.status}",
+        )
+        return None
+    prompt = await _newest_prompt(session, project_id, scene_id, dependent.shot["id"])
+    if prompt is None:
+        return None
+    try:
+        job, created = await _queue(
+            session,
+            project,
+            scene_id,
+            dependent,
+            prompt,
+            chain=True,
+            predecessor=shot,
+        )
+    except ShotTakesError as exc:
+        await session.rollback()
+        _logger.info(
+            "shot '%s' of scene '%s' of project %d: not started after '%s': %s",
+            dependent.shot["id"],
+            scene_id,
+            project_id,
+            shot_id,
             exc,
         )
         return None

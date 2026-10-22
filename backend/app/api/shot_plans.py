@@ -62,6 +62,9 @@ class ShotOut(BaseModel):
     speech_unit_ids: list[str]
     type: ShotType
     target_duration: float
+    # PHASE-032: the shot carries straight on from the shot before it, with no cut. Plans made
+    # before this phase have no such field and read as False.
+    continues_previous: bool = False
     description: str
 
 

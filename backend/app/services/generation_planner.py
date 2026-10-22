@@ -16,6 +16,12 @@ The rules:
   when there are any. A shot with neither pictures nor dialogue goes to the plain generate
   endpoint (text). A shot with dialogue and no pictures is refused: the generate endpoint takes no
   audio.
+- **Continuity shots (PHASE-032, Q-7):** a shot that continues the one before it and has no
+  dialogue takes the `first_frame` route: the generate endpoint, the last frame of the previous
+  shot as its first frame and no other picture. One that has dialogue stays on the reference
+  route with one more picture, a slot of kind `anchor` after the others. The request only
+  records the slot (`anchor`); the frame is cut from the previous shot's take when the take is
+  queued (`services/continuity_anchor.py`).
 - **Frames:** the smallest `17n + 5` at or above the shot's length on the timeline
   (`duration_policy.shot_num_frames`, D-9), within the hard bounds. The clip is trimmed to the
   exact length when the video is rendered.
@@ -34,10 +40,19 @@ from app.services import video_models
 from app.services.duration_policy import DurationPolicy, DurationPolicyError, shot_num_frames
 from app.services.frame_counts import H3_FPS
 
-Route = Literal["reference", "text"]
+Route = Literal["reference", "text", "first_frame"]
 
 ROUTE_REFERENCE: Final = "reference"
 ROUTE_TEXT: Final = "text"
+# A continuity shot with no dialogue (PHASE-032, Q-7): the generate endpoint, with the last
+# frame of the previous shot as the clip's first frame, and no other picture.
+ROUTE_FIRST_FRAME: Final = "first_frame"
+# How a continuity shot uses the frame its predecessor ends on.
+ANCHOR_FIRST_FRAME: Final = "first_frame"
+ANCHOR_REFERENCE: Final = "reference"
+# The `kind` of the picture slot that stands for the anchor on the reference route. Its
+# `lab_image_id` is None: the frame does not exist until the previous shot has a take.
+ANCHOR_PICTURE_KIND: Final = "anchor"
 # How every dialogue audio is used: the model copies its spoken layer, and the rest of the clip
 # is made by the model.
 AUDIO_MARKER: Final = "partially_copy"
@@ -85,6 +100,10 @@ class GenerationPlan:
     pictures: list[dict[str, Any]]
     audios: list[dict[str, Any]]
     notes: list[str] = field(default_factory=list)
+    # PHASE-032: set for a continuity shot, `{from_shot_id, use, picture_order}` where `use` is
+    # `first_frame` or `reference` and `picture_order` is the anchor's `<Picture n>` (reference
+    # use only). None for every other shot.
+    anchor: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The `content` of a stored generation request."""
@@ -105,6 +124,7 @@ class GenerationPlan:
             "pictures": self.pictures,
             "audios": self.audios,
             "notes": self.notes,
+            "anchor": self.anchor,
         }
 
 
@@ -153,10 +173,12 @@ def plan(
     pictures: list[dict[str, Any]],
     dialogue: list[DialogueInput],
     visible_character_ids: list[str],
+    continues_from: str | None = None,
 ) -> GenerationPlan:
     """The generation request of one shot. `pictures` are the manifest's `references` (each has
     `order`, `lab_image_id`, `kind`, `subject_id`, `subject_name`, `view` and `variant`) and
-    `dialogue` the lines the shot carries, both in the order they are sent. Raises
+    `dialogue` the lines the shot carries, both in the order they are sent. `continues_from` is
+    the id of the shot before it when this is a continuity shot (PHASE-032). Raises
     GenerationPlanError.
     """
     sizes = video_generator.H3_SIZES.get(orientation)
@@ -184,21 +206,69 @@ def plan(
             f"{max_audios} audios. Plan the shots of this scene again."
         )
 
-    if not pictures:
+    planned_pictures = [_picture(entry, number) for number, entry in enumerate(pictures, start=1)]
+    notes: list[str] = []
+    anchor: dict[str, Any] | None = None
+    if continues_from is not None and not dialogue:
+        # Q-7: a shot with no dialogue audio is made on the generate endpoint, which takes the
+        # first frame and no other picture.
+        route: Route = ROUTE_FIRST_FRAME
+        endpoint = video_generator.H3_GENERATE_PATH
+        planned_pictures = []
+        anchor = {
+            "from_shot_id": continues_from,
+            "use": ANCHOR_FIRST_FRAME,
+            "picture_order": None,
+        }
+        notes.append(
+            f"This shot continues '{continues_from}': the clip starts on that shot's last frame "
+            "and is sent with no other reference picture."
+        )
+    elif not pictures:
         if dialogue:
             raise GenerationPlanError(
                 "The shot has dialogue but no reference pictures, and a text-only clip takes no "
                 "audio. Choose the shot's references first."
             )
-        route: Route = ROUTE_TEXT
+        route = ROUTE_TEXT
         endpoint = video_generator.H3_GENERATE_PATH
     else:
         route = ROUTE_REFERENCE
         endpoint = video_generator.H3_AUDIO_TO_VIDEO_PATH
+        if continues_from is not None:
+            # Q-7: a dialogue shot needs the reference endpoint, where the anchor is one more
+            # reference picture, sent after the others.
+            order = len(planned_pictures) + 1
+            if order > max_pictures:
+                raise GenerationPlanError(
+                    f"The shot has {len(pictures)} reference pictures and needs one more for "
+                    f"the last frame of '{continues_from}'; the video model takes at most "
+                    f"{max_pictures}."
+                )
+            planned_pictures.append(
+                {
+                    "label": f"Picture {order}",
+                    "order": order,
+                    "lab_image_id": None,
+                    "kind": ANCHOR_PICTURE_KIND,
+                    "subject_id": continues_from,
+                    "subject_name": f"Last frame of {continues_from}",
+                    "view": "last_frame",
+                    "variant": "",
+                }
+            )
+            anchor = {
+                "from_shot_id": continues_from,
+                "use": ANCHOR_REFERENCE,
+                "picture_order": order,
+            }
+            notes.append(
+                f"This shot continues '{continues_from}': the last frame of that shot is sent as "
+                f"Picture {order}."
+            )
 
     visible = set(visible_character_ids)
     audios: list[dict[str, Any]] = []
-    notes: list[str] = []
     for number, line in enumerate(dialogue, start=1):
         seconds = _check_audio(line, target_s)
         speaker_visible = line.speaker_id in visible
@@ -239,7 +309,8 @@ def plan(
         # The clip is as long as the shot asks, never as long as the audio: the shot's length is
         # never shorter than its speech (PHASE-021).
         match_audio_duration=False,
-        pictures=[_picture(entry, number) for number, entry in enumerate(pictures, start=1)],
+        pictures=planned_pictures,
         audios=audios,
         notes=notes,
+        anchor=anchor,
     )

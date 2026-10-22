@@ -343,6 +343,23 @@ async def state(session: AsyncSession, project: Project) -> GenerationRequestsSt
 # --- Planning ------------------------------------------------------------------------------
 
 
+def continues_from(plan_content: Any, shot_id: str) -> str | None:
+    """The id of the shot before `shot_id` in a shot plan's content when the plan marks the shot
+    as continuing it (PHASE-032), else None. The first shot of a scene never continues.
+    """
+    shots = plan_content.get("shots") if isinstance(plan_content, dict) else None
+    if not isinstance(shots, list):
+        return None
+    for position, shot in enumerate(shots):
+        if isinstance(shot, dict) and shot.get("id") == shot_id:
+            previous = shots[position - 1] if position > 0 else None
+            if shot.get("continues_previous") is True and isinstance(previous, dict):
+                previous_id = previous.get("id")
+                return previous_id if isinstance(previous_id, str) else None
+            return None
+    return None
+
+
 def _plan_inputs(
     ctx: _Context, scene_id: str, entry: shot_references.ShotEntry
 ) -> tuple[generation_planner.GenerationPlan, list[dict[str, Any]]]:
@@ -411,6 +428,7 @@ def _plan_inputs(
             pictures=manifest.content["references"],
             dialogue=dialogue,
             visible_character_ids=visible,
+            continues_from=continues_from(plan_entry.row.content, shot_id),
         )
     except generation_planner.GenerationPlanError as exc:
         raise GenerationRequestsError(str(exc)) from exc

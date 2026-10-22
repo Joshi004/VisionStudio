@@ -37,6 +37,7 @@ from app.db.models import Job, ShotTake
 from app.db.session import SessionLocal
 from app.db.types import utcnow
 from app.jobs import dispatcher, phases, store
+from app.jobs.generate_shot import start_dependents
 from app.jobs.gpu_job import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
 from app.jobs.handlers import JobHandler
 from app.providers import gpu_server, transcriber
@@ -197,8 +198,11 @@ class CheckTakeDialogueHandler(JobHandler):
             return
 
         await self._phase(job_id, phases.COMPARING_DIALOGUE)
-        retry_take_id = await self._compare_and_store(job, base_url, body, spoken)
+        retry_take_id, selected_take_id = await self._compare_and_store(job, base_url, body, spoken)
         await self._retry(retry_take_id)
+        # A take of **Generate all** that has just become selected starts the shot that
+        # continues it (PHASE-032).
+        await start_dependents(selected_take_id)
 
     async def _result_not_downloaded(self, job: Job, exc: GpuCallError) -> None:
         """The download did not give a transcript. Only a result that cannot be used fails."""
@@ -226,19 +230,21 @@ class CheckTakeDialogueHandler(JobHandler):
         base_url: str,
         body: dict[str, Any],
         spoken: list[transcriber.SpokenWord],
-    ) -> int | None:
-        """Judges the transcript and saves the result with the finished job. Returns the take's
-        id when it failed and a retry may be queued, else None.
+    ) -> tuple[int | None, int | None]:
+        """Judges the transcript and saves the result with the finished job. Returns
+        `(retry_take_id, selected_take_id)`: the take's id when it failed and a retry may be
+        queued, and the take's id when this check is what made it the shot's selected take.
         """
         recorded = job.input if isinstance(job.input, dict) else {}
         take_id = recorded.get(shot_takes.DIALOGUE_DEDUPE_KEY)
         retry_take_id: int | None = None
+        selected_take_id: int | None = None
 
         async with SessionLocal() as session:
             take = await session.get(ShotTake, take_id) if isinstance(take_id, int) else None
             if take is None:
                 await store.fail_job(session, job.id, "The take this check was made for is gone.")
-                return None
+                return None, None
             lines = await shot_takes.dialogue_lines(session, take)
             threshold = await settings_service.get_int(
                 session, settings_service.DIALOGUE_MATCH_THRESHOLD_KEY
@@ -271,13 +277,14 @@ class CheckTakeDialogueHandler(JobHandler):
                     take.selected_at = await shot_takes.selection_time(
                         session, take.project_id, take.scene_id, take.shot_id
                     )
+                    selected_take_id = take.id
             else:
                 retry_take_id = take.id
             # The result and the finished job are saved together or not at all.
             if not await store.finish_job(session, job.id, output):
                 await session.rollback()
                 _logger.warning("job %d: transcript compared but the job is not running", job.id)
-                return None
+                return None, None
             await session.commit()
 
         _logger.info(
@@ -293,7 +300,7 @@ class CheckTakeDialogueHandler(JobHandler):
         purge = await self._purge(base_url, job.provider_job_id)
         async with SessionLocal() as session:
             await store.merge_output(session, job.id, {"purge": purge})
-        return retry_take_id
+        return retry_take_id, selected_take_id
 
     @staticmethod
     async def _purge(base_url: str, provider_job_id: str | None) -> dict[str, Any]:

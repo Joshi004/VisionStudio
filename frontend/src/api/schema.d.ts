@@ -4163,7 +4163,7 @@ export interface components {
              * Route
              * @enum {string}
              */
-            route: "reference" | "text";
+            route: "reference" | "text" | "first_frame";
             /** Endpoint */
             endpoint: string;
             /** Orientation */
@@ -4188,6 +4188,7 @@ export interface components {
             audios: components["schemas"]["RequestAudioOut"][];
             /** Notes */
             notes: string[];
+            anchor?: components["schemas"]["RequestAnchorOut"] | null;
         };
         /**
          * GenerationRequestVersionOut
@@ -5826,6 +5827,23 @@ export interface components {
             message: string;
         };
         /**
+         * RequestAnchorOut
+         * @description PHASE-032: the shot continues `from_shot_id`, and the last frame of that shot's selected
+         *     take is the first frame of this clip (`first_frame`) or one more reference picture
+         *     (`reference`, with its `<Picture n>` number in `picture_order`).
+         */
+        RequestAnchorOut: {
+            /** From Shot Id */
+            from_shot_id: string;
+            /**
+             * Use
+             * @enum {string}
+             */
+            use: "first_frame" | "reference";
+            /** Picture Order */
+            picture_order: number | null;
+        };
+        /**
          * RequestAudioOut
          * @description One dialogue audio of the request, in the order it is sent. A prompt calls it
          *     `<Audio n>`.
@@ -5857,6 +5875,8 @@ export interface components {
         /**
          * RequestPictureOut
          * @description One picture of the request, in the order it is sent. A prompt calls it `<Picture n>`.
+         *     A picture of kind `anchor` (PHASE-032) is the last frame of the previous shot: it has no
+         *     stored image until the shot is generated.
          */
         RequestPictureOut: {
             /** Label */
@@ -5864,14 +5884,14 @@ export interface components {
             /** Order */
             order: number;
             /** Lab Image Id */
-            lab_image_id: number;
+            lab_image_id: number | null;
             /** Url */
             url: string | null;
             /**
              * Kind
              * @enum {string}
              */
-            kind: "character" | "environment";
+            kind: "character" | "environment" | "anchor";
             /** Subject Id */
             subject_id: string;
             /** Subject Name */
@@ -6698,6 +6718,11 @@ export interface components {
             type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
             /** Target Duration */
             target_duration: number;
+            /**
+             * Continues Previous
+             * @default false
+             */
+            continues_previous: boolean;
             /** Description */
             description: string;
         };
@@ -7076,6 +7101,7 @@ export interface components {
             dialogue: components["schemas"]["DialogueLineOut"][];
             dialogue_check: components["schemas"]["TakeDialogueOut"] | null;
             dialogue_job: components["schemas"]["DiscoveryJobOut"] | null;
+            anchor?: components["schemas"]["TakeAnchorOut"] | null;
         };
         /** ShotTakesCheckOut */
         ShotTakesCheckOut: {
@@ -7106,6 +7132,8 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Continues From */
+            continues_from?: string | null;
         };
         /** ShotTakesOut */
         ShotTakesOut: {
@@ -7704,6 +7732,29 @@ export interface components {
             tag: string;
             /** Operations */
             operations: components["schemas"]["OperationOut"][];
+        };
+        /**
+         * TakeAnchorOut
+         * @description PHASE-032: what a take of a continuity shot was cut from. Its first frame (or one more
+         *     reference picture) is frame `frame_index` of take `take_number` of the shot `from_shot_id`,
+         *     the frame that take shows last at its shot's target duration.
+         */
+        TakeAnchorOut: {
+            /** From Shot Id */
+            from_shot_id: string;
+            /** Take Id */
+            take_id: number;
+            /** Take Number */
+            take_number: number;
+            /** Frame Index */
+            frame_index: number | null;
+            /**
+             * Use
+             * @enum {string}
+             */
+            use: "first_frame" | "reference";
+            /** Url */
+            url: string | null;
         };
         /**
          * TakeAudioOut

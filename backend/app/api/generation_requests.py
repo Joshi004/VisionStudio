@@ -51,18 +51,22 @@ _INVALID = {
 Source = Literal["ai", "manual"]
 Status = Literal["not_planned", "planned", "out_of_date"]
 ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
-PictureKind = Literal["character", "environment"]
+PictureKind = Literal["character", "environment", "anchor"]
 ManifestStatus = Literal["not_selected", "selected", "out_of_date"]
-Route = Literal["reference", "text"]
+Route = Literal["reference", "text", "first_frame"]
+AnchorUse = Literal["first_frame", "reference"]
 
 
 class RequestPictureOut(BaseModel):
-    """One picture of the request, in the order it is sent. A prompt calls it `<Picture n>`."""
+    """One picture of the request, in the order it is sent. A prompt calls it `<Picture n>`.
+    A picture of kind `anchor` (PHASE-032) is the last frame of the previous shot: it has no
+    stored image until the shot is generated.
+    """
 
     label: str
     order: int
-    lab_image_id: int
-    # None when the picture no longer exists.
+    lab_image_id: int | None
+    # None when the picture no longer exists, and for an anchor.
     url: str | None
     kind: PictureKind
     subject_id: str
@@ -92,6 +96,17 @@ class RequestAudioOut(BaseModel):
     marker: str
 
 
+class RequestAnchorOut(BaseModel):
+    """PHASE-032: the shot continues `from_shot_id`, and the last frame of that shot's selected
+    take is the first frame of this clip (`first_frame`) or one more reference picture
+    (`reference`, with its `<Picture n>` number in `picture_order`).
+    """
+
+    from_shot_id: str
+    use: AnchorUse
+    picture_order: int | None
+
+
 class GenerationRequestOut(BaseModel):
     model: str
     route: Route
@@ -109,6 +124,7 @@ class GenerationRequestOut(BaseModel):
     pictures: list[RequestPictureOut]
     audios: list[RequestAudioOut]
     notes: list[str]
+    anchor: RequestAnchorOut | None = None
 
 
 class GenerationRequestVersionOut(BaseModel):
@@ -188,7 +204,11 @@ async def _urls(state: generation_requests.GenerationRequestsState, session: Ses
     for scene in state.entries:
         for shot in scene.shots:
             if shot.row is not None:
-                picture_ids.update(item["lab_image_id"] for item in shot.row.content["pictures"])
+                picture_ids.update(
+                    item["lab_image_id"]
+                    for item in shot.row.content["pictures"]
+                    if item["lab_image_id"] is not None
+                )
                 audio_ids.update(
                     item["speech_unit_audio_id"] for item in shot.row.content["audios"]
                 )
@@ -235,6 +255,10 @@ def _request_out(content: dict[str, Any], urls: _Urls) -> GenerationRequestOut:
             for audio in content["audios"]
         ],
         notes=content["notes"],
+        # Requests planned before PHASE-032 have no `anchor`.
+        anchor=(
+            RequestAnchorOut(**content["anchor"]) if content.get("anchor") is not None else None
+        ),
     )
 
 
