@@ -24,6 +24,7 @@ import {
   type SceneEventsEntry,
 } from "../../api/sceneEvents";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import type { SpeechMode } from "../projects/speechModes";
 import { ArtifactViewer } from "./ArtifactViewer";
 import { ReplaceManualModal } from "./ReplaceManualModal";
 import { SceneEventsEditor } from "./SceneEventsEditor";
@@ -31,6 +32,8 @@ import { SceneEventsView } from "./SceneEventsView";
 
 type SceneEventsPanelProps = {
   projectId: number;
+  /** The project's speech mode, which decides the event types an edit may use. */
+  speechMode: SpeechMode;
 };
 
 const STATUS: Record<
@@ -43,6 +46,7 @@ const STATUS: Record<
 };
 
 type EntryRowProps = {
+  speechMode: SpeechMode;
   entry: SceneEventsEntry;
   characterNames: Record<string, string>;
   characters: { id: string; name: string }[];
@@ -61,6 +65,7 @@ type EntryRowProps = {
  * failed, and the events themselves, which can be edited by hand.
  */
 function EntryRow({
+  speechMode,
   entry,
   characterNames,
   characters,
@@ -183,6 +188,7 @@ function EntryRow({
       {editing && entry.events !== null && (
         <Paper withBorder p="md" radius="sm" ml={34}>
           <SceneEventsEditor
+            speechMode={speechMode}
             initial={entry.events.events}
             characters={characters}
             saving={saving}
@@ -217,7 +223,7 @@ function EntryRow({
  * as narration, dialogue, actions, sounds and pauses. A scene can only be extracted once it is
  * defined. **Extract all** covers every defined scene whose events are missing or out of date.
  */
-export function SceneEventsPanel({ projectId }: SceneEventsPanelProps) {
+export function SceneEventsPanel({ projectId, speechMode }: SceneEventsPanelProps) {
   const { data, isLoading, isError, error } = useSceneEvents(projectId);
   const extractAll = useExtractAllEvents(projectId);
   const extractOne = useExtractOneSceneEvents(projectId);
@@ -297,6 +303,7 @@ export function SceneEventsPanel({ projectId }: SceneEventsPanelProps) {
         {entries.map((entry) => (
           <EntryRow
             key={entry.id}
+            speechMode={speechMode}
             entry={entry}
             characterNames={characterNames}
             projectBlocked={projectBlocked}

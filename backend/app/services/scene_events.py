@@ -346,6 +346,8 @@ async def _queue(
         input={
             "story_bible_id": bible.id,
             "story_bible_version": bible.version,
+            # The project's speech mode, which decides the event types the model may use.
+            "speech_mode": project.speech_mode,
             "scene_id": scene["id"],
             "scene": {
                 "index": scene["index"],
@@ -680,6 +682,7 @@ async def save_manual(
             scene_id,
             prepared.scene["text"],
             {item["id"] for item in _character_items(loaded)},
+            project.speech_mode,
         )
     except ValueError as exc:
         raise SceneEventsError(str(exc)) from exc

@@ -4,6 +4,8 @@ import { useNavigate } from "react-router";
 
 import { describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
+import { SPEECH_MODES, isSpeechMode } from "./speechModes";
+import type { SpeechMode } from "./speechModes";
 
 const ORIENTATIONS = [
   { value: "landscape", label: "Landscape", size: "1920 x 1080" },
@@ -21,6 +23,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const create = useCreateProject();
   const [orientation, setOrientation] = useState<Orientation | null>(null);
+  const [speechMode, setSpeechMode] = useState<SpeechMode>("both");
   const [name, setName] = useState("");
 
   const canCreate = orientation !== null && name.trim() !== "";
@@ -30,7 +33,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
       return;
     }
     create.mutate(
-      { name, orientation },
+      { name, orientation, speech_mode: speechMode },
       {
         onSuccess: (project) => {
           onClose();
@@ -84,6 +87,33 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
           maxLength={200}
           data-autofocus
         />
+
+        <Radio.Group
+          label="3. Speech"
+          description="How the story is spoken. It cannot be changed later."
+          value={speechMode}
+          onChange={(value) => {
+            if (isSpeechMode(value)) {
+              setSpeechMode(value);
+            }
+          }}
+        >
+          <Stack mt="xs" gap="xs">
+            {SPEECH_MODES.map((option) => (
+              <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                <Group wrap="nowrap" align="flex-start">
+                  <Radio.Indicator />
+                  <Stack gap={2}>
+                    <Text fw={500}>{option.label}</Text>
+                    <Text size="sm" c="dimmed">
+                      {option.description}
+                    </Text>
+                  </Stack>
+                </Group>
+              </Radio.Card>
+            ))}
+          </Stack>
+        </Radio.Group>
 
         {create.isError && <Alert color="red">{describeError(create.error)}</Alert>}
 

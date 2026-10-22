@@ -14,6 +14,7 @@ import {
 
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
+import { speechModeLabel } from "./speechModes";
 import { changedFields, initialDraft, type Draft, type NUMBER_FIELDS } from "./settingsDraft";
 
 type ProjectSettingsFormProps = {
@@ -87,6 +88,16 @@ export function ProjectSettingsForm({
               maxLength={200}
             />
           </Stack>
+        </Paper>
+
+        <Paper withBorder p="md" radius="md">
+          <Group gap="sm">
+            <Title order={4}>Speech</Title>
+            <Badge variant="light">{speechModeLabel(project.speech_mode)}</Badge>
+            <Text size="xs" c="dimmed">
+              The speech mode is fixed after creation.
+            </Text>
+          </Group>
         </Paper>
 
         <Paper withBorder p="md" radius="md">

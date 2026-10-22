@@ -27,6 +27,7 @@ from app.services import story_length as story_length_service
 router = APIRouter()
 
 Orientation = Literal["landscape", "portrait"]
+SpeechMode = Literal["both", "no_dialogue", "no_narration"]
 
 # SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
 _MAX_PROJECT_ID = 2**63 - 1
@@ -40,10 +41,13 @@ class ProjectCreate(BaseModel):
 
     name: StrictStr
     orientation: Orientation
+    speech_mode: SpeechMode = "both"
 
 
 class ProjectUpdate(BaseModel):
-    """Only the fields that are sent are changed. The orientation cannot be changed."""
+    """Only the fields that are sent are changed. The orientation and the speech mode cannot be
+    changed.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -78,6 +82,7 @@ class ProjectDetail(BaseModel):
     id: int
     name: str
     orientation: Orientation
+    speech_mode: SpeechMode
     created_at: datetime
     gen_width: int
     gen_height: int
@@ -93,6 +98,11 @@ def _orientation(project: Project) -> Orientation:
     return cast(Orientation, project.orientation)
 
 
+def _speech_mode(project: Project) -> SpeechMode:
+    # The database CHECK constraint keeps this to the three allowed values.
+    return cast(SpeechMode, project.speech_mode)
+
+
 async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
     policy = await story_length_service.read_story_length_policy(session)
     length = story_length_service.story_length(project.script_text, policy)
@@ -100,6 +110,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         id=project.id,
         name=project.name,
         orientation=_orientation(project),
+        speech_mode=_speech_mode(project),
         created_at=project.created_at,
         gen_width=project.gen_width,
         gen_height=project.gen_height,
@@ -150,7 +161,9 @@ async def list_projects(session: SessionDep) -> list[ProjectSummary]:
 )
 async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDetail:
     try:
-        project = await projects_service.create_project(session, body.name, body.orientation)
+        project = await projects_service.create_project(
+            session, body.name, body.orientation, body.speech_mode
+        )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return await _detail(session, project)

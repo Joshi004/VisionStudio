@@ -98,8 +98,8 @@ export function ProjectPage() {
           <CharacterRelationsPanel projectId={project.id} />
           <CharacterDefinitionsPanel projectId={project.id} />
           <CharacterImagesPanel projectId={project.id} />
-          <CharacterVoicesPanel projectId={project.id} />
-          <NarratorVoicePanel projectId={project.id} />
+          {project.speech_mode !== "no_dialogue" && <CharacterVoicesPanel projectId={project.id} />}
+          {project.speech_mode !== "no_narration" && <NarratorVoicePanel projectId={project.id} />}
           <DiscoveryPanel
             projectId={project.id}
             kind="environments"
@@ -109,7 +109,7 @@ export function ProjectPage() {
           <ScenesPanel projectId={project.id} hasStory={project.script_text !== null} />
           <EnvironmentDefinitionsPanel projectId={project.id} />
           <SceneDefinitionsPanel projectId={project.id} />
-          <SceneEventsPanel projectId={project.id} />
+          <SceneEventsPanel projectId={project.id} speechMode={project.speech_mode} />
           <LooksAndStatesPanel projectId={project.id} />
           <LookStateImagesPanel projectId={project.id} />
           <SpeechUnitsPanel projectId={project.id} />

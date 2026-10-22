@@ -71,6 +71,7 @@ from app.services import (
 )
 from app.services.character_definitions import EntryDefinition
 from app.services.character_links import LinkInfo
+from app.services.projects import SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION
 from app.services.voice_lab import VoiceLabForm, VoiceLabInputError
 
 _logger = logging.getLogger(__name__)
@@ -79,6 +80,10 @@ JOB_TYPE: Final = "design_voice"
 # Two presses on one voice make one job; two voices run side by side.
 DEDUPE_KEY: Final = "target"
 NARRATOR_TARGET: Final = "narrator"
+
+# Why "Make voices for all" leaves a voice alone in a project with no narration or no dialogue.
+NO_NARRATION_REASON: Final = "This project has no narration."
+NO_DIALOGUE_REASON: Final = "This project has no dialogue."
 
 # How many of a project's newest voice jobs are read to find each voice's newest one.
 _JOB_LOOKBACK: Final = 500
@@ -485,7 +490,13 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     """
     result = await state(session, project)
     narrator = await narrator_state(session, project)
-    narrator_reason = _narrator_skip_reason(narrator)
+    # A project with no narration has no narrator to give a voice, and one with no dialogue has
+    # no character to (PHASE-049).
+    narrator_reason = (
+        NO_NARRATION_REASON
+        if project.speech_mode == SPEECH_NO_NARRATION
+        else _narrator_skip_reason(narrator)
+    )
     if result.discovery_version is None and narrator_reason is not None:
         raise StoryVoiceError("Find the characters first: there is nothing to give a voice yet.")
 
@@ -494,7 +505,9 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     for item in result.entries:
         entry_id = item.definition.item["id"]
         name = item.definition.item["name"]
-        reason = _skip_reason(item)
+        reason = (
+            NO_DIALOGUE_REASON if project.speech_mode == SPEECH_NO_DIALOGUE else _skip_reason(item)
+        )
         if reason is not None:
             skipped.append(Skipped(entry_id, name, reason))
             continue

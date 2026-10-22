@@ -55,6 +55,7 @@ from app.services import (
     story_renders,
     story_voices,
 )
+from app.services.projects import SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION
 from app.services.story_pipeline import (
     PROJECT_KEY,
     STEP_KEYS,
@@ -577,10 +578,16 @@ _NARRATOR_KEY: Final = story_voices.NARRATOR_TARGET
 async def _evaluate_voices(
     session: AsyncSession, project: Project, options: RunOptions
 ) -> StepView:
-    voices = await story_voices.state(session, project)
-    narrator = await story_voices.narrator_state(session, project)
+    # A project with no dialogue needs no character voice, and one with no narration needs no
+    # narrator voice (PHASE-049): those targets are left out, so nothing is paid for or awaited.
+    needs_characters = project.speech_mode != SPEECH_NO_DIALOGUE
+    needs_narrator = project.speech_mode != SPEECH_NO_NARRATION
     targets: list[Target] = []
-    for entry in voices.entries:
+    if not needs_characters:
+        voice_entries: list[story_voices.EntryVoice] = []
+    else:
+        voice_entries = (await story_voices.state(session, project)).entries
+    for entry in voice_entries:
         discovery_id = entry.definition.item["id"]
         done = entry.status == "ready"
         active = entry.status == "in_progress"
@@ -600,24 +607,26 @@ async def _evaluate_voices(
                 ref=(discovery_id,),
             )
         )
-    narrator_done = narrator.status == "ready"
-    narrator_active = narrator.status == "in_progress"
-    targets.append(
-        Target(
-            _NARRATOR_KEY,
-            "Narrator",
-            narrator_done,
-            active=narrator_active,
-            block=None if narrator_done or narrator_active else narrator.blocked_reason,
-            consent=(
-                "The narrator's voice was chosen by hand, and a new one replaces it."
-                if narrator.needs_confirmation and not narrator_done
-                else None
-            ),
-            last_error=narrator.error or _failure(narrator.job),
-            ref=(_NARRATOR_KEY,),
+    if needs_narrator:
+        narrator = await story_voices.narrator_state(session, project)
+        narrator_done = narrator.status == "ready"
+        narrator_active = narrator.status == "in_progress"
+        targets.append(
+            Target(
+                _NARRATOR_KEY,
+                "Narrator",
+                narrator_done,
+                active=narrator_active,
+                block=None if narrator_done or narrator_active else narrator.blocked_reason,
+                consent=(
+                    "The narrator's voice was chosen by hand, and a new one replaces it."
+                    if narrator.needs_confirmation and not narrator_done
+                    else None
+                ),
+                last_error=narrator.error or _failure(narrator.job),
+                ref=(_NARRATOR_KEY,),
+            )
         )
-    )
     return StepView(targets)
 
 

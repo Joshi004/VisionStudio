@@ -38,6 +38,7 @@ from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import discovery, event_extraction_writer, llm_target, scene_events
 from app.services.llm_target import STORY_MODEL_KEY
+from app.services.projects import SPEECH_BOTH, SPEECH_MODES
 
 _logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class _Input:
     characters: list[dict[str, Any]]
     inputs: dict[str, Any]
     bible_id: int
+    speech_mode: str
 
 
 def _read_input(job_input: dict[str, Any]) -> _Input | None:
@@ -70,8 +72,11 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     characters = job_input.get("characters")
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
+    # A job queued before PHASE-049 has no speech mode: it is a `both` project.
+    speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
     if (
-        not isinstance(scene, dict)
+        speech_mode not in SPEECH_MODES
+        or not isinstance(scene, dict)
         or not isinstance(scene.get("id"), str)
         or not isinstance(scene.get("title"), str)
         or not isinstance(scene.get("text"), str)
@@ -89,6 +94,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         characters=characters,
         inputs=inputs,
         bible_id=bible_id,
+        speech_mode=speech_mode,
     )
 
 
@@ -104,7 +110,11 @@ class ExtractEventsHandler(JobHandler):
 
     @staticmethod
     def _read(
-        result: llm.ChatResult, scene_id: str, scene_text: str, character_ids: set[str]
+        result: llm.ChatResult,
+        scene_id: str,
+        scene_text: str,
+        character_ids: set[str],
+        speech_mode: str,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`."""
         if result.finish_reason == "length":
@@ -112,7 +122,7 @@ class ExtractEventsHandler(JobHandler):
         try:
             answer = event_extraction_writer.parse_answer(result.content)
             return None, event_extraction_writer.check_answer(
-                answer, scene_id, scene_text, character_ids
+                answer, scene_id, scene_text, character_ids, speech_mode
             )
         except ValueError as exc:
             return str(exc), None
@@ -146,6 +156,7 @@ class ExtractEventsHandler(JobHandler):
         title = read.scene["title"]
         scene_text = read.scene["text"]
         character_ids = _ids(read.characters)
+        speech_mode = read.speech_mode
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
         body = event_extraction_writer.build_request(
@@ -155,6 +166,7 @@ class ExtractEventsHandler(JobHandler):
             scene_characters=read.scene_characters,
             all_characters=read.characters,
             model=target.model,
+            speech_mode=speech_mode,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
@@ -169,7 +181,7 @@ class ExtractEventsHandler(JobHandler):
             job_id,
             target,
             body,
-            lambda result: self._read(result, scene_id, scene_text, character_ids),
+            lambda result: self._read(result, scene_id, scene_text, character_ids, speech_mode),
             timeout_s=REQUEST_TIMEOUT_S,
         )
         content: dict[str, Any] | None = outcome.value

@@ -386,6 +386,8 @@ async def _queue(
             **replan_input,
             "story_bible_id": bible.id,
             "story_bible_version": bible.version,
+            # The project's speech mode: `no_narration` adds a line to the instructions.
+            "speech_mode": project.speech_mode,
             "scene_id": item["id"],
             "scene": {
                 "index": item["index"],

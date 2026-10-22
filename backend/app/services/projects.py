@@ -30,6 +30,12 @@ PORTRAIT = "portrait"
 
 DEFAULT_FPS: Final = 24
 
+# How a project's story is spoken. Chosen when the project is created and never changed.
+SPEECH_BOTH: Final = "both"
+SPEECH_NO_DIALOGUE: Final = "no_dialogue"
+SPEECH_NO_NARRATION: Final = "no_narration"
+SPEECH_MODES: Final = (SPEECH_BOTH, SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION)
+
 NAME_MAX_CHARS: Final = 200
 SCRIPT_MAX_CHARS: Final = 100_000
 
@@ -57,7 +63,7 @@ ORIENTATION_DEFAULTS: Final[Mapping[str, OrientationDefaults]] = {
     PORTRAIT: OrientationDefaults(gen_width=1088, gen_height=1920, out_width=1080, out_height=1920),
 }
 
-# What a PATCH may change. The orientation and the id are not here.
+# What a PATCH may change. The orientation, the speech mode and the id are not here.
 _FIELD_LABELS: Final[Mapping[str, str]] = {
     "name": "Name",
     "gen_width": "Generation width",
@@ -143,10 +149,16 @@ def _normalise_script(value: str | None) -> str | None:
     return value
 
 
-async def create_project(session: AsyncSession, name: str, orientation: str) -> Project:
-    """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits."""
+async def create_project(
+    session: AsyncSession, name: str, orientation: str, speech_mode: str = SPEECH_BOTH
+) -> Project:
+    """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
+    The speech mode is set here and never changed afterwards.
+    """
     if orientation not in ORIENTATION_DEFAULTS:
         raise ProjectValidationError("Orientation must be landscape or portrait.")
+    if speech_mode not in SPEECH_MODES:
+        raise ProjectValidationError("Speech mode must be both, no_dialogue or no_narration.")
     sizes = ORIENTATION_DEFAULTS[orientation]
 
     # Every default is set here, rather than left to the column defaults, because the
@@ -159,6 +171,7 @@ async def create_project(session: AsyncSession, name: str, orientation: str) -> 
         out_width=sizes.out_width,
         out_height=sizes.out_height,
         fps=DEFAULT_FPS,
+        speech_mode=speech_mode,
     )
     validate_project(project)
     session.add(project)

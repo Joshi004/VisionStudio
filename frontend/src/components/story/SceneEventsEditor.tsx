@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Button, Group, Paper, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 
 import type { SceneEvent, SceneEventInput } from "../../api/sceneEvents";
+import type { SpeechMode } from "../projects/speechModes";
 import { EditorActions } from "./editorParts";
 
 type SceneEventsEditorProps = {
+  /** The project's speech mode: the type it does not use is left out of the type list. */
+  speechMode: SpeechMode;
   /** The scene's newest events; the form starts from them. */
   initial: SceneEvent[];
   /** The story's characters, for who speaks a line. */
@@ -24,6 +27,13 @@ const TYPE_OPTIONS: { value: EventType; label: string }[] = [
   { value: "sound_event", label: "Sound" },
   { value: "pause", label: "Pause" },
 ];
+
+/** The types a speech mode allows: no dialogue without lines, no narration without a narrator. */
+function typeOptionsFor(speechMode: SpeechMode) {
+  const forbidden =
+    speechMode === "no_dialogue" ? "dialogue" : speechMode === "no_narration" ? "narration" : null;
+  return TYPE_OPTIONS.filter((option) => option.value !== forbidden);
+}
 
 /** A row being edited. Every field is kept while the type changes; only the type's own are sent. */
 type Row = {
@@ -71,6 +81,7 @@ function toInput(row: Row): SceneEventInput {
  * event is wrong. The ids (`evt_1`, ...) are set from the order.
  */
 export function SceneEventsEditor({
+  speechMode,
   initial,
   characters,
   saving,
@@ -79,6 +90,7 @@ export function SceneEventsEditor({
   onCancel,
 }: SceneEventsEditorProps) {
   const [rows, setRows] = useState<Row[]>(initial.map(toRow));
+  const typeOptions = typeOptionsFor(speechMode);
 
   const change = (index: number, part: Partial<Row>) =>
     setRows(rows.map((row, position) => (position === index ? { ...row, ...part } : row)));
@@ -109,7 +121,7 @@ export function SceneEventsEditor({
             <Group gap="xs" align="flex-end" wrap="nowrap">
               <Select
                 label={`Event ${index + 1}`}
-                data={TYPE_OPTIONS}
+                data={typeOptions}
                 value={row.type}
                 allowDeselect={false}
                 onChange={(value) => value !== null && change(index, { type: value as EventType })}
@@ -197,7 +209,13 @@ export function SceneEventsEditor({
           onClick={() =>
             setRows([
               ...rows,
-              { type: "narration", text: "", speaker_id: null, emotion: "", description: "" },
+              {
+                type: typeOptions[0].value,
+                text: "",
+                speaker_id: null,
+                emotion: "",
+                description: "",
+              },
             ])
           }
         >

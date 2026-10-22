@@ -50,6 +50,7 @@ from app.services import (
     shot_plans,
 )
 from app.services.llm_target import STORY_MODEL_KEY
+from app.services.projects import SPEECH_BOTH, SPEECH_MODES
 
 _logger = logging.getLogger(__name__)
 
@@ -76,6 +77,8 @@ class _Input:
     bible_id: int
     # Set for an automatic re-plan (PHASE-021): `{attempt, problems, previous_shots}`.
     replan: dict[str, Any] | None = None
+    # The project's speech mode (PHASE-049); a job queued before it is a `both` project.
+    speech_mode: str = SPEECH_BOTH
 
 
 def _read_replan(value: Any) -> tuple[bool, dict[str, Any] | None]:
@@ -110,10 +113,12 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
     replan_ok, replan = _read_replan(job_input.get("replan"))
+    speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
     if not replan_ok:
         return None
     if (
-        not isinstance(scene, dict)
+        speech_mode not in SPEECH_MODES
+        or not isinstance(scene, dict)
         or not isinstance(scene.get("id"), str)
         or not isinstance(scene.get("title"), str)
         or not isinstance(scene_definition, dict)
@@ -148,6 +153,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         inputs=inputs,
         bible_id=bible_id,
         replan=replan,
+        speech_mode=speech_mode,
     )
 
 
@@ -221,6 +227,7 @@ class PlanShotsHandler(JobHandler):
                 if read.replan is not None
                 else None
             ),
+            speech_mode=read.speech_mode,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

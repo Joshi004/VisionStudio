@@ -40,6 +40,7 @@ import math
 from typing import Any, Final
 
 from app.services import discovery_writer
+from app.services.projects import SPEECH_BOTH, SPEECH_NO_NARRATION
 
 parse_answer = discovery_writer.parse_answer
 
@@ -71,7 +72,7 @@ _ANSWER_FORM: Final = json.dumps(
     }
 )
 
-_INSTRUCTIONS: Final = f"""You are the shot planner of a studio that turns written stories into \
+_BODY: Final = f"""You are the shot planner of a studio that turns written stories into \
 short films. You read ONE scene whose events are known and whose speech has already been recorded, \
 and you decide how the audience sees it: a list of shots in story order. Later steps describe each \
 shot in detail and film it, so give only a compact skeleton of each.
@@ -122,10 +123,24 @@ If the user message also holds PREVIOUS SHOTS and TIMELINE PROBLEMS, an earlier 
 same scene was checked by code and had the problems listed. Plan the whole scene again so that \
 none of those problems remains: for example, merge a shot that is too short with a neighbour, \
 split one that is too long, or lengthen a shot so that the line spoken in it fits. Each problem \
-has a "message" with the numbers. Keep what was fine, and still follow every rule above.
+has a "message" with the numbers. Keep what was fine, and still follow every rule above."""
 
+_ANSWER_TAIL: Final = f"""\
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
+
+# A project with no narration (PHASE-049): no narrator carries the story, so the shots must.
+_NO_NARRATION_NOTE: Final = """This story has no narrator. Nothing explains the story in words, so \
+the shots alone must carry it: show what the events show clearly, and give a silent action shot \
+(one with no speech) enough time to be read before the next shot."""
+
+
+def instructions(speech_mode: str = SPEECH_BOTH) -> str:
+    """The system message for a project's speech mode. For every mode except `no_narration` it is
+    what every project used before PHASE-049.
+    """
+    note = f"\n\n{_NO_NARRATION_NOTE}" if speech_mode == SPEECH_NO_NARRATION else ""
+    return f"{_BODY}{note}\n\n{_ANSWER_TAIL}"
 
 
 def build_request(
@@ -141,9 +156,13 @@ def build_request(
     target_max_seconds: int,
     model: str,
     replan: dict[str, Any] | None = None,
+    speech_mode: str = SPEECH_BOTH,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
+
+    `speech_mode` is the project's (`both`, `no_dialogue` or `no_narration`); only
+    `no_narration` adds to the instructions.
 
     `scene` is `{index, id, title, description}`; `scene_characters` is a list of `{id, name,
     description, definition}` and `environment` is `{id, name, description, definition}`;
@@ -181,7 +200,7 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": _INSTRUCTIONS},
+            {"role": "system", "content": instructions(speech_mode)},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,

@@ -5624,6 +5624,12 @@ export interface components {
              * @enum {string}
              */
             orientation: "landscape" | "portrait";
+            /**
+             * Speech Mode
+             * @default both
+             * @enum {string}
+             */
+            speech_mode: "both" | "no_dialogue" | "no_narration";
         };
         /** ProjectDetail */
         ProjectDetail: {
@@ -5636,6 +5642,11 @@ export interface components {
              * @enum {string}
              */
             orientation: "landscape" | "portrait";
+            /**
+             * Speech Mode
+             * @enum {string}
+             */
+            speech_mode: "both" | "no_dialogue" | "no_narration";
             /**
              * Created At
              * Format: date-time
@@ -5703,7 +5714,8 @@ export interface components {
         };
         /**
          * ProjectUpdate
-         * @description Only the fields that are sent are changed. The orientation cannot be changed.
+         * @description Only the fields that are sent are changed. The orientation and the speech mode cannot be
+         *     changed.
          */
         ProjectUpdate: {
             /** Name */

@@ -39,6 +39,9 @@ class Project(Base):
     __tablename__ = "project"
     __table_args__ = (
         CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
+        CheckConstraint(
+            "speech_mode IN ('both', 'no_dialogue', 'no_narration')", name="speech_mode_valid"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -51,6 +54,9 @@ class Project(Base):
     out_height: Mapped[int]
     fps: Mapped[int] = mapped_column(default=24, server_default=text("24"))
     script_text: Mapped[str | None] = mapped_column(default=None)
+    # Chosen when the project is created and never changed: `both`, `no_dialogue` (only a
+    # narrator speaks) or `no_narration` (nobody narrates).
+    speech_mode: Mapped[str] = mapped_column(default="both", server_default=text("'both'"))
 
 
 class Asset(Base):
