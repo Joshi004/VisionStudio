@@ -6,7 +6,10 @@
   may be pressed. Out of date is worked out on every read.
 - `POST .../run` ("Define all") starts one job per scene that is not defined and up to date
   already and not already being defined.
-- `POST .../{scene_id}/run` starts the job for one scene.
+- `POST .../{scene_id}/run` starts the job for one scene. When the scene's newest definition was
+  written by the user, the body must confirm the replacement (PHASE-037).
+- `PUT .../{scene_id}` saves the user's edited definition of one scene as its next version
+  (`source` is `manual`), checked like the model's answer.
 
 A job stores a new version of the scene's definition (`services/scene_definitions.py`); nothing
 is written to the Character Lab. The answers never return ORM objects.
@@ -18,13 +21,15 @@ from datetime import datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
 from app.services import scene_definitions
@@ -110,6 +115,8 @@ class SceneDefinitionEntryOut(BaseModel):
     job: DiscoveryJobOut | None
     can_run: bool
     blocked_reason: str | None
+    # True when defining this scene again would add a version after one the user wrote.
+    needs_confirmation: bool
 
 
 class SceneDefinitionsOut(BaseModel):
@@ -133,6 +140,58 @@ class SceneDefinitionRunAllOut(BaseModel):
 
 class SceneDefinitionRunOut(BaseModel):
     job_id: int
+
+
+class SceneDefinitionRunIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+
+
+_Text = Field(max_length=5000)
+
+
+class SceneStoryContextIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    before: str = _Text
+    current: str = _Text
+    after: str = _Text
+
+
+class SceneTimeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    time_of_day: str = _Text
+    lighting_state: str = _Text
+
+
+class SceneMoodIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: str = _Text
+    middle: str = _Text
+    end: str = _Text
+
+
+class SceneDefinitionIn(BaseModel):
+    """An edited definition. The `id` is the scene's and is set by code. The rules (known
+    ids, sizes) are checked by `scene_definition_writer.check_definition`; these limits only
+    keep a request from being huge.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    story_context: SceneStoryContextIn
+    environment_id: str = Field(max_length=200)
+    environment_state: str = _Text
+    time: SceneTimeIn
+    characters: list[str] = Field(max_length=200)
+    character_looks: dict[str, str] = Field(max_length=200)
+    mood: SceneMoodIn
+    dramatic_goal: str = _Text
+    continuity_start: dict[str, str] = Field(max_length=200)
+    continuity_end: dict[str, str] = Field(max_length=200)
 
 
 def _entry_out(entry: SceneEntry) -> SceneDefinitionEntryOut:
@@ -172,6 +231,7 @@ def _entry_out(entry: SceneEntry) -> SceneDefinitionEntryOut:
         ),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
+        needs_confirmation=entry.needs_confirmation,
     )
 
 
@@ -186,6 +246,10 @@ def _refused(exc: scene_definitions.SceneDefinitionError) -> HTTPException:
 )
 async def get_scene_definitions(project_id: int, session: SessionDep) -> SceneDefinitionsOut:
     project = await load_project(session, project_id)
+    return await _state_out(session, project)
+
+
+async def _state_out(session: AsyncSession, project: Project) -> SceneDefinitionsOut:
     result = await scene_definitions.state(session, project)
     return SceneDefinitionsOut(
         scenes_version=result.scenes_version,
@@ -227,15 +291,40 @@ async def run_all(project_id: int, session: SessionDep) -> SceneDefinitionRunAll
     responses={**_NOT_FOUND, **_INVALID},
 )
 async def run_one(
-    project_id: int, scene_id: DiscoveryId, session: SessionDep
+    project_id: int,
+    scene_id: DiscoveryId,
+    session: SessionDep,
+    body: SceneDefinitionRunIn | None = None,
 ) -> SceneDefinitionRunOut:
     """Starts the job that defines one scene. If it already has a job waiting or running, that
     job's id is returned and no second job is made.
     """
     project = await load_project(session, project_id)
     try:
-        job = await scene_definitions.start_run(session, project, scene_id)
+        job = await scene_definitions.start_run(
+            session,
+            project,
+            scene_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+        )
     except scene_definitions.SceneDefinitionError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()
     return SceneDefinitionRunOut(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/scene-definitions/{scene_id}",
+    response_model=SceneDefinitionsOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_definition(
+    project_id: int, scene_id: DiscoveryId, body: SceneDefinitionIn, session: SessionDep
+) -> SceneDefinitionsOut:
+    """Saves the edited definition of one scene as its next version, written by the user."""
+    project = await load_project(session, project_id)
+    try:
+        await scene_definitions.save_manual(session, project, scene_id, body.model_dump())
+    except scene_definitions.SceneDefinitionError as exc:
+        raise _refused(exc) from exc
+    return await _state_out(session, project)

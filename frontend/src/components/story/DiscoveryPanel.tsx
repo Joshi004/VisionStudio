@@ -18,11 +18,14 @@ import {
   useDiscovery,
   useDiscoveryVersion,
   useRunDiscovery,
+  useSaveDiscovery,
   type DiscoveryKind,
 } from "../../api/discovery";
 import { useStoryBible } from "../../api/storyBible";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { DiscoveryListEditor } from "./DiscoveryListEditor";
+import { ReplaceManualModal } from "./ReplaceManualModal";
 
 type DiscoveryPanelProps = {
   projectId: number;
@@ -31,16 +34,21 @@ type DiscoveryPanelProps = {
   hasStory: boolean;
 };
 
-const TEXTS: Record<DiscoveryKind, { title: string; description: string; result: string }> = {
+const TEXTS: Record<
+  DiscoveryKind,
+  { title: string; description: string; result: string; noun: string }
+> = {
   characters: {
     title: "Characters",
     description: "The people and presences the story needs, with a short note on each.",
     result: "Characters found",
+    noun: "character",
   },
   environments: {
     title: "Environments",
     description: "The places the story happens in, with a short note on each.",
     result: "Environments found",
+    noun: "environment",
   },
 };
 
@@ -54,6 +62,9 @@ export function DiscoveryPanel({ projectId, kind, hasStory }: DiscoveryPanelProp
   const { data, isLoading, isError, error } = useDiscovery(projectId, kind);
   const bible = useStoryBible(projectId);
   const run = useRunDiscovery(projectId, kind);
+  const save = useSaveDiscovery(projectId, kind);
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   // The version the user picked. Until they pick one, the newest is shown.
   const [picked, setPicked] = useState<number | null>(null);
 
@@ -75,6 +86,12 @@ export function DiscoveryPanel({ projectId, kind, hasStory }: DiscoveryPanelProp
   } else if (bible.data?.out_of_date) {
     blocker = "The Story Bible is out of date. Re-run it first.";
   }
+
+  const startRun = (confirmReplaceManual: boolean) => {
+    // A new version is on its way: show it when it arrives.
+    setPicked(null);
+    run.mutate({ confirmReplaceManual });
+  };
 
   return (
     <Stack gap="sm">
@@ -102,14 +119,26 @@ export function DiscoveryPanel({ projectId, kind, hasStory }: DiscoveryPanelProp
                 />
               )}
               <Button
+                variant="default"
                 onClick={() => {
-                  // A new version is on its way: show it when it arrives.
+                  save.reset();
                   setPicked(null);
-                  run.mutate();
+                  setEditing(true);
                 }}
+                disabled={!hasStory || editing || latest === null || active}
+              >
+                Edit
+              </Button>
+              <Button
+                onClick={() => (data?.needs_confirmation ? setConfirming(true) : startRun(false))}
                 loading={run.isPending || active}
                 disabled={
-                  blocker !== null || isLoading || isError || bible.isLoading || bible.isError
+                  blocker !== null ||
+                  isLoading ||
+                  isError ||
+                  bible.isLoading ||
+                  bible.isError ||
+                  editing
                 }
               >
                 {latest ? "Re-run" : "Run"}
@@ -148,7 +177,19 @@ export function DiscoveryPanel({ projectId, kind, hasStory }: DiscoveryPanelProp
         </Stack>
       </Paper>
 
-      {shown && (
+      {editing && latest && (
+        <Paper withBorder p="md" radius="md">
+          <DiscoveryListEditor
+            noun={texts.noun}
+            initial={latest.items}
+            saving={save.isPending}
+            error={save.error}
+            onSave={(items) => save.mutate(items, { onSuccess: () => setEditing(false) })}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {shown && !editing && (
         <ArtifactViewer
           title={texts.result}
           version={shown.version}
@@ -185,6 +226,17 @@ export function DiscoveryPanel({ projectId, kind, hasStory }: DiscoveryPanelProp
           {describeError(olderVersion.error)}
         </Alert>
       )}
+      <ReplaceManualModal
+        opened={confirming}
+        title={`Find the ${texts.noun}s again?`}
+        what={`The newest list of ${texts.noun}s`}
+        confirmLabel="Re-run"
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          startRun(true);
+        }}
+      />
     </Stack>
   );
 }

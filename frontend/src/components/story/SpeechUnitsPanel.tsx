@@ -26,10 +26,14 @@ import {
   usePlanAllSpeechUnits,
   usePlanOneSceneSpeechUnits,
   totalSeconds,
+  useSaveSpeechUnits,
   useSpeechUnits,
+  type SpeechUnitInput,
   type SpeechUnitsEntry,
 } from "../../api/speechUnits";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { ReplaceManualModal } from "./ReplaceManualModal";
+import { SpeechUnitsEditor } from "./SpeechUnitsEditor";
 import { SpeechUnitsView } from "./SpeechUnitsView";
 
 type SpeechUnitsPanelProps = {
@@ -52,6 +56,10 @@ type EntryRowProps = {
   projectBlocked: boolean;
   busy: boolean;
   onPlan: () => void;
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (units: SpeechUnitInput[], done: () => void) => void;
   /** Where the audio of this scene's units stands (PHASE-019). */
   sceneAudio: SpeechSceneAudio | undefined;
   speechBusy: boolean;
@@ -59,8 +67,8 @@ type EntryRowProps = {
 };
 
 /**
- * One scene: its status, why its plan is out of date, and the speech units themselves, read
- * only.
+ * One scene: its status, why its plan is out of date, and the speech units themselves, which
+ * can be re-split by hand.
  */
 function EntryRow({
   entry,
@@ -68,11 +76,16 @@ function EntryRow({
   projectBlocked,
   busy,
   onPlan,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
   sceneAudio,
   speechBusy,
   onMake,
 }: EntryRowProps) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const status = STATUS[entry.status];
   const planned = entry.status === "planned" || entry.status === "out_of_date";
   // Why this one scene cannot be planned, when that is about the scene itself.
@@ -162,17 +175,43 @@ function EntryRow({
               {open ? "Hide the units" : "Show the units"}
             </Button>
           )}
+          {entry.units !== null && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={editing || busy}
+              onClick={() => {
+                onStartEdit();
+                setOpen(false);
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
           <Button
             size="compact-sm"
             variant="default"
-            disabled={!entry.can_run || busy}
+            disabled={!entry.can_run || busy || editing}
             onClick={onPlan}
           >
             {planned ? "Plan again" : "Plan"}
           </Button>
         </Group>
       </Group>
-      {entry.units !== null && entry.version !== null && (
+      {editing && entry.units !== null && (
+        <Paper withBorder p="md" radius="sm" ml={34}>
+          <SpeechUnitsEditor
+            initial={entry.units.units}
+            characterNames={characterNames}
+            saving={saving}
+            error={saveError}
+            onSave={(units) => onSave(units, () => setEditing(false))}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {entry.units !== null && entry.version !== null && !editing && (
         <Collapse expanded={open}>
           <ArtifactViewer
             title="Speech units"
@@ -205,6 +244,9 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
   const { data, isLoading, isError, error } = useSpeechUnits(projectId);
   const planAll = usePlanAllSpeechUnits(projectId);
   const planOne = usePlanOneSceneSpeechUnits(projectId);
+  const save = useSaveSpeechUnits(projectId);
+  // The scene whose newest units the user cut, waiting for "yes, plan them again".
+  const [confirming, setConfirming] = useState<SpeechUnitsEntry | null>(null);
   const audio = useSpeechAudio(projectId);
   const makeAll = useMakeAllSpeech(projectId);
   const makeOne = useMakeOneSpeech(projectId);
@@ -359,13 +401,36 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
             characterNames={characterNames}
             projectBlocked={projectBlocked}
             busy={busy}
-            onPlan={() => planOne.mutate(entry.id)}
+            onPlan={() =>
+              entry.needs_confirmation
+                ? setConfirming(entry)
+                : planOne.mutate({ sceneId: entry.id, confirmReplaceManual: false })
+            }
+            saving={save.isPending}
+            saveError={save.error}
+            onStartEdit={() => save.reset()}
+            onSave={(units, done) =>
+              save.mutate({ sceneId: entry.id, units }, { onSuccess: done })
+            }
             sceneAudio={audioByScene[entry.id]}
             speechBusy={speechBusy}
             onMake={(unitId) => makeOne.mutate({ sceneId: entry.id, unitId })}
           />
         ))}
       </Stack>
+      <ReplaceManualModal
+        opened={confirming !== null}
+        title="Plan the speech units again?"
+        what={`The newest speech units of ${confirming?.title ?? "this scene"}`}
+        confirmLabel="Plan again"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming !== null) {
+            planOne.mutate({ sceneId: confirming.id, confirmReplaceManual: true });
+          }
+          setConfirming(null);
+        }}
+      />
     </Paper>
   );
 }

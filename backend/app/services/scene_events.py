@@ -49,6 +49,8 @@ from app.services import (
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = "extract_events"
+SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
 # Two presses on one scene make one job; two scenes run side by side.
 DEDUPE_KEY: Final = "scene_id"
 
@@ -90,6 +92,11 @@ class SceneEntry:
     @property
     def content(self) -> dict[str, Any] | None:
         return self.row.content if self.row is not None else None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        """Whether extracting this scene again replaces events the user wrote."""
+        return self.row is not None and self.row.source == SOURCE_MANUAL
 
 
 @dataclass(frozen=True)
@@ -253,13 +260,21 @@ def _shown(character: _Character) -> dict[str, Any]:
 # --- Starting runs ------------------------------------------------------------------------
 
 
-async def _queue(
-    session: AsyncSession, project: Project, loaded: _Loaded, position: int
-) -> tuple[Job, bool]:
-    """Queues the job for the scene at this position of the newest list, and returns
-    `(job, created)`. `created` is False when the scene already has a job waiting or running,
-    which is returned instead. Raises SceneEventsError when this scene cannot be extracted.
-    The caller has checked that the project is not blocked.
+@dataclass(frozen=True)
+class _Prepared:
+    """What the events of one scene are made from: what a job is sent, and what a version
+    records. A manual save records exactly what a job would (D-3).
+    """
+
+    scene: dict[str, Any]
+    definition: dict[str, Any]
+    chosen: list[_Character]
+    inputs: dict[str, Any]
+
+
+def _prepare(project: Project, loaded: _Loaded, position: int) -> _Prepared:
+    """The inputs of the scene at this position of the newest list. Raises SceneEventsError
+    when this scene cannot be extracted. The caller has checked that the project is not blocked.
     """
     story, bible = loaded.story, loaded.bible
     assert story is not None and bible is not None  # the callers refuse a blocked state first
@@ -308,6 +323,21 @@ async def _queue(
             *(_shown(character) for character in chosen),
         ],
     }
+    return _Prepared(scene, definition, chosen, inputs)
+
+
+async def _queue(
+    session: AsyncSession, project: Project, loaded: _Loaded, position: int
+) -> tuple[Job, bool]:
+    """Queues the job for the scene at this position of the newest list, and returns
+    `(job, created)`. `created` is False when the scene already has a job waiting or running,
+    which is returned instead. Raises SceneEventsError when this scene cannot be extracted.
+    The caller has checked that the project is not blocked.
+    """
+    bible = loaded.bible
+    assert bible is not None  # the callers refuse a blocked state first
+    prepared = _prepare(project, loaded, position)
+    scene = prepared.scene
     return await store.create_job(
         session,
         project_id=project.id,
@@ -324,7 +354,7 @@ async def _queue(
                 "description": scene["description"],
                 "text": scene["text"],
             },
-            "scene_definition": definition,
+            "scene_definition": prepared.definition,
             "scene_characters": [
                 {
                     "id": character.discovery_id,
@@ -332,23 +362,37 @@ async def _queue(
                     "description": character.description,
                     "definition": character.definition,
                 }
-                for character in chosen
+                for character in prepared.chosen
             ],
             "characters": [
                 {"id": item["id"], "name": item["name"], "description": item["description"]}
                 for item in _character_items(loaded)
             ],
             # Written onto the version the job makes (D-3).
-            "inputs": inputs,
+            "inputs": prepared.inputs,
         },
         dedupe_key=DEDUPE_KEY,
     )
 
 
-async def start_run(session: AsyncSession, project: Project, scene_id: str) -> Job:
+MANUAL_REPLACE_MESSAGE: Final = (
+    "The newest events of this scene were written by you. Extracting them again adds a new "
+    "version from the model, so it has to be confirmed."
+)
+SKIPPED_MANUAL: Final = "Written by you: use this scene's own button to replace it."
+
+
+async def start_run(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    *,
+    confirm_replace_manual: bool = False,
+) -> Job:
     """Queues the job that extracts one scene's events, and commits. If that scene already has
-    a job waiting or running, that job is returned and no new one is made. Raises
-    SceneEventsError.
+    a job waiting or running, that job is returned and no new one is made. When the newest
+    events were written by the user, they are replaced only when `confirm_replace_manual` is
+    true (PHASE-037). Raises SceneEventsError.
     """
     loaded = await _load(session, project)
     if loaded.blocked_reason is not None:
@@ -357,6 +401,9 @@ async def start_run(session: AsyncSession, project: Project, scene_id: str) -> J
     position = next((i for i, item in enumerate(items) if item["id"] == scene_id), None)
     if position is None:
         raise SceneEventsError(f"There is no scene '{scene_id}' in the newest list of scenes.")
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is not None and newest.source == SOURCE_MANUAL and not confirm_replace_manual:
+        raise SceneEventsError(MANUAL_REPLACE_MESSAGE)
     job, _created = await _queue(session, project, loaded, position)
     return job
 
@@ -378,6 +425,9 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         entry = current[item["id"]]
         if entry.status == "extracted":
             skipped.append(Skipped(item["id"], item["title"], "Already extracted and up to date."))
+            continue
+        if entry.needs_confirmation:
+            skipped.append(Skipped(item["id"], item["title"], SKIPPED_MANUAL))
             continue
         refusal = _scene_refusal(loaded.definitions.get(item["id"]))
         if refusal is not None:
@@ -562,12 +612,14 @@ async def save_events(
     project_id: int,
     scene_id: str,
     content: dict[str, Any],
-    job_id: int,
+    job_id: int | None,
     inputs: dict[str, Any],
+    source: str = SOURCE_AI,
 ) -> SceneEvents:
     """Adds the scene's next version. Flushes but does not commit: the job commits it together
     with finishing itself, so a job is never "succeeded" without its result.
 
+    `job_id` is None and `source` is `manual` for events the user edited (`save_manual`).
     `inputs` is what the job was started with and is stored as it is: the artifacts in it are
     those of the scene's own definition and characters.
     """
@@ -579,7 +631,7 @@ async def save_events(
         project_id=project_id,
         scene_id=scene_id,
         version=(highest or 0) + 1,
-        source="ai",
+        source=source,
         job_id=job_id,
         inputs=inputs,
         content=content,
@@ -587,10 +639,58 @@ async def save_events(
     session.add(row)
     await session.flush()
     _logger.info(
-        "job %d: events of scene '%s' of project %d saved, version %d",
+        "job %s: events of scene '%s' of project %d saved, version %d",
         job_id,
         scene_id,
         project_id,
         row.version,
     )
+    return row
+
+
+async def save_manual(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    events: list[dict[str, Any]],
+) -> SceneEvents:
+    """Stores the user's edited events of one scene as its next version (`source` is
+    `manual`), and commits (PHASE-037). It needs what a run needs (the scene's definition
+    exists and is current) and is refused while the scene is being extracted. The events are
+    checked the way the model's answer is (`check_answer`): the types and fields, every speaker a
+    discovered character, ids `evt_1`, `evt_2`, ... set by code in the order given, and every
+    speech event found in the scene's text in order. The stretches of the text no speech event
+    covers are worked out again. Raises SceneEventsError.
+    """
+    loaded = await _load(session, project)
+    if loaded.blocked_reason is not None:
+        raise SceneEventsError(loaded.blocked_reason)
+    items = _scene_items(loaded)
+    position = next((i for i, item in enumerate(items) if item["id"] == scene_id), None)
+    if position is None:
+        raise SceneEventsError(f"There is no scene '{scene_id}' in the newest list of scenes.")
+    job = (await _newest_jobs(session, project.id)).get(scene_id)
+    if job is not None and job.status in store.ACTIVE_STATUSES:
+        raise SceneEventsError("The events are already being extracted.")
+
+    prepared = _prepare(project, loaded, position)
+    try:
+        content = event_extraction_writer.check_answer(
+            {"events": events},
+            scene_id,
+            prepared.scene["text"],
+            {item["id"] for item in _character_items(loaded)},
+        )
+    except ValueError as exc:
+        raise SceneEventsError(str(exc)) from exc
+    row = await save_events(
+        session,
+        project_id=project.id,
+        scene_id=scene_id,
+        content=content,
+        job_id=None,
+        inputs=prepared.inputs,
+        source=SOURCE_MANUAL,
+    )
+    await session.commit()
     return row

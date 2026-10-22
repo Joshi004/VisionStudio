@@ -5,13 +5,14 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 
 export type SceneDefinitions = components["schemas"]["SceneDefinitionsOut"];
 export type SceneDefinitionEntry =
   components["schemas"]["SceneDefinitionEntryOut"];
 export type SceneDefinition = components["schemas"]["SceneDefinitionOut"];
+export type SceneDefinitionInput = components["schemas"]["SceneDefinitionIn"];
 export type SceneDefineAll = components["schemas"]["SceneDefinitionRunAllOut"];
 
 /**
@@ -88,14 +89,20 @@ export function useDefineAllScenes(projectId: number) {
   });
 }
 
-/** Starts the job that defines one scene. */
+/**
+ * Starts the job that defines one scene. `confirmReplaceManual` is true only after the user
+ * agreed to add a version from the model on top of one they wrote.
+ */
 export function useDefineOneScene(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sceneId: string) => {
+    mutationFn: async (input: { sceneId: string; confirmReplaceManual: boolean }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/scene-definitions/{scene_id}/run",
-        { params: { path: { project_id: projectId, scene_id: sceneId } } },
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: { confirm_replace_manual: input.confirmReplaceManual },
+        },
       );
       if (!data) {
         throw new ApiError(
@@ -109,5 +116,29 @@ export function useDefineOneScene(projectId: number) {
       return data;
     },
     onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Saves one scene's edited definition as its next version, written by the user. */
+export function useSaveSceneDefinition(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string; definition: SceneDefinitionInput }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/scene-definitions/{scene_id}",
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: input.definition,
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not save the scene definition (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

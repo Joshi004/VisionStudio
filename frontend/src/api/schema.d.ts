@@ -90,7 +90,11 @@ export interface paths {
         };
         /** Get Story Bible */
         get: operations["get_story_bible_api_projects__project_id__story_bible_get"];
-        put?: never;
+        /**
+         * Save Story Bible
+         * @description Saves the whole edited bible as the next version, written by the user.
+         */
+        put: operations["save_story_bible_api_projects__project_id__story_bible_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -145,7 +149,12 @@ export interface paths {
         };
         /** Get Discovery */
         get: operations["get_discovery_api_projects__project_id__discovery__kind__get"];
-        put?: never;
+        /**
+         * Save Discovery
+         * @description Saves the whole edited list as the next version, written by the user. Removing an entry
+         *     that a scene still uses is refused.
+         */
+        put: operations["save_discovery_api_projects__project_id__discovery__kind__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -200,7 +209,12 @@ export interface paths {
         };
         /** Get Scenes */
         get: operations["get_scenes_api_projects__project_id__scenes_get"];
-        put?: never;
+        /**
+         * Save Scenes
+         * @description Saves the whole edited list of scenes as the next version, written by the user. The
+         *     story is cut again at each scene's opening words.
+         */
+        put: operations["save_scenes_api_projects__project_id__scenes_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1967,6 +1981,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/scene-definitions/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Definition
+         * @description Saves the edited definition of one scene as its next version, written by the user.
+         */
+        put: operations["save_definition_api_projects__project_id__scene_definitions__scene_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/scene-events": {
         parameters: {
             query?: never;
@@ -2020,6 +2054,27 @@ export interface paths {
          *     running, that job's id is returned and no second job is made.
          */
         post: operations["run_one_api_projects__project_id__scene_events__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-events/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Events
+         * @description Saves the whole edited list of events of one scene as its next version, written by the
+         *     user. Events are numbered again in the order given.
+         */
+        put: operations["save_events_api_projects__project_id__scene_events__scene_id__put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2196,6 +2251,26 @@ export interface paths {
          * @description Plans one scene's speech units, as a new version, and answers with the scene's entry.
          */
         post: operations["run_one_api_projects__project_id__speech_units__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/speech-units/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Units
+         * @description Saves the user's own cuts of one scene's speech events as its next version.
+         */
+        put: operations["save_units_api_projects__project_id__speech_units__scene_id__put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2833,7 +2908,11 @@ export interface paths {
         put?: never;
         /**
          * Select Take
-         * @description Makes a ready take the selected one of its shot. The other shots do not change.
+         * @description Makes a ready take the selected one of its shot. A take that failed a check is accepted
+         *     as it is. The shot's automatic retries that are waiting or running are cancelled, since the
+         *     user is satisfied. When the take was accepted although it failed and was made by **Generate
+         *     all** or **Generate scene**, the shot that continues it is queued, as it would have been had
+         *     the take passed. The other shots do not change.
          */
         post: operations["select_take_api_projects__project_id__shot_takes__scene_id___shot_id__takes__take_id__select_post"];
         delete?: never;
@@ -3605,6 +3684,19 @@ export interface components {
             description: string;
         };
         /**
+         * DiscoveryItemIn
+         * @description One entry of an edited list. The rules (slug, sizes) are checked by
+         *     `discovery_writer.check_items`; these limits only keep a request from being huge.
+         */
+        DiscoveryItemIn: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /**
          * DiscoveryJobOut
          * @description The newest discovery job of this kind for the project, whatever its status.
          */
@@ -3647,6 +3739,19 @@ export interface components {
             /** Job Id */
             job_id: number;
         };
+        /** DiscoveryRunIn */
+        DiscoveryRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /** DiscoverySaveIn */
+        DiscoverySaveIn: {
+            /** Items */
+            items: components["schemas"]["DiscoveryItemIn"][];
+        };
         /** DiscoveryState */
         DiscoveryState: {
             latest: components["schemas"]["DiscoveryOut"] | null;
@@ -3655,6 +3760,8 @@ export interface components {
             job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Out Of Date */
             out_of_date: boolean;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
         };
         /** DiscoveryVersionOut */
         DiscoveryVersionOut: {
@@ -6009,6 +6116,39 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+        };
+        /**
+         * SceneDefinitionIn
+         * @description An edited definition. The `id` is the scene's and is set by code. The rules (known
+         *     ids, sizes) are checked by `scene_definition_writer.check_definition`; these limits only
+         *     keep a request from being huge.
+         */
+        SceneDefinitionIn: {
+            story_context: components["schemas"]["SceneStoryContextIn"];
+            /** Environment Id */
+            environment_id: string;
+            /** Environment State */
+            environment_state: string;
+            time: components["schemas"]["SceneTimeIn"];
+            /** Characters */
+            characters: string[];
+            /** Character Looks */
+            character_looks: {
+                [key: string]: string;
+            };
+            mood: components["schemas"]["SceneMoodIn"];
+            /** Dramatic Goal */
+            dramatic_goal: string;
+            /** Continuity Start */
+            continuity_start: {
+                [key: string]: string;
+            };
+            /** Continuity End */
+            continuity_end: {
+                [key: string]: string;
+            };
         };
         /** SceneDefinitionOut */
         SceneDefinitionOut: {
@@ -6044,6 +6184,14 @@ export interface components {
             job_ids: number[];
             /** Skipped */
             skipped: components["schemas"]["SceneDefinitionSkippedOut"][];
+        };
+        /** SceneDefinitionRunIn */
+        SceneDefinitionRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
         };
         /** SceneDefinitionRunOut */
         SceneDefinitionRunOut: {
@@ -6122,11 +6270,38 @@ export interface components {
             job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Out Of Date */
             out_of_date: boolean;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+        };
+        /** SceneEventDeliveryIn */
+        SceneEventDeliveryIn: {
+            /** Emotion */
+            emotion?: string | null;
         };
         /** SceneEventDeliveryOut */
         SceneEventDeliveryOut: {
             /** Emotion */
             emotion: string;
+        };
+        /**
+         * SceneEventIn
+         * @description One event of an edited list. Which fields count depends on `type` (see `SceneEventOut`);
+         *     the rules are checked by `event_extraction_writer.check_answer`, and the id is set by code.
+         *     These limits only keep a request from being huge.
+         */
+        SceneEventIn: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "narration" | "dialogue" | "action" | "sound_event" | "pause";
+            /** Text */
+            text?: string | null;
+            /** Speaker Id */
+            speaker_id?: string | null;
+            delivery?: components["schemas"]["SceneEventDeliveryIn"] | null;
+            /** Description */
+            description?: string | null;
         };
         /**
          * SceneEventOut
@@ -6193,6 +6368,8 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
         };
         /** SceneEventsOut */
         SceneEventsOut: {
@@ -6212,10 +6389,23 @@ export interface components {
             /** Skipped */
             skipped: components["schemas"]["SceneEventsSkippedOut"][];
         };
+        /** SceneEventsRunIn */
+        SceneEventsRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
         /** SceneEventsRunOut */
         SceneEventsRunOut: {
             /** Job Id */
             job_id: number;
+        };
+        /** SceneEventsSaveIn */
+        SceneEventsSaveIn: {
+            /** Events */
+            events: components["schemas"]["SceneEventIn"][];
         };
         /** SceneEventsSkippedOut */
         SceneEventsSkippedOut: {
@@ -6263,6 +6453,21 @@ export interface components {
             shots: components["schemas"]["GenerationRequestEntryOut"][];
         };
         /**
+         * SceneIn
+         * @description One scene of an edited list. The rules are checked by
+         *     `scene_discovery_writer.check_scenes`; these limits only keep a request from being huge.
+         */
+        SceneIn: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Starts With */
+            starts_with: string;
+        };
+        /**
          * SceneItem
          * @description One discovered scene. Nothing about who is in it or where it happens is kept (D-15).
          */
@@ -6284,6 +6489,15 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** SceneMoodIn */
+        SceneMoodIn: {
+            /** Start */
+            start: string;
+            /** Middle */
+            middle: string;
+            /** End */
+            end: string;
+        };
         /** SceneMoodOut */
         SceneMoodOut: {
             /** Start */
@@ -6292,6 +6506,19 @@ export interface components {
             middle: string;
             /** End */
             end: string;
+        };
+        /** SceneRunIn */
+        SceneRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /** SceneSaveIn */
+        SceneSaveIn: {
+            /** Scenes */
+            scenes: components["schemas"]["SceneIn"][];
         };
         /**
          * SceneShotDefinitionsOut
@@ -6368,6 +6595,15 @@ export interface components {
             /** Shots */
             shots: components["schemas"]["ShotTakesEntryOut"][];
         };
+        /** SceneStoryContextIn */
+        SceneStoryContextIn: {
+            /** Before */
+            before: string;
+            /** Current */
+            current: string;
+            /** After */
+            after: string;
+        };
         /** SceneStoryContextOut */
         SceneStoryContextOut: {
             /** Before */
@@ -6376,6 +6612,13 @@ export interface components {
             current: string;
             /** After */
             after: string;
+        };
+        /** SceneTimeIn */
+        SceneTimeIn: {
+            /** Time Of Day */
+            time_of_day: string;
+            /** Lighting State */
+            lighting_state: string;
         };
         /** SceneTimeOut */
         SceneTimeOut: {
@@ -7338,6 +7581,17 @@ export interface components {
             emotion: string;
         };
         /**
+         * SpeechUnitIn
+         * @description One piece of an event's text, as the user cut it. The words are checked against the event
+         *     by `speech_unit_planner.plan_units`; the limit only keeps a request from being huge.
+         */
+        SpeechUnitIn: {
+            /** Event Id */
+            event_id: string;
+            /** Text */
+            text: string;
+        };
+        /**
          * SpeechUnitOut
          * @description One speech unit. `speaker_id` is None for narration. `part` of `parts` says which piece of
          *     its event this is.
@@ -7415,6 +7669,8 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
         };
         /** SpeechUnitsOut */
         SpeechUnitsOut: {
@@ -7433,6 +7689,19 @@ export interface components {
             planned: string[];
             /** Skipped */
             skipped: components["schemas"]["SpeechUnitsSkippedOut"][];
+        };
+        /** SpeechUnitsRunIn */
+        SpeechUnitsRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /** SpeechUnitsSaveIn */
+        SpeechUnitsSaveIn: {
+            /** Units */
+            units: components["schemas"]["SpeechUnitIn"][];
         };
         /** SpeechUnitsSkippedOut */
         SpeechUnitsSkippedOut: {
@@ -7542,6 +7811,35 @@ export interface components {
             /** Job Id */
             job_id: number;
         };
+        /** StoryBibleRunIn */
+        StoryBibleRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /**
+         * StoryBibleSaveIn
+         * @description The bible as the user edited it. `language` is not sent: code fixes it to `en`. The size
+         *     limits that matter are checked by `story_bible_writer.check_bible`; these only keep a
+         *     request from being huge.
+         */
+        StoryBibleSaveIn: {
+            /** Title */
+            title: string;
+            /** Genre */
+            genre: string[];
+            /** Tone */
+            tone: string[];
+            /** Visual Style */
+            visual_style: string;
+            /** Time Period */
+            time_period: string;
+            storytelling_style: components["schemas"]["StorytellingStyleIn"];
+            /** World Rules */
+            world_rules: string[];
+        };
         /** StoryBibleState */
         StoryBibleState: {
             latest: components["schemas"]["StoryBibleOut"] | null;
@@ -7550,6 +7848,8 @@ export interface components {
             job: components["schemas"]["StoryBibleJobOut"] | null;
             /** Out Of Date */
             out_of_date: boolean;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
         };
         /** StoryBibleVersionOut */
         StoryBibleVersionOut: {
@@ -7742,6 +8042,11 @@ export interface components {
         };
         /** StorytellingStyle */
         StorytellingStyle: {
+            /** Narration */
+            narration: string;
+        };
+        /** StorytellingStyleIn */
+        StorytellingStyleIn: {
             /** Narration */
             narration: string;
         };
@@ -8405,7 +8710,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StoryBibleRunIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -8476,6 +8785,50 @@ export interface operations {
             };
         };
     };
+    save_story_bible_api_projects__project_id__story_bible_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoryBibleSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryBibleState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story to read. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_story_bible_version_api_projects__project_id__story_bible_versions__version__get: {
         parameters: {
             query?: never;
@@ -8527,7 +8880,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DiscoveryRunIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -8599,6 +8956,51 @@ export interface operations {
             };
         };
     };
+    save_discovery_api_projects__project_id__discovery__kind__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                kind: "characters" | "environments";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscoverySaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscoveryState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, or no up-to-date Story Bible, to read. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_discovery_version_api_projects__project_id__discovery__kind__versions__version__get: {
         parameters: {
             query?: never;
@@ -8650,7 +9052,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SceneRunIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -8717,6 +9123,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_scenes_api_projects__project_id__scenes_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneDiscoveryState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, or no up-to-date Story Bible, to read. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -12566,7 +13016,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SceneDefinitionRunIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -12575,6 +13029,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SceneDefinitionRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or a character or environment is not linked and defined yet, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_definition_api_projects__project_id__scene_definitions__scene_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneDefinitionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneDefinitionsOut"];
                 };
             };
             /** @description No such project. */
@@ -12687,7 +13186,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SceneEventsRunIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -12696,6 +13199,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SceneEventsRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or the scene is not defined yet, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_events_api_projects__project_id__scene_events__scene_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneEventsSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneEventsOut"];
                 };
             };
             /** @description No such project. */
@@ -13050,7 +13598,56 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SpeechUnitsRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechUnitsEntryOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene has no current events, the speech rules cannot be used, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_units_api_projects__project_id__speech_units__scene_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpeechUnitsSaveIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -14208,7 +14805,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14248,7 +14845,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14289,7 +14886,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14331,7 +14928,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -14374,7 +14971,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;

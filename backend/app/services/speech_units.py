@@ -36,6 +36,14 @@ from app.services.speech_unit_planner import SpeechRules
 _logger = logging.getLogger(__name__)
 
 SCENE_EVENTS_KIND: Final = "scene_events"
+SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
+
+MANUAL_REPLACE_MESSAGE: Final = (
+    "The newest speech units of this scene were written by you. Planning them again adds a "
+    "new version made by code from the events, so it has to be confirmed."
+)
+SKIPPED_MANUAL: Final = "Written by you: use this scene's own button to replace it."
 
 # The shortest dialogue limit that is worth planning with: below it nothing would fit.
 _MIN_DIALOGUE_LIMIT_SECONDS: Final = 1
@@ -73,6 +81,11 @@ class SceneEntry:
     @property
     def content(self) -> dict[str, Any] | None:
         return self.row.content if self.row is not None else None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        """Whether planning this scene again replaces units the user wrote."""
+        return self.row is not None and self.row.source == SOURCE_MANUAL
 
 
 @dataclass(frozen=True)
@@ -239,13 +252,22 @@ async def state(session: AsyncSession, project: Project) -> SpeechState:
 
 
 async def _add_plan(
-    session: AsyncSession, project: Project, entry: SceneEntry, rules: SpeechRules
+    session: AsyncSession,
+    project: Project,
+    entry: SceneEntry,
+    rules: SpeechRules,
+    *,
+    parts_by_event: dict[str, list[str]] | None = None,
 ) -> SpeechUnits:
-    """Plans one scene and adds its next version. Flushes but does not commit."""
+    """Plans one scene and adds its next version. Flushes but does not commit. With
+    `parts_by_event` the units are the user's own cuts and the version is `manual`.
+    """
     events_row = entry.events.row
     assert events_row is not None  # the callers refuse a scene without events first
     scene_id = entry.item["id"]
-    units, warnings = speech_unit_planner.plan_units(events_row.content["events"], rules)
+    units, warnings = speech_unit_planner.plan_units(
+        events_row.content["events"], rules, parts_by_event=parts_by_event
+    )
     highest = (
         await session.execute(
             select(func.max(SpeechUnits.version)).where(
@@ -257,7 +279,7 @@ async def _add_plan(
         project_id=project.id,
         scene_id=scene_id,
         version=(highest or 0) + 1,
-        source="ai",
+        source=SOURCE_AI if parts_by_event is None else SOURCE_MANUAL,
         job_id=None,
         inputs={
             "project_id": project.id,
@@ -300,8 +322,17 @@ async def _commit(session: AsyncSession) -> None:
         ) from exc
 
 
-async def plan_scene(session: AsyncSession, project: Project, scene_id: str) -> None:
-    """Plans one scene's speech units and commits. Raises SpeechUnitsError."""
+async def plan_scene(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    *,
+    confirm_replace_manual: bool = False,
+) -> None:
+    """Plans one scene's speech units and commits. When the newest plan was written by the user
+    it is replaced only when `confirm_replace_manual` is true (PHASE-037). Raises
+    SpeechUnitsError.
+    """
     current = await state(session, project)
     if current.blocked_reason is not None:
         raise SpeechUnitsError(current.blocked_reason)
@@ -310,6 +341,8 @@ async def plan_scene(session: AsyncSession, project: Project, scene_id: str) -> 
         raise SpeechUnitsError(f"There is no scene '{scene_id}' in the newest list of scenes.")
     if entry.blocked_reason is not None:
         raise SpeechUnitsError(entry.blocked_reason)
+    if entry.needs_confirmation and not confirm_replace_manual:
+        raise SpeechUnitsError(MANUAL_REPLACE_MESSAGE)
     rules, problem = await _read_rules(session)
     if rules is None:
         raise SpeechUnitsError(problem or "The speech rules cannot be used.")
@@ -317,9 +350,13 @@ async def plan_scene(session: AsyncSession, project: Project, scene_id: str) -> 
     await _commit(session)
 
 
-async def plan_all(session: AsyncSession, project: Project) -> PlanAllResult:
+async def plan_all(
+    session: AsyncSession, project: Project, *, confirm_replace_manual: bool = False
+) -> PlanAllResult:
     """Plans every scene that has current events and no current plan, and commits once. The
-    others are skipped, with the reason. Raises SpeechUnitsError when nothing can be planned yet.
+    others are skipped, with the reason. A scene whose newest plan the user wrote is skipped
+    unless `confirm_replace_manual` is true (PHASE-037). Raises SpeechUnitsError when nothing
+    can be planned yet.
     """
     current = await state(session, project)
     if current.blocked_reason is not None:
@@ -335,8 +372,55 @@ async def plan_all(session: AsyncSession, project: Project) -> PlanAllResult:
             skipped.append(Skipped(scene_id, title, entry.blocked_reason))
         elif entry.status == "planned":
             skipped.append(Skipped(scene_id, title, "Already planned and up to date."))
+        elif entry.needs_confirmation and not confirm_replace_manual:
+            skipped.append(Skipped(scene_id, title, SKIPPED_MANUAL))
         else:
             await _add_plan(session, project, entry, rules)
             planned.append(scene_id)
     await _commit(session)
     return PlanAllResult(planned=planned, skipped=skipped)
+
+
+async def save_manual(
+    session: AsyncSession, project: Project, scene_id: str, units: list[dict[str, Any]]
+) -> None:
+    """Stores the user's own cuts of one scene's speech events as the scene's next version
+    (`source` is `manual`), and commits (PHASE-037). `units` is a list of `{event_id, text}` in
+    the order they are spoken. The scene needs what Plan needs (current events). Only the cuts
+    may move: the units of each narration or dialogue event, joined, must hold exactly the
+    words of the event, in order, and every speech event needs at least one unit. Ids, estimates
+    and warnings are worked out by code. Raises SpeechUnitsError.
+    """
+    current = await state(session, project)
+    if current.blocked_reason is not None:
+        raise SpeechUnitsError(current.blocked_reason)
+    entry = next((item for item in current.entries if item.item["id"] == scene_id), None)
+    if entry is None:
+        raise SpeechUnitsError(f"There is no scene '{scene_id}' in the newest list of scenes.")
+    if entry.blocked_reason is not None:
+        raise SpeechUnitsError(entry.blocked_reason)
+    rules, problem = await _read_rules(session)
+    if rules is None:
+        raise SpeechUnitsError(problem or "The speech rules cannot be used.")
+
+    events_row = entry.events.row
+    assert events_row is not None  # `blocked_reason` is set for a scene without events
+    speech_ids = {
+        event["id"]
+        for event in events_row.content["events"]
+        if event.get("type") in ("narration", "dialogue")
+    }
+    parts_by_event: dict[str, list[str]] = {}
+    for unit in units:
+        event_id = unit["event_id"]
+        if event_id not in speech_ids:
+            raise SpeechUnitsError(
+                f"'{event_id}' is not a narration or dialogue event of the scene."
+            )
+        parts_by_event.setdefault(event_id, []).append(unit["text"])
+    try:
+        await _add_plan(session, project, entry, rules, parts_by_event=parts_by_event)
+    except ValueError as exc:
+        await session.rollback()
+        raise SpeechUnitsError(str(exc)) from exc
+    await _commit(session)

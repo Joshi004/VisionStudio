@@ -37,6 +37,7 @@ from app.jobs import store
 from app.services import story_bible
 
 SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
 BIBLE_KIND: Final = "story_bible"
 
 # The three discovery stages. `services/discovery_writer.Kind` is the two of them whose answer
@@ -65,7 +66,13 @@ class DiscoveryError(ValueError):
     """A request that cannot be done. The message is meant to be shown to the user."""
 
 
-async def start_run(session: AsyncSession, project: Project, kind: StageKind) -> Job:
+async def start_run(
+    session: AsyncSession,
+    project: Project,
+    kind: StageKind,
+    *,
+    confirm_replace_manual: bool = False,
+) -> Job:
     """Queues the job that finds the project's characters (or environments, or scenes) from
     its saved story and its newest StoryBible, and commits.
 
@@ -76,6 +83,9 @@ async def start_run(session: AsyncSession, project: Project, kind: StageKind) ->
     waiting or running for the project, that job is returned and no new one is made (two quick
     clicks make one paid call). The two kinds have different job types, so one never waits for
     the other.
+
+    When the newest version was written by the user, the run replaces it only when
+    `confirm_replace_manual` is true (PHASE-037).
     """
     story = project.script_text
     if story is None or not story.strip():
@@ -87,6 +97,12 @@ async def start_run(session: AsyncSession, project: Project, kind: StageKind) ->
         raise DiscoveryError(
             "The Story Bible is out of date, because the story has changed since it was "
             f"written. Re-run the Story Bible first, then find the {kind}."
+        )
+    newest = await latest(session, kind, project.id)
+    if newest is not None and newest.source == SOURCE_MANUAL and not confirm_replace_manual:
+        raise DiscoveryError(
+            f"The newest {kind} were written by you. Finding them again adds a new version "
+            "from the model, so it has to be confirmed."
         )
     job, _created = await store.create_job(
         session,
@@ -151,13 +167,41 @@ async def save_version(
     and the StoryBible it was made from. Flushes but does not commit: the job commits it
     together with finishing itself, so a job is never "succeeded" without its result.
     """
+    return await add_version(
+        session,
+        kind,
+        project_id=project_id,
+        source=SOURCE_AI,
+        job_id=job_id,
+        story_sha256=story_sha256,
+        bible_id=bible_id,
+        bible_version=bible_version,
+        content=content,
+    )
+
+
+async def add_version(
+    session: AsyncSession,
+    kind: StageKind,
+    *,
+    project_id: int,
+    source: str,
+    job_id: int | None,
+    story_sha256: str,
+    bible_id: int,
+    bible_version: int,
+    content: dict[str, Any],
+) -> Discovery:
+    """Adds the next version with the given source (`ai` from a job, `manual` from an edit).
+    Flushes but does not commit.
+    """
     model = SPECS[kind].model
     statement = select(func.max(model.version)).where(model.project_id == project_id)
     highest = (await session.execute(statement)).scalar_one_or_none()
     row = model(
         project_id=project_id,
         version=(highest or 0) + 1,
-        source=SOURCE_AI,
+        source=source,
         job_id=job_id,
         inputs={
             "story_sha256": story_sha256,

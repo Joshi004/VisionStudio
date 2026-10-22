@@ -4,11 +4,12 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 
 export type StoryBibleState = components["schemas"]["StoryBibleState"];
 export type StoryBibleOut = components["schemas"]["StoryBibleOut"];
+export type StoryBibleInput = components["schemas"]["StoryBibleSaveIn"];
 export type StoryBibleVersion = components["schemas"]["StoryBibleVersionOut"];
 
 /**
@@ -68,14 +69,20 @@ export function useStoryBibleVersion(projectId: number, version: number | null) 
   });
 }
 
-/** Starts the job that writes the next version from the saved story. */
+/**
+ * Starts the job that writes the next version from the saved story. `confirmReplaceManual` is
+ * true only after the user agreed to add a version from the model on top of one they wrote.
+ */
 export function useRunStoryBible(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input: { confirmReplaceManual: boolean }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/story-bible/run",
-        { params: { path: { project_id: projectId } } },
+        {
+          params: { path: { project_id: projectId } },
+          body: { confirm_replace_manual: input.confirmReplaceManual },
+        },
       );
       if (!data) {
         throw new ApiError(
@@ -90,5 +97,26 @@ export function useRunStoryBible(projectId: number) {
         queryClient.invalidateQueries({ queryKey: storyBibleKey(projectId) }),
         invalidateAfterJobAction(queryClient),
       ]),
+  });
+}
+
+/** Saves the edited Story Bible as the next version, written by the user. */
+export function useSaveStoryBible(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (content: StoryBibleInput) => {
+      const { data, error, response } = await api.PUT("/api/projects/{project_id}/story-bible", {
+        params: { path: { project_id: projectId } },
+        body: content,
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not save the Story Bible (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

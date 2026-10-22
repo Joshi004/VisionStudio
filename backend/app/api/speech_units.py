@@ -5,7 +5,11 @@
   date, its newest speech units with their provenance, and whether Plan may be pressed. Out of
   date is worked out on every read.
 - `POST .../run` ("Plan all") plans every scene that has current events and no current plan.
-- `POST .../{scene_id}/run` plans one scene and answers with that scene's entry.
+- `POST .../{scene_id}/run` plans one scene and answers with that scene's entry. When the
+  scene's newest units were written by the user, the body must confirm the replacement
+  (PHASE-037).
+- `PUT .../{scene_id}` saves the user's own cuts of the scene's speech events as its next version
+  (`source` is `manual`). Only the cuts may move: the words stay as the events have them.
 
 Planning is plain code, so it is done inside the request and nothing waits in a job. A plan is a
 new version of the scene's speech units (`services/speech_units.py`). The answers never return ORM
@@ -18,7 +22,7 @@ from datetime import datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
@@ -103,6 +107,8 @@ class SpeechUnitsEntryOut(BaseModel):
     version: SpeechUnitsVersionOut | None
     can_run: bool
     blocked_reason: str | None
+    # True when planning this scene again would add a version after one the user wrote.
+    needs_confirmation: bool
 
 
 class SpeechUnitsOut(BaseModel):
@@ -124,6 +130,29 @@ class SpeechUnitsSkippedOut(BaseModel):
 class SpeechUnitsRunAllOut(BaseModel):
     planned: list[str]
     skipped: list[SpeechUnitsSkippedOut]
+
+
+class SpeechUnitsRunIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+
+
+class SpeechUnitIn(BaseModel):
+    """One piece of an event's text, as the user cut it. The words are checked against the event
+    by `speech_unit_planner.plan_units`; the limit only keeps a request from being huge.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(max_length=200)
+    text: str = Field(max_length=20000)
+
+
+class SpeechUnitsSaveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    units: list[SpeechUnitIn] = Field(max_length=1000)
 
 
 def _entry_out(entry: SceneEntry) -> SpeechUnitsEntryOut:
@@ -150,6 +179,7 @@ def _entry_out(entry: SceneEntry) -> SpeechUnitsEntryOut:
         ),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
+        needs_confirmation=entry.needs_confirmation,
     )
 
 
@@ -205,12 +235,41 @@ async def run_all(project_id: int, session: SessionDep) -> SpeechUnitsRunAllOut:
     responses={**_NOT_FOUND, **_INVALID},
 )
 async def run_one(
-    project_id: int, scene_id: DiscoveryId, session: SessionDep
+    project_id: int,
+    scene_id: DiscoveryId,
+    session: SessionDep,
+    body: SpeechUnitsRunIn | None = None,
 ) -> SpeechUnitsEntryOut:
     """Plans one scene's speech units, as a new version, and answers with the scene's entry."""
     project = await load_project(session, project_id)
     try:
-        await speech_units.plan_scene(session, project, scene_id)
+        await speech_units.plan_scene(
+            session,
+            project,
+            scene_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+        )
+    except speech_units.SpeechUnitsError as exc:
+        raise _refused(exc) from exc
+    current = await speech_units.state(session, project)
+    entry = next(item for item in current.entries if item.item["id"] == scene_id)
+    return _entry_out(entry)
+
+
+@router.put(
+    "/projects/{project_id}/speech-units/{scene_id}",
+    response_model=SpeechUnitsEntryOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_units(
+    project_id: int, scene_id: DiscoveryId, body: SpeechUnitsSaveIn, session: SessionDep
+) -> SpeechUnitsEntryOut:
+    """Saves the user's own cuts of one scene's speech events as its next version."""
+    project = await load_project(session, project_id)
+    try:
+        await speech_units.save_manual(
+            session, project, scene_id, [unit.model_dump() for unit in body.units]
+        )
     except speech_units.SpeechUnitsError as exc:
         raise _refused(exc) from exc
     current = await speech_units.state(session, project)

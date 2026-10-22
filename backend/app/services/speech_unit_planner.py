@@ -21,7 +21,7 @@ delivered. It is a planning figure only; PHASE-019 measures the real length.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -142,9 +142,17 @@ def split_dialogue(text: str, factor: float, rules: SpeechRules) -> list[str]:
 
 
 def plan_units(
-    events: Sequence[dict[str, Any]], rules: SpeechRules
+    events: Sequence[dict[str, Any]],
+    rules: SpeechRules,
+    *,
+    parts_by_event: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[SpeechWarning]]:
     """The speech units of one scene's events, in order, and the warnings.
+
+    With `parts_by_event` (the user's own cuts, by event id, PHASE-037) the units are made from
+    those pieces instead of the automatic split: an event with no entry gets no unit, which
+    `check_coverage` refuses, and the pieces must hold exactly the words of the event, in
+    order. Ids, estimates and warnings are worked out as for an automatic split.
 
     Only `narration` and `dialogue` events make units. Code sets each unit's id (`su_1`,
     `su_2`, ...) and `order`. `speaker_id` is None for narration. `part` and `parts` say which
@@ -165,8 +173,17 @@ def plan_units(
         emotion = delivery.get("emotion") if isinstance(delivery, dict) else None
         factor = delivery_factor(emotion)
         limit = rules.narration_max_seconds if kind == "narration" else rules.dialogue_max_seconds
-        split = split_narration if kind == "narration" else split_dialogue
-        parts = split(text, factor, rules)
+        if parts_by_event is None:
+            split = split_narration if kind == "narration" else split_dialogue
+            parts = split(text, factor, rules)
+        else:
+            parts = [" ".join(part.split()) for part in parts_by_event.get(event["id"], [])]
+            parts = [part for part in parts if part]
+            if parts and " ".join(parts).split() != text.split():
+                raise ValueError(
+                    f"The units of event {event['id']} do not hold its text exactly: the words "
+                    "must stay the same and in the same order, and only the cuts may move."
+                )
         for index, part in enumerate(parts, start=1):
             order = len(units) + 1
             units.append(

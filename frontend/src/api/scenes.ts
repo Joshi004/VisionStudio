@@ -4,13 +4,14 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 import { storyBibleKey } from "./storyBible";
 
 export type SceneDiscoveryState = components["schemas"]["SceneDiscoveryState"];
 export type SceneDiscoveryOut = components["schemas"]["SceneDiscoveryOut"];
 export type SceneDiscoveryVersion = components["schemas"]["DiscoveryVersionOut"];
+export type SceneInput = components["schemas"]["SceneIn"];
 export type SceneItem = components["schemas"]["SceneItem"];
 
 /**
@@ -71,13 +72,17 @@ export function useSceneVersion(projectId: number, version: number | null) {
   });
 }
 
-/** Starts the job that finds the next version from the saved story. */
+/**
+ * Starts the job that finds the next version from the saved story. `confirmReplaceManual` is true
+ * only after the user agreed to add a version from the model on top of a list they wrote.
+ */
 export function useRunScenes(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input: { confirmReplaceManual: boolean }) => {
       const { data, error, response } = await api.POST("/api/projects/{project_id}/scenes/run", {
         params: { path: { project_id: projectId } },
+        body: { confirm_replace_manual: input.confirmReplaceManual },
       });
       if (!data) {
         throw new ApiError(
@@ -95,5 +100,26 @@ export function useRunScenes(projectId: number) {
         queryClient.invalidateQueries({ queryKey: storyBibleKey(projectId) }),
         invalidateAfterJobAction(queryClient),
       ]),
+  });
+}
+
+/** Saves the whole edited list of scenes as the next version, written by the user. */
+export function useSaveScenes(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (scenes: SceneInput[]) => {
+      const { data, error, response } = await api.PUT("/api/projects/{project_id}/scenes", {
+        params: { path: { project_id: projectId } },
+        body: { scenes },
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not save the scenes (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

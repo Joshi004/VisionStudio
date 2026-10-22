@@ -62,6 +62,8 @@ from app.services import (
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = "define_scene"
+SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
 # Two presses on one scene make one job; two scenes run side by side.
 DEDUPE_KEY: Final = "scene_id"
 
@@ -110,6 +112,11 @@ class SceneEntry:
     @property
     def definition(self) -> dict[str, Any] | None:
         return self.row.content if self.row is not None else None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        """Whether defining this scene again replaces a definition the user wrote."""
+        return self.row is not None and self.row.source == SOURCE_MANUAL
 
 
 @dataclass(frozen=True)
@@ -329,12 +336,24 @@ def _shown(current: CurrentDefinition) -> dict[str, Any]:
 # --- Starting runs ------------------------------------------------------------------------
 
 
-async def _queue(
-    session: AsyncSession, project: Project, loaded: _Loaded, position: int
-) -> tuple[Job, bool]:
-    """Queues the job for the scene at this position of the newest list, and returns
-    `(job, created)`. `created` is False when the scene already has a job waiting or running,
-    which is returned instead. The caller has checked that nothing is blocked.
+@dataclass(frozen=True)
+class _Prepared:
+    """What a definition of one scene is made from: what a job is sent, and what a version
+    records. A manual save records exactly what a job would (D-3).
+    """
+
+    scene: dict[str, Any]
+    previous: dict[str, Any] | None
+    next_: dict[str, Any] | None
+    characters: list[CurrentDefinition]
+    environments: list[CurrentDefinition]
+    story_hash: str
+    inputs: dict[str, Any]
+
+
+def _prepare(project: Project, loaded: _Loaded, position: int) -> _Prepared:
+    """The inputs of the scene at this position of the newest list. The callers have checked
+    that nothing is blocked.
     """
     story, bible = loaded.story, loaded.bible
     assert story is not None and bible is not None  # the callers refuse a blocked state first
@@ -377,6 +396,21 @@ async def _queue(
             },
         ],
     }
+    return _Prepared(scene, previous, next_, characters, environments, story_hash, inputs)
+
+
+async def _queue(
+    session: AsyncSession, project: Project, loaded: _Loaded, position: int
+) -> tuple[Job, bool]:
+    """Queues the job for the scene at this position of the newest list, and returns
+    `(job, created)`. `created` is False when the scene already has a job waiting or running,
+    which is returned instead. The caller has checked that nothing is blocked.
+    """
+    story, bible = loaded.story, loaded.bible
+    assert story is not None and bible is not None  # the callers refuse a blocked state first
+    prepared = _prepare(project, loaded, position)
+    scene = prepared.scene
+    characters, environments = prepared.characters, prepared.environments
     return await store.create_job(
         session,
         project_id=project.id,
@@ -384,7 +418,7 @@ async def _queue(
         provider="llm",
         input={
             "story_text": story,
-            "story_sha256": story_hash,
+            "story_sha256": prepared.story_hash,
             "story_bible_id": bible.id,
             "story_bible_version": bible.version,
             "scene_id": scene["id"],
@@ -395,23 +429,37 @@ async def _queue(
                 "description": scene["description"],
                 "text": scene["text"],
             },
-            "previous": _summary(previous),
-            "next": _summary(next_),
+            "previous": _summary(prepared.previous),
+            "next": _summary(prepared.next_),
             "characters": [_for_model(current) for current in characters],
             "environments": [_for_model(current) for current in environments],
             # What the model was shown, so that only what it chooses is recorded (D-3).
             "shown": [_shown(current) for current in characters + environments],
             # Written onto the version the job makes (D-3).
-            "inputs": inputs,
+            "inputs": prepared.inputs,
         },
         dedupe_key=DEDUPE_KEY,
     )
 
 
-async def start_run(session: AsyncSession, project: Project, scene_id: str) -> Job:
+MANUAL_REPLACE_MESSAGE: Final = (
+    "The newest definition of this scene was written by you. Defining it again adds a new "
+    "version from the model, so it has to be confirmed."
+)
+SKIPPED_MANUAL: Final = "Written by you: use this scene's own button to replace it."
+
+
+async def start_run(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    *,
+    confirm_replace_manual: bool = False,
+) -> Job:
     """Queues the job that defines one scene, and commits. If that scene already has a job
-    waiting or running, that job is returned and no new one is made. Raises
-    SceneDefinitionError.
+    waiting or running, that job is returned and no new one is made. When the newest definition
+    was written by the user, it is replaced only when `confirm_replace_manual` is true
+    (PHASE-037). Raises SceneDefinitionError.
     """
     loaded = await _load(session, project)
     if loaded.blocked_reason is not None:
@@ -420,6 +468,9 @@ async def start_run(session: AsyncSession, project: Project, scene_id: str) -> J
     position = next((i for i, item in enumerate(items) if item["id"] == scene_id), None)
     if position is None:
         raise SceneDefinitionError(f"There is no scene '{scene_id}' in the newest list of scenes.")
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is not None and newest.source == SOURCE_MANUAL and not confirm_replace_manual:
+        raise SceneDefinitionError(MANUAL_REPLACE_MESSAGE)
     job, _created = await _queue(session, project, loaded, position)
     return job
 
@@ -439,6 +490,9 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     for position, item in enumerate(_scene_items(loaded)):
         if current[item["id"]].status == "defined":
             skipped.append(Skipped(item["id"], item["title"], "Already defined and up to date."))
+            continue
+        if current[item["id"]].needs_confirmation:
+            skipped.append(Skipped(item["id"], item["title"], SKIPPED_MANUAL))
             continue
         job, created = await _queue(session, project, loaded, position)
         if created:
@@ -620,13 +674,15 @@ async def save_definition(
     project_id: int,
     scene_id: str,
     definition: dict[str, Any],
-    job_id: int,
+    job_id: int | None,
     inputs: dict[str, Any],
     shown: list[dict[str, Any]],
+    source: str = SOURCE_AI,
 ) -> SceneDefinition:
     """Adds the scene's next version. Flushes but does not commit: the job commits it together
     with finishing itself, so a job is never "succeeded" without its result.
 
+    `job_id` is None and `source` is `manual` for a definition the user edited (`save_manual`).
     `inputs` is what the job was started with; the definition of each character and the
     environment the model chose is added to its artifacts, taken from `shown`. A definition the
     model was shown and did not choose is not recorded, so a scene is only out of date because
@@ -652,7 +708,7 @@ async def save_definition(
         project_id=project_id,
         scene_id=scene_id,
         version=(highest or 0) + 1,
-        source="ai",
+        source=source,
         job_id=job_id,
         inputs=stored_inputs,
         content=definition,
@@ -660,10 +716,58 @@ async def save_definition(
     session.add(row)
     await session.flush()
     _logger.info(
-        "job %d: scene '%s' of project %d defined, version %d",
+        "job %s: scene '%s' of project %d defined, version %d",
         job_id,
         scene_id,
         project_id,
         row.version,
     )
+    return row
+
+
+async def save_manual(
+    session: AsyncSession, project: Project, scene_id: str, definition: dict[str, Any]
+) -> SceneDefinition:
+    """Stores the user's edited definition of one scene as its next version (`source` is
+    `manual`), and commits (PHASE-037). It needs what a run needs (everything linked and
+    defined, the lists current) and is refused while the scene is being defined. The definition
+    is checked the way the model's answer is (`check_definition`), and the version records
+    exactly what a job would: the lists, the StoryBible and the definitions of the environment
+    and characters it chose. Raises SceneDefinitionError.
+    """
+    loaded = await _load(session, project)
+    if loaded.blocked_reason is not None:
+        raise SceneDefinitionError(loaded.blocked_reason)
+    assert loaded.characters is not None and loaded.environments is not None
+    items = _scene_items(loaded)
+    position = next((i for i, item in enumerate(items) if item["id"] == scene_id), None)
+    if position is None:
+        raise SceneDefinitionError(f"There is no scene '{scene_id}' in the newest list of scenes.")
+    job = (await _newest_jobs(session, project.id)).get(scene_id)
+    if job is not None and job.status in store.ACTIVE_STATUSES:
+        raise SceneDefinitionError("A definition is already being written.")
+
+    try:
+        checked = scene_definition_writer.check_definition(
+            definition,
+            scene_id,
+            _list_ids(loaded.characters, "characters"),
+            _list_ids(loaded.environments, "environments"),
+        )
+    except ValueError as exc:
+        raise SceneDefinitionError(str(exc)) from exc
+
+    prepared = _prepare(project, loaded, position)
+    shown = [_shown(current) for current in prepared.characters + prepared.environments]
+    row = await save_definition(
+        session,
+        project_id=project.id,
+        scene_id=scene_id,
+        definition=checked,
+        job_id=None,
+        inputs=prepared.inputs,
+        shown=shown,
+        source=SOURCE_MANUAL,
+    )
+    await session.commit()
     return row

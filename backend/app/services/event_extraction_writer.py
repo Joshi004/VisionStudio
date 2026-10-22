@@ -199,7 +199,7 @@ def _delivery(event: dict[str, Any], position: int) -> dict[str, str] | None:
 def _event(entry: Any, position: int, character_ids: Collection[str]) -> dict[str, Any]:
     """One event checked and cleaned, without its id. Only the fields of its type are kept."""
     if not isinstance(entry, dict):
-        raise ValueError(f"Event {position} of the model's answer was not an object.")
+        raise ValueError(f"Event {position} was not an object.")
     kind = entry.get("type")
     if kind not in EVENT_TYPES:
         raise ValueError(
@@ -242,11 +242,11 @@ def check_events(answer: Any, character_ids: Collection[str]) -> list[dict[str, 
         raise ValueError("The model's answer was not a JSON object.")
     entries = answer.get("events")
     if not isinstance(entries, list):
-        raise ValueError('The "events" of the model\'s answer was missing or not a list.')
+        raise ValueError('The "events" was missing or not a list.')
     if not entries:
-        raise ValueError('The "events" of the model\'s answer was empty.')
+        raise ValueError('The "events" was empty.')
     if len(entries) > MAX_EVENTS:
-        raise ValueError(f'The "events" of the model\'s answer had more than {MAX_EVENTS} events.')
+        raise ValueError(f'The "events" had more than {MAX_EVENTS} events.')
 
     events: list[dict[str, Any]] = []
     for position, entry in enumerate(entries, start=1):

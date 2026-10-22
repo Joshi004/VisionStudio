@@ -115,14 +115,14 @@ def _text(value: object, name: str, max_chars: int) -> str:
     longer than `max_chars`.
     """
     if value is None:
-        raise ValueError(f'The model\'s answer had no "{name}".')
+        raise ValueError(f'There is no "{name}".')
     if not isinstance(value, str):
-        raise ValueError(f'The model\'s "{name}" was not text.')
+        raise ValueError(f'The "{name}" was not text.')
     text = _one_line(value)
     if not text:
-        raise ValueError(f'The model\'s "{name}" was empty.')
+        raise ValueError(f'The "{name}" was empty.')
     if len(text) > max_chars:
-        raise ValueError(f'The model\'s "{name}" was longer than {max_chars} characters.')
+        raise ValueError(f'The "{name}" was longer than {max_chars} characters.')
     return text
 
 
@@ -133,9 +133,9 @@ def _text_list(
     Raises ValueError when it is not a list of texts, or has too few or too many items.
     """
     if value is None:
-        raise ValueError(f'The model\'s answer had no "{name}".')
+        raise ValueError(f'There is no "{name}".')
     if not isinstance(value, list):
-        raise ValueError(f'The model\'s "{name}" was not a list.')
+        raise ValueError(f'The "{name}" was not a list.')
     items: list[str] = []
     seen: set[str] = set()
     for entry in value:
@@ -146,9 +146,9 @@ def _text_list(
             seen.add(item.casefold())
             items.append(item)
     if len(items) < min_items:
-        raise ValueError(f'The model\'s "{name}" had fewer than {min_items} item(s).')
+        raise ValueError(f'The "{name}" had fewer than {min_items} item(s).')
     if len(items) > max_items:
-        raise ValueError(f'The model\'s "{name}" had more than {max_items} items.')
+        raise ValueError(f'The "{name}" had more than {max_items} items.')
     return items
 
 
@@ -158,9 +158,9 @@ def check_bible(answer: dict[str, Any]) -> dict[str, Any]:
     """
     style = answer.get("storytelling_style")
     if style is None:
-        raise ValueError('The model\'s answer had no "storytelling_style".')
+        raise ValueError('There is no "storytelling_style".')
     if not isinstance(style, dict):
-        raise ValueError('The model\'s "storytelling_style" was not an object.')
+        raise ValueError('The "storytelling_style" was not an object.')
     # A missing (or null) list of rules means the story needs none.
     world_rules = answer.get("world_rules")
     if world_rules is None:

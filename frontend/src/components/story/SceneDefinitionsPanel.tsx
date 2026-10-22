@@ -13,16 +13,21 @@ import {
   Title,
 } from "@mantine/core";
 
+import { useDiscovery, type DiscoveryItem } from "../../api/discovery";
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import {
   useDefineAllScenes,
   useDefineOneScene,
+  useSaveSceneDefinition,
   useSceneDefinitions,
   type SceneDefinitionEntry,
+  type SceneDefinitionInput,
 } from "../../api/sceneDefinitions";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { ReplaceManualModal } from "./ReplaceManualModal";
+import { SceneDefinitionEditor } from "./SceneDefinitionEditor";
 import { SceneDefinitionView } from "./SceneDefinitionView";
 
 type SceneDefinitionsPanelProps = {
@@ -44,14 +49,33 @@ type EntryRowProps = {
   projectBlocked: boolean;
   busy: boolean;
   onDefine: () => void;
+  /** The story's lists, for the editor's choices. */
+  characters: DiscoveryItem[];
+  environments: DiscoveryItem[];
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (definition: SceneDefinitionInput, done: () => void) => void;
 };
 
 /**
  * One scene: its status, why its definition is out of date, the job's failure when the last run
- * failed, and the definition itself, read only.
+ * failed, and the definition itself, which can be edited by hand.
  */
-function EntryRow({ entry, projectBlocked, busy, onDefine }: EntryRowProps) {
+function EntryRow({
+  entry,
+  projectBlocked,
+  busy,
+  onDefine,
+  characters,
+  environments,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
+}: EntryRowProps) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const job = entry.job;
   const active = isJobActive(job);
   const status = STATUS[entry.status];
@@ -117,18 +141,45 @@ function EntryRow({ entry, projectBlocked, busy, onDefine }: EntryRowProps) {
               {open ? "Hide the definition" : "Show the definition"}
             </Button>
           )}
+          {entry.definition !== null && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={editing || active || busy}
+              onClick={() => {
+                onStartEdit();
+                setOpen(false);
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
           <Button
             size="compact-sm"
             variant="default"
             loading={active}
-            disabled={!entry.can_run || busy}
+            disabled={!entry.can_run || busy || editing}
             onClick={onDefine}
           >
             {defined ? "Re-define" : "Define"}
           </Button>
         </Group>
       </Group>
-      {entry.definition !== null && entry.version !== null && (
+      {editing && entry.definition !== null && (
+        <Paper withBorder p="md" radius="sm" ml={34}>
+          <SceneDefinitionEditor
+            initial={entry.definition}
+            characters={characters}
+            environments={environments}
+            saving={saving}
+            error={saveError}
+            onSave={(definition) => onSave(definition, () => setEditing(false))}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {entry.definition !== null && entry.version !== null && !editing && (
         <Collapse expanded={open}>
           <ArtifactViewer
             title="Definition"
@@ -157,6 +208,11 @@ export function SceneDefinitionsPanel({
   const { data, isLoading, isError, error } = useSceneDefinitions(projectId);
   const defineAll = useDefineAllScenes(projectId);
   const defineOne = useDefineOneScene(projectId);
+  const save = useSaveSceneDefinition(projectId);
+  const characters = useDiscovery(projectId, "characters").data?.latest?.items ?? [];
+  const environments = useDiscovery(projectId, "environments").data?.latest?.items ?? [];
+  // The scene whose newest definition the user wrote, waiting for "yes, define it again".
+  const [confirming, setConfirming] = useState<SceneDefinitionEntry | null>(null);
 
   const busy = defineAll.isPending || defineOne.isPending;
   const entries = data?.entries ?? [];
@@ -230,10 +286,35 @@ export function SceneDefinitionsPanel({
             entry={entry}
             projectBlocked={projectBlocked}
             busy={busy}
-            onDefine={() => defineOne.mutate(entry.id)}
+            onDefine={() =>
+              entry.needs_confirmation
+                ? setConfirming(entry)
+                : defineOne.mutate({ sceneId: entry.id, confirmReplaceManual: false })
+            }
+            characters={characters}
+            environments={environments}
+            saving={save.isPending}
+            saveError={save.error}
+            onStartEdit={() => save.reset()}
+            onSave={(definition, done) =>
+              save.mutate({ sceneId: entry.id, definition }, { onSuccess: done })
+            }
           />
         ))}
       </Stack>
+      <ReplaceManualModal
+        opened={confirming !== null}
+        title="Define this scene again?"
+        what={`The newest definition of ${confirming?.title ?? "this scene"}`}
+        confirmLabel="Re-define"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming !== null) {
+            defineOne.mutate({ sceneId: confirming.id, confirmReplaceManual: true });
+          }
+          setConfirming(null);
+        }}
+      />
     </Paper>
   );
 }

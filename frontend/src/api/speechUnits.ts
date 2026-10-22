@@ -3,7 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 import { speechAudioKey } from "./speechAudio";
 
@@ -11,6 +11,7 @@ export type SpeechUnits = components["schemas"]["SpeechUnitsOut"];
 export type SpeechUnitsEntry = components["schemas"]["SpeechUnitsEntryOut"];
 export type SpeechUnitsContent = components["schemas"]["SpeechUnitsContentOut"];
 export type SpeechUnit = components["schemas"]["SpeechUnitOut"];
+export type SpeechUnitInput = components["schemas"]["SpeechUnitIn"];
 export type SpeechPlanAll = components["schemas"]["SpeechUnitsRunAllOut"];
 
 /** The total of the estimates of a plan, in seconds to a tenth. */
@@ -93,14 +94,20 @@ export function usePlanAllSpeechUnits(projectId: number) {
   });
 }
 
-/** Plans the speech units of one scene. */
+/**
+ * Plans the speech units of one scene. `confirmReplaceManual` is true only after the user agreed
+ * to replace cuts they made.
+ */
 export function usePlanOneSceneSpeechUnits(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sceneId: string) => {
+    mutationFn: async (input: { sceneId: string; confirmReplaceManual: boolean }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/speech-units/{scene_id}/run",
-        { params: { path: { project_id: projectId, scene_id: sceneId } } },
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: { confirm_replace_manual: input.confirmReplaceManual },
+        },
       );
       if (!data) {
         throw new ApiError(
@@ -114,5 +121,34 @@ export function usePlanOneSceneSpeechUnits(projectId: number) {
       return data;
     },
     onSettled: () => refreshAfterPlanning(queryClient, projectId),
+  });
+}
+
+/** Saves one scene's re-split speech units as its next plan, written by the user. */
+export function useSaveSpeechUnits(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string; units: SpeechUnitInput[] }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/speech-units/{scene_id}",
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: { units: input.units },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not save the speech units (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    // A new plan changes which units have current audio, so the audio is loaded again too.
+    onSuccess: () =>
+      Promise.all([
+        refreshProject(queryClient, projectId),
+        refreshAfterPlanning(queryClient, projectId),
+      ]),
   });
 }

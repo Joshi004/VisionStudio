@@ -18,11 +18,15 @@ import { isJobActive } from "../../api/polling";
 import {
   useExtractAllEvents,
   useExtractOneSceneEvents,
+  useSaveSceneEvents,
   useSceneEvents,
+  type SceneEventInput,
   type SceneEventsEntry,
 } from "../../api/sceneEvents";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { ReplaceManualModal } from "./ReplaceManualModal";
+import { SceneEventsEditor } from "./SceneEventsEditor";
 import { SceneEventsView } from "./SceneEventsView";
 
 type SceneEventsPanelProps = {
@@ -41,24 +45,35 @@ const STATUS: Record<
 type EntryRowProps = {
   entry: SceneEventsEntry;
   characterNames: Record<string, string>;
+  characters: { id: string; name: string }[];
   /** True when nothing can be extracted yet; the reason is shown once, above the list. */
   projectBlocked: boolean;
   busy: boolean;
   onExtract: () => void;
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (events: SceneEventInput[], done: () => void) => void;
 };
 
 /**
  * One scene: its status, why its events are out of date, the job's failure when the last run
- * failed, and the events themselves, read only.
+ * failed, and the events themselves, which can be edited by hand.
  */
 function EntryRow({
   entry,
   characterNames,
+  characters,
   projectBlocked,
   busy,
   onExtract,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
 }: EntryRowProps) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const job = entry.job;
   const active = isJobActive(job);
   const status = STATUS[entry.status];
@@ -140,18 +155,44 @@ function EntryRow({
               {open ? "Hide the events" : "Show the events"}
             </Button>
           )}
+          {entry.events !== null && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={editing || active || busy}
+              onClick={() => {
+                onStartEdit();
+                setOpen(false);
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
           <Button
             size="compact-sm"
             variant="default"
             loading={active}
-            disabled={!entry.can_run || busy}
+            disabled={!entry.can_run || busy || editing}
             onClick={onExtract}
           >
             {extracted ? "Re-extract" : "Extract"}
           </Button>
         </Group>
       </Group>
-      {entry.events !== null && entry.version !== null && (
+      {editing && entry.events !== null && (
+        <Paper withBorder p="md" radius="sm" ml={34}>
+          <SceneEventsEditor
+            initial={entry.events.events}
+            characters={characters}
+            saving={saving}
+            error={saveError}
+            onSave={(events) => onSave(events, () => setEditing(false))}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {entry.events !== null && entry.version !== null && !editing && (
         <Collapse expanded={open}>
           <ArtifactViewer
             title="Events"
@@ -180,6 +221,9 @@ export function SceneEventsPanel({ projectId }: SceneEventsPanelProps) {
   const { data, isLoading, isError, error } = useSceneEvents(projectId);
   const extractAll = useExtractAllEvents(projectId);
   const extractOne = useExtractOneSceneEvents(projectId);
+  const save = useSaveSceneEvents(projectId);
+  // The scene whose newest events the user wrote, waiting for "yes, extract them again".
+  const [confirming, setConfirming] = useState<SceneEventsEntry | null>(null);
 
   const busy = extractAll.isPending || extractOne.isPending;
   const entries = data?.entries ?? [];
@@ -257,10 +301,34 @@ export function SceneEventsPanel({ projectId }: SceneEventsPanelProps) {
             characterNames={characterNames}
             projectBlocked={projectBlocked}
             busy={busy}
-            onExtract={() => extractOne.mutate(entry.id)}
+            characters={data?.characters ?? []}
+            onExtract={() =>
+              entry.needs_confirmation
+                ? setConfirming(entry)
+                : extractOne.mutate({ sceneId: entry.id, confirmReplaceManual: false })
+            }
+            saving={save.isPending}
+            saveError={save.error}
+            onStartEdit={() => save.reset()}
+            onSave={(events, done) =>
+              save.mutate({ sceneId: entry.id, events }, { onSuccess: done })
+            }
           />
         ))}
       </Stack>
+      <ReplaceManualModal
+        opened={confirming !== null}
+        title="Extract the events again?"
+        what={`The newest events of ${confirming?.title ?? "this scene"}`}
+        confirmLabel="Re-extract"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming !== null) {
+            extractOne.mutate({ sceneId: confirming.id, confirmReplaceManual: true });
+          }
+          setConfirming(null);
+        }}
+      />
     </Paper>
   );
 }

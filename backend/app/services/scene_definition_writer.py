@@ -203,7 +203,7 @@ def _one_line(value: str) -> str:
 def _object(parent: dict[str, Any], key: str, path: str) -> dict[str, Any]:
     value = parent.get(key)
     if not isinstance(value, dict):
-        raise ValueError(f'The model\'s answer had no "{path}" object.')
+        raise ValueError(f'There is no "{path}" object.')
     return value
 
 
@@ -213,7 +213,7 @@ def _optional_object(parent: dict[str, Any], key: str) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ValueError(f'The "{key}" of the model\'s answer was not an object.')
+        raise ValueError(f'The "{key}" was not an object.')
     return value
 
 
@@ -223,14 +223,12 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     """
     value = parent.get(key)
     if not isinstance(value, str):
-        raise ValueError(f'The "{path}" of the model\'s answer was missing or not text.')
+        raise ValueError(f'The "{path}" was missing or not text.')
     text = _one_line(value)
     if not text:
-        raise ValueError(f'The "{path}" of the model\'s answer was empty.')
+        raise ValueError(f'The "{path}" was empty.')
     if len(text) > max_chars:
-        raise ValueError(
-            f'The "{path}" of the model\'s answer was longer than {max_chars} characters.'
-        )
+        raise ValueError(f'The "{path}" was longer than {max_chars} characters.')
     return text
 
 
@@ -245,8 +243,7 @@ def _character_map(
     for character_id in raw:
         if character_id not in characters:
             raise ValueError(
-                f'The "{key}" of the model\'s answer named "{character_id}", who is not one of '
-                "the scene's characters."
+                f'The "{key}" named "{character_id}", who is not one of the scene\'s characters.'
             )
         result[character_id] = _text(raw, character_id, f"{key}.{character_id}", max_chars)
     return result
@@ -275,24 +272,19 @@ def check_definition(
 
     environment_id = answer.get("environment_id")
     if not isinstance(environment_id, str) or environment_id not in environment_ids:
-        raise ValueError(
-            "The \"environment_id\" of the model's answer was not one of the story's environments."
-        )
+        raise ValueError('The "environment_id" was not one of the story\'s environments.')
 
     raw_characters = answer.get("characters")
     if not isinstance(raw_characters, list):
-        raise ValueError('The "characters" of the model\'s answer was missing or not a list.')
+        raise ValueError('The "characters" was missing or not a list.')
     characters: list[str] = []
     for character_id in raw_characters:
         if not isinstance(character_id, str) or character_id not in character_ids:
             raise ValueError(
-                'The "characters" of the model\'s answer named someone who is not one of the '
-                "story's characters."
+                'The "characters" named someone who is not one of the story\'s characters.'
             )
         if character_id in characters:
-            raise ValueError(
-                f'The "characters" of the model\'s answer listed "{character_id}" twice.'
-            )
+            raise ValueError(f'The "characters" listed "{character_id}" twice.')
         characters.append(character_id)
 
     return {

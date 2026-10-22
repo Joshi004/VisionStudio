@@ -5,13 +5,14 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 
 export type SceneEvents = components["schemas"]["SceneEventsOut"];
 export type SceneEventsEntry = components["schemas"]["SceneEventsEntryOut"];
 export type SceneEventsContent = components["schemas"]["SceneEventsContentOut"];
 export type SceneEvent = components["schemas"]["SceneEventOut"];
+export type SceneEventInput = components["schemas"]["SceneEventIn"];
 export type SceneExtractAll = components["schemas"]["SceneEventsRunAllOut"];
 
 /**
@@ -88,14 +89,20 @@ export function useExtractAllEvents(projectId: number) {
   });
 }
 
-/** Starts the job that extracts the events of one scene. */
+/**
+ * Starts the job that extracts the events of one scene. `confirmReplaceManual` is true only
+ * after the user agreed to add a version from the model on top of one they wrote.
+ */
 export function useExtractOneSceneEvents(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sceneId: string) => {
+    mutationFn: async (input: { sceneId: string; confirmReplaceManual: boolean }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/scene-events/{scene_id}/run",
-        { params: { path: { project_id: projectId, scene_id: sceneId } } },
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: { confirm_replace_manual: input.confirmReplaceManual },
+        },
       );
       if (!data) {
         throw new ApiError(
@@ -109,5 +116,29 @@ export function useExtractOneSceneEvents(projectId: number) {
       return data;
     },
     onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Saves one scene's edited events as its next version, written by the user. */
+export function useSaveSceneEvents(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string; events: SceneEventInput[] }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/scene-events/{scene_id}",
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: { events: input.events },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not save the scene events (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

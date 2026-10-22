@@ -15,10 +15,18 @@ import {
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
-import { useRunScenes, useSceneVersion, useScenes, type SceneItem } from "../../api/scenes";
+import {
+  useRunScenes,
+  useSaveScenes,
+  useSceneVersion,
+  useScenes,
+  type SceneItem,
+} from "../../api/scenes";
 import { useStoryBible } from "../../api/storyBible";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { ReplaceManualModal } from "./ReplaceManualModal";
+import { ScenesEditor } from "./ScenesEditor";
 
 type ScenesPanelProps = {
   projectId: number;
@@ -83,6 +91,9 @@ export function ScenesPanel({ projectId, hasStory }: ScenesPanelProps) {
   const { data, isLoading, isError, error } = useScenes(projectId);
   const bible = useStoryBible(projectId);
   const run = useRunScenes(projectId);
+  const save = useSaveScenes(projectId);
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   // The version the user picked. Until they pick one, the newest is shown.
   const [picked, setPicked] = useState<number | null>(null);
 
@@ -104,6 +115,12 @@ export function ScenesPanel({ projectId, hasStory }: ScenesPanelProps) {
   } else if (bible.data?.out_of_date) {
     blocker = "The Story Bible is out of date. Re-run it first.";
   }
+
+  const startRun = (confirmReplaceManual: boolean) => {
+    // A new version is on its way: show it when it arrives.
+    setPicked(null);
+    run.mutate({ confirmReplaceManual });
+  };
 
   return (
     <Stack gap="sm">
@@ -132,14 +149,26 @@ export function ScenesPanel({ projectId, hasStory }: ScenesPanelProps) {
                 />
               )}
               <Button
+                variant="default"
                 onClick={() => {
-                  // A new version is on its way: show it when it arrives.
+                  save.reset();
                   setPicked(null);
-                  run.mutate();
+                  setEditing(true);
                 }}
+                disabled={!hasStory || editing || latest === null || active}
+              >
+                Edit
+              </Button>
+              <Button
+                onClick={() => (data?.needs_confirmation ? setConfirming(true) : startRun(false))}
                 loading={run.isPending || active}
                 disabled={
-                  blocker !== null || isLoading || isError || bible.isLoading || bible.isError
+                  blocker !== null ||
+                  isLoading ||
+                  isError ||
+                  bible.isLoading ||
+                  bible.isError ||
+                  editing
                 }
               >
                 {latest ? "Re-run" : "Run"}
@@ -178,7 +207,18 @@ export function ScenesPanel({ projectId, hasStory }: ScenesPanelProps) {
         </Stack>
       </Paper>
 
-      {shown && (
+      {editing && latest && (
+        <Paper withBorder p="md" radius="md">
+          <ScenesEditor
+            initial={latest.scenes}
+            saving={save.isPending}
+            error={save.error}
+            onSave={(scenes) => save.mutate(scenes, { onSuccess: () => setEditing(false) })}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {shown && !editing && (
         <ArtifactViewer
           title="Scenes found"
           version={shown.version}
@@ -198,6 +238,17 @@ export function ScenesPanel({ projectId, hasStory }: ScenesPanelProps) {
           {describeError(olderVersion.error)}
         </Alert>
       )}
+      <ReplaceManualModal
+        opened={confirming}
+        title="Find the scenes again?"
+        what="The newest list of scenes"
+        confirmLabel="Re-run"
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          startRun(true);
+        }}
+      />
     </Stack>
   );
 }

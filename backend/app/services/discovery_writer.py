@@ -146,10 +146,10 @@ def clean_text(value: object, field: str, position: int, max_chars: int) -> str:
     longer than `max_chars`.
     """
     if not isinstance(value, str):
-        raise ValueError(f'Item {position} of the model\'s answer had no text "{field}".')
+        raise ValueError(f'Item {position} had no text "{field}".')
     text = _one_line(value)
     if not text:
-        raise ValueError(f'Item {position} of the model\'s answer had an empty "{field}".')
+        raise ValueError(f'Item {position} had an empty "{field}".')
     if len(text) > max_chars:
         raise ValueError(
             f'The "{field}" of item {position} was longer than {max_chars} characters.'
@@ -160,7 +160,7 @@ def clean_text(value: object, field: str, position: int, max_chars: int) -> str:
 def clean_slug(value: object, position: int) -> str:
     """The item's id, in lower case. Raises ValueError when it is not a usable slug."""
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f'Item {position} of the model\'s answer had no "id".')
+        raise ValueError(f'Item {position} had no "id".')
     slug = value.strip().lower()
     if len(slug) > ID_MAX_CHARS:
         raise ValueError(f'The "id" of item {position} was longer than {ID_MAX_CHARS} characters.')
@@ -180,15 +180,15 @@ def check_items(kind: Kind, answer: Any) -> dict[str, Any]:
     """
     items = answer.get(kind) if isinstance(answer, dict) else answer
     if items is None:
-        raise ValueError(f'The model\'s answer had no "{kind}".')
+        raise ValueError(f'There is no "{kind}".')
     if not isinstance(items, list):
-        raise ValueError(f'The model\'s "{kind}" was not a list.')
+        raise ValueError(f'The "{kind}" was not a list.')
 
     checked: list[dict[str, str]] = []
     seen: set[str] = set()
     for position, entry in enumerate(items, start=1):
         if not isinstance(entry, dict):
-            raise ValueError(f"Item {position} of the model's answer was not an object.")
+            raise ValueError(f"Item {position} was not an object.")
         item_id = clean_slug(entry.get("id"), position)
         if item_id in seen:
             raise ValueError(f'The id "{item_id}" was used for more than one item.')
@@ -204,7 +204,7 @@ def check_items(kind: Kind, answer: Any) -> dict[str, Any]:
         )
 
     if len(checked) < MIN_ITEMS:
-        raise ValueError(f'The model\'s "{kind}" was empty.')
+        raise ValueError(f'The "{kind}" was empty.')
     if len(checked) > MAX_ITEMS:
-        raise ValueError(f'The model\'s "{kind}" had more than {MAX_ITEMS} items.')
+        raise ValueError(f'The "{kind}" had more than {MAX_ITEMS} items.')
     return {kind: checked}

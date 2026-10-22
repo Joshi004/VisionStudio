@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
@@ -38,6 +39,14 @@ async function fetchProject(projectId: number) {
     );
   }
   return data;
+}
+
+/**
+ * Loads again everything stored for one project. A saved edit of an artifact changes what the
+ * stages after it say is out of date, and every such query starts with the project's key.
+ */
+export function refreshProject(queryClient: QueryClient, projectId: number) {
+  return queryClient.invalidateQueries({ queryKey: [...PROJECTS_KEY, projectId] });
 }
 
 export function isValidProjectId(projectId: number): boolean {

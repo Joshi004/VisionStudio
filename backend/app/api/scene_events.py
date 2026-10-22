@@ -6,7 +6,11 @@
   be pressed. Out of date is worked out on every read.
 - `POST .../run` ("Extract all") starts one job per scene that is not extracted and up to date
   already, is defined and is not already being extracted.
-- `POST .../{scene_id}/run` starts the job for one scene.
+- `POST .../{scene_id}/run` starts the job for one scene. When the scene's newest events were
+  written by the user, the body must confirm the replacement (PHASE-037).
+- `PUT .../{scene_id}` saves the user's edited events of one scene as its next version (`source`
+  is `manual`). They are checked like the model's answer, including that every speech event is
+  found in the scene's text in order.
 
 A job stores a new version of the scene's events (`services/scene_events.py`); nothing is
 written to the Character Lab. The answers never return ORM objects.
@@ -18,13 +22,15 @@ from datetime import datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
 from app.services import scene_events
@@ -114,6 +120,8 @@ class SceneEventsEntryOut(BaseModel):
     job: DiscoveryJobOut | None
     can_run: bool
     blocked_reason: str | None
+    # True when extracting this scene again would add a version after one the user wrote.
+    needs_confirmation: bool
 
 
 class SceneEventsOut(BaseModel):
@@ -139,6 +147,39 @@ class SceneEventsRunAllOut(BaseModel):
 
 class SceneEventsRunOut(BaseModel):
     job_id: int
+
+
+class SceneEventsRunIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+
+
+class SceneEventDeliveryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    emotion: str | None = Field(default=None, max_length=1000)
+
+
+class SceneEventIn(BaseModel):
+    """One event of an edited list. Which fields count depends on `type` (see `SceneEventOut`);
+    the rules are checked by `event_extraction_writer.check_answer`, and the id is set by code.
+    These limits only keep a request from being huge.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: EventType
+    text: str | None = Field(default=None, max_length=20000)
+    speaker_id: str | None = Field(default=None, max_length=200)
+    delivery: SceneEventDeliveryIn | None = None
+    description: str | None = Field(default=None, max_length=5000)
+
+
+class SceneEventsSaveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    events: list[SceneEventIn] = Field(max_length=500)
 
 
 def _entry_out(entry: SceneEntry) -> SceneEventsEntryOut:
@@ -176,6 +217,7 @@ def _entry_out(entry: SceneEntry) -> SceneEventsEntryOut:
         ),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
+        needs_confirmation=entry.needs_confirmation,
     )
 
 
@@ -190,6 +232,10 @@ def _refused(exc: scene_events.SceneEventsError) -> HTTPException:
 )
 async def get_scene_events(project_id: int, session: SessionDep) -> SceneEventsOut:
     project = await load_project(session, project_id)
+    return await _state_out(session, project)
+
+
+async def _state_out(session: AsyncSession, project: Project) -> SceneEventsOut:
     result = await scene_events.state(session, project)
     return SceneEventsOut(
         scenes_version=result.scenes_version,
@@ -231,14 +277,48 @@ async def run_all(project_id: int, session: SessionDep) -> SceneEventsRunAllOut:
     status_code=status.HTTP_202_ACCEPTED,
     responses={**_NOT_FOUND, **_INVALID},
 )
-async def run_one(project_id: int, scene_id: DiscoveryId, session: SessionDep) -> SceneEventsRunOut:
+async def run_one(
+    project_id: int,
+    scene_id: DiscoveryId,
+    session: SessionDep,
+    body: SceneEventsRunIn | None = None,
+) -> SceneEventsRunOut:
     """Starts the job that extracts one scene's events. If it already has a job waiting or
     running, that job's id is returned and no second job is made.
     """
     project = await load_project(session, project_id)
     try:
-        job = await scene_events.start_run(session, project, scene_id)
+        job = await scene_events.start_run(
+            session,
+            project,
+            scene_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+        )
     except scene_events.SceneEventsError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()
     return SceneEventsRunOut(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/scene-events/{scene_id}",
+    response_model=SceneEventsOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_events(
+    project_id: int, scene_id: DiscoveryId, body: SceneEventsSaveIn, session: SessionDep
+) -> SceneEventsOut:
+    """Saves the whole edited list of events of one scene as its next version, written by the
+    user. Events are numbered again in the order given.
+    """
+    project = await load_project(session, project_id)
+    try:
+        await scene_events.save_manual(
+            session,
+            project,
+            scene_id,
+            [event.model_dump(exclude_none=True) for event in body.events],
+        )
+    except scene_events.SceneEventsError as exc:
+        raise _refused(exc) from exc
+    return await _state_out(session, project)

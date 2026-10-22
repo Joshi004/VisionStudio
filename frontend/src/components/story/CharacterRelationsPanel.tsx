@@ -5,7 +5,6 @@ import {
   Button,
   Group,
   Loader,
-  Modal,
   Paper,
   Select,
   Stack,
@@ -23,6 +22,7 @@ import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { ReplaceManualModal } from "./ReplaceManualModal";
 
 type CharacterRelationsPanelProps = {
   projectId: number;
@@ -290,33 +290,17 @@ export function CharacterRelationsPanel({ projectId }: CharacterRelationsPanelPr
         </ArtifactViewer>
       )}
 
-      <Modal
+      <ReplaceManualModal
         opened={confirming}
-        onClose={() => setConfirming(false)}
         title="Find the relations again?"
-        centered
-      >
-        <Stack gap="md">
-          <Text size="sm">
-            The newest relations were written by you. Finding them again adds a new version from
-            the model on top. Your version stays in the list of versions.
-          </Text>
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setConfirming(false)}>
-              Cancel
-            </Button>
-            <Button
-              color="red"
-              onClick={() => {
-                find.mutate({ confirmReplaceManual: true });
-                setConfirming(false);
-              }}
-            >
-              Find again
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+        what="The newest relations"
+        confirmLabel="Find again"
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          find.mutate({ confirmReplaceManual: true });
+          setConfirming(false);
+        }}
+      />
     </Stack>
   );
 }

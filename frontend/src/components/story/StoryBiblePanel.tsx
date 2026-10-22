@@ -3,9 +3,16 @@ import { Alert, Button, Group, Loader, Paper, Select, Stack, Text, Title } from 
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
-import { useRunStoryBible, useStoryBible, useStoryBibleVersion } from "../../api/storyBible";
+import {
+  useRunStoryBible,
+  useSaveStoryBible,
+  useStoryBible,
+  useStoryBibleVersion,
+} from "../../api/storyBible";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { ReplaceManualModal } from "./ReplaceManualModal";
+import { StoryBibleEditor } from "./StoryBibleEditor";
 
 type StoryBiblePanelProps = {
   projectId: number;
@@ -20,6 +27,9 @@ type StoryBiblePanelProps = {
 export function StoryBiblePanel({ projectId, hasStory }: StoryBiblePanelProps) {
   const { data, isLoading, isError, error } = useStoryBible(projectId);
   const run = useRunStoryBible(projectId);
+  const save = useSaveStoryBible(projectId);
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   // The version the user picked. Until they pick one, the newest is shown.
   const [picked, setPicked] = useState<number | null>(null);
 
@@ -31,6 +41,12 @@ export function StoryBiblePanel({ projectId, hasStory }: StoryBiblePanelProps) {
 
   const job = data?.job ?? null;
   const active = isJobActive(job);
+
+  const startRun = (confirmReplaceManual: boolean) => {
+    // A new version is on its way: show it when it arrives.
+    setPicked(null);
+    run.mutate({ confirmReplaceManual });
+  };
 
   return (
     <Stack gap="sm">
@@ -58,13 +74,20 @@ export function StoryBiblePanel({ projectId, hasStory }: StoryBiblePanelProps) {
                 />
               )}
               <Button
+                variant="default"
                 onClick={() => {
-                  // A new version is on its way: show it when it arrives.
+                  save.reset();
                   setPicked(null);
-                  run.mutate();
+                  setEditing(true);
                 }}
+                disabled={!hasStory || editing || latest === null || active}
+              >
+                Edit
+              </Button>
+              <Button
+                onClick={() => (data?.needs_confirmation ? setConfirming(true) : startRun(false))}
                 loading={run.isPending || active}
-                disabled={!hasStory || isLoading || isError}
+                disabled={!hasStory || isLoading || isError || editing}
               >
                 {latest ? "Re-run" : "Run"}
               </Button>
@@ -102,7 +125,18 @@ export function StoryBiblePanel({ projectId, hasStory }: StoryBiblePanelProps) {
         </Stack>
       </Paper>
 
-      {shown && (
+      {editing && latest && (
+        <Paper withBorder p="md" radius="md">
+          <StoryBibleEditor
+            initial={latest.content}
+            saving={save.isPending}
+            error={save.error}
+            onSave={(content) => save.mutate(content, { onSuccess: () => setEditing(false) })}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {shown && !editing && (
         <ArtifactViewer
           title="Result"
           version={shown.version}
@@ -117,6 +151,17 @@ export function StoryBiblePanel({ projectId, hasStory }: StoryBiblePanelProps) {
           {describeError(olderVersion.error)}
         </Alert>
       )}
+      <ReplaceManualModal
+        opened={confirming}
+        title="Run the Story Bible again?"
+        what="The newest Story Bible"
+        confirmLabel="Re-run"
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          startRun(true);
+        }}
+      />
     </Stack>
   );
 }

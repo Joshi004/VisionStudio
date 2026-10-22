@@ -73,6 +73,26 @@ SETTLE_SECONDS: Final = 60.0
 
 _STORY_FIRST: Final = "Save the story first: the pipeline starts from it."
 
+# What a run would replace that the user wrote (PHASE-037). Each is the `consent` of a target.
+_MANUAL_STORY_BIBLE: Final = (
+    "The newest Story Bible was written by you, and writing it again adds a version from the model."
+)
+_MANUAL_LIST: Final = (
+    "The newest list was written by you, and finding it again adds a version from the model."
+)
+_MANUAL_DEFINITION: Final = (
+    "The newest definition of this scene was written by you, and defining it again adds a "
+    "version from the model."
+)
+_MANUAL_EVENTS: Final = (
+    "The newest events of this scene were written by you, and extracting them again adds a "
+    "version from the model."
+)
+_MANUAL_UNITS: Final = (
+    "The newest speech units of this scene were written by you, and planning them again "
+    "replaces your cuts."
+)
+
 Evaluate = Callable[[AsyncSession, Project, RunOptions], Awaitable[StepView]]
 # `deadline` is a `time.monotonic()` value: a start function that makes one job per target stops
 # after it (but always starts at least one), so a poll never holds the dispatcher for long.
@@ -221,6 +241,11 @@ async def _evaluate_story_bible(
                 done,
                 active=_active(job),
                 block=_STORY_FIRST if _blank(story) else None,
+                consent=(
+                    _MANUAL_STORY_BIBLE
+                    if bible is not None and bible.source == "manual" and not done
+                    else None
+                ),
                 last_error=_failure(job),
             )
         ]
@@ -228,7 +253,9 @@ async def _evaluate_story_bible(
 
 
 async def _start_story_bible(session: AsyncSession, project: Project, options: RunOptions) -> Job:
-    return await story_bible.start_run(session, project)
+    return await story_bible.start_run(
+        session, project, confirm_replace_manual=options.confirm_overwrite
+    )
 
 
 def _discovery_adapter(kind: discovery.StageKind) -> Adapter:
@@ -252,13 +279,20 @@ def _discovery_adapter(kind: discovery.StageKind) -> Adapter:
                     done,
                     active=_active(job),
                     block=block,
+                    consent=(
+                        _MANUAL_LIST
+                        if row is not None and row.source == "manual" and not done
+                        else None
+                    ),
                     last_error=_failure(job),
                 )
             ]
         )
 
     async def call(session: AsyncSession, project: Project, options: RunOptions) -> Job:
-        return await discovery.start_run(session, project, kind)
+        return await discovery.start_run(
+            session, project, kind, confirm_replace_manual=options.confirm_overwrite
+        )
 
     return Adapter(evaluate, _project_start(call))
 
@@ -627,6 +661,7 @@ async def _evaluate_scene_definitions(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
+                consent=_MANUAL_DEFINITION if entry.needs_confirmation and not done else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
             )
@@ -645,7 +680,14 @@ async def _start_scene_definitions(
         session,
         targets,
         deadline,
-        lambda target: _ids_of(scene_definitions.start_run(session, project, target.ref[0])),
+        lambda target: _ids_of(
+            scene_definitions.start_run(
+                session,
+                project,
+                target.ref[0],
+                confirm_replace_manual=options.confirm_overwrite,
+            )
+        ),
     )
 
 
@@ -666,6 +708,7 @@ async def _evaluate_events(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
+                consent=_MANUAL_EVENTS if entry.needs_confirmation and not done else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
             )
@@ -684,7 +727,14 @@ async def _start_events(
         session,
         targets,
         deadline,
-        lambda target: _ids_of(scene_events.start_run(session, project, target.ref[0])),
+        lambda target: _ids_of(
+            scene_events.start_run(
+                session,
+                project,
+                target.ref[0],
+                confirm_replace_manual=options.confirm_overwrite,
+            )
+        ),
     )
 
 
@@ -776,6 +826,11 @@ async def _evaluate_speech_units(
                 _scene_label(entry.item),
                 entry.status == "planned",
                 block=None if entry.status == "planned" else entry.blocked_reason,
+                consent=(
+                    _MANUAL_UNITS
+                    if entry.needs_confirmation and entry.status != "planned"
+                    else None
+                ),
                 ref=(entry.item["id"],),
             )
             for entry in state.entries
@@ -791,7 +846,9 @@ async def _start_speech_units(
     deadline: float,
 ) -> list[Started]:
     async def work() -> dict[str, str]:
-        result = await speech_units.plan_all(session, project)
+        result = await speech_units.plan_all(
+            session, project, confirm_replace_manual=options.confirm_overwrite
+        )
         return {f"scene:{skipped.scene_id}": skipped.reason for skipped in result.skipped}
 
     return await _start_inline(session, targets, work)
@@ -1383,11 +1440,18 @@ if set(ADAPTERS) != set(STEP_KEYS):  # a step without an adapter would never run
 
 # The steps that can replace something the user chose or wrote.
 _CONSENT_STEPS: Final[tuple[str, ...]] = (
+    "story_bible",
+    "character_discovery",
+    "environment_discovery",
+    "scene_discovery",
     "relations",
     "character_definitions",
     "environment_definitions",
     "character_images",
     "voices",
+    "scene_definitions",
+    "events",
+    "speech_units",
 )
 
 

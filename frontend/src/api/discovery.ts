@@ -4,7 +4,7 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 import { storyBibleKey } from "./storyBible";
 
@@ -12,6 +12,7 @@ export type DiscoveryKind = "characters" | "environments";
 export type DiscoveryState = components["schemas"]["DiscoveryState"];
 export type DiscoveryOut = components["schemas"]["DiscoveryOut"];
 export type DiscoveryVersion = components["schemas"]["DiscoveryVersionOut"];
+export type DiscoveryItemInput = components["schemas"]["DiscoveryItemIn"];
 export type DiscoveryItem = components["schemas"]["DiscoveryItem"];
 
 /**
@@ -76,14 +77,20 @@ export function useDiscoveryVersion(
   });
 }
 
-/** Starts the job that finds the next version from the saved story. */
+/**
+ * Starts the job that finds the next version from the saved story. `confirmReplaceManual` is true
+ * only after the user agreed to add a version from the model on top of a list they wrote.
+ */
 export function useRunDiscovery(projectId: number, kind: DiscoveryKind) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (input: { confirmReplaceManual: boolean }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/discovery/{kind}/run",
-        { params: { path: { project_id: projectId, kind } } },
+        {
+          params: { path: { project_id: projectId, kind } },
+          body: { confirm_replace_manual: input.confirmReplaceManual },
+        },
       );
       if (!data) {
         throw new ApiError(
@@ -101,5 +108,26 @@ export function useRunDiscovery(projectId: number, kind: DiscoveryKind) {
         queryClient.invalidateQueries({ queryKey: storyBibleKey(projectId) }),
         invalidateAfterJobAction(queryClient),
       ]),
+  });
+}
+
+/** Saves the whole edited list as the next version, written by the user. */
+export function useSaveDiscovery(projectId: number, kind: DiscoveryKind) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: DiscoveryItemInput[]) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/discovery/{kind}",
+        { params: { path: { project_id: projectId, kind } }, body: { items } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not save the ${kind} (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

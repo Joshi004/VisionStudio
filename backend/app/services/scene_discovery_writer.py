@@ -193,7 +193,7 @@ class _Described:
 
 def _described(entry: object, position: int, seen: set[str]) -> _Described:
     if not isinstance(entry, dict):
-        raise ValueError(f"Scene {position} of the model's answer was not an object.")
+        raise ValueError(f"Scene {position} was not an object.")
     scene_id = discovery_writer.clean_slug(entry.get("id"), position)
     if scene_id in seen:
         raise ValueError(f'The id "{scene_id}" was used for more than one scene.')
@@ -271,13 +271,13 @@ def check_scenes(answer: Any, story_text: str) -> dict[str, Any]:
     """
     entries = answer.get("scenes") if isinstance(answer, dict) else answer
     if entries is None:
-        raise ValueError('The model\'s answer had no "scenes".')
+        raise ValueError('There is no "scenes".')
     if not isinstance(entries, list):
-        raise ValueError('The model\'s "scenes" was not a list.')
+        raise ValueError('The "scenes" was not a list.')
     if len(entries) < MIN_SCENES:
-        raise ValueError('The model\'s "scenes" was empty.')
+        raise ValueError('The "scenes" was empty.')
     if len(entries) > MAX_SCENES:
-        raise ValueError(f'The model\'s "scenes" had more than {MAX_SCENES} scenes.')
+        raise ValueError(f'The "scenes" had more than {MAX_SCENES} scenes.')
 
     seen: set[str] = set()
     described = [_described(entry, position, seen) for position, entry in enumerate(entries, 1)]

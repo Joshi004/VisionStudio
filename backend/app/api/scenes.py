@@ -7,6 +7,9 @@
   or the StoryBible has changed since the newest version was made. "Out of date" is worked out
   on every read.
 - `GET .../versions/{version}` answers one older (or the newest) version.
+- `PUT ...` saves the user's edited scenes as the next version (`source` is `manual`,
+  PHASE-037); code cuts the story again at the opening words. `POST .../run` over a version the
+  user wrote needs `confirm_replace_manual` in its body.
 
 It is the stage of `api/discovery.py` with a richer result: each scene carries the slice of
 the story it owns (`text`, cut by code from the author's story), so the scenes' texts joined in
@@ -19,15 +22,18 @@ from __future__ import annotations
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Path, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut, DiscoveryVersionOut
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.services import discovery as discovery_service
+from app.services import discovery_edits
 from app.services import story_bible as story_bible_service
 from app.services.discovery import Discovery
 
@@ -78,10 +84,37 @@ class SceneDiscoveryState(BaseModel):
     # made from, or there is a newer StoryBible than the one it read. False when there is no
     # version.
     out_of_date: bool
+    # True when finding the scenes again would add a version after one the user wrote.
+    needs_confirmation: bool
 
 
 class SceneDiscoveryRun(BaseModel):
     job_id: int
+
+
+class SceneRunIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+
+
+class SceneIn(BaseModel):
+    """One scene of an edited list. The rules are checked by
+    `scene_discovery_writer.check_scenes`; these limits only keep a request from being huge.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(max_length=200)
+    title: str = Field(max_length=2000)
+    description: str = Field(max_length=5000)
+    starts_with: str = Field(max_length=5000)
+
+
+class SceneSaveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenes: list[SceneIn] = Field(max_length=200)
 
 
 def _version_out(row: Discovery) -> DiscoveryVersionOut:
@@ -108,26 +141,27 @@ def _scenes_out(row: Discovery) -> SceneDiscoveryOut:
     status_code=status.HTTP_202_ACCEPTED,
     responses={**_NOT_FOUND, **_INVALID},
 )
-async def run_scenes(project_id: int, session: SessionDep) -> SceneDiscoveryRun:
+async def run_scenes(
+    project_id: int, session: SessionDep, body: SceneRunIn | None = None
+) -> SceneDiscoveryRun:
     """Starts the job that finds the next version from the saved story. If one is already
     waiting or running for the project, its id is returned and no second job is made.
     """
     project = await load_project(session, project_id)
     try:
-        job = await discovery_service.start_run(session, project, KIND)
+        job = await discovery_service.start_run(
+            session,
+            project,
+            KIND,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+        )
     except discovery_service.DiscoveryError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
     return SceneDiscoveryRun(job_id=job.id)
 
 
-@router.get(
-    "/projects/{project_id}/scenes",
-    response_model=SceneDiscoveryState,
-    responses=_NOT_FOUND,
-)
-async def get_scenes(project_id: int, session: SessionDep) -> SceneDiscoveryState:
-    project = await load_project(session, project_id)
+async def _state(session: AsyncSession, project: Project) -> SceneDiscoveryState:
     latest = await discovery_service.latest(session, KIND, project.id)
     versions = await discovery_service.list_versions(session, KIND, project.id)
     job = await store.latest_job(session, project.id, discovery_service.SPECS[KIND].job_type)
@@ -154,7 +188,40 @@ async def get_scenes(project_id: int, session: SessionDep) -> SceneDiscoveryStat
             if latest is not None
             else False
         ),
+        needs_confirmation=(
+            latest is not None and latest.source == discovery_service.SOURCE_MANUAL
+        ),
     )
+
+
+@router.get(
+    "/projects/{project_id}/scenes",
+    response_model=SceneDiscoveryState,
+    responses=_NOT_FOUND,
+)
+async def get_scenes(project_id: int, session: SessionDep) -> SceneDiscoveryState:
+    return await _state(session, await load_project(session, project_id))
+
+
+@router.put(
+    "/projects/{project_id}/scenes",
+    response_model=SceneDiscoveryState,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_scenes(
+    project_id: int, body: SceneSaveIn, session: SessionDep
+) -> SceneDiscoveryState:
+    """Saves the whole edited list of scenes as the next version, written by the user. The
+    story is cut again at each scene's opening words.
+    """
+    project = await load_project(session, project_id)
+    try:
+        await discovery_edits.save_manual_scenes(
+            session, project, [scene.model_dump() for scene in body.scenes]
+        )
+    except discovery_service.DiscoveryError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return await _state(session, project)
 
 
 @router.get(
