@@ -28,6 +28,7 @@ import { SpeechUnitsPanel } from "../components/story/SpeechUnitsPanel";
 import { StageList } from "../components/story/StageList";
 import { StoryBiblePanel } from "../components/story/StoryBiblePanel";
 import { StoryEditor } from "../components/story/StoryEditor";
+import { StoryPipelinePanel } from "../components/story/StoryPipelinePanel";
 import { capitalise } from "../format";
 
 export function ProjectNotFound() {
@@ -84,6 +85,7 @@ export function ProjectPage() {
           </Group>
 
           <StoryEditor project={project} />
+          <StoryPipelinePanel projectId={project.id} />
           <StoryBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
           <DiscoveryPanel
             projectId={project.id}

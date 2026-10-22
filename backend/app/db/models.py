@@ -97,7 +97,8 @@ class Job(Base):
         # repair of a cut between two shots, since revision 0045, and the compilation of a
         # shot's H3 prompt, since revision 0046, and the generation of a shot's clip, since
         # revision 0047, and the render of the story's video, since revision 0048, and the
-        # check of the shots' takes, since revision 0049.
+        # check of the shots' takes, since revision 0049, and the run of the whole story
+        # pipeline, since revision 0050.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -106,7 +107,8 @@ class Job(Base):
             "'write_environment_prompt', 'define_environment', 'define_scene', "
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
             "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
-            "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes')",
+            "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes', "
+            "'story_pipeline')",
             name="type_valid",
         ),
         CheckConstraint(

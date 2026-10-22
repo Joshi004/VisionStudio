@@ -808,8 +808,9 @@ export interface paths {
         put?: never;
         /**
          * Cancel Job
-         * @description Cancels a job that has not started, one the GPU server no longer knows, or a running
-         *     image or video job (which is cancelled on the GPU server first).
+         * @description Cancels a job that has not started, one the GPU server no longer knows, a running
+         *     image or video job (which is cancelled on the GPU server first), or a story pipeline run
+         *     (which also cancels the jobs it made that have not started).
          */
         post: operations["cancel_job_api_jobs__job_id__cancel_post"];
         delete?: never;
@@ -2879,6 +2880,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/story-pipeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Story Pipeline */
+        get: operations["get_story_pipeline_api_projects__project_id__story_pipeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-pipeline/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Story Pipeline
+         * @description Starts the run. If a run is already waiting or running, its job id is returned and no
+         *     second run is made.
+         */
+        post: operations["run_story_pipeline_api_projects__project_id__story_pipeline_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-pipeline/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Story Pipeline
+         * @description Lets a paused run go on.
+         */
+        post: operations["continue_story_pipeline_api_projects__project_id__story_pipeline_continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4304,7 +4363,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline";
             /**
              * Status
              * @enum {string}
@@ -4357,7 +4416,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline";
             /**
              * Status
              * @enum {string}
@@ -5227,6 +5286,104 @@ export interface components {
             /** Discovery Id */
             discovery_id: string;
         };
+        /** PipelineConfirmationOut */
+        PipelineConfirmationOut: {
+            /** Step */
+            step: string;
+            /** Step Label */
+            step_label: string;
+            /** Target */
+            target: string;
+            /** Reason */
+            reason: string;
+        };
+        /** PipelineProblemOut */
+        PipelineProblemOut: {
+            /** Step */
+            step: string;
+            /** Step Label */
+            step_label: string;
+            /** Target */
+            target: string;
+            /** Tries */
+            tries: number;
+            /** Message */
+            message: string;
+        };
+        /** PipelineRunBody */
+        PipelineRunBody: {
+            /** Pause After */
+            pause_after?: string[];
+            /**
+             * Confirm Overwrite
+             * @default false
+             */
+            confirm_overwrite: boolean;
+        };
+        /** PipelineRunOut */
+        PipelineRunOut: {
+            /** Job Id */
+            job_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Steps */
+            steps: components["schemas"]["PipelineStepProgressOut"][];
+            /** Problems */
+            problems: components["schemas"]["PipelineProblemOut"][];
+            /** Warnings */
+            warnings: string[];
+            /** Paused At */
+            paused_at: string | null;
+            /** Pause After */
+            pause_after: string[];
+            /** Confirm Overwrite */
+            confirm_overwrite: boolean;
+        };
+        /** PipelineRunStartedOut */
+        PipelineRunStartedOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /**
+         * PipelineStepOut
+         * @description One step of the pipeline, for the pause boxes and the list.
+         */
+        PipelineStepOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+        };
+        /** PipelineStepProgressOut */
+        PipelineStepProgressOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "skipped" | "failed";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+        };
         /**
          * PoolCapacity
          * @description One of the two shared pools: how many jobs may run in it, and what is in it now.
@@ -5259,7 +5416,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline";
             /** Running */
             running: number;
             /** Queued */
@@ -7361,6 +7518,20 @@ export interface components {
             limit_seconds: number;
             /** Over Limit */
             over_limit: boolean;
+        };
+        /** StoryPipelineOut */
+        StoryPipelineOut: {
+            /** Steps */
+            steps: components["schemas"]["PipelineStepOut"][];
+            run: components["schemas"]["PipelineRunOut"] | null;
+            /** Can Start */
+            can_start: boolean;
+            /** Start Block */
+            start_block: string | null;
+            /** Confirmations */
+            confirmations: components["schemas"]["PipelineConfirmationOut"][];
+            /** Max Tries */
+            max_tries: number;
         };
         /** StoryRenderOut */
         StoryRenderOut: {
@@ -14171,6 +14342,139 @@ export interface operations {
                 };
             };
             /** @description The story cannot be rendered now: a scene's shots are not ready, a shot has no clip, or a clip or a speech file is missing or too short. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_story_pipeline_api_projects__project_id__story_pipeline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoryPipelineOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_story_pipeline_api_projects__project_id__story_pipeline_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineRunBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunStartedOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run would replace what the user chose or wrote, and `confirm_overwrite` is false. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run cannot start now (no story, or another job is waiting or running), an unknown step was named, or there is no paused run. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    continue_story_pipeline_api_projects__project_id__story_pipeline_continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunStartedOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run cannot start now (no story, or another job is waiting or running), an unknown step was named, or there is no paused run. */
             422: {
                 headers: {
                     [name: string]: unknown;

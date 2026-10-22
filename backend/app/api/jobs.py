@@ -22,6 +22,7 @@ from app.jobs import dispatcher, handlers, pools, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
+from app.services import story_pipeline
 
 GPU_URL_KEY = "gpu_api_base_url"
 
@@ -55,6 +56,7 @@ JobType = Literal[
     "generate_shot",
     "render_story",
     "check_shot_takes",
+    "story_pipeline",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]
@@ -256,8 +258,9 @@ async def _cancel_on_server(base_url: str, provider_job_id: str) -> dict[str, An
     },
 )
 async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
-    """Cancels a job that has not started, one the GPU server no longer knows, or a running
-    image or video job (which is cancelled on the GPU server first).
+    """Cancels a job that has not started, one the GPU server no longer knows, a running
+    image or video job (which is cancelled on the GPU server first), or a story pipeline run
+    (which also cancels the jobs it made that have not started).
     """
     job = (await _load_row(session, job_id)).job
     was_not_found = store.is_not_found(job)
@@ -274,6 +277,11 @@ async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
         await store.cancel_job(session, job_id)
     except JobActionError as exc:
         raise HTTPException(exc.status_code, exc.message) from exc
+
+    # Stopping a story pipeline run also cancels the jobs it made that have not started, so a
+    # stopped run leaves no paid work waiting. A job that is already running finishes.
+    if job.type == store.PIPELINE_RUN_TYPE:
+        await story_pipeline.cancel_queued_children(session, job)
 
     # A job that was still uploading may have been submitted while it was being cancelled.
     # Its start notices (`mark_submitted` fails) and cancels it too; this covers the other order.

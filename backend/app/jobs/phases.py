@@ -7,6 +7,7 @@ cancelled or resubmitted), so every label lives here once.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Final
 
 # A job is tried at most this many times after pre-emption (ANALYSIS.md Section 5.8).
@@ -200,6 +201,34 @@ def trimming_shot(number: int, total: int) -> str:
 # `check_shot_takes` is a local job: ffprobe and FFmpeg on this machine.
 def checking_take(number: int, total: int) -> str:
     return f"checking clip {number} of {total}"
+
+
+# --- Running: the story pipeline (PHASE-030) ------------------------------------------------
+# `story_pipeline` is a local job that only starts the jobs of the stages and waits for them.
+_PIPELINE_STEPS_SHOWN: Final = 3
+
+
+def pipeline_progress(done: int, total: int, running: Sequence[tuple[str, int, int]]) -> str:
+    """Where a pipeline run is: "5 of 24 steps done; running: define the characters (2 of 5),
+    extract the events". `running` holds each step that is going on as `(label, done, count)`,
+    where `count` is the number of targets of the step: a step with one target shows no count.
+    """
+    text = f"{done} of {total} steps done"
+    if not running:
+        return text
+    named = [
+        f"{label.lower()} ({targets_done} of {count})" if count > 1 else label.lower()
+        for label, targets_done, count in running[:_PIPELINE_STEPS_SHOWN]
+    ]
+    more = len(running) - _PIPELINE_STEPS_SHOWN
+    if more > 0:
+        named.append(f"{more} more")
+    return f"{text}; running: {', '.join(named)}"
+
+
+def pipeline_paused(label: str) -> str:
+    """The phase of a run that waits for the user to press Continue."""
+    return f"Paused after {label.lower()}: press Continue to go on"
 
 
 # Every phase in which a remote job's result is being fetched and stored.

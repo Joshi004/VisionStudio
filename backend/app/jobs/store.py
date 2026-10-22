@@ -40,6 +40,10 @@ CHARACTER_LAB_NAME = "Character lab"
 # Job types that can be cancelled while they run, because the server has a cancel for them.
 REMOTE_CANCEL_TYPES = frozenset({"lab_video", "lab_image", "generate_shot"})
 
+# The job of one run of the whole story pipeline (PHASE-030). It does no work of its own, only
+# starts the jobs of the stages, so stopping it is always safe.
+PIPELINE_RUN_TYPE = "story_pipeline"
+
 # One backend process, so a module lock is enough to make "create, unless one is active" atomic.
 _create_lock = asyncio.Lock()
 
@@ -62,10 +66,13 @@ class JobRow:
 
 
 def can_cancel(job: Job) -> bool:
-    """A job that has not started, one the server no longer knows, or (for the types that
-    have a cancel on the server) a running one that is not yet fetching its result.
+    """A job that has not started, one the server no longer knows, a run of the story pipeline,
+    or (for the types that have a cancel on the server) a running one that is not yet fetching
+    its result.
     """
     if job.status == "queued" or is_not_found(job):
+        return True
+    if job.status == "running" and job.type == PIPELINE_RUN_TYPE:
         return True
     return (
         job.status == "running"
@@ -251,6 +258,27 @@ async def record_output(session: AsyncSession, job_id: int, output: dict[str, An
     saved = await _update(session, job_id, ("running",), output=output)
     await session.commit()
     return saved
+
+
+async def save_progress(
+    session: AsyncSession,
+    job_id: int,
+    *,
+    phase: str,
+    output: dict[str, Any],
+    provider_job_id: str | None = None,
+) -> bool:
+    """Saves where a long-running job is (a story pipeline run): its phase and output, in one
+    UPDATE, and notes that it was checked. `provider_job_id`, when given, is the marker that
+    makes the dispatcher check the job every tick. It is not an id on any server.
+
+    Does not commit: the caller commits it together with what the run did in the same step.
+    False means the job is no longer running (it was cancelled): the caller rolls back.
+    """
+    values: dict[str, Any] = {"phase": phase, "output": output, "last_checked_at": utcnow()}
+    if provider_job_id is not None:
+        values["provider_job_id"] = provider_job_id
+    return await _update(session, job_id, ("running",), **values)
 
 
 async def record_poll(
