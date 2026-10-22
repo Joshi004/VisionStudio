@@ -113,6 +113,7 @@ export const STORY_STAGES: readonly StoryStage[] = [
     id: "h3-prompts",
     name: "H3 prompts",
     description: "Writes the final prompt for each shot.",
+    available: true,
   },
   {
     id: "shot-generation",

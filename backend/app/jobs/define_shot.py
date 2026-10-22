@@ -46,6 +46,7 @@ from app.services import (
     shot_continuity,
     shot_definition_writer,
     shot_definitions,
+    shot_prompts,
     shot_references,
 )
 from app.services.llm_target import STORY_MODEL_KEY
@@ -292,11 +293,19 @@ class DefineShotHandler(JobHandler):
         # With the references chosen, the shot's generation request is planned by code too
         # (PHASE-025). Its own step for the same reason: a shot that cannot be planned yet (its
         # speech is not ready, say) is left for the user's **Plan**.
+        planned = False
         try:
             async with SessionLocal() as session:
-                await generation_requests.plan_if_ready(session, project_id, read.scene_id, shot_id)
+                planned = await generation_requests.plan_if_ready(
+                    session, project_id, read.scene_id, shot_id
+                )
         except Exception:
             _logger.exception("job %d: the generation request could not be planned", job_id)
+
+        # With the request planned, the shot's final prompt is compiled by the model
+        # (PHASE-026), a job of its own. It never fails this job.
+        if planned:
+            await shot_prompts.queue_after_planning(project_id, read.scene_id, shot_id)
 
         # When this was the last shot of its scene to be defined, the scene's continuity is
         # checked by itself (PHASE-023). A separate step: the definition is stored and this job

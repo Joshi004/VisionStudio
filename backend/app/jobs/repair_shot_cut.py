@@ -53,6 +53,7 @@ from app.services import (
     shot_continuity,
     shot_cut_repair_writer,
     shot_definitions,
+    shot_prompts,
     shot_references,
 )
 from app.services.llm_target import STORY_MODEL_KEY
@@ -322,13 +323,17 @@ class RepairShotCutHandler(JobHandler):
                 _logger.exception("job %d: the references of the shot could not be chosen", job_id)
             # With the references chosen, the shot's generation request is planned by code too
             # (PHASE-025), exactly as after `define_shot`.
+            planned = False
             try:
                 async with SessionLocal() as session:
-                    await generation_requests.plan_if_ready(
+                    planned = await generation_requests.plan_if_ready(
                         session, project_id, scene_id, item["shot_id"]
                     )
             except Exception:
                 _logger.exception("job %d: the generation request could not be planned", job_id)
+            # And with the request planned, the shot's prompt is compiled (PHASE-026).
+            if planned:
+                await shot_prompts.queue_after_planning(project_id, scene_id, item["shot_id"])
         await self._check_again(job_id, project_id, scene_id)
 
     # --- Small helpers ------------------------------------------------------------------

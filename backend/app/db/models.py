@@ -94,7 +94,8 @@ class Job(Base):
         # revision 0035, and look and state resolution, since revision 0036, and speech
         # unit audio, since revision 0039, and shot planning, since revision 0040, and shot
         # definition, since revision 0041, and shot continuity, since revision 0042, and the
-        # repair of a cut between two shots, since revision 0045.
+        # repair of a cut between two shots, since revision 0045, and the compilation of a
+        # shot's H3 prompt, since revision 0046.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -102,7 +103,8 @@ class Job(Base):
             "'define_character', 'discover_relations', 'design_voice', "
             "'write_environment_prompt', 'define_environment', 'define_scene', "
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
-            "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut')",
+            "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
+            "'compile_shot_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -536,6 +538,43 @@ class GenerationRequest(Base):
     version: Mapped[int]
     source: Mapped[str]
     # Always NULL for now: no job makes a request.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotPrompt(Base):
+    """One version of one shot's compiled H3 prompt (PHASE-026, `Path_ahead.md` Section 30).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every
+    compilation is a new row with the next `version` of that shot, and a stored row is never
+    changed. `scene_id` is the slug `id` of the scene inside the project's `scene_discovery`
+    content, `shot_id` is the shot's id inside that scene's shot plan and
+    `generation_request_id` is the request row the prompt was compiled for. `inputs` records
+    what it was built from; `content` holds the finished prompt, the model's pieces, the
+    labels and the warnings.
+    """
+
+    __tablename__ = "shot_prompt"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "shot_id", "version"),
+        Index("idx_shot_prompt_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    # The request row the prompt was compiled for. NULL when that row was deleted.
+    generation_request_id: Mapped[int | None] = mapped_column(
+        ForeignKey("generation_request.id", ondelete="SET NULL"), default=None
+    )
+    version: Mapped[int]
+    source: Mapped[str]
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )

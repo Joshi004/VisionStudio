@@ -178,6 +178,10 @@ SAVING_CONTINUITY_CHECK: Final = "saving the continuity check"
 # `repair_shot_cut` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_CUT_REPAIR: Final = "saving the repaired shots"
 
+# --- Running: shot prompt compilation (PHASE-026) ----------------------------------------
+# `compile_shot_prompt` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_SHOT_PROMPT: Final = "saving the shot prompt"
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

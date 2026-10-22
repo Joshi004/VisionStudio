@@ -2640,6 +2640,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shot Prompts */
+        get: operations["get_shot_prompts_api_projects__project_id__shot_prompts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-prompts/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every shot that has no current prompt and is not already being
+         *     compiled. The shots that cannot be compiled are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__shot_prompts_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-prompts/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scene
+         * @description Starts a job for every shot of one scene that has no current prompt and is not already
+         *     being compiled.
+         */
+        post: operations["run_scene_api_projects__project_id__shot_prompts__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-prompts/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Shot
+         * @description Starts the job that compiles one shot's prompt. If it already has a job waiting or
+         *     running, that job's id is returned and no second job is made.
+         */
+        post: operations["run_shot_api_projects__project_id__shot_prompts__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4065,7 +4145,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt";
             /**
              * Status
              * @enum {string}
@@ -4118,7 +4198,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt";
             /**
              * Status
              * @enum {string}
@@ -5020,7 +5100,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt";
             /** Running */
             running: number;
             /** Queued */
@@ -5148,6 +5228,63 @@ export interface components {
              * @enum {string}
              */
             target_model: "ltx-2.3" | "ltx-2.5" | "minimax-h3";
+        };
+        /** PromptShotSkeletonOut */
+        PromptShotSkeletonOut: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            /** Description */
+            description: string;
+            /** Duration Seconds */
+            duration_seconds: number;
+        };
+        /**
+         * PromptSpeakerOut
+         * @description One `<Audio n>` of the prompt: a line of dialogue and who says it.
+         */
+        PromptSpeakerOut: {
+            /** Speaker */
+            speaker: string;
+            /** Audio Label */
+            audio_label: string;
+            /** Speaker Id */
+            speaker_id: string;
+            /** Unit Id */
+            unit_id: string;
+            /** Visible */
+            visible: boolean;
+            /** Subject Label */
+            subject_label: string | null;
+            /** Cue */
+            cue: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * PromptSubjectOut
+         * @description One `<Subject k>` of the prompt: a character or the place, and the pictures showing it.
+         */
+        PromptSubjectOut: {
+            /** Label */
+            label: string;
+            /** Subject Id */
+            subject_id: string;
+            /** Subject Name */
+            subject_name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "character" | "environment";
+            /** Pictures */
+            pictures: string[];
+            /** Views */
+            views: string[];
         };
         /**
          * QwenLabRunRequest
@@ -5785,6 +5922,22 @@ export interface components {
             can_run: boolean;
         };
         /**
+         * SceneShotPromptsOut
+         * @description One scene of the newest list of scenes.
+         */
+        SceneShotPromptsOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Shots */
+            shots: components["schemas"]["ShotPromptEntryOut"][];
+        };
+        /**
          * SceneShotReferencesOut
          * @description One scene of the newest list of scenes.
          */
@@ -6244,6 +6397,103 @@ export interface components {
         };
         /** ShotPlansRunOut */
         ShotPlansRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** ShotPromptContentOut */
+        ShotPromptContentOut: {
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "reference" | "generate";
+            /** Endpoint */
+            endpoint: string;
+            /** Prompt */
+            prompt: string;
+            /** Subjects */
+            subjects: components["schemas"]["PromptSubjectOut"][];
+            /** Speakers */
+            speakers: components["schemas"]["PromptSpeakerOut"][];
+            /** Warnings */
+            warnings: string[];
+            /** Word Count */
+            word_count: number;
+            /** Char Count */
+            char_count: number;
+        };
+        /** ShotPromptEntryOut */
+        ShotPromptEntryOut: {
+            shot: components["schemas"]["PromptShotSkeletonOut"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_compiled" | "compiled" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /**
+             * Request Status
+             * @enum {string}
+             */
+            request_status: "not_planned" | "planned" | "out_of_date";
+            prompt: components["schemas"]["ShotPromptContentOut"] | null;
+            version: components["schemas"]["ShotPromptVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotPromptSkippedOut */
+        ShotPromptSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string | null;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * ShotPromptVersionOut
+         * @description The provenance of the newest prompt of a shot (D-3).
+         */
+        ShotPromptVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ShotPromptsOut */
+        ShotPromptsOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Entries */
+            entries: components["schemas"]["SceneShotPromptsOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /** ShotPromptsRunManyOut */
+        ShotPromptsRunManyOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["ShotPromptSkippedOut"][];
+        };
+        /** ShotPromptsRunOneOut */
+        ShotPromptsRunOneOut: {
             /** Job Id */
             job_id: number;
         };
@@ -12992,6 +13242,169 @@ export interface operations {
                 };
             };
             /** @description The shot's references are not chosen and current, its speech is not ready, its length is outside the limits, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_shot_prompts_api_projects__project_id__shot_prompts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPromptsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__shot_prompts_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPromptsRunManyOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's generation request is not planned and current, the shot's specification cannot be read now, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_scene_api_projects__project_id__shot_prompts__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPromptsRunManyOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's generation request is not planned and current, the shot's specification cannot be read now, or the scene or shot is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_shot_api_projects__project_id__shot_prompts__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotPromptsRunOneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's generation request is not planned and current, the shot's specification cannot be read now, or the scene or shot is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -20,6 +20,7 @@ import { ScenesPanel } from "../components/story/ScenesPanel";
 import { GenerationRequestsPanel } from "../components/story/GenerationRequestsPanel";
 import { ShotDefinitionsPanel } from "../components/story/ShotDefinitionsPanel";
 import { ShotPlansPanel } from "../components/story/ShotPlansPanel";
+import { ShotPromptsPanel } from "../components/story/ShotPromptsPanel";
 import { ShotReferencesPanel } from "../components/story/ShotReferencesPanel";
 import { SpeechUnitsPanel } from "../components/story/SpeechUnitsPanel";
 import { StageList } from "../components/story/StageList";
@@ -110,6 +111,7 @@ export function ProjectPage() {
           <ShotDefinitionsPanel projectId={project.id} />
           <ShotReferencesPanel projectId={project.id} />
           <GenerationRequestsPanel projectId={project.id} />
+          <ShotPromptsPanel projectId={project.id} />
           <StageList />
         </>
       )}

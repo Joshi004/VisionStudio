@@ -588,6 +588,33 @@ async def cut_context(
     return CutContext(shots=shots)
 
 
+async def shot_contexts(
+    session: AsyncSession, project: Project, keys: list[tuple[str, str]]
+) -> dict[tuple[str, str], dict[str, Any] | str]:
+    """What the model is shown about each of these `(scene id, shot id)` shots, as the fields of
+    `_shot_fields` (the scene and its definition, the shot with its neighbours, its events and
+    speech, the characters with their resolved looks, the environment with its resolved state
+    and the `inputs` of D-3). Loaded once for all of them. A shot that cannot be read now is
+    given as the reason (a sentence for the user) instead. Used by the prompt compilation
+    (PHASE-026), which writes its prompt from the same material the shot was defined from.
+    """
+    loaded = await _load(session, project)
+    found: dict[tuple[str, str], dict[str, Any] | str] = {}
+    for scene_id, shot_id in keys:
+        if scene_id not in loaded.plan_by_scene:
+            found[(scene_id, shot_id)] = f"There is no scene '{scene_id}' in the newest list."
+            continue
+        refusal = _scene_refusal(loaded, scene_id)
+        if refusal is not None:
+            found[(scene_id, shot_id)] = refusal
+            continue
+        try:
+            found[(scene_id, shot_id)] = _shot_fields(loaded, project.id, scene_id, shot_id)
+        except ShotDefinitionsError as exc:
+            found[(scene_id, shot_id)] = str(exc)
+    return found
+
+
 async def newest_row(
     session: AsyncSession, project_id: int, scene_id: str, shot_id: str
 ) -> ShotDefinition | None:

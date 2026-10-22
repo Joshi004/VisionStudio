@@ -33,7 +33,7 @@ from app.api.errors import ErrorResponse
 from app.api.projects import load_project
 from app.db.models import LabImage, SpeechUnitAudio
 from app.db.session import SessionDep
-from app.services import generation_requests, storage
+from app.services import generation_requests, shot_prompts, storage
 from app.services.generation_requests import SceneEntry, ShotEntry
 
 router = APIRouter()
@@ -296,6 +296,14 @@ def _refused(exc: generation_requests.GenerationRequestsError) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
 
+async def _compile_prompts(project_id: int, result: generation_requests.PlanResult) -> None:
+    """Queues the prompt of each shot whose request was just planned (PHASE-026). It never
+    fails the press: a shot that cannot be compiled yet is left for the user's **Compile**.
+    """
+    for item in result.planned:
+        await shot_prompts.queue_after_planning(project_id, item.scene_id, item.shot_id)
+
+
 @router.get(
     "/projects/{project_id}/generation-requests",
     response_model=GenerationRequestsOut,
@@ -326,6 +334,7 @@ async def run_all(project_id: int, session: SessionDep) -> GenerationRequestsRun
         result = await generation_requests.plan_all(session, project)
     except generation_requests.GenerationRequestsError as exc:
         raise _refused(exc) from exc
+    await _compile_prompts(project_id, result)
     return _run_out(result)
 
 
@@ -343,6 +352,7 @@ async def run_scene(
         result = await generation_requests.plan_scene(session, project, scene_id)
     except generation_requests.GenerationRequestsError as exc:
         raise _refused(exc) from exc
+    await _compile_prompts(project_id, result)
     return _run_out(result)
 
 
@@ -360,4 +370,5 @@ async def run_shot(
         result = await generation_requests.plan_shot(session, project, scene_id, shot_id)
     except generation_requests.GenerationRequestsError as exc:
         raise _refused(exc) from exc
+    await _compile_prompts(project_id, result)
     return _run_out(result)

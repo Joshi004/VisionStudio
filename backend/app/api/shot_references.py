@@ -32,7 +32,7 @@ from app.api.errors import ErrorResponse
 from app.api.projects import load_project
 from app.db.models import LabImage
 from app.db.session import SessionDep
-from app.services import generation_requests, shot_references, storage
+from app.services import generation_requests, shot_prompts, shot_references, storage
 from app.services.shot_references import SceneEntry, ShotEntry
 
 _logger = logging.getLogger(__name__)
@@ -263,10 +263,11 @@ async def _plan_requests(
 ) -> None:
     """Plans the generation request of each shot whose references were just chosen (PHASE-025).
     A shot that cannot be planned yet is left for the user's **Plan** and never fails the press.
+    A shot that was planned has its prompt compiled next (PHASE-026).
     """
     for item in result.selected:
         try:
-            await generation_requests.plan_if_ready(
+            planned = await generation_requests.plan_if_ready(
                 session, project_id, item.scene_id, item.shot_id
             )
         except Exception:
@@ -275,6 +276,9 @@ async def _plan_requests(
                 item.shot_id,
                 item.scene_id,
             )
+            continue
+        if planned:
+            await shot_prompts.queue_after_planning(project_id, item.scene_id, item.shot_id)
 
 
 @router.get(
