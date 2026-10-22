@@ -1189,6 +1189,18 @@ def _failed_shot_reason(shot: shot_takes.ShotEntry) -> str:
                 "Plan the scene's shots again."
             )
         return f"No take passed its check: {text} Generate the shot from its own button to retry."
+    dialogue = newest.dialogue_result
+    if isinstance(dialogue, dict) and dialogue.get("passed") is False:
+        messages = [
+            str(problem["message"])
+            for problem in dialogue.get("problems", [])
+            if isinstance(problem, dict) and problem.get("message")
+        ]
+        text = " ".join(messages) or "The speech in the clip does not match the dialogue."
+        return (
+            f"No take passed its dialogue check: {text} "
+            "Generate the shot from its own button to retry."
+        )
     error = _failure(newest.job)
     if error is not None:
         return f"The clip could not be made: {error}. Generate the shot again from its own button."
@@ -1207,7 +1219,10 @@ async def _evaluate_shot_generation(
         scene_id = scene.item["id"]
         for shot in scene.shots:
             shot_id = shot.shot["id"]
-            generating = any(take.state == "generating" for take in shot.takes)
+            # A clip being made, or a clip whose speech is being compared with its dialogue.
+            generating = any(
+                take.state in ("generating", "checking_dialogue") for take in shot.takes
+            )
             unchecked = shot.status == "unchecked"
             done = shot.status == "generated" and not generating
             active = generating or (unchecked and checking)

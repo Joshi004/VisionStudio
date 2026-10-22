@@ -52,7 +52,7 @@ _INVALID = {
 }
 
 Status = Literal["not_generated", "generated", "out_of_date", "failed", "unchecked"]
-TakeState = Literal["generating", "ready", "failed"]
+TakeState = Literal["generating", "checking_dialogue", "ready", "failed"]
 PromptStatus = Literal["not_compiled", "compiled", "out_of_date"]
 ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
 ProblemKind = Literal["clip", "plan"]
@@ -71,6 +71,30 @@ class TakeValidationOut(BaseModel):
     passed: bool
     kind: ProblemKind | None
     problems: list[TakeProblemOut]
+    checked_at: datetime | None
+
+
+class DialogueLineOut(BaseModel):
+    """One dialogue line the clip must contain."""
+
+    unit_id: str
+    label: str
+    text: str
+    starts_in_shot_seconds: float
+
+
+class TakeDialogueOut(BaseModel):
+    """The speech-recognition check of a take with dialogue (PHASE-031): what Parakeet heard in
+    the clip next to the shot's lines. `similarity` and `threshold` are percents.
+    """
+
+    passed: bool
+    similarity: float
+    threshold: int
+    problems: list[TakeProblemOut]
+    # The intended words and the heard words after normalizing (lower case, no punctuation).
+    expected_text: str
+    heard_text: str
     checked_at: datetime | None
 
 
@@ -99,6 +123,13 @@ class ShotTakeOut(BaseModel):
     validation: TakeValidationOut | None
     # 0 for a take somebody asked for; n for the nth automatic retry of a failed clip.
     retry_attempt: int
+    # The lines of dialogue the clip must contain. Empty for a shot with no dialogue, whose take
+    # is never transcribed.
+    dialogue: list[DialogueLineOut]
+    # The speech-recognition check, or None when it was not made (yet).
+    dialogue_check: TakeDialogueOut | None
+    # The newest job of the take's dialogue check, whatever its status.
+    dialogue_job: DiscoveryJobOut | None
 
 
 class TakeShotSkeletonOut(BaseModel):
@@ -199,6 +230,26 @@ def _validation_out(validation: dict[str, Any] | None) -> TakeValidationOut | No
     )
 
 
+def _dialogue_check_out(result: dict[str, Any] | None) -> TakeDialogueOut | None:
+    if result is None:
+        return None
+    checked_at = result.get("checked_at")
+    similarity = result.get("similarity")
+    threshold = result.get("threshold")
+    return TakeDialogueOut(
+        passed=result.get("passed") is True,
+        similarity=float(similarity) if isinstance(similarity, int | float) else 0.0,
+        threshold=threshold if isinstance(threshold, int) else 0,
+        problems=[
+            TakeProblemOut(code=problem["code"], message=problem["message"])
+            for problem in result.get("problems", [])
+        ],
+        expected_text=str(result.get("expected_text", "")),
+        heard_text=str(result.get("heard_text", "")),
+        checked_at=datetime.fromisoformat(checked_at) if isinstance(checked_at, str) else None,
+    )
+
+
 def _take_out(entry: TakeEntry) -> ShotTakeOut:
     row = entry.row
     audio = row.audio
@@ -221,6 +272,17 @@ def _take_out(entry: TakeEntry) -> ShotTakeOut:
         job=_job_out(entry.job),
         validation=_validation_out(entry.validation),
         retry_attempt=entry.retry_attempt,
+        dialogue=[
+            DialogueLineOut(
+                unit_id=line.unit_id,
+                label=line.label,
+                text=line.text,
+                starts_in_shot_seconds=line.starts_in_shot_seconds,
+            )
+            for line in entry.dialogue
+        ],
+        dialogue_check=_dialogue_check_out(entry.dialogue_result),
+        dialogue_job=_job_out(entry.dialogue_job),
     )
 
 

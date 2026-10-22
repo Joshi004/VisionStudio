@@ -98,7 +98,8 @@ class Job(Base):
         # shot's H3 prompt, since revision 0046, and the generation of a shot's clip, since
         # revision 0047, and the render of the story's video, since revision 0048, and the
         # check of the shots' takes, since revision 0049, and the run of the whole story
-        # pipeline, since revision 0050.
+        # pipeline, since revision 0050, and the speech-recognition check of a take's
+        # dialogue, since revision 0051.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -108,7 +109,7 @@ class Job(Base):
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
             "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
             "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes', "
-            "'story_pipeline')",
+            "'story_pipeline', 'check_take_dialogue')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -636,6 +637,10 @@ class ShotTake(Base):
     # The technical check of the clip (PHASE-029, `services/take_validation.py`). NULL: not
     # checked. Only a take that passed is selected by itself, selected by the user or rendered.
     validation: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The speech-recognition check of the shot's dialogue (PHASE-031,
+    # `services/dialogue_check.py`). NULL: not checked, and always NULL for a take whose shot
+    # carries no dialogue. A take with dialogue is selected only when this passed too.
+    dialogue_check: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     selected_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 

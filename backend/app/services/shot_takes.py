@@ -20,6 +20,12 @@ run side by side when the GPU pool allows (`store.create_job` with `dedupe_key`)
   that fails for a reason a new seed can fix is generated again by itself, up to the
   `shot_take_max_retries` setting (`queue_retry`). The takes made before the checks existed are
   checked by the `check_shot_takes` job (`start_check`).
+- **A take whose shot carries dialogue is checked a second time (PHASE-031).** After its clip
+  passes the technical check, the `check_take_dialogue` job transcribes it with Parakeet and
+  compares the heard words with the shot's dialogue lines (`dialogue_check.py`); the result is on
+  `shot_take.dialogue_check`. Such a take is selected, by the job or by the user, only when both
+  checks passed, and a take whose speech does not match is generated again by `queue_retry`, with
+  the same limit as any failed clip. A shot with no dialogue is never transcribed.
 - `state` is what the story workspace shows. **Out of date is worked out on every read** and never
   stored: the shot's prompt was compiled again since the take was made, or is itself out of date
   (which already covers the request, the references and the definition).
@@ -52,6 +58,7 @@ from app.jobs import store
 from app.providers import contract_guard, video_generator
 from app.services import (
     api_contract,
+    dialogue_check,
     ffmpeg,
     shot_prompts,
     take_validation,
@@ -67,6 +74,10 @@ _logger = logging.getLogger(__name__)
 JOB_TYPE: Final = "generate_shot"
 # The local job that checks the takes that have no stored check (PHASE-029).
 CHECK_JOB_TYPE: Final = "check_shot_takes"
+# The GPU job that transcribes one take's clip with Parakeet and compares it with the shot's
+# dialogue lines (PHASE-031). One per take: its input holds `take_id`, which is also its dedupe key.
+DIALOGUE_JOB_TYPE: Final = "check_take_dialogue"
+DIALOGUE_DEDUPE_KEY: Final = "take_id"
 # Two presses on one shot make one job; two shots run side by side. The key is `scene/shot`.
 DEDUPE_KEY: Final = "shot_key"
 
@@ -82,9 +93,11 @@ REQUEST_KIND: Final = shot_prompts.REQUEST_KIND
 # check (PHASE-029) or its job ended without a clip, and nothing is being generated. `unchecked`:
 # no take passed, and a clip that was made before the checks existed has not been checked yet.
 Status = Literal["not_generated", "generated", "out_of_date", "failed", "unchecked"]
-# `generating`: the take's job is waiting or running. `ready`: the clip is stored. `failed`: the
-# job ended without a clip (failed or cancelled).
-TakeState = Literal["generating", "ready", "failed"]
+# `generating`: the take's job is waiting or running. `checking_dialogue`: the clip is stored and
+# passed its technical check, and the job that compares its speech with the shot's dialogue is
+# waiting or running (PHASE-031). `ready`: the clip is stored. `failed`: the job ended without a
+# clip (failed or cancelled).
+TakeState = Literal["generating", "checking_dialogue", "ready", "failed"]
 
 
 class ShotTakesError(ValueError):
@@ -106,6 +119,16 @@ class TakeEntry:
     validation: dict[str, Any] | None
     # 0 for a take somebody asked for; n for the nth automatic retry of a failed clip.
     retry_attempt: int
+    # The dialogue lines the shot carried when the take was made. Empty: nothing to verify.
+    dialogue: list[dialogue_check.DialogueLine]
+    # The speech-recognition check as stored (`dialogue_check`), or None when it was not made.
+    dialogue_result: dict[str, Any] | None
+    # The newest job of the take's dialogue check, whatever its status.
+    dialogue_job: Job | None
+    # True when the clip passed its technical check but still needs a check that has not been
+    # made (its technical check for a clip older than PHASE-029, its dialogue check for a take
+    # with dialogue) and no job is making it now.
+    unchecked: bool
 
 
 @dataclass(frozen=True)
@@ -182,12 +205,44 @@ def _is_ready(row: ShotTake) -> bool:
     return row.path is not None
 
 
-def _take_state(row: ShotTake, job: Job | None) -> TakeState:
+def _take_state(row: ShotTake, job: Job | None, *, checking_dialogue: bool) -> TakeState:
     if _is_ready(row):
-        return "ready"
+        return "checking_dialogue" if checking_dialogue else "ready"
     if job is not None and job.status in store.ACTIVE_STATUSES:
         return "generating"
     return "failed"
+
+
+def _dialogue_of(
+    row: ShotTake, request_content: dict[str, Any] | None
+) -> list[dialogue_check.DialogueLine]:
+    """The dialogue lines a take was meant to carry: the ones recorded on it when it was made,
+    else (a take made before PHASE-031) those of the generation request it was made from.
+    """
+    recorded = row.inputs.get("dialogue") if isinstance(row.inputs, dict) else None
+    if isinstance(recorded, list):
+        return dialogue_check.lines_of(recorded)
+    if isinstance(request_content, dict):
+        return dialogue_check.lines_of(request_content.get("audios"))
+    return []
+
+
+def _needs_dialogue_check(row: ShotTake, lines: list[dialogue_check.DialogueLine]) -> bool:
+    """A take with dialogue whose clip passed its technical check and whose speech has not been
+    compared with the lines yet.
+    """
+    return bool(lines) and take_validation.passed(row.validation) and row.dialogue_check is None
+
+
+def _usable(row: ShotTake, lines: list[dialogue_check.DialogueLine]) -> bool:
+    """A take that may be a shot's selected take: its clip is stored and passed its technical
+    check, and, when the shot carries dialogue, its speech passed the dialogue check.
+    """
+    return (
+        _is_ready(row)
+        and take_validation.passed(row.validation)
+        and (not lines or dialogue_check.passed(row.dialogue_check))
+    )
 
 
 def _retry_attempt(row: ShotTake) -> int:
@@ -196,17 +251,16 @@ def _retry_attempt(row: ShotTake) -> int:
     return attempt if isinstance(attempt, int) and not isinstance(attempt, bool) else 0
 
 
-def _selected_id(rows: list[ShotTake]) -> int | None:
-    """The id of the shot's selected take: its ready take that passed its technical check, with
-    the newest `selected_at`. A take that failed or was never checked is never selected.
+def _selected_id(
+    rows: list[ShotTake], lines_by_take: dict[int, list[dialogue_check.DialogueLine]]
+) -> int | None:
+    """The id of the shot's selected take: its ready take that passed its technical check (and,
+    with dialogue, its dialogue check), with the newest `selected_at`. A take that failed or was
+    never checked is never selected.
     """
     newest: ShotTake | None = None
     for row in rows:
-        if (
-            not _is_ready(row)
-            or row.selected_at is None
-            or not take_validation.passed(row.validation)
-        ):
+        if row.selected_at is None or not _usable(row, lines_by_take.get(row.id, [])):
             continue
         if (
             newest is None
@@ -264,7 +318,50 @@ def _refusal(prompt: shot_prompts.ShotEntry, takes: list[TakeEntry]) -> str | No
         return "The generation request of this shot is not current. Plan it again first."
     if any(take.state == "generating" for take in takes):
         return "This shot is already being generated."
+    if any(take.state == "checking_dialogue" for take in takes):
+        return "The speech in this shot's newest clip is being checked against its dialogue."
     return None
+
+
+async def _requests_of(session: AsyncSession, rows: list[ShotTake]) -> dict[int, dict[str, Any]]:
+    """The content of the generation request each take was made from, by request id."""
+    ids = {row.generation_request_id for row in rows if row.generation_request_id is not None}
+    if not ids:
+        return {}
+    statement = select(GenerationRequest.id, GenerationRequest.content).where(
+        GenerationRequest.id.in_(ids)
+    )
+    return {
+        request_id: content
+        for request_id, content in (await session.execute(statement)).all()
+        if isinstance(content, dict)
+    }
+
+
+async def _dialogue_jobs(session: AsyncSession, project_id: int) -> dict[int, Job]:
+    """The newest dialogue-check job of each take of the project, by take id."""
+    statement = (
+        select(Job)
+        .where(Job.project_id == project_id, Job.type == DIALOGUE_JOB_TYPE)
+        .order_by(Job.id)
+        .execution_options(populate_existing=True)
+    )
+    newest: dict[int, Job] = {}
+    for job in (await session.execute(statement)).scalars():
+        take_id = job.input.get(DIALOGUE_DEDUPE_KEY) if isinstance(job.input, dict) else None
+        if isinstance(take_id, int) and not isinstance(take_id, bool):
+            newest[take_id] = job  # ascending ids, so the last one is the newest
+    return newest
+
+
+async def dialogue_lines(session: AsyncSession, row: ShotTake) -> list[dialogue_check.DialogueLine]:
+    """The dialogue lines a take was meant to carry (see `_dialogue_of`)."""
+    request_row = (
+        await session.get(GenerationRequest, row.generation_request_id)
+        if row.generation_request_id is not None
+        else None
+    )
+    return _dialogue_of(row, request_row.content if request_row is not None else None)
 
 
 async def state(session: AsyncSession, project: Project) -> ShotTakesState:
@@ -273,26 +370,64 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
     """
     prompts = await shot_prompts.state(session, project)
     grouped = await _takes_by_shot(session, project.id)
-    jobs = await _jobs_of(session, [row for rows in grouped.values() for row in rows])
+    all_rows = [row for rows in grouped.values() for row in rows]
+    jobs = await _jobs_of(session, all_rows)
+    requests = await _requests_of(session, all_rows)
+    dialogue_jobs = await _dialogue_jobs(session, project.id)
+    lines_by_take = {
+        row.id: _dialogue_of(
+            row, requests.get(row.generation_request_id) if row.generation_request_id else None
+        )
+        for row in all_rows
+    }
+
+    def checking(row: ShotTake) -> bool:
+        """A take with dialogue that is waiting for its dialogue check to finish."""
+        job = dialogue_jobs.get(row.id)
+        return (
+            job is not None
+            and job.status in store.ACTIVE_STATUSES
+            and _needs_dialogue_check(row, lines_by_take[row.id])
+        )
+
+    def _needs_a_check(row: ShotTake) -> bool:
+        return (
+            _is_ready(row)
+            and not checking(row)
+            and (row.validation is None or _needs_dialogue_check(row, lines_by_take[row.id]))
+        )
+
     entries: list[SceneEntry] = []
     for scene in prompts.entries:
         scene_id = scene.item["id"]
         shots: list[ShotEntry] = []
         for prompt in scene.shots:
             rows = grouped.get(_shot_key(scene_id, prompt.shot["id"]), [])
-            selected_id = _selected_id(rows)
-            takes = [
-                TakeEntry(
-                    row=row,
-                    job=jobs.get(row.job_id) if row.job_id is not None else None,
-                    state=_take_state(row, jobs.get(row.job_id) if row.job_id else None),
-                    selected=row.id == selected_id,
-                    reasons=_take_reasons(row, prompt) if _is_ready(row) else [],
-                    validation=row.validation if isinstance(row.validation, dict) else None,
-                    retry_attempt=_retry_attempt(row),
+            selected_id = _selected_id(rows, lines_by_take)
+            takes = []
+            for row in rows:
+                lines = lines_by_take[row.id]
+                takes.append(
+                    TakeEntry(
+                        row=row,
+                        job=jobs.get(row.job_id) if row.job_id is not None else None,
+                        state=_take_state(
+                            row,
+                            jobs.get(row.job_id) if row.job_id else None,
+                            checking_dialogue=checking(row),
+                        ),
+                        selected=row.id == selected_id,
+                        reasons=_take_reasons(row, prompt) if _is_ready(row) else [],
+                        validation=row.validation if isinstance(row.validation, dict) else None,
+                        retry_attempt=_retry_attempt(row),
+                        dialogue=lines,
+                        dialogue_result=(
+                            row.dialogue_check if isinstance(row.dialogue_check, dict) else None
+                        ),
+                        dialogue_job=dialogue_jobs.get(row.id),
+                        unchecked=_needs_a_check(row),
+                    )
                 )
-                for row in rows
-            ]
             status: Status = "not_generated"
             reasons: list[str] = []
             selected = next((take for take in takes if take.selected), None)
@@ -300,8 +435,7 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                 reasons = selected.reasons
                 status = "out_of_date" if reasons else "generated"
             elif takes and not _already_generating_takes(takes):
-                has_unchecked = any(_is_ready(t.row) and t.validation is None for t in takes)
-                status = "unchecked" if has_unchecked else "failed"
+                status = "unchecked" if any(take.unchecked for take in takes) else "failed"
             blocked = _refusal(prompt, takes)
             shots.append(
                 ShotEntry(
@@ -321,12 +455,8 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
         scenes_version=prompts.scenes_version,
         entries=entries,
         blocked_reason=prompts.blocked_reason,
-        unchecked_count=sum(
-            1
-            for rows in grouped.values()
-            for row in rows
-            if _is_ready(row) and row.validation is None
-        ),
+        # Every take of the project, also one of a shot that is not in the newest plan.
+        unchecked_count=sum(1 for row in all_rows if _needs_a_check(row)),
         check_job=await store.latest_job(session, project.id, CHECK_JOB_TYPE),
         max_retries=await settings_service.get_int(
             session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY
@@ -335,7 +465,8 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
 
 
 def _already_generating_takes(takes: list[TakeEntry]) -> bool:
-    return any(take.state == "generating" for take in takes)
+    """A take's clip is being made, or its dialogue is being checked."""
+    return any(take.state in ("generating", "checking_dialogue") for take in takes)
 
 
 # --- Starting runs ------------------------------------------------------------------------
@@ -522,6 +653,8 @@ async def _queue(
             "endpoint": content["endpoint"],
             "num_frames": content["num_frames"],
             "target_seconds": content["target_seconds"],
+            # The lines the clip must contain (PHASE-031); empty for a shot with no dialogue.
+            "dialogue": dialogue_check.lines_as_json(dialogue_check.lines_of(content["audios"])),
             # Only a take made by the automatic retry of a failed clip has this (PHASE-029).
             **({"retry": retry} if retry is not None else {}),
         },
@@ -682,6 +815,17 @@ async def select_take(
             "This take failed its technical check, so it cannot be selected: "
             + _problem_text(take.validation)
         )
+    lines = await dialogue_lines(session, take)
+    if lines and take.dialogue_check is None:
+        raise ShotTakesError(
+            "The speech in this take has not been checked against the dialogue yet. "
+            "Wait for the check, or press Check takes."
+        )
+    if lines and not dialogue_check.passed(take.dialogue_check):
+        raise ShotTakesError(
+            "This take failed its dialogue check, so it cannot be selected: "
+            + _problem_text(take.dialogue_check)
+        )
     take.selected_at = await selection_time(session, project.id, scene_id, shot_id)
     await session.commit()
     return take
@@ -788,18 +932,39 @@ async def judge_take(
 # --- Retrying a failed clip ---------------------------------------------------------------
 
 
+def _retryable_failure(take: ShotTake) -> dict[str, Any] | None:
+    """The stored check that failed the take for a reason another seed can fix: its technical
+    check (`kind` is `clip`), or, when that passed, its dialogue check (PHASE-031). None when the
+    take did not fail, was not checked, or failed because of the plan.
+    """
+    validation = take.validation
+    if not isinstance(validation, dict):
+        return None
+    if validation.get("passed") is False:
+        return validation if validation.get("kind") == "clip" else None
+    check = take.dialogue_check
+    if (
+        validation.get("passed") is True
+        and isinstance(check, dict)
+        and check.get("passed") is False
+        and check.get("kind") == "clip"
+    ):
+        return check
+    return None
+
+
 async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
-    """Queues another take of a shot whose take `take_id` failed its technical check, with a new
-    seed, and commits. Returns the job, or None when no retry is made: the clip did not fail for
-    a reason another seed can fix (`kind` is not `clip`), the tries are used up
-    (`shot_take_max_retries`), the take is not the shot's newest take any more, or the shot
+    """Queues another take of a shot whose take `take_id` failed its technical check or its
+    dialogue check, with a new seed, and commits. Returns the job, or None when no retry is made:
+    the take did not fail for a reason another seed can fix (`kind` is not `clip`), the tries are
+    used up (`shot_take_max_retries`), the take is not the shot's newest take any more, or the shot
     cannot be generated now (its prompt or request changed meanwhile; the user presses Generate).
     """
     take = await session.get(ShotTake, take_id)
-    if take is None or not isinstance(take.validation, dict):
+    if take is None:
         return None
-    validation = take.validation
-    if validation.get("passed") is not False or validation.get("kind") != "clip":
+    validation = _retryable_failure(take)
+    if validation is None:
         return None
     attempt = _retry_attempt(take)
     max_tries = await settings_service.get_int(session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY)
@@ -859,17 +1024,66 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
 # --- Checking takes made before the checks existed -----------------------------------------
 
 
-async def start_check(session: AsyncSession, project: Project) -> Job:
-    """Queues the job that checks every ready take of the project that has no stored check, and
-    commits. If that job is already waiting or running, it is returned. Raises ShotTakesError
-    when no take needs a check.
+async def takes_needing_a_check(session: AsyncSession, project_id: int) -> list[ShotTake]:
+    """The ready takes of a project that still need a check and have no job making it: a clip
+    with no technical check (made before PHASE-029), or a take with dialogue that passed its
+    technical check and whose speech was never compared with the lines (PHASE-031).
     """
-    statement = select(func.count(ShotTake.id)).where(
-        ShotTake.project_id == project.id,
-        ShotTake.path.is_not(None),
-        ShotTake.validation.is_(None),
+    statement = (
+        select(ShotTake)
+        .where(ShotTake.project_id == project_id, ShotTake.path.is_not(None))
+        .order_by(ShotTake.id)
+        .execution_options(populate_existing=True)
     )
-    if not (await session.execute(statement)).scalar_one():
+    rows = list((await session.execute(statement)).scalars())
+    requests = await _requests_of(session, rows)
+    dialogue_jobs = await _dialogue_jobs(session, project_id)
+    needing: list[ShotTake] = []
+    for row in rows:
+        if row.validation is None:
+            needing.append(row)
+            continue
+        request_id = row.generation_request_id
+        lines = _dialogue_of(row, requests.get(request_id) if request_id is not None else None)
+        job = dialogue_jobs.get(row.id)
+        working = job is not None and job.status in store.ACTIVE_STATUSES
+        if _needs_dialogue_check(row, lines) and not working:
+            needing.append(row)
+    return needing
+
+
+async def queue_dialogue_check(
+    session: AsyncSession, take: ShotTake, *, commit: bool = True
+) -> tuple[Job, bool]:
+    """Queues the job that compares the speech in a take's clip with the shot's dialogue lines.
+    Returns `(job, created)`: the job already checking the take when it was not created. With
+    `commit=False` the job is only flushed, so the caller saves it with the take.
+    """
+    job, created = await store.create_job(
+        session,
+        project_id=take.project_id,
+        type=DIALOGUE_JOB_TYPE,
+        provider="gpu",
+        input={"requested": DIALOGUE_JOB_TYPE, DIALOGUE_DEDUPE_KEY: take.id},
+        commit=commit,
+        dedupe_key=DIALOGUE_DEDUPE_KEY,
+    )
+    if created:
+        _logger.info(
+            "take %d of project %d: dialogue check queued as job %d",
+            take.id,
+            take.project_id,
+            job.id,
+        )
+    return job, created
+
+
+async def start_check(session: AsyncSession, project: Project) -> Job:
+    """Queues the job that checks every ready take of the project that still needs a check (no
+    technical check, or, with dialogue, no dialogue check), and commits. If that job is already
+    waiting or running, it is returned. Raises ShotTakesError when no take needs a check.
+    """
+    if not await takes_needing_a_check(session, project.id):
         raise ShotTakesError("Every clip of this project has been checked already.")
     job, created = await store.create_job(
         session,

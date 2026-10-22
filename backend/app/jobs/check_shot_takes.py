@@ -7,8 +7,11 @@ This local job reads each such take's stored clip with ffprobe, decodes it to th
 with the same rules (`services/shot_takes.judge_take`) and writes the result on the take.
 
 It only writes `validation`. It never changes `selected_at` (a take that passes is the shot's
-selected take again if it was the newest choice), and it never starts a GPU run: a clip that
+selected take again if it was the newest choice), and it never starts a video run: a clip that
 fails here is shown as failed and the owner decides whether to generate the shot again.
+
+Since PHASE-031 it also queues the `check_take_dialogue` job (a small Parakeet run) for every take
+whose shot carries dialogue, whose clip passed and whose speech was never compared with the lines.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, ShotTake
 from app.db.session import SessionLocal
-from app.jobs import phases, store
+from app.jobs import dispatcher, phases, store
 from app.jobs.handlers import JobHandler
 from app.services import shot_takes, take_validation
 from app.services.storage import StorageError, get_storage
@@ -67,15 +70,35 @@ class CheckShotTakesHandler(JobHandler):
             else:
                 failed.append(take_id)
 
+        # A take with dialogue whose clip passes is not selectable until its speech has been
+        # compared with the lines (PHASE-031): queue that check for each such take, the ones just
+        # checked and the ones that passed earlier and never had it.
+        dialogue_checks = 0
+        async with SessionLocal() as session:
+            for take in await shot_takes.takes_needing_a_check(session, project_id):
+                if take.validation is None:
+                    continue
+                _job, created = await shot_takes.queue_dialogue_check(session, take)
+                dialogue_checks += 1 if created else 0
+        if dialogue_checks:
+            dispatcher.nudge()
+
         output: dict[str, Any] = {
             "checked": len(take_ids),
             "passed": passed,
             "failed_take_ids": failed,
+            "dialogue_checks_queued": dialogue_checks,
         }
         async with SessionLocal() as session:
             await store.finish_job(session, job_id, output)
             await session.commit()
-        _logger.info("job %d: %d clips checked, %d passed", job_id, len(take_ids), passed)
+        _logger.info(
+            "job %d: %d clips checked, %d passed, %d dialogue checks queued",
+            job_id,
+            len(take_ids),
+            passed,
+            dialogue_checks,
+        )
 
     @staticmethod
     async def _check_one(take_id: int) -> bool:

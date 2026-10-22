@@ -231,9 +231,22 @@ def pipeline_paused(label: str) -> str:
     return f"Paused after {label.lower()}: press Continue to go on"
 
 
+# --- Running: the dialogue check of a take (PHASE-031) ----------------------------------------
+# `check_take_dialogue` is a GPU job (Parakeet), so it also uses SUBMITTING and the cluster phases
+# above. Once the server has finished, the transcript is fetched and compared: the phases below
+# are in `FINISHING_PHASES`, so the job can no longer be cancelled.
+UPLOADING_CLIP_FOR_TRANSCRIPT: Final = "uploading the clip for transcription"
+DOWNLOADING_TRANSCRIPT: Final = "downloading the transcript"
+COMPARING_DIALOGUE: Final = "comparing the speech with the dialogue"
+
+TRANSCRIPT_FINISHING_PHASES: Final = frozenset({DOWNLOADING_TRANSCRIPT, COMPARING_DIALOGUE})
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
-    CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES
+    CLIP_FINISHING_PHASES
+    | FRAME_FINISHING_PHASES
+    | REFERENCE_FINISHING_PHASES
+    | TRANSCRIPT_FINISHING_PHASES
 )
 
 # --- Finished ---------------------------------------------------------------------

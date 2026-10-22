@@ -70,9 +70,57 @@ function CheckBadge({ take }: { take: ShotTake }) {
   );
 }
 
+/**
+ * The dialogue check of a take whose shot carries dialogue, as a badge: what the speech in the
+ * clip matched against the lines. Nothing for a shot with no dialogue or a clip that has not
+ * passed its technical check (it is not transcribed then).
+ */
+function DialogueBadge({ take }: { take: ShotTake }) {
+  if (
+    take.dialogue.length === 0 ||
+    take.state === "generating" ||
+    take.state === "failed" ||
+    !take.validation?.passed
+  ) {
+    return null;
+  }
+  const check = take.dialogue_check;
+  if (check === null) {
+    return take.state === "checking_dialogue" ? (
+      <Badge variant="light" color="blue">
+        Checking dialogue
+      </Badge>
+    ) : (
+      <Badge variant="light" color="orange">
+        Dialogue not checked
+      </Badge>
+    );
+  }
+  return check.passed ? (
+    <Badge variant="light" color="green">
+      Dialogue matched ({check.similarity}%)
+    </Badge>
+  ) : (
+    <Badge variant="light" color="red">
+      Dialogue did not match ({check.similarity}%)
+    </Badge>
+  );
+}
+
+/** A take may be selected when its clip passed, and so did its dialogue when it has any. */
+function canSelect(take: ShotTake): boolean {
+  return (
+    take.state === "ready" &&
+    !take.selected &&
+    take.validation?.passed === true &&
+    (take.dialogue.length === 0 || take.dialogue_check?.passed === true)
+  );
+}
+
 const TAKE_STATE: Record<ShotTake["state"], { label: string; color: string }> =
   {
     generating: { label: "Generating", color: "blue" },
+    checking_dialogue: { label: "Checking dialogue", color: "blue" },
     ready: { label: "Ready", color: "green" },
     failed: { label: "Failed", color: "red" },
   };
@@ -114,6 +162,7 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
           {state.label}
         </Badge>
         <CheckBadge take={take} />
+        <DialogueBadge take={take} />
         {take.selected && (
           <Badge variant="light" color="teal">
             Selected
@@ -124,24 +173,48 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
           {take.retry_attempt > 0
             ? `, automatic retry ${take.retry_attempt}`
             : ""}
-          {take.state === "ready" ? `, ${clipText(take)}` : ""}
+          {take.state === "ready" || take.state === "checking_dialogue"
+            ? `, ${clipText(take)}`
+            : ""}
         </Text>
         {take.job !== null && take.job.status !== "succeeded" && (
           <JobStatusBadge job={take.job} />
         )}
-        {take.state === "ready" &&
-          !take.selected &&
-          take.validation?.passed && (
-            <Button
-              size="compact-xs"
-              variant="default"
-              disabled={busy}
-              onClick={onSelect}
-            >
-              Select
-            </Button>
+        {take.dialogue_job !== null &&
+          take.dialogue_job.status !== "succeeded" && (
+            <JobStatusBadge job={take.dialogue_job} />
           )}
+        {canSelect(take) && (
+          <Button
+            size="compact-xs"
+            variant="default"
+            disabled={busy}
+            onClick={onSelect}
+          >
+            Select
+          </Button>
+        )}
       </Group>
+      {take.dialogue.length > 0 && take.dialogue_check !== null && (
+        <Stack gap={0} ml={8}>
+          {take.dialogue.map((line) => (
+            <Text key={line.unit_id} size="xs" c="dimmed">
+              {line.label || line.unit_id}: &ldquo;{line.text}&rdquo;
+            </Text>
+          ))}
+          <Text
+            size="xs"
+            c={take.dialogue_check.passed ? "dimmed" : "red"}
+            style={{ wordBreak: "break-word" }}
+          >
+            Heard:{" "}
+            {take.dialogue_check.heard_text
+              ? `\u201C${take.dialogue_check.heard_text}\u201D`
+              : "nothing"}{" "}
+            (needed {take.dialogue_check.threshold}%)
+          </Text>
+        </Stack>
+      )}
       {take.reasons.map((text) => (
         <Text key={text} size="xs" c="yellow.8">
           {text}
@@ -176,20 +249,23 @@ function failureLines(
   maxRetries: number,
 ): { text: string; key: string }[] {
   const newest = entry.takes[0];
-  const validation = newest?.validation;
-  if (
-    entry.status !== "failed" ||
-    !newest ||
-    !validation ||
-    validation.passed
-  ) {
+  if (entry.status !== "failed" || !newest || !newest.validation) {
     return [];
   }
-  const lines = validation.problems.map((problem) => ({
+  // The technical check failed, or, when it passed, the dialogue check did.
+  const failed = !newest.validation.passed
+    ? newest.validation
+    : newest.dialogue_check?.passed === false
+      ? newest.dialogue_check
+      : null;
+  if (failed === null) {
+    return [];
+  }
+  const lines = failed.problems.map((problem) => ({
     text: problem.message,
     key: problem.code,
   }));
-  if (validation.kind === "plan") {
+  if (newest.validation.kind === "plan") {
     lines.push({
       text: "Another take cannot fix this. Plan this scene's shots again.",
       key: "plan",
@@ -226,6 +302,7 @@ function ShotRow({
     newest !== undefined &&
     newest.state === "generating" &&
     newest.retry_attempt > 0;
+  const heard = selected?.dialogue_check ?? null;
 
   return (
     <Stack
@@ -287,14 +364,21 @@ function ShotRow({
           ))}
           {retrying && (
             <Text size="xs" c="blue">
-              The last clip failed its check. Generating it again automatically
+              The last clip failed a check. Generating it again automatically
               (retry {newest.retry_attempt} of {maxRetries}).
+            </Text>
+          )}
+          {takes.some((take) => take.state === "checking_dialogue") && (
+            <Text size="xs" c="blue">
+              Listening to the clip and comparing the speech with the
+              shot&apos;s dialogue.
             </Text>
           )}
           {entry.status === "unchecked" && (
             <Text size="xs" c="orange">
-              This shot&apos;s clips were made before clips were checked. Press
-              Check takes to check them.
+              A clip of this shot has not been fully checked (its technical
+              check, or its speech against the dialogue). Press Check takes to
+              check it.
             </Text>
           )}
           {job?.status === "failed" && !generating && !failed && (
@@ -336,6 +420,8 @@ function ShotRow({
             Take {selected.take_number}: {clipText(selected)}. The shot lasts{" "}
             {shot.duration_seconds} s; the clip is trimmed to that when the
             video is put together.
+            {heard !== null &&
+              ` Its speech matched the dialogue by ${heard.similarity}%.`}
           </Text>
         </Stack>
       )}
@@ -450,7 +536,10 @@ function SceneRow({
  * take; the take that finished (or was selected) last is the selected one. Nothing starts by
  * itself: a clip holds 4 to 8 GPUs for minutes. Each clip is checked in code when it is stored;
  * only a clip that passed can be selected or rendered, and one that failed is generated again
- * by the server with another seed, up to the limit in Settings (PHASE-029).
+ * by the server with another seed, up to the limit in Settings (PHASE-029). A clip of a shot
+ * with dialogue is then transcribed, and its speech must match the lines closely enough
+ * (a setting) before it can be selected; one that does not is generated again the same way
+ * (PHASE-031).
  */
 export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const { data, isLoading, isError, error } = useShotTakes(projectId);
@@ -498,9 +587,10 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
               and the take that finished or was selected last is the one used,
               but only a clip that passed its technical check (it decodes, has
               sound, and has the size and number of frames asked for) can be
-              selected or rendered. A clip that fails is generated again by
-              itself with another seed, up to the limit in Settings. Nothing
-              else starts by itself.
+              selected or rendered. For a shot with dialogue, the speech in the
+              clip is also transcribed and must match the lines. A clip that
+              fails either check is generated again by itself with another seed,
+              up to the limit in Settings. Nothing else starts by itself.
             </Text>
           </Stack>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -510,7 +600,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
                 onClick={() => checkTakes.mutate()}
                 loading={checkTakes.isPending || checking}
                 disabled={isLoading || isError || busy}
-                title="Checks the clips made before clips were checked. It starts no generation."
+                title="Checks the clips that have not been fully checked (technical check, and for dialogue the speech). It starts no clip generation."
               >
                 Check takes ({unchecked} not checked)
               </Button>

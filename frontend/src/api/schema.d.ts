@@ -3561,6 +3561,20 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * DialogueLineOut
+         * @description One dialogue line the clip must contain.
+         */
+        DialogueLineOut: {
+            /** Unit Id */
+            unit_id: string;
+            /** Label */
+            label: string;
+            /** Text */
+            text: string;
+            /** Starts In Shot Seconds */
+            starts_in_shot_seconds: number;
+        };
         /** DiffEntryOut */
         DiffEntryOut: {
             /** Path */
@@ -4363,7 +4377,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue";
             /**
              * Status
              * @enum {string}
@@ -4416,7 +4430,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue";
             /**
              * Status
              * @enum {string}
@@ -5416,7 +5430,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue";
             /** Running */
             running: number;
             /** Queued */
@@ -7026,7 +7040,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "generating" | "ready" | "failed";
+            state: "generating" | "checking_dialogue" | "ready" | "failed";
             /** Selected */
             selected: boolean;
             /** Seed */
@@ -7058,6 +7072,10 @@ export interface components {
             validation: components["schemas"]["TakeValidationOut"] | null;
             /** Retry Attempt */
             retry_attempt: number;
+            /** Dialogue */
+            dialogue: components["schemas"]["DialogueLineOut"][];
+            dialogue_check: components["schemas"]["TakeDialogueOut"] | null;
+            dialogue_job: components["schemas"]["DiscoveryJobOut"] | null;
         };
         /** ShotTakesCheckOut */
         ShotTakesCheckOut: {
@@ -7695,6 +7713,27 @@ export interface components {
             audio: components["schemas"]["AudioInputOut"];
             /** Duration S */
             duration_s: number | null;
+        };
+        /**
+         * TakeDialogueOut
+         * @description The speech-recognition check of a take with dialogue (PHASE-031): what Parakeet heard in
+         *     the clip next to the shot's lines. `similarity` and `threshold` are percents.
+         */
+        TakeDialogueOut: {
+            /** Passed */
+            passed: boolean;
+            /** Similarity */
+            similarity: number;
+            /** Threshold */
+            threshold: number;
+            /** Problems */
+            problems: components["schemas"]["TakeProblemOut"][];
+            /** Expected Text */
+            expected_text: string;
+            /** Heard Text */
+            heard_text: string;
+            /** Checked At */
+            checked_at: string | null;
         };
         /** TakeIn */
         TakeIn: {

@@ -139,6 +139,10 @@ SHOT_REPLAN_MAX_TRIES_KEY = "shot_replan_max_tries"
 # another seed (PHASE-029). Also a count, not a length.
 SHOT_TAKE_MAX_RETRIES_KEY = "shot_take_max_retries"
 
+# How closely the words Parakeet hears in a dialogue take must match the shot's dialogue lines,
+# in percent (PHASE-031). Below it the take fails and is generated again like any failed clip.
+DIALOGUE_MATCH_THRESHOLD_KEY = "dialogue_match_threshold"
+
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
 SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
@@ -436,6 +440,23 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=2,
         min_value=0,
         max_value=5,
+    ),
+    SettingSpec(
+        key=DIALOGUE_MATCH_THRESHOLD_KEY,
+        group=GROUP_DURATION,
+        label="Dialogue match needed (percent)",
+        help=(
+            "After a clip with dialogue passes its technical check, the speech in it is "
+            "transcribed and compared with the shot's dialogue lines (case and punctuation are "
+            "ignored). The clip passes when at least this percent of the words match. A clip "
+            "below it fails and is generated again automatically, like any failed clip, which "
+            "is a new GPU run of 10 to 20 minutes. 100 needs every word to match; 0 accepts any "
+            "speech."
+        ),
+        value_type="integer",
+        default=80,
+        min_value=0,
+        max_value=100,
     ),
     SettingSpec(
         key=SHOT_CONTINUITY_MAX_ROUNDS_KEY,

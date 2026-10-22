@@ -13,8 +13,13 @@ under the **project's** media folder (not `media/lab/`), and written on the `sho
 job was queued with (found by `shot_take.job_id`): the file, its checksum, its size and frame
 count and its audio track, and its technical check (`validation`, PHASE-029). `selected_at` is
 set only when the clip **passed**, so the take that has just finished is the shot's selected take
-only if it is good. The row and the finished job are saved in one transaction. The clip is not
-trimmed here: the render does that, to the shot's exact length (D-9).
+only if it is good. The row and the finished job are saved in one transaction.
+
+A take whose shot carries dialogue is **not selected here** (PHASE-031): when its clip passed, the
+`check_take_dialogue` job is queued in the same transaction, and that job selects the take if the
+speech in the clip matches the dialogue.
+
+The clip is not trimmed here: the render does that, to the shot's exact length (D-9).
 
 A clip that fails for a reason a new seed can fix (it cannot be read or decoded, it has no sound,
 its size or number of frames is wrong) starts another take by itself after the row is saved
@@ -99,6 +104,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
 
         # The take and the finished job are saved together or not at all.
         retry_take_id: int | None = None
+        queued_dialogue_check = False
         async with SessionLocal() as session:
             statement = select(ShotTake).where(ShotTake.job_id == job.id)
             take = (await session.execute(statement)).scalars().first()
@@ -114,9 +120,16 @@ class GenerateShotHandler(GenerateLabVideoHandler):
                 take.audio = audio
                 take.validation = validation
                 if validation["passed"]:
-                    take.selected_at = await shot_takes.selection_time(
-                        session, take.project_id, take.scene_id, take.shot_id
-                    )
+                    if await shot_takes.dialogue_lines(session, take):
+                        # A take with dialogue is selected only after its speech has been
+                        # checked (PHASE-031). The check is queued in this transaction, so the
+                        # take is never seen as "not checked" without a job making it.
+                        await shot_takes.queue_dialogue_check(session, take, commit=False)
+                        queued_dialogue_check = True
+                    else:
+                        take.selected_at = await shot_takes.selection_time(
+                            session, take.project_id, take.scene_id, take.shot_id
+                        )
                 elif validation["kind"] == "clip":
                     retry_take_id = take.id
                 output["take_id"] = take.id
@@ -124,6 +137,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
                 output["check"] = {
                     "passed": validation["passed"],
                     "problems": [problem["code"] for problem in validation["problems"]],
+                    "dialogue_check_queued": queued_dialogue_check,
                 }
             else:
                 _logger.warning("job %d: clip stored but its take is gone", job.id)
@@ -149,6 +163,8 @@ class GenerateShotHandler(GenerateLabVideoHandler):
             audio["codec"] if audio else "none",
             output.get("check"),
         )
+        if queued_dialogue_check:
+            dispatcher.nudge()
 
         # Best effort: a failure here is recorded and never fails the clip.
         purge = await self._purge(base_url, job.provider_job_id)
