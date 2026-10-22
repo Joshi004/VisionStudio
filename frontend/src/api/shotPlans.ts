@@ -5,7 +5,7 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 
 export type ShotPlans = components["schemas"]["ShotPlansOut"];
@@ -15,6 +15,8 @@ export type Shot = components["schemas"]["ShotOut"];
 export type ShotPlanAll = components["schemas"]["ShotPlansRunAllOut"];
 export type SceneTimeline = components["schemas"]["SceneTimelineOut"];
 export type TimelineProblem = components["schemas"]["TimelineProblemOut"];
+export type ShotPlanInput = components["schemas"]["ShotPlanEditIn"];
+export type ShotInput = components["schemas"]["ShotEditIn"];
 
 /**
  * Every shot-plan query of a project starts with this key. It also starts with the project's
@@ -101,14 +103,28 @@ export function usePlanAllShots(projectId: number) {
   });
 }
 
-/** Starts the job that plans the shots of one scene. */
+/**
+ * Starts the job that plans the shots of one scene. `confirmReplaceManual` is true only after the
+ * user agreed to add a plan from the model on top of one they wrote. `feedback` is the user's note
+ * on the newest plan: the scene is then planned again with the note.
+ */
 export function usePlanOneSceneShots(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sceneId: string) => {
+    mutationFn: async (input: {
+      sceneId: string;
+      confirmReplaceManual: boolean;
+      feedback?: string;
+    }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/shot-plans/{scene_id}/run",
-        { params: { path: { project_id: projectId, scene_id: sceneId } } },
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: {
+            confirm_replace_manual: input.confirmReplaceManual,
+            feedback: input.feedback,
+          },
+        },
       );
       if (!data) {
         throw new ApiError(
@@ -122,5 +138,32 @@ export function usePlanOneSceneShots(projectId: number) {
       return data;
     },
     onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Saves one scene's edited shots as its next plan, written by the user. */
+export function useSaveShotPlan(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string; plan: ShotPlanInput }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/shot-plans/{scene_id}",
+        {
+          params: { path: { project_id: projectId, scene_id: input.sceneId } },
+          body: input.plan,
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not save the shot plan (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

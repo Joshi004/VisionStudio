@@ -1,26 +1,10 @@
 import { Badge, Group, Stack, Text } from "@mantine/core";
 
-import type { SceneEvent, SceneEventsContent } from "../../api/sceneEvents";
+import type { SceneEventsContent } from "../../api/sceneEvents";
 import type { SpeechUnitAudio } from "../../api/speechAudio";
-import type { SpeechUnit, SpeechUnitsContent } from "../../api/speechUnits";
-import type { Shot, ShotPlanContent } from "../../api/shotPlans";
-
-const SHOT_TYPE: Record<Shot["type"], { label: string; color: string }> = {
-  establishing: { label: "Establishing", color: "indigo" },
-  action: { label: "Action", color: "grape" },
-  reaction: { label: "Reaction", color: "pink" },
-  dialogue: { label: "Dialogue", color: "teal" },
-  insert: { label: "Insert", color: "orange" },
-  transition: { label: "Transition", color: "gray" },
-};
-
-const EVENT_LABEL: Record<SceneEvent["type"], string> = {
-  narration: "Narration",
-  dialogue: "Dialogue",
-  action: "Action",
-  sound_event: "Sound",
-  pause: "Pause",
-};
+import type { SpeechUnitsContent } from "../../api/speechUnits";
+import type { ShotPlanContent } from "../../api/shotPlans";
+import { SHOT_TYPE, eventText, seconds, unitText } from "./shotPlanFormat";
 
 type ShotPlanViewProps = {
   plan: ShotPlanContent;
@@ -32,33 +16,6 @@ type ShotPlanViewProps = {
   /** The story's characters by id, so a speaker is shown by name. */
   characterNames: Record<string, string>;
 };
-
-function shorten(text: string, limit = 70): string {
-  return text.length <= limit ? text : `${text.slice(0, limit).trimEnd()}...`;
-}
-
-function seconds(value: number): string {
-  return `${value.toFixed(1)} s`;
-}
-
-function eventText(event: SceneEvent, characterNames: Record<string, string>) {
-  const body = event.text ?? event.description ?? "";
-  const speaker =
-    event.speaker_id != null
-      ? (characterNames[event.speaker_id] ?? event.speaker_id)
-      : null;
-  const label = EVENT_LABEL[event.type];
-  const prefix = speaker !== null ? `${label}, ${speaker}` : label;
-  return body === "" ? prefix : `${prefix}: ${shorten(body)}`;
-}
-
-function unitText(unit: SpeechUnit, characterNames: Record<string, string>) {
-  const speaker =
-    unit.speaker_id != null
-      ? (characterNames[unit.speaker_id] ?? unit.speaker_id)
-      : "Narrator";
-  return `${speaker}: ${shorten(unit.text)}`;
-}
 
 /**
  * One scene's shots in story order (`Path_ahead.md` Section 25), read only. A shot names the

@@ -164,9 +164,12 @@ export function useRepairCut(projectId: number) {
     mutationFn: async ({
       sceneId,
       boundaryId,
+      confirmReplaceManual,
     }: {
       sceneId: string;
       boundaryId: string;
+      /** True only after the user agreed to change shots they wrote. */
+      confirmReplaceManual: boolean;
     }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/shot-continuity/{scene_id}/cuts/{boundary_id}/repair",
@@ -178,6 +181,7 @@ export function useRepairCut(projectId: number) {
               boundary_id: boundaryId,
             },
           },
+          body: { confirm_replace_manual: confirmReplaceManual },
         },
       );
       if (!data) {

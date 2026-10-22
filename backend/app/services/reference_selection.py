@@ -32,6 +32,8 @@ from app.services.shot_definition_writer import FRAMING_OF_SIZE
 METHOD_DETERMINISTIC: Final = "deterministic"
 # The pictures were chosen by the language model (PHASE-033, `services/reference_selection_writer`).
 METHOD_LLM: Final = "llm"
+# The pictures were chosen by the user (PHASE-038, `shot_references.save_manual`).
+METHOD_MANUAL: Final = "manual"
 
 # The `view` of an environment's picture. A character's picture has its angle as the view.
 ENVIRONMENT_VIEW: Final = "environment"
@@ -230,4 +232,51 @@ def select(content: dict[str, Any], catalog: list[CatalogPicture]) -> Selection:
         pictures=[picture for picture, _fallback in chosen],
         fallbacks=[fallback for _picture, fallback in chosen],
         notes=notes,
+    )
+
+
+def manual(
+    content: dict[str, Any], catalog: list[CatalogPicture], image_ids: list[int]
+) -> Selection:
+    """The user's choice of pictures (PHASE-038), in the order given. Each must be in the
+    catalog, none may repeat, and there must be from 1 to `H3_MAX_REFERENCE_IMAGES` of them (what
+    the video model takes). Anything beyond that is the user's call: unlike the fixed rule it
+    does not insist on every angle or on the environment. Raises ReferenceSelectionError with a
+    sentence for the user.
+
+    `content` is the stored specification of the shot, which gives the shot size, the framing
+    and the focus character.
+    """
+    composition = content.get("composition") or {}
+    shot_size = composition.get("shot_size")
+    if not isinstance(shot_size, str):
+        raise ReferenceSelectionError("The shot has no shot size.")
+    framing = framing_for(shot_size)
+
+    if not 1 <= len(image_ids) <= H3_MAX_REFERENCE_IMAGES:
+        raise ReferenceSelectionError(
+            f"A shot needs from 1 to {H3_MAX_REFERENCE_IMAGES} reference pictures; "
+            f"{len(image_ids)} were given."
+        )
+    by_id: dict[int, CatalogPicture] = {}
+    for picture in catalog:
+        by_id.setdefault(picture.lab_image_id, picture)
+    pictures: list[CatalogPicture] = []
+    for image_id in image_ids:
+        picture = by_id.get(image_id)
+        if picture is None:
+            raise ReferenceSelectionError(
+                f"The picture {image_id} is not one of the pictures this shot can use now."
+            )
+        if picture in pictures:
+            raise ReferenceSelectionError(f"The picture {image_id} was chosen more than once.")
+        pictures.append(picture)
+
+    focus = focus_character(composition, visible_characters(content))
+    return Selection(
+        shot_size=shot_size,
+        framing=framing,
+        focus_character_id=focus,
+        pictures=pictures,
+        fallbacks=[not picture.is_resolved for picture in pictures],
     )

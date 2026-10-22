@@ -166,6 +166,8 @@ class ShotTakeOut(BaseModel):
     dialogue_job: DiscoveryJobOut | None
     # The take of the shot before it that this take continues (PHASE-032), or None.
     anchor: TakeAnchorOut | None = None
+    # The version of the shot prompt this take was made from, or None (PHASE-038).
+    prompt_version: int | None = None
 
 
 class TakeShotSkeletonOut(BaseModel):
@@ -341,6 +343,7 @@ def _take_out(entry: TakeEntry, frame_urls: dict[int, str]) -> ShotTakeOut:
         dialogue_check=_dialogue_check_out(entry.dialogue_result),
         dialogue_job=_job_out(entry.dialogue_job),
         anchor=_anchor_out(entry, frame_urls),
+        prompt_version=shot_takes.prompt_version_of(row),
     )
 
 

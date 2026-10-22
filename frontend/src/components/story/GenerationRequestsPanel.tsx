@@ -24,6 +24,7 @@ import {
   type RequestPicture,
   type SceneGenerationRequests,
 } from "../../api/generationRequests";
+import { PromptHoverCard } from "./PromptHoverCard";
 
 type GenerationRequestsPanelProps = {
   projectId: number;
@@ -83,19 +84,21 @@ function Thumbnail({ picture }: { picture: RequestPicture }) {
   return (
     <Stack gap={2} w={environment ? 160 : 90}>
       {picture.url !== null ? (
-        <img
-          src={picture.url}
-          alt={pictureLabel(picture)}
-          loading="lazy"
-          style={{
-            width: "100%",
-            aspectRatio: environment ? "16 / 9" : "2 / 3",
-            objectFit: "cover",
-            borderRadius: 4,
-            display: "block",
-            background: "var(--mantine-color-gray-1)",
-          }}
-        />
+        <PromptHoverCard imageId={picture.lab_image_id} block>
+          <img
+            src={picture.url}
+            alt={pictureLabel(picture)}
+            loading="lazy"
+            style={{
+              width: "100%",
+              aspectRatio: environment ? "16 / 9" : "2 / 3",
+              objectFit: "cover",
+              borderRadius: 4,
+              display: "block",
+              background: "var(--mantine-color-gray-1)",
+            }}
+          />
+        </PromptHoverCard>
       ) : (
         <Text size="xs" c="red">
           The picture no longer exists.
@@ -173,12 +176,14 @@ function ShotRow({ entry, busy, onPlan }: ShotRowProps) {
               {status.label}
             </Badge>
             {version !== null && (
-              <Badge
-                variant="light"
-                title="The newest version of this shot's request"
+              <PromptHoverCard
+                source={version.source}
+                codeNote="Planned by code from the shot's references and speech. No model was asked."
               >
-                v{version.version}
-              </Badge>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
             {request !== null && (
               <Badge variant="light" color="gray" style={{ textTransform: "none" }}>

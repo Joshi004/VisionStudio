@@ -387,6 +387,44 @@ async def get_run(run_id: RunId, session: SessionDep) -> LabRunOut:
     return (await _runs_out(session, [run], with_payloads=True))[0]
 
 
+class LabImagePromptOut(BaseModel):
+    """The prompt a lab picture was made from (PHASE-038). The prompt and seed are None for a
+    picture that was uploaded, which was not made from a prompt.
+    """
+
+    image_id: int
+    run_id: int | None
+    job_id: int | None
+    model: str | None
+    prompt: str | None
+    seed: int | None
+
+
+@router.get(
+    "/lab/images/{image_id}/prompt",
+    response_model=LabImagePromptOut,
+    responses={404: {"model": ErrorResponse, "description": "No lab image has this id."}},
+)
+async def get_image_prompt(image_id: RunId, session: SessionDep) -> LabImagePromptOut:
+    """The prompt and seed behind one lab picture (a character's, a look's, a place's), read from
+    the run that made it.
+    """
+    image = await session.get(LabImage, image_id)
+    if image is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Image {image_id} does not exist.")
+    run = await image_lab.get_run(session, image.run_id) if image.run_id is not None else None
+    params = run.params if run is not None and isinstance(run.params, dict) else {}
+    seed = params.get("seed")
+    return LabImagePromptOut(
+        image_id=image.id,
+        run_id=run.id if run is not None else None,
+        job_id=run.job_id if run is not None else None,
+        model=run.model if run is not None else None,
+        prompt=run.prompt if run is not None else None,
+        seed=seed if isinstance(seed, int) and not isinstance(seed, bool) else None,
+    )
+
+
 @router.post(
     "/lab/images/uploads",
     response_model=LabImageOut,

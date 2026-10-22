@@ -4,8 +4,9 @@ A clip must cover the stretch of the video it is for exactly. Two numbers come o
 
 - the *target*: how many frames the stretch lasts on the fps grid;
 - the *request*: how many frames a model is asked for. LTX is asked for the smallest `8k + 1`
-  at or above the target, and MiniMax H3 for the smallest `17n + 5`. The tail is trimmed away
-  at render time.
+  at or above the target, and MiniMax H3 for the smallest `17n + 5`. Any tail beyond the target is
+  trimmed away at render time; a story shot's length is already an H3 length, so for it nothing
+  is left to trim (`h3_lengths`, D-9).
 
 Boundaries are rounded to frame indices first, and a stretch's frame count is the difference
 between its two boundaries. Rounding every length on its own would let the errors add up over

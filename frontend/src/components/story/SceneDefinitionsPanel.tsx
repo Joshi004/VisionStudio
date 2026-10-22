@@ -26,6 +26,7 @@ import {
 } from "../../api/sceneDefinitions";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { PromptHoverCard } from "./PromptHoverCard";
 import { ReplaceManualModal } from "./ReplaceManualModal";
 import { SceneDefinitionEditor } from "./SceneDefinitionEditor";
 import { SceneDefinitionView } from "./SceneDefinitionView";
@@ -103,12 +104,11 @@ function EntryRow({
               {status.label}
             </Badge>
             {entry.version !== null && (
-              <Badge
-                variant="light"
-                title="The newest version of this scene's definition"
-              >
-                v{entry.version.version}
-              </Badge>
+              <PromptHoverCard jobId={entry.version.job_id} source={entry.version.source}>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{entry.version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
             {job && job.status !== "succeeded" && <JobStatusBadge job={job} />}
           </Group>

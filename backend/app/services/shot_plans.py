@@ -43,11 +43,14 @@ from app.services import (
     discovery,
     duration_policy,
     event_extraction_writer,
+    h3_lengths,
     scene_definition_writer,
     scene_definitions,
     scene_timeline,
+    shot_planning_writer,
     speech_synthesis,
     story_bible,
+    user_feedback,
 )
 
 _logger = logging.getLogger(__name__)
@@ -55,6 +58,15 @@ _logger = logging.getLogger(__name__)
 JOB_TYPE: Final = "plan_shots"
 # Two presses on one scene make one job; two scenes run side by side.
 DEDUPE_KEY: Final = "scene_id"
+
+# Who wrote a plan: the model (a job), or the user's edit (PHASE-038).
+SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
+MANUAL_REPLACE_MESSAGE: Final = (
+    "The newest shot plan of this scene was written by you. Planning it again adds a new "
+    "version from the model, so it has to be confirmed."
+)
+SKIPPED_MANUAL: Final = "Written by you: use this scene's own button to replace it."
 
 # How many of a project's newest planning jobs are read to find each scene's newest one.
 _JOB_LOOKBACK: Final = 500
@@ -117,6 +129,13 @@ class SceneEntry:
     @property
     def content(self) -> dict[str, Any] | None:
         return self.row.content if self.row is not None else None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        """The newest plan was written by the user: the model replaces it only when asked
+        (PHASE-038).
+        """
+        return self.row is not None and self.row.source == SOURCE_MANUAL
 
 
 @dataclass(frozen=True)
@@ -280,20 +299,27 @@ def _for_model(current: scene_definitions.CurrentDefinition) -> dict[str, Any]:
     }
 
 
-async def _queue(
-    session: AsyncSession,
-    project: Project,
-    loaded: _Loaded,
-    scene: speech_synthesis.SceneAudio,
-    replan: dict[str, Any] | None = None,
-) -> tuple[Job, bool]:
-    """Queues the job for this scene and returns `(job, created)`. `created` is False when the
-    scene already has a job waiting or running, which is returned instead. Raises
-    ShotPlansError when this scene cannot be planned. The caller has checked that the project
-    is not blocked.
+@dataclass(frozen=True)
+class _Prepared:
+    """What a plan of one scene is made from: what a job is sent, and what a version records.
+    A manual save records exactly what a job would (D-3).
+    """
 
-    `replan` is set for an automatic re-plan (PHASE-021): `{attempt, problems, previous_shots}`.
-    The job is given all three; the plan it saves records the attempt and the problems.
+    item: dict[str, Any]
+    definition: dict[str, Any]
+    events: list[dict[str, Any]]
+    # The speech units as the model sees them (id, event_id, kind, speaker_id, text, seconds).
+    units: list[dict[str, Any]]
+    # The same units for the timeline: id, kind and the measured length.
+    infos: list[scene_timeline.UnitInfo]
+    chosen_characters: list[tuple[str, str]]
+    environment_key: tuple[str, str]
+    inputs: dict[str, Any]
+
+
+def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAudio) -> _Prepared:
+    """What this scene's plan is made from. Raises ShotPlansError when this scene cannot be
+    planned. The caller has checked that the project is not blocked.
     """
     story, bible, policy = loaded.story, loaded.bible, loaded.policy
     assert story is not None and bible is not None and policy is not None  # not blocked
@@ -318,6 +344,7 @@ async def _queue(
     chosen = [environment_key, *chosen_characters]
 
     units: list[dict[str, Any]] = []
+    infos: list[scene_timeline.UnitInfo] = []
     audio_artifacts: list[dict[str, Any]] = []
     for entry in scene.units:
         audio = entry.audio
@@ -333,6 +360,7 @@ async def _queue(
                 "measured_seconds": round(audio.duration_s, 2),
             }
         )
+        infos.append(scene_timeline.UnitInfo(unit["id"], unit["kind"], float(audio.duration_s)))
         audio_artifacts.append(
             {
                 "kind": SPEECH_AUDIO_KIND,
@@ -373,10 +401,51 @@ async def _queue(
             "target_max_s": policy.target_max_s,
         },
     }
+    return _Prepared(
+        item=item,
+        definition=definition,
+        events=events_row.content["events"],
+        units=units,
+        infos=infos,
+        chosen_characters=chosen_characters,
+        environment_key=environment_key,
+        inputs=inputs,
+    )
+
+
+async def _queue(
+    session: AsyncSession,
+    project: Project,
+    loaded: _Loaded,
+    scene: speech_synthesis.SceneAudio,
+    replan: dict[str, Any] | None = None,
+    feedback: user_feedback.Feedback | None = None,
+) -> tuple[Job, bool]:
+    """Queues the job for this scene and returns `(job, created)`. `created` is False when the
+    scene already has a job waiting or running, which is returned instead. Raises
+    ShotPlansError when this scene cannot be planned. The caller has checked that the project
+    is not blocked.
+
+    `replan` is set for an automatic re-plan (PHASE-021): `{attempt, problems, previous_shots}`.
+    The job is given all three; the plan it saves records the attempt and the problems.
+
+    `feedback` is the user's note on the newest plan (PHASE-038). The job is given the note and
+    the plan it is about; the plan it saves records the note and the version it was about.
+    """
+    bible, policy = loaded.bible, loaded.policy
+    assert bible is not None and policy is not None  # not blocked
+    prepared = _prepare(project, loaded, scene)
+    item = prepared.item
+    inputs = prepared.inputs
+
     replan_input: dict[str, Any] = {}
     if replan is not None:
         inputs["replan"] = {"attempt": replan["attempt"], "problems": replan["problems"]}
         replan_input = {"replan": replan}
+    feedback_input: dict[str, Any] = {}
+    if feedback is not None:
+        inputs["feedback"] = feedback.for_version()
+        feedback_input = {"feedback": feedback.for_job()}
     return await store.create_job(
         session,
         project_id=project.id,
@@ -384,6 +453,7 @@ async def _queue(
         provider="llm",
         input={
             **replan_input,
+            **feedback_input,
             "story_bible_id": bible.id,
             "story_bible_version": bible.version,
             # The project's speech mode: `no_narration` adds a line to the instructions.
@@ -395,11 +465,13 @@ async def _queue(
                 "title": item["title"],
                 "description": item["description"],
             },
-            "scene_definition": definition,
-            "scene_characters": [_for_model(loaded.current[key]) for key in chosen_characters],
-            "environment": _for_model(loaded.current[environment_key]),
-            "events": events_row.content["events"],
-            "units": units,
+            "scene_definition": prepared.definition,
+            "scene_characters": [
+                _for_model(loaded.current[key]) for key in prepared.chosen_characters
+            ],
+            "environment": _for_model(loaded.current[prepared.environment_key]),
+            "events": prepared.events,
+            "units": prepared.units,
             "target_min_seconds": policy.target_min_s,
             "target_max_seconds": policy.target_max_s,
             # Written onto the version the job makes (D-3).
@@ -416,18 +488,68 @@ def _find_scene(loaded: _Loaded, scene_id: str) -> speech_synthesis.SceneAudio:
     raise ShotPlansError(f"There is no scene '{scene_id}' in the newest list of scenes.")
 
 
-async def start_run(session: AsyncSession, project: Project, scene_id: str) -> Job:
+async def start_run(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    *,
+    confirm_replace_manual: bool = False,
+    feedback: str | None = None,
+) -> Job:
     """Queues the job that plans one scene's shots, and commits. If that scene already has a
-    job waiting or running, that job is returned and no new one is made. Raises
-    ShotPlansError.
+    job waiting or running, that job is returned and no new one is made. When the newest plan
+    was written by the user, it is replaced only when `confirm_replace_manual` is true
+    (PHASE-038).
+
+    `feedback` is the user's note on the newest plan: the scene is planned again with the note
+    and that plan in the request (PHASE-038). A note is never dropped silently, so a scene that is
+    being planned already refuses it. Raises ShotPlansError.
     """
     loaded = await _load(session, project)
     if loaded.blocked_reason is not None:
         raise ShotPlansError(loaded.blocked_reason)
     _blocked_by_story(loaded)
     scene = _find_scene(loaded, scene_id)
-    job, _created = await _queue(session, project, loaded, scene)
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is not None and newest.source == SOURCE_MANUAL and not confirm_replace_manual:
+        raise ShotPlansError(MANUAL_REPLACE_MESSAGE)
+    note = _feedback_on(feedback, newest) if feedback is not None else None
+    job, created = await _queue(session, project, loaded, scene, feedback=note)
+    if note is not None and not created:
+        raise ShotPlansError("The shots of this scene are already being planned.")
     return job
+
+
+def _shots_for_model(row: ShotPlan) -> list[dict[str, Any]]:
+    """A plan's shots as the model is shown them again (a re-plan, or a note on the plan)."""
+    return [
+        {key: value for key, value in shot.items() if key != "scene_id"}
+        for shot in row.content["shots"]
+    ]
+
+
+def _feedback_on(text: str, newest: ShotPlan | None) -> user_feedback.Feedback:
+    """The user's note on the newest plan of a scene, with that plan as what it is about.
+    Raises ShotPlansError when the note is not usable or the scene has no plan to talk about.
+    """
+    try:
+        note = user_feedback.clean(text)
+    except ValueError as exc:
+        raise ShotPlansError(str(exc)) from exc
+    if newest is None:
+        raise ShotPlansError("This scene has no shot plan yet, so there is nothing to comment on.")
+    return user_feedback.Feedback(
+        text=note, previous=_shots_for_model(newest), base_version=newest.version
+    )
+
+
+def _carried_feedback(row: ShotPlan) -> user_feedback.Feedback | None:
+    """The note a plan was made from, or None: its automatic re-plan carries the same note
+    (PHASE-038), because it is the same plan being corrected.
+    """
+    stored = row.inputs.get("feedback") if isinstance(row.inputs, dict) else None
+    ok, note = user_feedback.read(stored)
+    return note if ok else None
 
 
 async def start_replan(
@@ -438,10 +560,12 @@ async def start_replan(
     attempt: int,
     problems: list[dict[str, Any]],
     previous_shots: list[dict[str, Any]],
+    feedback: user_feedback.Feedback | None = None,
 ) -> Job:
     """Queues the automatic re-plan of one scene (PHASE-021), and commits. `attempt` is the
     number of this re-plan (1 for the first), `problems` what the timeline checks found in the
-    plan that failed, and `previous_shots` that plan's shots. The scene must pass the same gate
+    plan that failed, and `previous_shots` that plan's shots. `feedback` is the note the failed
+    plan was made from, when it was made from one (PHASE-038). The scene must pass the same gate
     as `start_run`: if anything it is built from changed meanwhile, this raises ShotPlansError
     and nothing is queued.
     """
@@ -451,7 +575,7 @@ async def start_replan(
     _blocked_by_story(loaded)
     scene = _find_scene(loaded, scene_id)
     replan = {"attempt": attempt, "problems": problems, "previous_shots": previous_shots}
-    job, _created = await _queue(session, project, loaded, scene, replan)
+    job, _created = await _queue(session, project, loaded, scene, replan, feedback)
     return job
 
 
@@ -485,6 +609,9 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         entry = current[item["id"]]
         if entry.status == "planned":
             skipped.append(Skipped(item["id"], item["title"], "Already planned and up to date."))
+            continue
+        if entry.needs_confirmation:
+            skipped.append(Skipped(item["id"], item["title"], SKIPPED_MANUAL))
             continue
         refusal = _scene_refusal(scene, loaded.definitions.get(item["id"]), loaded.current)
         if refusal is not None:
@@ -840,10 +967,6 @@ async def queue_replan(
     newest = (await _newest_rows(session, project_id)).get(row.scene_id)
     if newest is None or newest.id != row.id:
         return None
-    previous_shots = [
-        {key: value for key, value in shot.items() if key != "scene_id"}
-        for shot in row.content["shots"]
-    ]
     try:
         return await start_replan(
             session,
@@ -851,7 +974,8 @@ async def queue_replan(
             row.scene_id,
             attempt=attempt + 1,
             problems=problems,
-            previous_shots=previous_shots,
+            previous_shots=_shots_for_model(row),
+            feedback=_carried_feedback(row),
         )
     except ShotPlansError as exc:
         _logger.info(
@@ -872,13 +996,15 @@ async def save_shot_plan(
     project_id: int,
     scene_id: str,
     content: dict[str, Any],
-    job_id: int,
+    job_id: int | None,
     inputs: dict[str, Any],
+    source: str = SOURCE_AI,
 ) -> ShotPlan:
     """Adds the scene's next version. Flushes but does not commit: the job commits it together
     with finishing itself, so a job is never "succeeded" without its result.
 
-    `inputs` is what the job was started with and is stored as it is.
+    `inputs` is what the job was started with and is stored as it is. `job_id` is None and
+    `source` is `manual` for a plan the user edited (`save_manual`).
     """
     statement = select(func.max(ShotPlan.version)).where(
         ShotPlan.project_id == project_id, ShotPlan.scene_id == scene_id
@@ -888,7 +1014,7 @@ async def save_shot_plan(
         project_id=project_id,
         scene_id=scene_id,
         version=(highest or 0) + 1,
-        source="ai",
+        source=source,
         job_id=job_id,
         inputs=inputs,
         content=content,
@@ -896,10 +1022,82 @@ async def save_shot_plan(
     session.add(row)
     await session.flush()
     _logger.info(
-        "job %d: shot plan of scene '%s' of project %d saved, version %d",
+        "job %s: shot plan of scene '%s' of project %d saved, version %d (%s)",
         job_id,
         scene_id,
         project_id,
         row.version,
+        source,
     )
+    return row
+
+
+async def save_manual(
+    session: AsyncSession, project: Project, scene_id: str, shots: list[dict[str, Any]]
+) -> ShotPlan:
+    """Stores the user's edit of a scene's shots as its next plan (`source` is `manual`), and
+    commits (PHASE-038). Each shot is `{source_event_ids, speech_unit_ids, type,
+    target_duration, continues_previous, description}`, in order.
+
+    The edit keeps the number of shots (splitting and merging are not part of it): the ids
+    `shot_1`, `shot_2`, ... are set by position, so the shots keep theirs. The shots are checked
+    the way the model's answer is (`shot_planning_writer.check_answer`), and then the timeline
+    checks run (PHASE-021): a **blocking** problem refuses the save and nothing is written; a
+    shot outside the planning target range is only a warning, as it is after a model plan.
+    Each shot's length is moved onto a length H3 makes (`h3_lengths`), as for a model plan, so the
+    stored length can differ from the one typed. The version records exactly what a job would
+    (D-3). Nothing is planned again by itself afterwards. Raises ShotPlansError.
+    """
+    loaded = await _load(session, project)
+    if loaded.blocked_reason is not None:
+        raise ShotPlansError(loaded.blocked_reason)
+    _blocked_by_story(loaded)
+    scene = _find_scene(loaded, scene_id)
+    job = (await _newest_jobs(session, project.id)).get(scene_id)
+    if job is not None and job.status in store.ACTIVE_STATUSES:
+        raise ShotPlansError("The shots are already being planned.")
+    newest = (await _newest_rows(session, project.id)).get(scene_id)
+    if newest is None:
+        raise ShotPlansError("Plan this scene's shots first: an edit changes a plan that exists.")
+    if len(shots) != len(newest.content["shots"]):
+        raise ShotPlansError(
+            f"An edit keeps the number of shots: this scene has {len(newest.content['shots'])}. "
+            "To change the number of shots, plan the scene again."
+        )
+
+    prepared = _prepare(project, loaded, scene)
+    try:
+        content = shot_planning_writer.check_answer(
+            {"shots": shots}, scene_id, prepared.events, prepared.units
+        )
+    except ValueError as exc:
+        raise ShotPlansError(str(exc)) from exc
+
+    policy = loaded.policy
+    assert policy is not None  # a blocked project was refused above
+    # The lengths go onto the lengths H3 makes (D-9), as for a plan the model made; the blocking
+    # checks below then judge the lengths that will be stored.
+    content = {
+        **content,
+        "shots": h3_lengths.fit_shots(content["shots"], prepared.infos, policy).shots,
+    }
+    timeline = scene_timeline.build_timeline(content["shots"], prepared.infos, policy)
+    blocking = [problem.message for problem in timeline.problems if problem.severity == "blocking"]
+    if blocking:
+        raise ShotPlansError(
+            "The timeline of these shots has "
+            + ("a blocking problem: " if len(blocking) == 1 else "blocking problems: ")
+            + " ".join(blocking)
+        )
+
+    row = await save_shot_plan(
+        session,
+        project_id=project.id,
+        scene_id=scene_id,
+        content=content,
+        job_id=None,
+        inputs=prepared.inputs,
+        source=SOURCE_MANUAL,
+    )
+    await session.commit()
     return row

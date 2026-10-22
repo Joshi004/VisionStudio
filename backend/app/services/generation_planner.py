@@ -23,8 +23,9 @@ The rules:
   records the slot (`anchor`); the frame is cut from the previous shot's take when the take is
   queued (`services/continuity_anchor.py`).
 - **Frames:** the smallest `17n + 5` at or above the shot's length on the timeline
-  (`duration_policy.shot_num_frames`, D-9), within the hard bounds. The clip is trimmed to the
-  exact length when the video is rendered.
+  (`duration_policy.shot_num_frames`, D-9), within the hard bounds. A shot planned since D-9
+  changed already lasts a `17n + 5` length (`services/h3_lengths`), so it asks for exactly its
+  length; an older plan asks for a little more, and the render trims the clip to the exact length.
 - **Size:** MiniMax H3's own size for the project's orientation (`H3_SIZES`).
 
 Nothing here chooses a seed or a partition: those are decided when the request is sent.

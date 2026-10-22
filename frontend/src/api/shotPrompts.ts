@@ -7,7 +7,7 @@ import { ApiError, detailMessage } from "./errors";
 import { generationRequestsKey } from "./generationRequests";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { isValidProjectId } from "./projects";
+import { isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 import { useShotDefinitions } from "./shotDefinitions";
 
@@ -135,11 +135,21 @@ export function useCompileScenePrompts(projectId: number) {
   });
 }
 
-/** Starts the job that compiles one shot's prompt. */
+/**
+ * Starts the job that compiles one shot's prompt. `confirmReplaceManual` is true only after the
+ * user agreed to add a prompt from the model on top of one they wrote. `feedback` is the user's
+ * note on the newest prompt: the prompt is then written again with the note. Nothing is sent to
+ * the video model by it.
+ */
 export function useCompileOnePrompt(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (target: { sceneId: string; shotId: string }) => {
+    mutationFn: async (target: {
+      sceneId: string;
+      shotId: string;
+      confirmReplaceManual: boolean;
+      feedback?: string;
+    }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/shot-prompts/{scene_id}/{shot_id}/run",
         {
@@ -150,6 +160,10 @@ export function useCompileOnePrompt(projectId: number) {
               shot_id: target.shotId,
             },
           },
+          body: {
+            confirm_replace_manual: target.confirmReplaceManual,
+            feedback: target.feedback,
+          },
         },
       );
       if (!data) {
@@ -158,5 +172,42 @@ export function useCompileOnePrompt(projectId: number) {
       return data;
     },
     onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Saves one shot's edited prompt pieces as its next version, written by the user. */
+export function useSaveShotPrompt(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      shotId: string;
+      pieces: Record<string, string>;
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/shot-prompts/{scene_id}/{shot_id}",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              shot_id: input.shotId,
+            },
+          },
+          body: { pieces: input.pieces },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not save the shot prompt (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

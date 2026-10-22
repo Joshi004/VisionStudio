@@ -3,6 +3,7 @@ import { Badge, Button, Code, Group, Paper, Stack, Table, Text, Title } from "@m
 
 import { formatDateTime } from "../../format";
 import { JobDetailDrawer } from "../jobs/JobDetailDrawer";
+import { PromptHoverCard } from "./PromptHoverCard";
 
 type Primitive = string | number | boolean | null;
 
@@ -97,7 +98,11 @@ export function ArtifactViewer({
             )}
           </Stack>
           <Group gap="xs">
-            <Badge variant="light">Version {version}</Badge>
+            <PromptHoverCard jobId={jobId} source={source}>
+              <Badge variant="light" style={{ cursor: "help" }}>
+                Version {version}
+              </Badge>
+            </PromptHoverCard>
             <Badge variant="light" color={source === "ai" ? "violet" : "teal"}>
               {source === "ai" ? "AI" : "Manual"}
             </Badge>

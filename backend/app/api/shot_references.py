@@ -9,7 +9,11 @@
 - `POST .../run` ("Select all") chooses the references of every shot, in every scene, that has
   none or an out of date manifest.
 - `POST .../{scene_id}/run` does the same for one scene.
-- `POST .../{scene_id}/{shot_id}/run` does it for one shot.
+- `POST .../{scene_id}/{shot_id}/run` does it for one shot. When the newest manifest was chosen
+  by the user, the body must say `confirm_replace_manual` (PHASE-038).
+- `PUT .../{scene_id}/{shot_id}` saves the user's own choice of pictures (from the catalog the
+  shot may use, in the order given) as the shot's next manifest (`source` and `method` are
+  `manual`). The generation request and the prompt follow, as after any manifest.
 
 The setting `reference_selection_method` says who chooses (PHASE-033). The fixed rule chooses
 in the request, with no model and no job. With the language model, a job is queued for each shot
@@ -27,18 +31,19 @@ from datetime import datetime
 from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import LabImage
+from app.db.models import LabImage, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import generation_requests, shot_prompts, shot_references, storage
+from app.services import generation_requests, shot_chain, shot_prompts, shot_references, storage
 from app.services.shot_references import SceneEntry, ShotEntry
 
 _logger = logging.getLogger(__name__)
@@ -55,7 +60,7 @@ _INVALID = {
 }
 
 Source = Literal["ai", "manual"]
-Method = Literal["deterministic", "llm"]
+Method = Literal["deterministic", "llm", "manual"]
 Status = Literal["not_selected", "selected", "out_of_date"]
 ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
 PictureKind = Literal["character", "environment"]
@@ -100,7 +105,7 @@ class CatalogPictureOut(BaseModel):
 
 
 class ShotReferenceManifestOut(BaseModel):
-    # How it was chosen: by the language model, or by the fixed rule.
+    # How it was chosen: by the language model, by the fixed rule, or by the user.
     method: Method
     # Why the fixed rule chose when the language model was meant to (its answer could not be
     # used, or the call failed). None otherwise.
@@ -118,6 +123,9 @@ class ShotReferenceVersionOut(BaseModel):
 
     version: int
     source: Source
+    # The job that chose it with the language model. None when the fixed rule chose (no model
+    # was asked) and for a manifest the user chose.
+    job_id: int | None
     created_at: datetime
 
 
@@ -142,6 +150,9 @@ class ShotReferenceEntryOut(BaseModel):
     job: DiscoveryJobOut | None
     can_run: bool
     blocked_reason: str | None
+    # True when the newest manifest was chosen by the user: choosing again by the fixed rule or
+    # the model has to be confirmed (PHASE-038).
+    needs_confirmation: bool
 
 
 class SceneShotReferencesOut(BaseModel):
@@ -179,6 +190,25 @@ class ShotReferenceQueuedOut(BaseModel):
     scene_id: str
     shot_id: str
     job_id: int
+
+
+class ShotReferenceRunIn(BaseModel):
+    """The optional body of the run of one shot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+
+
+class ShotReferencesEditIn(BaseModel):
+    """The user's own choice: the ids of the pictures (`lab_image_id` of the catalog), in the
+    order they are sent. The rules (in the catalog, no repeat, from 1 to 9) are checked by
+    `reference_selection.manual`; the limit here only keeps a request from being huge.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lab_image_ids: list[int] = Field(max_length=100)
 
 
 class ShotReferencesRunOut(BaseModel):
@@ -244,6 +274,7 @@ def _shot_out(entry: ShotEntry, urls: dict[int, str]) -> ShotReferenceEntryOut:
                 version=row.version,
                 # The database CHECK constraint keeps `source` to the two allowed values.
                 source=cast(Source, row.source),
+                job_id=row.job_id,
                 created_at=row.created_at,
             )
             if row is not None
@@ -261,6 +292,7 @@ def _shot_out(entry: ShotEntry, urls: dict[int, str]) -> ShotReferenceEntryOut:
         ),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
+        needs_confirmation=entry.needs_confirmation,
     )
 
 
@@ -333,6 +365,10 @@ async def _plan_requests(
 )
 async def get_shot_references(project_id: int, session: SessionDep) -> ShotReferencesOut:
     project = await load_project(session, project_id)
+    return await _state_out(session, project)
+
+
+async def _state_out(session: AsyncSession, project: Project) -> ShotReferencesOut:
     result = await shot_references.state(session, project)
     urls = await _urls(result, session)
     return ShotReferencesOut(
@@ -386,13 +422,47 @@ async def run_scene(
     responses={**_NOT_FOUND, **_INVALID},
 )
 async def run_shot(
-    project_id: int, scene_id: DiscoveryId, shot_id: DiscoveryId, session: SessionDep
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    session: SessionDep,
+    body: ShotReferenceRunIn | None = None,
 ) -> ShotReferencesRunOut:
     """Chooses the references of one shot. Refused with the reason when it cannot be done."""
     project = await load_project(session, project_id)
     try:
-        result = await shot_references.select_shot(session, project, scene_id, shot_id)
+        result = await shot_references.select_shot(
+            session,
+            project,
+            scene_id,
+            shot_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+        )
     except shot_references.ShotReferencesError as exc:
         raise _refused(exc) from exc
     await _plan_requests(session, project_id, result)
     return _run_out(result)
+
+
+@router.put(
+    "/projects/{project_id}/shot-references/{scene_id}/{shot_id}",
+    response_model=ShotReferencesOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_shot_references(
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    body: ShotReferencesEditIn,
+    session: SessionDep,
+) -> ShotReferencesOut:
+    """Saves the user's own choice of pictures for one shot as its next manifest, and then plans
+    the generation request and queues the prompt, as after any manifest.
+    """
+    project = await load_project(session, project_id)
+    try:
+        await shot_references.save_manual(session, project, scene_id, shot_id, body.lab_image_ids)
+    except shot_references.ShotReferencesError as exc:
+        raise _refused(exc) from exc
+    await shot_chain.after_references_saved(project_id, scene_id, shot_id)
+    return await _state_out(session, project)

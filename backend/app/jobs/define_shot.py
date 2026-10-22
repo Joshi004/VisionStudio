@@ -14,6 +14,10 @@ marks the job succeeded.
 Code writes the shot's id, its scene, its duration (`duration`) and the lines of dialogue
 (`dialogue`); the model's answer does not carry them (`shot_definition_writer.check_answer`).
 
+When the user wrote a note on the earlier specification (PHASE-038), the job also holds `feedback`
+(the text, the number of the version it was about, and that specification): the request gets them
+as data blocks, and the version the job saves records the note in its `inputs`.
+
 One job per shot, so shots are defined side by side when the pools allow (`store.create_job`
 with `dedupe_key`). The model is the **story role** (`llm_target.STORY_MODEL_KEY`), like every
 story stage (D-12).
@@ -36,18 +40,16 @@ from typing import Any, Final
 
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
-from app.jobs import dispatcher, llm_call, phases, store
+from app.jobs import llm_call, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import (
     discovery,
-    generation_requests,
     llm_target,
-    shot_continuity,
+    shot_chain,
     shot_definition_writer,
     shot_definitions,
-    shot_prompts,
-    shot_references,
+    user_feedback,
 )
 from app.services.llm_target import STORY_MODEL_KEY
 
@@ -81,6 +83,8 @@ class _Input:
     environment: dict[str, Any]
     inputs: dict[str, Any]
     bible_id: int
+    # The user's note on the earlier specification, when this one is made from one (PHASE-038).
+    feedback: user_feedback.Feedback | None = None
 
 
 def _is_number(value: Any) -> bool:
@@ -108,8 +112,10 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     environment = job_input.get("environment")
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
+    feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     if (
-        not isinstance(scene, dict)
+        not feedback_ok
+        or not isinstance(scene, dict)
         or not isinstance(scene_id, str)
         or not isinstance(shot_id, str)
         or not isinstance(shot_plan_id, int)
@@ -152,6 +158,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         environment=environment,
         inputs=inputs,
         bible_id=bible_id,
+        feedback=feedback,
     )
 
 
@@ -219,6 +226,7 @@ class DefineShotHandler(JobHandler):
             characters=read.characters,
             environment=read.environment,
             model=target.model,
+            feedback=read.feedback,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
@@ -281,48 +289,9 @@ class DefineShotHandler(JobHandler):
             outcome.usage,
         )
 
-        # The shot's reference pictures are chosen: by the fixed rule here, with no model call
-        # (PHASE-024), or, when the setting says the language model chooses, by a job of its own
-        # that is queued here and that plans the request and compiles the prompt when it is done
-        # (PHASE-033). Also a separate step: a shot that cannot be given its pictures yet is left
-        # for the user's **Select references**, and a failure here must not fail a job that has
-        # succeeded.
-        try:
-            async with SessionLocal() as session:
-                await shot_references.select_if_ready(session, project_id, read.scene_id, shot_id)
-        except Exception:
-            _logger.exception("job %d: the references of the shot could not be chosen", job_id)
-
-        # With the references chosen, the shot's generation request is planned by code too
-        # (PHASE-025). Its own step for the same reason: a shot that cannot be planned yet (its
-        # speech is not ready, say) is left for the user's **Plan**.
-        planned = False
-        try:
-            async with SessionLocal() as session:
-                planned = await generation_requests.plan_if_ready(
-                    session, project_id, read.scene_id, shot_id
-                )
-        except Exception:
-            _logger.exception("job %d: the generation request could not be planned", job_id)
-
-        # With the request planned, the shot's final prompt is compiled by the model
-        # (PHASE-026), a job of its own. It never fails this job.
-        if planned:
-            await shot_prompts.queue_after_planning(project_id, read.scene_id, shot_id)
-
-        # When this was the last shot of its scene to be defined, the scene's continuity is
-        # checked by itself (PHASE-023). A separate step: the definition is stored and this job
-        # is finished first. A failure here must not fail a job that has already succeeded.
-        try:
-            async with SessionLocal() as session:
-                check = await shot_continuity.queue_check_if_ready(
-                    session, project_id, read.scene_id
-                )
-        except Exception:
-            _logger.exception("job %d: the continuity check could not be queued", job_id)
-            return
-        if check is not None:
-            dispatcher.nudge()
+        # What follows a stored definition (references, generation request, prompt, continuity)
+        # is separate: a failure there must not fail a job that has already succeeded.
+        await shot_chain.after_definition_saved(project_id, read.scene_id, shot_id)
 
     # --- Small helpers ------------------------------------------------------------------
 

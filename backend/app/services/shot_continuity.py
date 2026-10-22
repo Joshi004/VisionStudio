@@ -63,6 +63,12 @@ DEDUPE_KEY: Final = "scene_id"
 # that share no shot run side by side. The key is `scene/boundary`.
 REPAIR_JOB_TYPE: Final = shot_definitions.REPAIR_JOB_TYPE
 REPAIR_DEDUPE_KEY: Final = "cut_key"
+# The `source` of a shot definition the user wrote (PHASE-038).
+SOURCE_MANUAL: Final = "manual"
+MANUAL_CUT_MESSAGE: Final = (
+    "Every shot of this cut that a repair could change was written by you, so it is left as it "
+    "is. Fixing the cut changes your shots, so it has to be confirmed."
+)
 
 # How many of a project's newest check jobs are read to find each scene's newest one.
 _JOB_LOOKBACK: Final = 500
@@ -108,6 +114,9 @@ class CutMismatch:
     # Whether Fix this cut may be pressed, and the reason when it may not.
     can_repair: bool
     blocked_reason: str | None
+    # True when every shot of the cut that a repair could change was written by the user: the
+    # repair leaves them alone unless the user confirms (PHASE-038).
+    needs_confirmation: bool = False
 
 
 @dataclass(frozen=True)
@@ -311,12 +320,18 @@ def _shot_flags(entry: shot_definitions.SceneEntry) -> list[ShotFlag]:
     return flags
 
 
+def _manual_shots(entry: shot_definitions.SceneEntry) -> set[str]:
+    """The ids of the shots whose newest definition the user wrote."""
+    return {shot.shot["id"] for shot in entry.shots if shot.needs_confirmation}
+
+
 def _cut_mismatches(
     verdict: list[dict[str, Any]],
     row: ShotContinuityCheck,
     repairs: dict[str, Job],
     can_repair: bool,
     blocked_reason: str | None,
+    manual_shots: set[str],
 ) -> list[CutMismatch]:
     """The cuts of a check that do not line up. A repair job made before the check is not
     shown: it belongs to an older verdict of the cut.
@@ -336,6 +351,9 @@ def _cut_mismatches(
                 job=repair if fresh else None,
                 can_repair=can_repair,
                 blocked_reason=blocked_reason,
+                needs_confirmation=not shot_continuity_writer.editable_and_frozen(
+                    boundary, manual_shots
+                ).editable,
             )
         )
     return result
@@ -371,7 +389,7 @@ def _scene_state(
         else None
     )
     mismatches = (
-        _cut_mismatches(verdict, row, repairs, status == "mismatches", reason)
+        _cut_mismatches(verdict, row, repairs, status == "mismatches", reason, _manual_shots(entry))
         if verdict is not None and row is not None and status in ("mismatches", "reconciling")
         else []
     )
@@ -625,11 +643,16 @@ async def _queue_repair(
     check: ShotContinuityCheck,
     boundary: dict[str, Any],
     round_: int,
+    confirm_replace_manual: bool = False,
 ) -> tuple[Job, bool]:
     """Queues the repair of one cut of this check and returns `(job, created)`. `created` is
     False when the cut already has a repair waiting or running, which is returned instead. The
     scene must be ready (`_not_ready_reason`) and the check must cover it. Raises
     ShotContinuityError.
+
+    A shot whose definition the user wrote is frozen: the repair changes the other shot of the
+    cut to match it. When every shot it could change is the user's, nothing is queued and the
+    reason says so, unless `confirm_replace_manual` is true (PHASE-038).
 
     The job reads both shots of the cut with their newest specification. The shots the repair
     may not change keep their outer edge (`shot_continuity_writer.editable_and_frozen`).
@@ -638,12 +661,19 @@ async def _queue_repair(
     """
     scene_id = entry.item["id"]
     boundary_id = boundary["id"]
-    edit = shot_continuity_writer.editable_and_frozen(boundary)
     shot_ids = shot_continuity_writer.shots_of_boundary(boundary)
     try:
         context = await shot_definitions.cut_context(session, project, scene_id, shot_ids)
     except shot_definitions.ShotDefinitionsError as exc:
         raise ShotContinuityError(str(exc)) from exc
+    manual = (
+        set()
+        if confirm_replace_manual
+        else {item.shot_id for item in context.shots if item.row.source == SOURCE_MANUAL}
+    )
+    edit = shot_continuity_writer.editable_and_frozen(boundary, manual)
+    if not edit.editable:
+        raise ShotContinuityError(MANUAL_CUT_MESSAGE)
 
     common = context.shots[0].fields
     continuity = {"check_id": check.id, "round": round_, "boundary_id": boundary_id}
@@ -760,13 +790,20 @@ async def queue_repairs(session: AsyncSession, project_id: int, check_id: int) -
 
 
 async def start_cut_repair(
-    session: AsyncSession, project: Project, scene_id: str, boundary_id: str
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    boundary_id: str,
+    *,
+    confirm_replace_manual: bool = False,
 ) -> Job:
     """Queues the repair of one cut that the newest check found not lining up, at round 0 (the
     user's request starts the count again, so automatic waves follow it), and commits. If the
-    cut already has a repair waiting or running, that job is returned. Raises
-    ShotContinuityError when the scene is not ready, the newest check does not cover the shots
-    as they are now, or the cut lines up.
+    cut already has a repair waiting or running, that job is returned. A shot of the cut whose
+    definition the user wrote is left as it is, and when every shot the repair could change is
+    the user's, `confirm_replace_manual` must be true (PHASE-038). Raises ShotContinuityError
+    when the scene is not ready, the newest check does not cover the shots as they are now, or
+    the cut lines up.
     """
     definitions = await shot_definitions.state(session, project)
     entry = _find_scene(definitions, scene_id)
@@ -788,7 +825,9 @@ async def start_cut_repair(
         raise ShotContinuityError(f"There is no cut '{boundary_id}' in the newest check.")
     if boundary["matches"]:
         raise ShotContinuityError("This cut lines up already.")
-    repair, _created = await _queue_repair(session, project, entry, check, boundary, 0)
+    repair, _created = await _queue_repair(
+        session, project, entry, check, boundary, 0, confirm_replace_manual
+    )
     return repair
 
 

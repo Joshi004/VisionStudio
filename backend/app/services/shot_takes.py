@@ -302,6 +302,20 @@ def _selected_id(
     return newest.id if newest is not None else None
 
 
+def prompt_version_of(row: ShotTake) -> int | None:
+    """The version number of the shot prompt this take was made from, as the take recorded it
+    (`inputs.artifacts`), or None when it recorded none. The story workspace compares it with
+    the newest prompt to tell the user that a newer prompt is waiting (PHASE-038).
+    """
+    artifacts = row.inputs.get("artifacts") if isinstance(row.inputs, dict) else None
+    for artifact in artifacts if isinstance(artifacts, list) else []:
+        if isinstance(artifact, dict) and artifact.get("kind") == PROMPT_KIND:
+            version = artifact.get("version")
+            if isinstance(version, int) and not isinstance(version, bool):
+                return version
+    return None
+
+
 def _take_reasons(row: ShotTake, prompt: shot_prompts.ShotEntry) -> list[str]:
     """Why a take made for this shot is no longer current, one sentence each."""
     current = prompt.row

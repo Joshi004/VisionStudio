@@ -5,8 +5,10 @@ One call per scene (`Path_ahead.md` Sections 22 and 25). Only after the speech h
 its length measured, can we decide how the audience sees a scene. The call reads the StoryBible,
 the scene, its definition, the definitions of the characters it chose and of its environment, the
 scene's events, its speech units with their **measured** lengths, and the duration policy (the
-planning target range, passed as data and never written into the instructions, D-8). It answers
-with a list of compact shot skeletons in story order.
+planning target range and the lengths H3 makes, passed as data and never written into the
+instructions, D-8). It answers with a list of compact shot skeletons in story order. Code moves
+each `target_duration` onto one of H3's lengths when the plan is saved (`services/h3_lengths`,
+D-9), so the model's number is a request, not the final length.
 
 A shot skeleton says which events it shows (`source_event_ids`), which speech units are heard
 during it (`speech_unit_ids`, the answer to Q-15), its `type`, its `target_duration` and a
@@ -39,7 +41,7 @@ import json
 import math
 from typing import Any, Final
 
-from app.services import discovery_writer
+from app.services import discovery_writer, user_feedback
 from app.services.projects import SPEECH_BOTH, SPEECH_NO_NARRATION
 
 parse_answer = discovery_writer.parse_answer
@@ -117,13 +119,18 @@ POLICY: the video does not have to be as short as the speech.
 the shot that shows it. You also decide whether a very short event is combined with its \
 neighbours or given a shot of its own.
 - Keep every shot inside the target range of the DURATION POLICY.
+- The video model only makes clips of certain lengths, listed as "h3_lengths_seconds" in the \
+DURATION POLICY. Choose every "target_duration" from that list: code moves any other length to \
+the nearest one on it, which can make a shot a little shorter or longer than you planned.
 - Do not invent events, characters or places the scene does not have.
 
 If the user message also holds PREVIOUS SHOTS and TIMELINE PROBLEMS, an earlier plan of this \
 same scene was checked by code and had the problems listed. Plan the whole scene again so that \
 none of those problems remains: for example, merge a shot that is too short with a neighbour, \
 split one that is too long, or lengthen a shot so that the line spoken in it fits. Each problem \
-has a "message" with the numbers. Keep what was fine, and still follow every rule above."""
+has a "message" with the numbers. Keep what was fine, and still follow every rule above.
+
+{user_feedback.INSTRUCTION}"""
 
 _ANSWER_TAIL: Final = f"""\
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
@@ -155,7 +162,9 @@ def build_request(
     target_min_seconds: int,
     target_max_seconds: int,
     model: str,
+    h3_lengths_seconds: list[float] | None = None,
     replan: dict[str, Any] | None = None,
+    feedback: user_feedback.Feedback | None = None,
     speech_mode: str = SPEECH_BOTH,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
@@ -169,14 +178,23 @@ def build_request(
     `events` is the scene's stored events; `units` is a list of `{id, event_id, kind,
     speaker_id, text, measured_seconds}`. The target range comes from the duration policy.
 
+    `h3_lengths_seconds` is the lengths H3 makes inside the hard bounds (`h3_lengths.grid_lengths`),
+    given to the model as part of the duration policy data (D-8, never written into the
+    instructions). Code moves each planned length onto one of them when the plan is saved (D-9).
+
     `replan` is set when this is an automatic re-plan (PHASE-021): `{previous_shots, problems}`,
     the shots of the plan that failed the timeline checks and the problems found. Both reach the
     model as data blocks, never as text in the instructions.
+
+    `feedback` is the user's note on the earlier plan (PHASE-038): `PREVIOUS SHOTS` (its shots,
+    unless a re-plan gives them) and `USER FEEDBACK`, again as data blocks.
     """
-    policy = {
+    policy: dict[str, Any] = {
         "target_min_seconds": target_min_seconds,
         "target_max_seconds": target_max_seconds,
     }
+    if h3_lengths_seconds is not None:
+        policy["h3_lengths_seconds"] = h3_lengths_seconds
     parts = [
         "STORY BIBLE (JSON):\n" + json.dumps(bible_content, ensure_ascii=False, indent=2),
         "SCENE (JSON):\n" + json.dumps(scene, ensure_ascii=False, indent=2),
@@ -197,6 +215,8 @@ def build_request(
             "TIMELINE PROBLEMS (JSON):\n"
             + json.dumps(replan["problems"], ensure_ascii=False, indent=2)
         )
+    if feedback is not None:
+        parts += user_feedback.blocks(feedback, "PREVIOUS SHOTS", with_previous=replan is None)
     return {
         "model": model,
         "messages": [
@@ -375,14 +395,14 @@ def check_shots(
     order.
     """
     if not isinstance(answer, dict):
-        raise ValueError("The model's answer was not a JSON object.")
+        raise ValueError("The shots were not a JSON object.")
     entries = answer.get("shots")
     if not isinstance(entries, list):
-        raise ValueError('The "shots" of the model\'s answer was missing or not a list.')
+        raise ValueError('The "shots" were missing or not a list.')
     if not entries:
-        raise ValueError('The "shots" of the model\'s answer was empty.')
+        raise ValueError("There were no shots.")
     if len(entries) > MAX_SHOTS:
-        raise ValueError(f'The "shots" of the model\'s answer had more than {MAX_SHOTS} shots.')
+        raise ValueError(f"There were more than {MAX_SHOTS} shots.")
 
     event_ids = [event["id"] for event in events]
     order = {event_id: index for index, event_id in enumerate(event_ids)}
@@ -393,7 +413,7 @@ def check_shots(
     spans: list[tuple[int, int]] = []
     for position, entry in enumerate(entries, start=1):
         if not isinstance(entry, dict):
-            raise ValueError(f"Shot {position} of the model's answer was not an object.")
+            raise ValueError(f"Shot {position} was not an object.")
         kind = entry.get("type")
         if kind not in SHOT_TYPES:
             raise ValueError(

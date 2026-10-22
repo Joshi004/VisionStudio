@@ -9,8 +9,9 @@ same thing again.
 **Frames.** Shot boundaries are rounded to the frame grid once, at story level, and a shot's frame
 count is the difference of its two boundaries (`frame_counts`). The counts add up to the boundary
 of the last shot, so the video is as long as the sum of the shot targets to within half a frame.
-A shot's count is never more than `ceil(target * fps)`, which is what H3 was asked for (D-9), so
-a clip always covers its shot; the plan still checks the clip's frames.
+A shot's length is stored on H3's own length (`h3_lengths`, D-9), so the clip normally has exactly
+the frames its shot needs and nothing is cut. At another frame rate than H3's 24 a clip can be one
+source frame short; the render repeats its last frame then. The plan checks the clip's frames.
 
 **Audio** (the starting values below are untested by ear and are meant to be tuned):
 
@@ -277,7 +278,8 @@ def build_plan(scenes: list[SceneSource], *, fps: int, width: int, height: int) 
             if frames < 1:
                 raise RenderPlanError(f"The shot {label} lasts less than one frame.")
             needed = source_frames_needed(frames, fps)
-            if take.frame_count is None or take.frame_count < needed:
+            # One source frame short is allowed: the render repeats the last frame (D-9).
+            if take.frame_count is None or take.frame_count < needed - 1:
                 have = "an unreadable number of" if take.frame_count is None else take.frame_count
                 too_short.append(f"{label} has {have} frames, needs {needed}")
             if take.reasons:

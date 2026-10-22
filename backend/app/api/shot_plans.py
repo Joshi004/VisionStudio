@@ -7,7 +7,12 @@
   timeline in seconds with the problems found (PHASE-021) and whether generation may use it.
 - `POST .../run` ("Plan all") starts one job per scene that is not planned and up to date
   already, can be planned and is not already being planned.
-- `POST .../{scene_id}/run` starts the job for one scene.
+- `POST .../{scene_id}/run` starts the job for one scene. When the newest plan was written by
+  the user, the body must say `confirm_replace_manual`. The body may also hold `feedback`, the
+  user's note on the newest plan: the scene is planned again with the note (PHASE-038).
+- `PUT .../{scene_id}` saves the user's edit of the shots of one scene as its next plan
+  (`source` is `manual`), checked like the model's answer and then by the timeline checks; the
+  number of shots stays as it is (PHASE-038).
 
 A job stores a new version of the scene's shot plan (`services/shot_plans.py`); nothing is
 written to the Character Lab. The answers never return ORM objects.
@@ -19,16 +24,18 @@ from datetime import datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import scene_timeline, shot_planning_writer, shot_plans
+from app.services import scene_timeline, shot_planning_writer, shot_plans, user_feedback
 from app.services.shot_plans import SceneEntry
 
 router = APIRouter()
@@ -83,6 +90,8 @@ class ShotPlanVersionOut(BaseModel):
     source: Source
     job_id: int | None
     created_at: datetime
+    # The user's note this version was made from, or None (PHASE-038).
+    feedback: str | None = None
 
 
 # --- The timeline (PHASE-021) ---------------------------------------------------------------
@@ -191,6 +200,9 @@ class ShotPlanEntryOut(BaseModel):
     # Whether generation may use this scene's shots: a current plan with no blocking problem.
     generation_ready: bool
     generation_blocked_reason: str | None
+    # True when the newest plan was written by the user: planning it again by model has to be
+    # confirmed (PHASE-038).
+    needs_confirmation: bool
 
 
 class ShotPlansOut(BaseModel):
@@ -221,6 +233,38 @@ class ShotPlansRunOut(BaseModel):
     job_id: int
 
 
+class ShotPlanRunIn(BaseModel):
+    """The optional body of the run of one scene."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+    # The user's note on the newest plan. `user_feedback.clean` checks it again.
+    feedback: str | None = Field(default=None, max_length=user_feedback.MAX_CHARS)
+
+
+class ShotEditIn(BaseModel):
+    """One edited shot. Its id is set by code from its position. The rules (known ids, order,
+    coverage, lengths) are checked by `shot_planning_writer.check_shots`; these limits only keep
+    a request from being huge.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_event_ids: list[str] = Field(max_length=200)
+    speech_unit_ids: list[str] = Field(max_length=200)
+    type: ShotType
+    target_duration: float
+    continues_previous: bool = False
+    description: str = Field(max_length=2000)
+
+
+class ShotPlanEditIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shots: list[ShotEditIn] = Field(max_length=shot_planning_writer.MAX_SHOTS)
+
+
 def _entry_out(entry: SceneEntry) -> ShotPlanEntryOut:
     row = entry.row
     job = entry.job
@@ -243,6 +287,7 @@ def _entry_out(entry: SceneEntry) -> ShotPlanEntryOut:
                 source=cast(Source, row.source),
                 job_id=row.job_id,
                 created_at=row.created_at,
+                feedback=user_feedback.text_of(row.inputs),
             )
             if row is not None
             else None
@@ -264,6 +309,7 @@ def _entry_out(entry: SceneEntry) -> ShotPlanEntryOut:
         replan_attempt=entry.replan_attempt,
         generation_ready=entry.generation_ready,
         generation_blocked_reason=entry.generation_blocked_reason,
+        needs_confirmation=entry.needs_confirmation,
     )
 
 
@@ -278,6 +324,10 @@ def _refused(exc: shot_plans.ShotPlansError) -> HTTPException:
 )
 async def get_shot_plans(project_id: int, session: SessionDep) -> ShotPlansOut:
     project = await load_project(session, project_id)
+    return await _state_out(session, project)
+
+
+async def _state_out(session: AsyncSession, project: Project) -> ShotPlansOut:
     result = await shot_plans.state(session, project)
     return ShotPlansOut(
         scenes_version=result.scenes_version,
@@ -321,14 +371,44 @@ async def run_all(project_id: int, session: SessionDep) -> ShotPlansRunAllOut:
     status_code=status.HTTP_202_ACCEPTED,
     responses={**_NOT_FOUND, **_INVALID},
 )
-async def run_one(project_id: int, scene_id: DiscoveryId, session: SessionDep) -> ShotPlansRunOut:
+async def run_one(
+    project_id: int,
+    scene_id: DiscoveryId,
+    session: SessionDep,
+    body: ShotPlanRunIn | None = None,
+) -> ShotPlansRunOut:
     """Starts the job that plans one scene's shots. If it already has a job waiting or
     running, that job's id is returned and no second job is made.
     """
     project = await load_project(session, project_id)
     try:
-        job = await shot_plans.start_run(session, project, scene_id)
+        job = await shot_plans.start_run(
+            session,
+            project,
+            scene_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+            feedback=body.feedback if body is not None else None,
+        )
     except shot_plans.ShotPlansError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()
     return ShotPlansRunOut(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/shot-plans/{scene_id}",
+    response_model=ShotPlansOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_shot_plan(
+    project_id: int, scene_id: DiscoveryId, body: ShotPlanEditIn, session: SessionDep
+) -> ShotPlansOut:
+    """Saves the edited shots of one scene as its next plan, written by the user."""
+    project = await load_project(session, project_id)
+    try:
+        await shot_plans.save_manual(
+            session, project, scene_id, [shot.model_dump() for shot in body.shots]
+        )
+    except shot_plans.ShotPlansError as exc:
+        raise _refused(exc) from exc
+    return await _state_out(session, project)

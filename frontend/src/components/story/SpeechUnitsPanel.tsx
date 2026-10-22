@@ -32,6 +32,7 @@ import {
   type SpeechUnitsEntry,
 } from "../../api/speechUnits";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { PromptHoverCard } from "./PromptHoverCard";
 import { ReplaceManualModal } from "./ReplaceManualModal";
 import { SpeechUnitsEditor } from "./SpeechUnitsEditor";
 import { SpeechUnitsView } from "./SpeechUnitsView";
@@ -117,12 +118,11 @@ function EntryRow({
               {status.label}
             </Badge>
             {entry.version !== null && (
-              <Badge
-                variant="light"
-                title="The newest version of this scene's speech units"
-              >
-                v{entry.version.version}
-              </Badge>
+              <PromptHoverCard jobId={entry.version.job_id} source={entry.version.source}>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{entry.version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
             {entry.units !== null && (
               <Badge variant="light" color="gray">

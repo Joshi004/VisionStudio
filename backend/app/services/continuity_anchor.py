@@ -1,9 +1,11 @@
 """The frame a continuity shot starts from (PHASE-032, Q-7).
 
 A continuity shot carries straight on from the shot before it. Its anchor is the frame its
-predecessor's selected take ends on, **at the predecessor's target duration**: a take is longer
-than its shot (the tail is trimmed at render time, D-9), so the last frame of the file is not the
-last frame the viewer sees. That frame is cut from the clip with FFmpeg and stored as an `asset`
+predecessor's selected take ends on, **at the predecessor's target duration**: a shot's length is
+stored on H3's own length (D-9), so this is normally the last frame of the file. A plan made
+before that, or a project at another frame rate, can have a take a few frames longer than its
+shot (the render cuts the tail), and the frame at the target is the last one the viewer sees.
+That frame is cut from the clip with FFmpeg and stored as an `asset`
 row (`kind='frame'`, `source='derived'`), which the video handler already accepts as a first
 frame (`{"source": "asset", "id": ...}`) and as a reference picture. No table and no migration
 are needed.

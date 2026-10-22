@@ -11,7 +11,7 @@ type SceneTimelineViewProps = {
 const BAR_HEIGHT = 26;
 
 function seconds(value: number): string {
-  return `${value.toFixed(1)} s`;
+  return `${value.toFixed(2)} s`;
 }
 
 function percent(value: number, total: number): string {

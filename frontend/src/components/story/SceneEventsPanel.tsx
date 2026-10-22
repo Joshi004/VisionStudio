@@ -26,6 +26,7 @@ import {
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import type { SpeechMode } from "../projects/speechModes";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { PromptHoverCard } from "./PromptHoverCard";
 import { ReplaceManualModal } from "./ReplaceManualModal";
 import { SceneEventsEditor } from "./SceneEventsEditor";
 import { SceneEventsView } from "./SceneEventsView";
@@ -108,12 +109,11 @@ function EntryRow({
               {status.label}
             </Badge>
             {entry.version !== null && (
-              <Badge
-                variant="light"
-                title="The newest version of this scene's events"
-              >
-                v{entry.version.version}
-              </Badge>
+              <PromptHoverCard jobId={entry.version.job_id} source={entry.version.source}>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{entry.version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
             {entry.events !== null && (
               <Badge variant="light" color="gray">

@@ -9,7 +9,13 @@
   request is planned and current and that has no current prompt and is not already being
   compiled.
 - `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
-- `POST .../{scene_id}/{shot_id}/run` starts the job for one shot.
+- `POST .../{scene_id}/{shot_id}/run` starts the job for one shot. When the newest prompt was
+  written by the user, the body must say `confirm_replace_manual`. The body may also hold
+  `feedback`, the user's note on the newest prompt: the prompt is written again with the note
+  (PHASE-038). Nothing is sent to the video model by it.
+- `PUT .../{scene_id}/{shot_id}` saves the user's edit of the pieces of a shot's prompt as its
+  next version (`source` is `manual`). Code builds the prompt from the pieces with the same
+  checks as for the model's answer.
 
 A job stores a new version of the shot's prompt (`services/shot_prompts.py`); nothing is written
 to the Character Lab and nothing is sent to the video model. The answers never return ORM
@@ -22,16 +28,18 @@ from datetime import datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import shot_prompts
+from app.services import shot_prompts, user_feedback
 from app.services.shot_prompts import SceneEntry, ShotEntry
 
 router = APIRouter()
@@ -88,6 +96,9 @@ class ShotPromptContentOut(BaseModel):
     endpoint: str
     # The finished prompt, as it is sent to the video model.
     prompt: str
+    # The creative pieces the model wrote (or the user edited), by name. The prompt is built from
+    # them and the parts that code writes.
+    pieces: dict[str, str] = {}
     subjects: list[PromptSubjectOut]
     speakers: list[PromptSpeakerOut]
     # What is off in the prompt. None of it blocks.
@@ -103,6 +114,8 @@ class ShotPromptVersionOut(BaseModel):
     source: Source
     job_id: int | None
     created_at: datetime
+    # The user's note this version was made from, or None (PHASE-038).
+    feedback: str | None = None
 
 
 class PromptShotSkeletonOut(BaseModel):
@@ -125,6 +138,9 @@ class ShotPromptEntryOut(BaseModel):
     job: DiscoveryJobOut | None
     can_run: bool
     blocked_reason: str | None
+    # True when the newest prompt was written by the user: compiling it again by model has to be
+    # confirmed (PHASE-038).
+    needs_confirmation: bool
 
 
 class SceneShotPromptsOut(BaseModel):
@@ -162,6 +178,27 @@ class ShotPromptsRunOneOut(BaseModel):
     job_id: int
 
 
+class ShotPromptRunIn(BaseModel):
+    """The optional body of the run of one shot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+    # The user's note on the newest prompt. `user_feedback.clean` checks it again.
+    feedback: str | None = Field(default=None, max_length=user_feedback.MAX_CHARS)
+
+
+class ShotPromptEditIn(BaseModel):
+    """The edited pieces, by name (`shot_prompt_writer` says which names a shot has). The rules
+    are checked by `shot_prompt_writer.check_answer`; the limits here only keep a request from
+    being huge.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pieces: dict[str, str] = Field(max_length=50)
+
+
 def _shot_out(entry: ShotEntry) -> ShotPromptEntryOut:
     shot = entry.shot
     row = entry.row
@@ -185,6 +222,7 @@ def _shot_out(entry: ShotEntry) -> ShotPromptEntryOut:
                 source=cast(Source, row.source),
                 job_id=row.job_id,
                 created_at=row.created_at,
+                feedback=user_feedback.text_of(row.inputs),
             )
             if row is not None
             else None
@@ -201,6 +239,7 @@ def _shot_out(entry: ShotEntry) -> ShotPromptEntryOut:
         ),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
+        needs_confirmation=entry.needs_confirmation,
     )
 
 
@@ -240,6 +279,10 @@ def _refused(exc: shot_prompts.ShotPromptsError) -> HTTPException:
 )
 async def get_shot_prompts(project_id: int, session: SessionDep) -> ShotPromptsOut:
     project = await load_project(session, project_id)
+    return await _state_out(session, project)
+
+
+async def _state_out(session: AsyncSession, project: Project) -> ShotPromptsOut:
     result = await shot_prompts.state(session, project)
     return ShotPromptsOut(
         scenes_version=result.scenes_version,
@@ -297,15 +340,49 @@ async def run_scene(
     responses={**_NOT_FOUND, **_INVALID},
 )
 async def run_shot(
-    project_id: int, scene_id: DiscoveryId, shot_id: DiscoveryId, session: SessionDep
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    session: SessionDep,
+    body: ShotPromptRunIn | None = None,
 ) -> ShotPromptsRunOneOut:
     """Starts the job that compiles one shot's prompt. If it already has a job waiting or
     running, that job's id is returned and no second job is made.
     """
     project = await load_project(session, project_id)
     try:
-        job = await shot_prompts.start_shot(session, project, scene_id, shot_id)
+        job = await shot_prompts.start_shot(
+            session,
+            project,
+            scene_id,
+            shot_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+            feedback=body.feedback if body is not None else None,
+        )
     except shot_prompts.ShotPromptsError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()
     return ShotPromptsRunOneOut(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/shot-prompts/{scene_id}/{shot_id}",
+    response_model=ShotPromptsOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_shot_prompt(
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    body: ShotPromptEditIn,
+    session: SessionDep,
+) -> ShotPromptsOut:
+    """Saves the edited pieces of one shot's prompt as its next version, written by the user.
+    Nothing is sent to the video model.
+    """
+    project = await load_project(session, project_id)
+    try:
+        await shot_prompts.save_manual(session, project, scene_id, shot_id, body.pieces)
+    except shot_prompts.ShotPromptsError as exc:
+        raise _refused(exc) from exc
+    return await _state_out(session, project)

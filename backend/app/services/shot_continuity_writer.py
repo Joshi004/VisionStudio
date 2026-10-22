@@ -35,7 +35,7 @@ are saved by `services/shot_continuity.py`.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -292,16 +292,7 @@ class CutEdit:
     frozen: list[dict[str, str]]
 
 
-def editable_and_frozen(boundary: dict[str, Any]) -> CutEdit:
-    """What repairing this boundary may change.
-
-    - A cut between two shots: both may change, but only at the cut, so the earlier shot's
-      start and the later shot's end are frozen.
-    - The scene's start: only the first shot may change (its start); its end is frozen.
-    - The scene's end: only the last shot may change (its end); its start is frozen.
-
-    Freezing the outer edges is what keeps a repair from breaking the cuts next to it.
-    """
+def _structural_edit(boundary: dict[str, Any]) -> CutEdit:
     before, after = boundary["before"], boundary["after"]
     if before == SCENE_START:
         return CutEdit(editable=[after], frozen=[{"shot_id": after, "edge": "end"}])
@@ -313,6 +304,35 @@ def editable_and_frozen(boundary: dict[str, Any]) -> CutEdit:
             {"shot_id": before, "edge": "start"},
             {"shot_id": after, "edge": "end"},
         ],
+    )
+
+
+def editable_and_frozen(boundary: dict[str, Any], frozen_shots: Collection[str] = ()) -> CutEdit:
+    """What repairing this boundary may change.
+
+    - A cut between two shots: both may change, but only at the cut, so the earlier shot's
+      start and the later shot's end are frozen.
+    - The scene's start: only the first shot may change (its start); its end is frozen.
+    - The scene's end: only the last shot may change (its end); its start is frozen.
+
+    Freezing the outer edges is what keeps a repair from breaking the cuts next to it.
+
+    `frozen_shots` are shots the repair may not change at all, because the user wrote their
+    definition (PHASE-038): both of their edges are frozen, and the other shot of the cut is
+    repaired to match. `editable` is then empty when every shot of the cut is one of them.
+    """
+    edit = _structural_edit(boundary)
+    if not frozen_shots:
+        return edit
+    frozen: list[dict[str, str]] = []
+    for shot_id in shots_of_boundary(boundary):
+        if shot_id in frozen_shots:
+            frozen += [{"shot_id": shot_id, "edge": "start"}, {"shot_id": shot_id, "edge": "end"}]
+        else:
+            frozen += [item for item in edit.frozen if item["shot_id"] == shot_id]
+    return CutEdit(
+        editable=[shot_id for shot_id in edit.editable if shot_id not in frozen_shots],
+        frozen=frozen,
     )
 
 

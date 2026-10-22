@@ -20,6 +20,7 @@ import {
   type LookStateScene,
 } from "../../api/lookStateResolution";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { PromptHoverCard } from "./PromptHoverCard";
 
 type LooksAndStatesPanelProps = {
   projectId: number;
@@ -158,12 +159,11 @@ export function LooksAndStatesPanel({ projectId }: LooksAndStatesPanelProps) {
           </Stack>
           <Group gap="xs">
             {version !== null && (
-              <Badge
-                variant="light"
-                title="The newest resolution of the looks and states"
-              >
-                v{version.version}
-              </Badge>
+              <PromptHoverCard jobId={version.job_id} source={version.source}>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
             <Button
               onClick={() => resolve.mutate()}

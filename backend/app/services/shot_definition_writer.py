@@ -36,7 +36,7 @@ import re
 from collections.abc import Collection
 from typing import Any, Final
 
-from app.services import discovery_writer
+from app.services import discovery_writer, user_feedback
 
 parse_answer = discovery_writer.parse_answer
 
@@ -170,6 +170,8 @@ separately, and music is added to the whole film later.
 speaking, or is stated to be unseen. Narration is heard over the shot and is not spoken by \
 anyone in it.
 
+{user_feedback.INSTRUCTION}
+
 Answer with one JSON object only, in exactly this form (the values here are only examples of the \
 type): {_ANSWER_FORM}"""
 
@@ -187,9 +189,13 @@ def build_request(
     characters: list[dict[str, Any]],
     environment: dict[str, Any],
     model: str,
+    feedback: user_feedback.Feedback | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
+
+    `feedback` is the user's note on the earlier specification of this shot (PHASE-038): it adds
+    `PREVIOUS SPECIFICATION` (see `previous_specification`) and `USER FEEDBACK` as data blocks.
 
     `scene` is `{index, id, title, description}`; `shot` is the shot's skeleton with its
     `duration_seconds`, `position` and `shot_count` added; `previous_shot` and `next_shot` are
@@ -210,6 +216,8 @@ def build_request(
         "CHARACTERS IN THE SCENE (JSON):\n" + json.dumps(characters, ensure_ascii=False, indent=2),
         "ENVIRONMENT (JSON):\n" + json.dumps(environment, ensure_ascii=False, indent=2),
     ]
+    if feedback is not None:
+        parts += user_feedback.blocks(feedback, "PREVIOUS SPECIFICATION")
     return {
         "model": model,
         "messages": [
@@ -225,6 +233,22 @@ def build_request(
     }
 
 
+def previous_specification(content: dict[str, Any]) -> dict[str, Any]:
+    """A stored specification in the form of the model's answer: without the shot id, the scene
+    id, the duration and the dialogue, which code writes (`PREVIOUS SPECIFICATION` of a request
+    with feedback).
+    """
+    previous = {
+        key: value
+        for key, value in content.items()
+        if key not in ("shot_id", "scene_id", "duration")
+    }
+    audio = previous.get("audio_intent")
+    if isinstance(audio, dict):
+        previous["audio_intent"] = {key: value for key, value in audio.items() if key != "dialogue"}
+    return previous
+
+
 # --- Checking the answer ------------------------------------------------------------------
 
 
@@ -235,7 +259,7 @@ def _one_line(value: str) -> str:
 def _object(parent: dict[str, Any], key: str, path: str) -> dict[str, Any]:
     value = parent.get(key)
     if not isinstance(value, dict):
-        raise ValueError(f'The model\'s answer had no "{path}" object.')
+        raise ValueError(f'There was no "{path}" object.')
     return value
 
 
@@ -245,7 +269,7 @@ def _optional_object(parent: dict[str, Any], key: str) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ValueError(f'The "{key}" of the model\'s answer was not an object.')
+        raise ValueError(f'The "{key}" was not an object.')
     return value
 
 
@@ -255,15 +279,13 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     """
     value = parent.get(key)
     if not isinstance(value, str):
-        raise ValueError(f'The "{path}" of the model\'s answer was missing or not text.')
+        raise ValueError(f'The "{path}" was missing or not text.')
     text = _one_line(value)
     if not text:
-        raise ValueError(f'The "{path}" of the model\'s answer was empty.')
+        raise ValueError(f'The "{path}" was empty.')
     accepted_chars = int(max_chars * LIMIT_SLACK)
     if len(text) > accepted_chars:
-        raise ValueError(
-            f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
-        )
+        raise ValueError(f'The "{path}" was longer than {accepted_chars} characters.')
     return text
 
 
@@ -273,11 +295,11 @@ def _shot_size(composition: dict[str, Any]) -> str:
     """
     value = composition.get("shot_size")
     if not isinstance(value, str):
-        raise ValueError('The "composition.shot_size" of the model\'s answer was missing.')
+        raise ValueError('The "composition.shot_size" was missing.')
     size = re.sub(r"[\s-]+", "_", value.strip().lower())
     if size not in SHOT_SIZES:
         raise ValueError(
-            f'The "composition.shot_size" of the model\'s answer was "{_one_line(value)[:40]}", '
+            f'The "composition.shot_size" was "{_one_line(value)[:40]}", '
             f"which is not one of: {', '.join(SHOT_SIZES)}."
         )
     return size
@@ -288,21 +310,17 @@ def _characters(
 ) -> list[dict[str, str]]:
     raw = answer.get("characters")
     if not isinstance(raw, list):
-        raise ValueError('The "characters" of the model\'s answer was missing or not a list.')
+        raise ValueError('The "characters" was missing or not a list.')
     result: list[dict[str, str]] = []
     seen: set[str] = set()
     for position, entry in enumerate(raw, start=1):
         if not isinstance(entry, dict):
-            raise ValueError(f"Character {position} of the model's answer was not an object.")
+            raise ValueError(f"Character {position} was not an object.")
         character_id = entry.get("id")
         if not isinstance(character_id, str) or character_id not in scene_character_ids:
-            raise ValueError(
-                f"Character {position} of the model's answer was not one of the scene's characters."
-            )
+            raise ValueError(f"Character {position} was not one of the scene's characters.")
         if character_id in seen:
-            raise ValueError(
-                f'The "characters" of the model\'s answer listed "{character_id}" twice.'
-            )
+            raise ValueError(f'The "characters" listed "{character_id}" twice.')
         seen.add(character_id)
         path = f"characters.{character_id}"
         result.append(
@@ -321,15 +339,12 @@ def _characters(
 def _environment_state(answer: dict[str, Any]) -> dict[str, str | bool]:
     raw = _optional_object(answer, "environment_state")
     if len(raw) > MAX_STATE_KEYS:
-        raise ValueError(
-            'The "environment_state" of the model\'s answer had more than '
-            f"{MAX_STATE_KEYS} entries."
-        )
+        raise ValueError(f'The "environment_state" had more than {MAX_STATE_KEYS} entries.')
     result: dict[str, str | bool] = {}
     for key, value in raw.items():
         if not _STATE_KEY.match(key):
             raise ValueError(
-                f'The "environment_state" of the model\'s answer had the key "{key[:40]}", which '
+                f'The "environment_state" had the key "{key[:40]}", which '
                 "is not lower_case_with_underscores."
             )
         if isinstance(value, bool):
@@ -341,8 +356,7 @@ def _environment_state(answer: dict[str, Any]) -> dict[str, str | bool]:
             )
         else:
             raise ValueError(
-                f'The "environment_state.{key}" of the model\'s answer was not text, a number or '
-                "true or false."
+                f'The "environment_state.{key}" was not text, a number or true or false.'
             )
     return result
 
@@ -358,7 +372,7 @@ def _character_map(
     for character_id in raw:
         if character_id not in scene_character_ids:
             raise ValueError(
-                f'The "{key}" of the model\'s answer named "{character_id[:40]}", who is not one '
+                f'The "{key}" named "{character_id[:40]}", who is not one '
                 "of the scene's characters."
             )
         result[character_id] = _text(
@@ -372,11 +386,10 @@ def _sound_events(audio: dict[str, Any]) -> list[str]:
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise ValueError('The "audio_intent.sound_events" of the model\'s answer was not a list.')
+        raise ValueError('The "audio_intent.sound_events" was not a list.')
     if len(raw) > MAX_SOUND_EVENTS:
         raise ValueError(
-            f'The "audio_intent.sound_events" of the model\'s answer had more than '
-            f"{MAX_SOUND_EVENTS} entries."
+            f'The "audio_intent.sound_events" had more than {MAX_SOUND_EVENTS} entries.'
         )
     return [
         _text(
@@ -406,7 +419,7 @@ def check_answer(
     a fixed order, so a music field or any other extra field is dropped.
     """
     if not isinstance(answer, dict):
-        raise ValueError("The model's answer was not a JSON object.")
+        raise ValueError("The specification was not a JSON object.")
     composition = _object(answer, "composition", "composition")
     camera = _object(answer, "camera", "camera")
     action = _object(answer, "action", "action")

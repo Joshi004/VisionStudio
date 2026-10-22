@@ -7,6 +7,7 @@ import {
   Divider,
   Group,
   Loader,
+  Menu,
   Paper,
   Stack,
   Text,
@@ -15,6 +16,12 @@ import {
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
+import {
+  useCompileOnePrompt,
+  useSaveShotPrompt,
+  useShotPrompts,
+  type ShotPromptEntry,
+} from "../../api/shotPrompts";
 import {
   useCheckShotTakes,
   useGenerateAllShots,
@@ -27,6 +34,10 @@ import {
   type ShotTakesEntry,
 } from "../../api/shotTakes";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { FeedbackModal } from "./FeedbackModal";
+import { PromptHoverCard } from "./PromptHoverCard";
+import { ShotPromptEditor } from "./ShotPromptEditor";
+import { ShotPromptReview } from "./ShotPromptReview";
 
 type ShotTakesPanelProps = {
   projectId: number;
@@ -181,9 +192,14 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
   return (
     <Stack gap={2}>
       <Group gap="xs" wrap="nowrap">
-        <Badge variant="outline" color="gray">
-          Take {take.take_number}
-        </Badge>
+        <PromptHoverCard
+          jobId={take.job?.id ?? null}
+          codeNote="No prompt is stored for this take: its job is gone."
+        >
+          <Badge variant="outline" color="gray" style={{ cursor: "help" }}>
+            Take {take.take_number}
+          </Badge>
+        </PromptHoverCard>
         <Badge variant="light" color={state.color}>
           {state.label}
         </Badge>
@@ -283,10 +299,28 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
   );
 }
 
+/** What a shot's row needs to look at, edit or rewrite the prompt its clips are made from. */
+type ShotPromptTools = {
+  /** Where the shot's compiled prompt stands; undefined until the prompts have loaded. */
+  entry: ShotPromptEntry | undefined;
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  /** Saves the hand-edited pieces, then makes a take with them when `thenGenerate` is true. */
+  onSave: (
+    pieces: Record<string, string>,
+    thenGenerate: boolean,
+    done: () => void,
+  ) => void;
+  /** Writes the prompt again with the user's note; no clip is made. */
+  onFeedback: (text: string, confirmReplaceManual: boolean) => void;
+};
+
 type ShotRowProps = {
   entry: ShotTakesEntry;
   maxRetries: number;
   busy: boolean;
+  prompts: ShotPromptTools;
   onGenerate: () => void;
   onSelect: (takeId: number) => void;
 };
@@ -341,10 +375,13 @@ function ShotRow({
   entry,
   maxRetries,
   busy,
+  prompts,
   onGenerate,
   onSelect,
 }: ShotRowProps) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const { shot, takes, job } = entry;
   const status = STATUS[entry.status];
   const selected = takes.find((take) => take.selected) ?? null;
@@ -357,6 +394,53 @@ function ShotRow({
     newest.state === "generating" &&
     newest.retry_attempt > 0;
   const heard = selected?.dialogue_check ?? null;
+
+  // The prompt behind the clips, which can be rewritten from here (PHASE-038).
+  const promptEntry = prompts.entry;
+  const prompt = promptEntry?.prompt ?? null;
+  const promptVersion = promptEntry?.version ?? null;
+  const promptWorking = promptEntry !== undefined && isJobActive(promptEntry.job);
+  const hasPieces = prompt !== null && Object.keys(prompt.pieces).length > 0;
+  const canGenerate = entry.can_run && !busy;
+  const canRewrite =
+    promptEntry !== undefined &&
+    prompt !== null &&
+    promptEntry.can_run &&
+    !promptWorking &&
+    !busy;
+  const canEdit = canRewrite && hasPieces;
+  // Why the prompt cannot be rewritten now, shown in the menu.
+  const rewriteHint =
+    promptEntry === undefined
+      ? "The prompt is loading."
+      : prompt === null
+        ? "This shot has no compiled prompt."
+        : promptWorking
+          ? "The prompt is being written."
+          : !promptEntry.can_run
+            ? (promptEntry.blocked_reason ?? "The prompt cannot be changed now.")
+            : !hasPieces
+              ? "This prompt was compiled before its pieces were kept, so it cannot be edited by hand. Feedback still works."
+              : null;
+  // A newer prompt than any take was made from: the user reviews it before a clip is made.
+  const madeFrom = takes.flatMap((take) =>
+    take.prompt_version == null ? [] : [take.prompt_version],
+  );
+  const reference = selected ?? takes[0];
+  const reviewing =
+    !editing &&
+    promptEntry?.status === "compiled" &&
+    prompt !== null &&
+    promptVersion !== null &&
+    reference !== undefined &&
+    madeFrom.length > 0 &&
+    promptVersion.version > Math.max(...madeFrom);
+
+  const startEditing = () => {
+    prompts.onStartEdit();
+    setOpen(false);
+    setEditing(true);
+  };
 
   return (
     <Stack
@@ -451,6 +535,17 @@ function ShotRow({
               {job.error ?? "The job failed."}
             </Alert>
           )}
+          {promptWorking && (
+            <Text size="xs" c="blue">
+              The prompt is being written again. Nothing is generated until you
+              review it and press Generate.
+            </Text>
+          )}
+          {promptEntry?.job?.status === "failed" && (
+            <Alert color="red" p="xs" title="The prompt could not be written">
+              {promptEntry.job.error ?? "The job failed."}
+            </Alert>
+          )}
         </Stack>
         <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
           {hasTakes && (
@@ -462,16 +557,74 @@ function ShotRow({
               {open ? "Hide the takes" : "Show the takes"}
             </Button>
           )}
-          <Button
-            size="compact-xs"
-            variant="default"
-            disabled={!entry.can_run || busy}
-            onClick={onGenerate}
-          >
-            {hasTakes ? "Regenerate" : "Generate"}
-          </Button>
+          {hasTakes ? (
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  disabled={!canGenerate && !canRewrite}
+                >
+                  Regenerate
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item disabled={!canGenerate} onClick={onGenerate}>
+                  Same prompt, new seed
+                </Menu.Item>
+                <Menu.Item disabled={!canEdit} onClick={startEditing}>
+                  Edit the prompt, then generate
+                </Menu.Item>
+                <Menu.Item
+                  disabled={!canRewrite}
+                  onClick={() => setFeedbackOpen(true)}
+                >
+                  Give feedback to the prompt writer
+                </Menu.Item>
+                {rewriteHint !== null && (
+                  <Menu.Label style={{ maxWidth: 280, whiteSpace: "normal" }}>
+                    {rewriteHint}
+                  </Menu.Label>
+                )}
+              </Menu.Dropdown>
+            </Menu>
+          ) : (
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={!entry.can_run || busy}
+              onClick={onGenerate}
+            >
+              Generate
+            </Button>
+          )}
         </Group>
       </Group>
+      {editing && prompt !== null && (
+        <Paper withBorder p="md" radius="sm" ml={72}>
+          <ShotPromptEditor
+            prompt={prompt}
+            saving={prompts.saving}
+            error={prompts.saveError}
+            onSave={(pieces) =>
+              prompts.onSave(pieces, false, () => setEditing(false))
+            }
+            extra={(pieces, canSave) => (
+              <Button
+                variant="default"
+                disabled={!canSave || busy}
+                loading={prompts.saving}
+                onClick={() =>
+                  prompts.onSave(pieces, true, () => setEditing(false))
+                }
+              >
+                Save and generate
+              </Button>
+            )}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
       {selected !== null && selected.url !== null && (
         <Stack gap={2} ml={72}>
           <video
@@ -494,6 +647,33 @@ function ShotRow({
           </Text>
         </Stack>
       )}
+      {reviewing && (
+        <Stack ml={72}>
+          <ShotPromptReview
+            prompt={prompt}
+            version={promptVersion}
+            take={{ number: reference.take_number, jobId: reference.job?.id ?? null }}
+            canGenerate={canGenerate}
+            canRewrite={canRewrite}
+            onGenerate={onGenerate}
+            onFeedback={() => setFeedbackOpen(true)}
+            onEdit={startEditing}
+          />
+        </Stack>
+      )}
+      <FeedbackModal
+        opened={feedbackOpen}
+        title={`Feedback on the prompt of ${shot.id}`}
+        what="the prompt of this shot"
+        initialText={promptVersion?.feedback ?? ""}
+        writtenByUser={promptEntry?.needs_confirmation ?? false}
+        submitLabel="Write the prompt again"
+        onCancel={() => setFeedbackOpen(false)}
+        onSubmit={(text) => {
+          prompts.onFeedback(text, promptEntry?.needs_confirmation ?? false);
+          setFeedbackOpen(false);
+        }}
+      />
       {hasTakes && (
         <Collapse expanded={open}>
           <Stack gap="xs" pt={4} ml={72}>
@@ -518,6 +698,7 @@ type SceneRowProps = {
   busy: boolean;
   onGenerateScene: () => void;
   onGenerateShot: (shotId: string) => void;
+  promptsOf: (shotId: string) => ShotPromptTools;
   onSelect: (shotId: string, takeId: number) => void;
 };
 
@@ -528,6 +709,7 @@ function SceneRow({
   busy,
   onGenerateScene,
   onGenerateShot,
+  promptsOf,
   onSelect,
 }: SceneRowProps) {
   const generated = scene.shots.filter(
@@ -589,6 +771,7 @@ function SceneRow({
               entry={entry}
               maxRetries={maxRetries}
               busy={busy}
+              prompts={promptsOf(entry.shot.id)}
               onGenerate={() => onGenerateShot(entry.shot.id)}
               onSelect={(takeId) => onSelect(entry.shot.id, takeId)}
             />
@@ -617,6 +800,10 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const generateOne = useGenerateOneShot(projectId);
   const selectTake = useSelectTake(projectId);
   const checkTakes = useCheckShotTakes(projectId);
+  // The prompts the clips are made from, which can be edited or rewritten from here.
+  const shotPrompts = useShotPrompts(projectId).data;
+  const compilePrompt = useCompileOnePrompt(projectId);
+  const savePrompt = useSaveShotPrompt(projectId);
 
   const entries = data?.entries ?? [];
   const busy =
@@ -624,7 +811,9 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
     generateScene.isPending ||
     generateOne.isPending ||
     selectTake.isPending ||
-    checkTakes.isPending;
+    checkTakes.isPending ||
+    compilePrompt.isPending ||
+    savePrompt.isPending;
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
   const unchecked = data?.unchecked_count ?? 0;
   const checkJob = data?.check_job ?? null;
@@ -642,6 +831,39 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   ].filter(
     (item) => item.shot_id !== null && !item.reason.startsWith("Already"),
   );
+
+  const promptEntries = new Map(
+    (shotPrompts?.entries ?? []).flatMap((scene) =>
+      scene.shots.map((shot) => [`${scene.id}/${shot.shot.id}`, shot] as const),
+    ),
+  );
+  const promptsOf =
+    (sceneId: string) =>
+    (shotId: string): ShotPromptTools => ({
+      entry: promptEntries.get(`${sceneId}/${shotId}`),
+      saving: savePrompt.isPending,
+      saveError: savePrompt.error,
+      onStartEdit: () => savePrompt.reset(),
+      onSave: (pieces, thenGenerate, done) =>
+        savePrompt.mutate(
+          { sceneId, shotId, pieces },
+          {
+            onSuccess: () => {
+              done();
+              if (thenGenerate) {
+                generateOne.mutate({ sceneId, shotId });
+              }
+            },
+          },
+        ),
+      onFeedback: (text, confirmReplaceManual) =>
+        compilePrompt.mutate({
+          sceneId,
+          shotId,
+          confirmReplaceManual,
+          feedback: text,
+        }),
+    });
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -710,6 +932,11 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
               </Alert>
             ),
         )}
+        {compilePrompt.isError && (
+          <Alert color="red" title="Could not write the prompt again">
+            {describeError(compilePrompt.error)}
+          </Alert>
+        )}
         {skipped.length > 0 && (
           <Alert color="blue" title="Not generated">
             <Stack gap={2}>
@@ -738,6 +965,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             onGenerateShot={(shotId) =>
               generateOne.mutate({ sceneId: scene.id, shotId })
             }
+            promptsOf={promptsOf(scene.id)}
             onSelect={(shotId, takeId) =>
               selectTake.mutate({ sceneId: scene.id, shotId, takeId })
             }

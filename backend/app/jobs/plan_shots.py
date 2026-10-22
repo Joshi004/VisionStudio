@@ -15,11 +15,18 @@ One job per scene, so scenes are planned side by side when the pools allow (`sto
 with `dedupe_key`). The model is the **story role** (`llm_target.STORY_MODEL_KEY`), like every
 story stage (D-12).
 
+When the user wrote a note on the earlier plan (PHASE-038), the job also holds `feedback` (the text,
+the number of the version it was about, and that plan's shots): the request gets them as data
+blocks, and the plan the job saves records the note in its `inputs`.
+
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
 retried, every answer saved on the job the moment it arrives, and a restart never re-runs it
 (`never_rerun`): the user asks again by pressing Plan again. An answer that leaves an event
 unshown or a unit uncarried is unusable, so it is asked for once more; after that the job fails
 with the reason and nothing is stored.
+
+Before it is saved, code moves every shot's `target_duration` onto a length H3 makes
+(`services/h3_lengths`, D-9), so the clips need no trimming.
 
 After the plan is saved, its timeline is checked (`services/scene_timeline`, PHASE-021). A plan
 with problems is planned again by a new job of the same type that carries `replan` (the attempt,
@@ -44,10 +51,13 @@ from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import (
     discovery,
+    duration_policy,
+    h3_lengths,
     llm_target,
     scene_timeline,
     shot_planning_writer,
     shot_plans,
+    user_feedback,
 )
 from app.services.llm_target import STORY_MODEL_KEY
 from app.services.projects import SPEECH_BOTH, SPEECH_MODES
@@ -79,6 +89,8 @@ class _Input:
     replan: dict[str, Any] | None = None
     # The project's speech mode (PHASE-049); a job queued before it is a `both` project.
     speech_mode: str = SPEECH_BOTH
+    # The user's note on the earlier plan, when this plan is made from one (PHASE-038).
+    feedback: user_feedback.Feedback | None = None
 
 
 def _read_replan(value: Any) -> tuple[bool, dict[str, Any] | None]:
@@ -113,8 +125,9 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
     replan_ok, replan = _read_replan(job_input.get("replan"))
+    feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
-    if not replan_ok:
+    if not replan_ok or not feedback_ok:
         return None
     if (
         speech_mode not in SPEECH_MODES
@@ -154,7 +167,30 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         bible_id=bible_id,
         replan=replan,
         speech_mode=speech_mode,
+        feedback=feedback,
     )
+
+
+def _unit_infos(
+    units: list[dict[str, Any]], inputs: dict[str, Any]
+) -> list[scene_timeline.UnitInfo]:
+    """The scene's speech units with their kinds and lengths, as the timeline reads them. The
+    length is the one recorded on the plan's inputs (the same the timeline uses later); the
+    rounded `measured_seconds` the model saw is the fallback.
+    """
+    recorded: dict[str, float] = {}
+    for artifact in inputs.get("artifacts") or []:
+        if isinstance(artifact, dict) and artifact.get("kind") == shot_plans.SPEECH_AUDIO_KIND:
+            seconds = artifact.get("duration_s")
+            if isinstance(seconds, int | float) and not isinstance(seconds, bool):
+                recorded[str(artifact.get("unit_id"))] = float(seconds)
+    infos: list[scene_timeline.UnitInfo] = []
+    for unit in units:
+        seconds = recorded.get(unit["id"], unit.get("measured_seconds"))
+        if isinstance(seconds, bool) or not isinstance(seconds, int | float):
+            continue
+        infos.append(scene_timeline.UnitInfo(unit["id"], unit["kind"], float(seconds)))
+    return infos
 
 
 class PlanShotsHandler(JobHandler):
@@ -196,6 +232,12 @@ class PlanShotsHandler(JobHandler):
                 else None
             )
             bible_content = bible.content if bible is not None else None
+            try:
+                h3_lengths_seconds: list[float] | None = h3_lengths.grid_lengths(
+                    await duration_policy.read_duration_policy(session)
+                )
+            except duration_policy.DurationPolicyError:
+                h3_lengths_seconds = None
             await session.commit()
 
         if project_id is None or read is None:
@@ -219,6 +261,7 @@ class PlanShotsHandler(JobHandler):
             target_min_seconds=read.target_min_seconds,
             target_max_seconds=read.target_max_seconds,
             model=target.model,
+            h3_lengths_seconds=h3_lengths_seconds,
             replan=(
                 {
                     "previous_shots": read.replan["previous_shots"],
@@ -227,6 +270,7 @@ class PlanShotsHandler(JobHandler):
                 if read.replan is not None
                 else None
             ),
+            feedback=read.feedback,
             speech_mode=read.speech_mode,
         )
         job_input.update(
@@ -255,6 +299,23 @@ class PlanShotsHandler(JobHandler):
 
         await self._phase(job_id, phases.SAVING_SHOT_PLAN)
         async with SessionLocal() as session:
+            # The lengths are moved onto the lengths H3 makes (D-9), so the render cuts nothing.
+            # With no usable policy the plan is saved as it came, like `timeline_of` allows.
+            try:
+                policy = await duration_policy.read_duration_policy(session)
+            except duration_policy.DurationPolicyError:
+                policy = None
+            if policy is not None:
+                fitted = h3_lengths.fit_shots(
+                    content["shots"], _unit_infos(read.units, read.inputs), policy
+                )
+                content = {**content, "shots": fitted.shots}
+                _logger.info(
+                    "job %d: shot lengths of scene '%s' moved onto H3's lengths (%s)",
+                    job_id,
+                    scene_id,
+                    fitted.mode,
+                )
             row = await shot_plans.save_shot_plan(
                 session,
                 project_id=project_id,

@@ -5,7 +5,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { isValidProjectId } from "./projects";
+import { isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 import { shotDefinitionsKey, useShotDefinitions } from "./shotDefinitions";
 
@@ -14,6 +14,9 @@ export type SceneShotReferences =
   components["schemas"]["SceneShotReferencesOut"];
 export type ShotReferenceEntry = components["schemas"]["ShotReferenceEntryOut"];
 export type ReferencePicture = components["schemas"]["ReferencePictureOut"];
+export type ShotReferenceManifest =
+  components["schemas"]["ShotReferenceManifestOut"];
+export type CatalogPicture = components["schemas"]["CatalogPictureOut"];
 export type ShotReferencesRun = components["schemas"]["ShotReferencesRunOut"];
 
 /**
@@ -133,11 +136,18 @@ export function useSelectSceneReferences(projectId: number) {
   });
 }
 
-/** Chooses the references of one shot. */
+/**
+ * Chooses the references of one shot. `confirmReplaceManual` is true only after the user agreed
+ * to replace a choice of pictures they made.
+ */
 export function useSelectOneShotReferences(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (target: { sceneId: string; shotId: string }) => {
+    mutationFn: async (target: {
+      sceneId: string;
+      shotId: string;
+      confirmReplaceManual: boolean;
+    }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/shot-references/{scene_id}/{shot_id}/run",
         {
@@ -148,6 +158,7 @@ export function useSelectOneShotReferences(projectId: number) {
               shot_id: target.shotId,
             },
           },
+          body: { confirm_replace_manual: target.confirmReplaceManual },
         },
       );
       if (!data) {
@@ -156,5 +167,42 @@ export function useSelectOneShotReferences(projectId: number) {
       return data;
     },
     onSettled: () => refresh(queryClient, projectId),
+  });
+}
+
+/** Saves the user's own choice of pictures for one shot, in the order given, as its next manifest. */
+export function useSaveShotReferences(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      shotId: string;
+      labImageIds: number[];
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/shot-references/{scene_id}/{shot_id}",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              shot_id: input.shotId,
+            },
+          },
+          body: { lab_image_ids: input.labImageIds },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not save the references (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

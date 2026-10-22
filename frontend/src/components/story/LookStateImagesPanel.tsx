@@ -22,6 +22,7 @@ import {
   type LookStateImageItem,
 } from "../../api/lookStateImages";
 import { ReferenceStrip } from "../characterLab/LookPicker";
+import { PromptHoverCard } from "./PromptHoverCard";
 
 type LookStateImagesPanelProps = {
   projectId: number;
@@ -154,20 +155,23 @@ function ItemRow({ item, busy, onMake, onRedo, redoingAngle }: ItemRowProps) {
         />
       )}
       {item.image !== null && (
-        <img
-          src={item.image.url}
-          alt={`${item.subject_name}, ${item.name}`}
-          loading="lazy"
-          style={{
-            width: "100%",
-            maxWidth: 420,
-            aspectRatio: "16 / 9",
-            objectFit: "cover",
-            borderRadius: 4,
-            display: "block",
-            background: "var(--mantine-color-gray-1)",
-          }}
-        />
+        <div style={{ maxWidth: 420 }}>
+          <PromptHoverCard imageId={item.image.id} block>
+            <img
+              src={item.image.url}
+              alt={`${item.subject_name}, ${item.name}`}
+              loading="lazy"
+              style={{
+                width: "100%",
+                aspectRatio: "16 / 9",
+                objectFit: "cover",
+                borderRadius: 4,
+                display: "block",
+                background: "var(--mantine-color-gray-1)",
+              }}
+            />
+          </PromptHoverCard>
+        </div>
       )}
     </Stack>
   );

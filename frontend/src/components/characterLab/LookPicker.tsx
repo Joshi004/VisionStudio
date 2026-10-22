@@ -28,6 +28,7 @@ import {
 import { describeError } from "../../api/errors";
 import { LAB_UPLOAD_MAX_MB, useLabUpload } from "../../api/imageLab";
 import { ACCEPT } from "../imageLab/ReferenceTray";
+import { PromptHoverCard } from "../story/PromptHoverCard";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ANGLE_LABELS, ANGLES, referencePicture } from "./characterLabView";
 
@@ -104,13 +105,24 @@ export function ReferenceStrip({
       {ANGLES.map((angle) => {
         const reference = byAngle.get(angle);
         const picture = reference ? referencePicture(reference) : null;
+        const labImageId = reference?.lab_image_id ?? null;
+        const image =
+          picture !== null ? (
+            <img src={picture} alt={`${ANGLE_LABELS[angle]} view`} loading="lazy" style={PICTURE_STYLE} />
+          ) : null;
         return (
           <Stack key={angle} gap={6}>
             <Text size="sm" fw={500}>
               {ANGLE_LABELS[angle]}
             </Text>
-            {picture !== null ? (
-              <img src={picture} alt={`${ANGLE_LABELS[angle]} view`} loading="lazy" style={PICTURE_STYLE} />
+            {image !== null ? (
+              labImageId !== null ? (
+                <PromptHoverCard imageId={labImageId} block>
+                  {image}
+                </PromptHoverCard>
+              ) : (
+                image
+              )
             ) : (
               <div style={PLACEHOLDER_STYLE}>
                 <Loader size="sm" />

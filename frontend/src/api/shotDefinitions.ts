@@ -5,7 +5,7 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
-import { PROJECTS_KEY, isValidProjectId } from "./projects";
+import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
 
 export type ShotDefinitions = components["schemas"]["ShotDefinitionsOut"];
@@ -17,6 +17,7 @@ export type ShotDefinitionContent =
   components["schemas"]["ShotDefinitionContentOut"];
 export type ShotDefinitionsRun =
   components["schemas"]["ShotDefinitionsRunManyOut"];
+export type ShotDefinitionInput = components["schemas"]["ShotDefinitionIn"];
 
 /**
  * Every shot-definition query of a project starts with this key. It also starts with the
@@ -118,11 +119,20 @@ export function useDefineSceneShots(projectId: number) {
   });
 }
 
-/** Starts the job that defines one shot. */
+/**
+ * Starts the job that defines one shot. `confirmReplaceManual` is true only after the user
+ * agreed to add a definition from the model on top of one they wrote. `feedback` is the user's
+ * note on the newest definition: the shot is then defined again with the note.
+ */
 export function useDefineOneShot(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (target: { sceneId: string; shotId: string }) => {
+    mutationFn: async (target: {
+      sceneId: string;
+      shotId: string;
+      confirmReplaceManual: boolean;
+      feedback?: string;
+    }) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/shot-definitions/{scene_id}/{shot_id}/run",
         {
@@ -133,6 +143,10 @@ export function useDefineOneShot(projectId: number) {
               shot_id: target.shotId,
             },
           },
+          body: {
+            confirm_replace_manual: target.confirmReplaceManual,
+            feedback: target.feedback,
+          },
         },
       );
       if (!data) {
@@ -141,5 +155,42 @@ export function useDefineOneShot(projectId: number) {
       return data;
     },
     onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Saves one shot's edited specification as its next version, written by the user. */
+export function useSaveShotDefinition(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      shotId: string;
+      definition: ShotDefinitionInput;
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/shot-definitions/{scene_id}/{shot_id}",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: input.sceneId,
+              shot_id: input.shotId,
+            },
+          },
+          body: input.definition,
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not save the shot definition (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => refreshProject(queryClient, projectId),
   });
 }

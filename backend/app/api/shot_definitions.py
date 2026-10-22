@@ -8,7 +8,14 @@
 - `POST .../run` ("Define all") starts one job per shot, in every scene that can be defined,
   that is not defined and up to date already and is not already being defined.
 - `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
-- `POST .../{scene_id}/{shot_id}/run` starts the job for one shot.
+- `POST .../{scene_id}/{shot_id}/run` starts the job for one shot. When the newest definition
+  was written by the user, the body must say `confirm_replace_manual`. The body may also hold
+  `feedback`, the user's note on the newest definition: the shot is defined again with the
+  note (PHASE-038).
+- `PUT .../{scene_id}/{shot_id}` saves the user's edit of a shot's specification as its next
+  version (`source` is `manual`), checked like the model's answer. What follows a saved
+  definition (references, request, prompt, continuity) is started as after a job
+  (`services/shot_chain.py`).
 
 A job stores a new version of the shot's definition (`services/shot_definitions.py`); nothing is
 written to the Character Lab. The answers never return ORM objects.
@@ -20,16 +27,18 @@ from datetime import datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import shot_definitions
+from app.services import shot_chain, shot_definitions, user_feedback
 from app.services.shot_definitions import SceneEntry, ShotEntry
 
 router = APIRouter()
@@ -119,6 +128,8 @@ class ShotDefinitionVersionOut(BaseModel):
     source: Source
     job_id: int | None
     created_at: datetime
+    # The user's note this version was made from, or None (PHASE-038).
+    feedback: str | None = None
 
 
 class ShotSkeletonOut(BaseModel):
@@ -145,6 +156,9 @@ class ShotDefinitionEntryOut(BaseModel):
     job: DiscoveryJobOut | None
     can_run: bool
     blocked_reason: str | None
+    # True when the newest definition was written by the user: defining it again by model has
+    # to be confirmed (PHASE-038).
+    needs_confirmation: bool
 
 
 class SceneShotDefinitionsOut(BaseModel):
@@ -188,6 +202,77 @@ class ShotDefinitionsRunOneOut(BaseModel):
     job_id: int
 
 
+class ShotDefinitionRunIn(BaseModel):
+    """The optional body of the run of one shot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+    # The user's note on the newest definition. `user_feedback.clean` checks it again.
+    feedback: str | None = Field(default=None, max_length=user_feedback.MAX_CHARS)
+
+
+# --- An edited specification ------------------------------------------------------------------
+# The id, the scene, the duration and the dialogue are set by code. The rules (the sizes, the
+# known character ids) are checked by `shot_definition_writer.check_answer`; these limits only
+# keep a request from being huge.
+
+_Text = Field(max_length=2000)
+
+
+class ShotCharacterIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(max_length=200)
+    expression: str = _Text
+    pose: str = _Text
+    gaze: str = _Text
+
+
+class ShotCompositionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shot_size: str = Field(max_length=100)
+    angle: str = _Text
+    focus: str = _Text
+
+
+class ShotCameraIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    movement: str = _Text
+    intensity: str = _Text
+
+
+class ShotActionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_state: str = _Text
+    primary_action: str = _Text
+    end_state: str = _Text
+
+
+class ShotAudioIntentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ambient: str = _Text
+    sound_events: list[str] = Field(max_length=50)
+
+
+class ShotDefinitionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    visual_story: str = _Text
+    characters: list[ShotCharacterIn] = Field(max_length=200)
+    environment_state: dict[str, str | bool] = Field(max_length=200)
+    composition: ShotCompositionIn
+    camera: ShotCameraIn
+    action: ShotActionIn
+    continuity_start: dict[str, str] = Field(max_length=200)
+    continuity_end: dict[str, str] = Field(max_length=200)
+    audio_intent: ShotAudioIntentIn
+
+
 def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
     shot = entry.shot
     row = entry.row
@@ -215,6 +300,7 @@ def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
                 source=cast(Source, row.source),
                 job_id=row.job_id,
                 created_at=row.created_at,
+                feedback=user_feedback.text_of(row.inputs),
             )
             if row is not None
             else None
@@ -231,6 +317,7 @@ def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
         ),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
+        needs_confirmation=entry.needs_confirmation,
     )
 
 
@@ -274,6 +361,10 @@ def _refused(exc: shot_definitions.ShotDefinitionsError) -> HTTPException:
 )
 async def get_shot_definitions(project_id: int, session: SessionDep) -> ShotDefinitionsOut:
     project = await load_project(session, project_id)
+    return await _state_out(session, project)
+
+
+async def _state_out(session: AsyncSession, project: Project) -> ShotDefinitionsOut:
     result = await shot_definitions.state(session, project)
     return ShotDefinitionsOut(
         scenes_version=result.scenes_version,
@@ -332,15 +423,50 @@ async def run_scene(
     responses={**_NOT_FOUND, **_INVALID},
 )
 async def run_shot(
-    project_id: int, scene_id: DiscoveryId, shot_id: DiscoveryId, session: SessionDep
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    session: SessionDep,
+    body: ShotDefinitionRunIn | None = None,
 ) -> ShotDefinitionsRunOneOut:
     """Starts the job that defines one shot. If it already has a job waiting or running, that
     job's id is returned and no second job is made.
     """
     project = await load_project(session, project_id)
     try:
-        job = await shot_definitions.start_shot(session, project, scene_id, shot_id)
+        job = await shot_definitions.start_shot(
+            session,
+            project,
+            scene_id,
+            shot_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+            feedback=body.feedback if body is not None else None,
+        )
     except shot_definitions.ShotDefinitionsError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()
     return ShotDefinitionsRunOneOut(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/shot-definitions/{scene_id}/{shot_id}",
+    response_model=ShotDefinitionsOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def save_shot_definition(
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    body: ShotDefinitionIn,
+    session: SessionDep,
+) -> ShotDefinitionsOut:
+    """Saves the edited specification of one shot as its next version, written by the user, and
+    then runs the steps that follow a definition (references, request, prompt, continuity).
+    """
+    project = await load_project(session, project_id)
+    try:
+        await shot_definitions.save_manual(session, project, scene_id, shot_id, body.model_dump())
+    except shot_definitions.ShotDefinitionsError as exc:
+        raise _refused(exc) from exc
+    await shot_chain.after_definition_saved(project_id, scene_id, shot_id)
+    return await _state_out(session, project)

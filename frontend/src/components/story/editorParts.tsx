@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Alert, Button, Group, Stack, Text, TextInput } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
@@ -58,6 +59,8 @@ type EditorActionsProps = {
   /** The title of that error, for example "Could not save the Story Bible". */
   errorTitle: string;
   canSave?: boolean;
+  /** More buttons, shown right after Save (for example "Save and generate"). */
+  extra?: ReactNode;
   onSave: () => void;
   onCancel: () => void;
 };
@@ -68,6 +71,7 @@ export function EditorActions({
   error,
   errorTitle,
   canSave = true,
+  extra,
   onSave,
   onCancel,
 }: EditorActionsProps) {
@@ -82,6 +86,7 @@ export function EditorActions({
         <Button onClick={onSave} loading={saving} disabled={!canSave}>
           Save
         </Button>
+        {extra}
         <Button variant="default" onClick={onCancel} disabled={saving}>
           Cancel
         </Button>

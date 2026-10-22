@@ -15,6 +15,7 @@ import {
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
+import { useSceneDefinitions } from "../../api/sceneDefinitions";
 import { useSceneEvents } from "../../api/sceneEvents";
 import {
   useCheckAllContinuity,
@@ -29,17 +30,29 @@ import {
   useDefineAllShots,
   useDefineOneShot,
   useDefineSceneShots,
+  useSaveShotDefinition,
   useShotDefinitions,
   type SceneShotDefinitions,
   type ShotDefinitionEntry,
+  type ShotDefinitionInput,
 } from "../../api/shotDefinitions";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { FeedbackBadge } from "./FeedbackBadge";
+import { FeedbackModal } from "./FeedbackModal";
+import { PromptHoverCard } from "./PromptHoverCard";
+import { ReplaceManualModal } from "./ReplaceManualModal";
+import { ShotDefinitionEditor } from "./ShotDefinitionEditor";
 import { ShotDefinitionView } from "./ShotDefinitionView";
 
 type ShotDefinitionsPanelProps = {
   projectId: number;
 };
+
+/** What the user is asked to confirm: defining a shot again, or repairing a cut. */
+type Confirming =
+  | { kind: "define"; sceneId: string; shotId: string }
+  | { kind: "repair"; sceneId: string; boundaryId: string; label: string };
 
 const STATUS: Record<
   ShotDefinitionEntry["status"],
@@ -77,9 +90,19 @@ type ShotRowProps = {
   sceneBlocked: boolean;
   busy: boolean;
   onDefine: () => void;
+  onFeedback: () => void;
+  /** The ids of the scene's characters, for the editor's choices. */
+  sceneCharacterIds: string[];
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (definition: ShotDefinitionInput, done: () => void) => void;
 };
 
-/** One shot: its status, why it is out of date, the job's failure, and its specification. */
+/**
+ * One shot: its status, why it is out of date, the job's failure, and its specification, which
+ * can be edited by hand.
+ */
 function ShotRow({
   entry,
   continuity,
@@ -87,8 +110,15 @@ function ShotRow({
   sceneBlocked,
   busy,
   onDefine,
+  onFeedback,
+  sceneCharacterIds,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
 }: ShotRowProps) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const { shot, job } = entry;
   const active = isJobActive(job);
   const status = STATUS[entry.status];
@@ -112,13 +142,13 @@ function ShotRow({
               {status.label}
             </Badge>
             {entry.version !== null && (
-              <Badge
-                variant="light"
-                title="The newest version of this shot's definition"
-              >
-                v{entry.version.version}
-              </Badge>
+              <PromptHoverCard jobId={entry.version.job_id} source={entry.version.source}>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{entry.version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
+            <FeedbackBadge text={entry.version?.feedback} />
             <Badge variant="light" color="gray">
               {shot.duration_seconds.toFixed(1)} s
             </Badge>
@@ -156,7 +186,7 @@ function ShotRow({
             </Alert>
           )}
         </Stack>
-        <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        <Group gap="xs" justify="flex-end" maw={420} style={{ flexShrink: 0 }}>
           {entry.definition !== null && (
             <Button
               size="compact-xs"
@@ -166,18 +196,56 @@ function ShotRow({
               {open ? "Hide the specification" : "Show the specification"}
             </Button>
           )}
+          {entry.definition !== null && (
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={editing || active || busy}
+              onClick={() => {
+                onStartEdit();
+                setOpen(false);
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
           <Button
             size="compact-xs"
             variant="default"
             loading={active}
-            disabled={!entry.can_run || busy}
+            disabled={!entry.can_run || busy || editing}
             onClick={onDefine}
           >
             {defined ? "Define again" : "Define"}
           </Button>
+          {entry.definition !== null && (
+            <Button
+              size="compact-xs"
+              variant="default"
+              title="Define this shot again, with a note from you for the model"
+              disabled={!entry.can_run || busy || editing}
+              onClick={onFeedback}
+            >
+              Regenerate with feedback
+            </Button>
+          )}
         </Group>
       </Group>
-      {entry.definition !== null && entry.version !== null && (
+      {editing && entry.definition !== null && (
+        <Paper withBorder p="md" radius="sm">
+          <ShotDefinitionEditor
+            initial={entry.definition}
+            sceneCharacterIds={sceneCharacterIds}
+            characterNames={characterNames}
+            saving={saving}
+            error={saveError}
+            onSave={(definition) => onSave(definition, () => setEditing(false))}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {entry.definition !== null && entry.version !== null && !editing && (
         <Collapse expanded={open}>
           <ArtifactViewer
             title={`Specification of ${shot.id}`}
@@ -206,8 +274,18 @@ type SceneRowProps = {
   busy: boolean;
   onDefineScene: () => void;
   onDefineShot: (shotId: string) => void;
+  onFeedbackShot: (entry: ShotDefinitionEntry) => void;
   onCheckContinuity: () => void;
-  onRepairCut: (boundaryId: string) => void;
+  onRepairCut: (mismatch: ContinuityMismatch) => void;
+  sceneCharacterIds: string[];
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (
+    shotId: string,
+    definition: ShotDefinitionInput,
+    done: () => void,
+  ) => void;
 };
 
 /** The continuity of one scene: its status and the button. The cuts that fail are shown between the shots. */
@@ -327,8 +405,14 @@ function SceneRow({
   busy,
   onDefineScene,
   onDefineShot,
+  onFeedbackShot,
   onCheckContinuity,
   onRepairCut,
+  sceneCharacterIds,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
 }: SceneRowProps) {
   const defined = scene.shots.filter(
     (shot) => shot.status === "defined",
@@ -350,7 +434,7 @@ function SceneRow({
       key={item.id}
       mismatch={item}
       busy={busy}
-      onRepair={() => onRepairCut(item.id)}
+      onRepair={() => onRepairCut(item)}
     />
   );
 
@@ -429,6 +513,14 @@ function SceneRow({
                 sceneBlocked={scene.blocked_reason !== null}
                 busy={busy}
                 onDefine={() => onDefineShot(entry.shot.id)}
+                onFeedback={() => onFeedbackShot(entry)}
+                sceneCharacterIds={sceneCharacterIds}
+                saving={saving}
+                saveError={saveError}
+                onStartEdit={onStartEdit}
+                onSave={(definition, done) =>
+                  onSave(entry.shot.id, definition, done)
+                }
               />
               {mismatches
                 .filter((item) => item.before === entry.shot.id)
@@ -455,8 +547,18 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
   const checkAll = useCheckAllContinuity(projectId);
   const checkScene = useCheckSceneContinuity(projectId);
   const repairCut = useRepairCut(projectId);
+  const save = useSaveShotDefinition(projectId);
   // Characters are shown by name; the event list already carries them for its own panel.
   const sceneEvents = useSceneEvents(projectId).data;
+  // Which characters each scene has, for the editor's choices.
+  const sceneDefinitions = useSceneDefinitions(projectId).data;
+  // A shot or a cut waiting for "yes, write over what I wrote".
+  const [confirming, setConfirming] = useState<Confirming | null>(null);
+  // The shot the user is writing a note about.
+  const [feedbackFor, setFeedbackFor] = useState<{
+    sceneId: string;
+    entry: ShotDefinitionEntry;
+  } | null>(null);
 
   const entries = data?.entries ?? [];
   // A check follows the last shot of a scene to be defined, so the continuity is asked again
@@ -495,10 +597,22 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
         .length,
     0,
   );
+  // A scene that was skipped, and a shot the user wrote (it is only redefined by its own
+  // button). The other shot-level skips ("already defined") are not worth showing.
+  const manualShots = new Set(
+    entries.flatMap((scene) =>
+      scene.shots
+        .filter((shot) => shot.needs_confirmation)
+        .map((shot) => `${scene.id}/${shot.shot.id}`),
+    ),
+  );
   const skipped = [
     ...(defineAll.data?.skipped ?? []),
     ...(defineScene.data?.skipped ?? []),
-  ].filter((item) => item.shot_id === null);
+  ].filter(
+    (item) =>
+      item.shot_id === null || manualShots.has(`${item.scene_id}/${item.shot_id}`),
+  );
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -592,8 +706,10 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
           <Alert color="blue" title="Not started">
             <Stack gap={2}>
               {skipped.map((item) => (
-                <Text key={item.scene_id} size="sm">
-                  {item.title}: {item.reason}
+                <Text key={`${item.scene_id}/${item.shot_id}`} size="sm">
+                  {item.title}
+                  {item.shot_id !== null ? `, ${item.shot_id}` : ""}:{" "}
+                  {item.reason}
                 </Text>
               ))}
             </Stack>
@@ -616,15 +732,100 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
             busy={busy}
             onDefineScene={() => defineScene.mutate(scene.id)}
             onDefineShot={(shotId) =>
-              defineOne.mutate({ sceneId: scene.id, shotId })
+              scene.shots.find((shot) => shot.shot.id === shotId)
+                ?.needs_confirmation
+                ? setConfirming({ kind: "define", sceneId: scene.id, shotId })
+                : defineOne.mutate({
+                    sceneId: scene.id,
+                    shotId,
+                    confirmReplaceManual: false,
+                  })
+            }
+            onFeedbackShot={(entry) =>
+              setFeedbackFor({ sceneId: scene.id, entry })
             }
             onCheckContinuity={() => checkScene.mutate(scene.id)}
-            onRepairCut={(boundaryId) =>
-              repairCut.mutate({ sceneId: scene.id, boundaryId })
+            onRepairCut={(mismatch) =>
+              mismatch.needs_confirmation
+                ? setConfirming({
+                    kind: "repair",
+                    sceneId: scene.id,
+                    boundaryId: mismatch.id,
+                    label: `${boundaryName(mismatch.before)} to ${boundaryName(mismatch.after)}`,
+                  })
+                : repairCut.mutate({
+                    sceneId: scene.id,
+                    boundaryId: mismatch.id,
+                    confirmReplaceManual: false,
+                  })
+            }
+            sceneCharacterIds={
+              sceneDefinitions?.entries.find((item) => item.id === scene.id)
+                ?.definition?.characters ?? []
+            }
+            saving={save.isPending}
+            saveError={save.error}
+            onStartEdit={() => save.reset()}
+            onSave={(shotId, definition, done) =>
+              save.mutate(
+                { sceneId: scene.id, shotId, definition },
+                { onSuccess: done },
+              )
             }
           />
         ))}
       </Stack>
+      <FeedbackModal
+        opened={feedbackFor !== null}
+        title={`Feedback on the definition of ${feedbackFor?.entry.shot.id ?? "this shot"}`}
+        what="the definition of this shot"
+        initialText={feedbackFor?.entry.version?.feedback ?? ""}
+        writtenByUser={feedbackFor?.entry.needs_confirmation ?? false}
+        submitLabel="Define with feedback"
+        onCancel={() => setFeedbackFor(null)}
+        onSubmit={(text) => {
+          if (feedbackFor !== null) {
+            defineOne.mutate({
+              sceneId: feedbackFor.sceneId,
+              shotId: feedbackFor.entry.shot.id,
+              confirmReplaceManual: feedbackFor.entry.needs_confirmation,
+              feedback: text,
+            });
+          }
+          setFeedbackFor(null);
+        }}
+      />
+      <ReplaceManualModal
+        opened={confirming !== null}
+        title={
+          confirming?.kind === "repair"
+            ? "Fix this cut?"
+            : "Define this shot again?"
+        }
+        what={
+          confirming?.kind === "repair"
+            ? `A shot at the cut ${confirming.label}`
+            : `The newest definition of ${confirming?.shotId ?? "this shot"}`
+        }
+        confirmLabel={confirming?.kind === "repair" ? "Fix the cut" : "Define again"}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming?.kind === "define") {
+            defineOne.mutate({
+              sceneId: confirming.sceneId,
+              shotId: confirming.shotId,
+              confirmReplaceManual: true,
+            });
+          } else if (confirming?.kind === "repair") {
+            repairCut.mutate({
+              sceneId: confirming.sceneId,
+              boundaryId: confirming.boundaryId,
+              confirmReplaceManual: true,
+            });
+          }
+          setConfirming(null);
+        }}
+      />
     </Paper>
   );
 }

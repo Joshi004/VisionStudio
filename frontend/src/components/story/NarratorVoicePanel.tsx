@@ -21,6 +21,7 @@ import {
   type NarratorVoice,
 } from "../../api/storyVoices";
 import { useVoices } from "../../api/voiceLab";
+import { PromptHoverCard } from "./PromptHoverCard";
 
 type NarratorVoicePanelProps = {
   projectId: number;
@@ -135,9 +136,15 @@ export function NarratorVoicePanel({ projectId }: NarratorVoicePanelProps) {
                 </Badge>
               )}
               {narrator.version !== null && (
-                <Badge variant="light" title="The version of the narrator voice this project uses">
-                  v{narrator.version.version}
-                </Badge>
+                <PromptHoverCard
+                  jobId={narrator.version.job_id}
+                  source={narrator.version.source}
+                  codeNote="A saved voice chosen for this project. No model was asked."
+                >
+                  <Badge variant="light" style={{ cursor: "help" }}>
+                    v{narrator.version.version}
+                  </Badge>
+                </PromptHoverCard>
               )}
               {narrator.voice !== null && (
                 <Text size="sm" fw={500}>

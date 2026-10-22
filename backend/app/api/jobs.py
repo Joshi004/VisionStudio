@@ -22,7 +22,7 @@ from app.jobs import dispatcher, handlers, pools, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import story_pipeline
+from app.services import prompt_view, story_pipeline
 
 GPU_URL_KEY = "gpu_api_base_url"
 
@@ -227,6 +227,77 @@ async def get_capacity(session: SessionDep) -> JobCapacity:
 @router.get("/jobs/{job_id}", response_model=JobDetail, responses=_NOT_FOUND)
 async def get_job(job_id: int, session: SessionDep) -> JobDetail:
     return job_detail(await _load_row(session, job_id))
+
+
+class PromptMessageOut(BaseModel):
+    role: str
+    content: str
+
+
+class MediaRequestOut(BaseModel):
+    endpoint: str | None
+    prompt: str
+    seed: int | None
+    width: int | None
+    height: int | None
+    num_frames: int | None
+    pictures: int
+    audios: int
+
+
+class JobPromptOut(BaseModel):
+    """The prompt a job sent to a model, as it was stored (PHASE-038). `kind` is `none` for a
+    job that sent nothing to a model.
+    """
+
+    job_id: int
+    type: JobType
+    kind: Literal["llm", "video", "image", "none"]
+    model: str | None
+    # The call's other settings (the token limit, the reasoning effort, the answer format).
+    settings: dict[str, str | int | float | bool]
+    messages: list[PromptMessageOut]
+    # What the model answered, after the stage's checks (what was stored).
+    answer: Any | None
+    # The last answer that could not be used, as the model wrote it.
+    unusable_answer: str | None
+    # What the user asked for in their own words, when the call was made from feedback.
+    feedback: str | None
+    media: MediaRequestOut | None
+
+
+@router.get("/jobs/{job_id}/prompt", response_model=JobPromptOut, responses=_NOT_FOUND)
+async def get_job_prompt(job_id: int, session: SessionDep) -> JobPromptOut:
+    """The prompt behind what a job made: the messages sent to the language model, or the prompt
+    and numbers sent to the video or image model. Only what the job stored is returned.
+    """
+    job = (await _load_row(session, job_id)).job
+    view = prompt_view.view_of(job.input, job.output)
+    return JobPromptOut(
+        job_id=job.id,
+        type=cast(JobType, job.type),
+        kind=view.kind,
+        model=view.model,
+        settings=view.settings,
+        messages=[PromptMessageOut(role=m.role, content=m.content) for m in view.messages],
+        answer=view.answer,
+        unusable_answer=view.unusable_answer,
+        feedback=view.feedback,
+        media=(
+            MediaRequestOut(
+                endpoint=view.media.endpoint,
+                prompt=view.media.prompt,
+                seed=view.media.seed,
+                width=view.media.width,
+                height=view.media.height,
+                num_frames=view.media.num_frames,
+                pictures=view.media.pictures,
+                audios=view.media.audios,
+            )
+            if view.media is not None
+            else None
+        ),
+    )
 
 
 async def _cancel_on_server(base_url: str, provider_job_id: str) -> dict[str, Any]:

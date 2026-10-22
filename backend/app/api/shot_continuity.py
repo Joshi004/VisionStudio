@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Path, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
@@ -72,6 +72,9 @@ class ContinuityMismatchOut(BaseModel):
     # Whether Fix this cut may be pressed, and the reason when it may not.
     can_repair: bool
     blocked_reason: str | None
+    # True when every shot a repair could change was written by the user: Fix this cut then has
+    # to be confirmed, and changes the user's shots (PHASE-038).
+    needs_confirmation: bool
 
 
 class ContinuityVersionOut(BaseModel):
@@ -128,6 +131,14 @@ class ShotContinuityRunOneOut(BaseModel):
     job_id: int
 
 
+class ContinuityRepairIn(BaseModel):
+    """The optional body of Fix this cut."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_replace_manual: bool = False
+
+
 def _job_out(job: Job | None) -> DiscoveryJobOut | None:
     if job is None:
         return None
@@ -148,6 +159,7 @@ def _mismatch_out(item: shot_continuity.CutMismatch) -> ContinuityMismatchOut:
         job=_job_out(item.job),
         can_repair=item.can_repair,
         blocked_reason=item.blocked_reason,
+        needs_confirmation=item.needs_confirmation,
     )
 
 
@@ -258,16 +270,28 @@ async def run_scene(
     responses={**_NOT_FOUND, **_INVALID},
 )
 async def repair_cut(
-    project_id: int, scene_id: DiscoveryId, boundary_id: BoundaryId, session: SessionDep
+    project_id: int,
+    scene_id: DiscoveryId,
+    boundary_id: BoundaryId,
+    session: SessionDep,
+    body: ContinuityRepairIn | None = None,
 ) -> ShotContinuityRunOneOut:
     """Repairs one cut that the newest check found not lining up ("Fix this cut"): one call that
     sees both shots and decides which side changes. The count of automatic rounds starts again,
     and the scene is checked again afterwards. If the cut already has a repair waiting or
-    running, that job's id is returned and no second job is made.
+    running, that job's id is returned and no second job is made. A shot the user wrote is left
+    as it is; when every shot the repair could change is the user's, the body must say
+    `confirm_replace_manual` (PHASE-038).
     """
     project = await load_project(session, project_id)
     try:
-        job = await shot_continuity.start_cut_repair(session, project, scene_id, boundary_id)
+        job = await shot_continuity.start_cut_repair(
+            session,
+            project,
+            scene_id,
+            boundary_id,
+            confirm_replace_manual=body.confirm_replace_manual if body is not None else False,
+        )
     except shot_continuity.ShotContinuityError as exc:
         raise _refused(exc) from exc
     dispatcher.nudge()

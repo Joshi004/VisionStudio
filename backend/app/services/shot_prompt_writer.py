@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from app.providers import video_generator
-from app.services import discovery_writer, lab_prompt_writer
+from app.services import discovery_writer, lab_prompt_writer, user_feedback
 from app.services.character_take_prompt_writer import (
     H3_GENERATE_MAX_WORDS,
     H3_GENERATE_MIN_WORDS,
@@ -420,7 +420,8 @@ def layout(request: dict[str, Any]) -> Layout:
 # --- The request --------------------------------------------------------------------------
 
 
-_COMMON_RULES: Final = """\
+_COMMON_RULES: Final = (
+    """\
 You are the prompt compiler of a studio that turns written stories into short films. Everything \
 about one shot has been decided already: what it shows, how it is framed and moves, what is heard, \
 and which reference pictures and audios are sent with it. You turn that structured intent into \
@@ -456,7 +457,11 @@ pedestal down, arc shot, tracking shot, static shot, shake slightly, POV.
 - The sound of the clip is made by H3 itself. The soundscape is only ambience, physical sounds \
 and non-verbal human sounds (breath, cloth, footsteps, a chair): no speech and no music, no \
 score and no song, not even a hint of one.
+
 """
+    + user_feedback.INSTRUCTION
+    + "\n"
+)
 
 _REFERENCE_RULES: Final = """\
 
@@ -577,9 +582,14 @@ def build_request(
     characters: list[dict[str, Any]],
     environment: dict[str, Any],
     model: str,
+    feedback: user_feedback.Feedback | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job (`job.input.request`),
     so nothing about the call is hidden from the job record.
+
+    `feedback` is the user's note on the earlier prompt of this shot (PHASE-038): it adds
+    `PREVIOUS PIECES` (the creative pieces of that prompt, when it kept them) and `USER FEEDBACK`
+    as data blocks.
 
     `scene` is `{index, id, title, description}`; `shot_definition` is the stored specification
     of the shot (PHASE-022); `characters` are the scene's characters as `{id, name, description,
@@ -615,6 +625,8 @@ def build_request(
     ]
     if shot_layout.anchor_use is not None:
         parts.append("CONTINUITY (JSON):\n" + _dump(continuity_block(shot_layout, shot_definition)))
+    if feedback is not None:
+        parts += user_feedback.blocks(feedback, "PREVIOUS PIECES")
     parts.append(
         "ANSWER FORM (JSON; the values here are only stand-ins):\n"
         + json.dumps(answer_form(shot_layout))
@@ -864,14 +876,12 @@ def check_answer(answer: Any, shot_layout: Layout) -> dict[str, Any]:
     or a word about music.
     """
     if not isinstance(answer, dict):
-        raise ValueError("The model's answer was not a JSON object.")
+        raise ValueError("The pieces of the prompt were not a JSON object.")
     reference = shot_layout.format == FORMAT_REFERENCE
     pieces = _reference_pieces(answer, shot_layout) if reference else _generate_pieces(answer)
     missing = [key for key, value in pieces.items() if not value]
     if missing:
-        raise ValueError(
-            "The model's answer had no text for: " + ", ".join(f'"{key}"' for key in missing) + "."
-        )
+        raise ValueError("There was no text for: " + ", ".join(f'"{key}"' for key in missing) + ".")
 
     model_text = "\n".join(pieces.values())
     if any(match != "1" for match in _SHOT_TAG.findall(model_text)):

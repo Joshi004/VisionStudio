@@ -24,12 +24,19 @@ import type { SpeechUnitsContent } from "../../api/speechUnits";
 import {
   usePlanAllShots,
   usePlanOneSceneShots,
+  useSaveShotPlan,
   useShotPlans,
   type ShotPlanEntry,
+  type ShotPlanInput,
 } from "../../api/shotPlans";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { FeedbackBadge } from "./FeedbackBadge";
+import { FeedbackModal } from "./FeedbackModal";
+import { PromptHoverCard } from "./PromptHoverCard";
+import { ReplaceManualModal } from "./ReplaceManualModal";
 import { SceneTimelineView } from "./SceneTimelineView";
+import { ShotPlanEditor } from "./ShotPlanEditor";
 import { ShotPlanView } from "./ShotPlanView";
 
 type ShotPlansPanelProps = {
@@ -83,11 +90,16 @@ type EntryRowProps = {
   replanMaxTries: number;
   busy: boolean;
   onPlan: () => void;
+  onFeedback: () => void;
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (plan: ShotPlanInput, done: () => void) => void;
 };
 
 /**
  * One scene: its status, why its plan is out of date, the job's failure when the last run
- * failed, and the shots themselves, read only.
+ * failed, and the shots themselves, which can be edited by hand.
  */
 function EntryRow({
   entry,
@@ -99,9 +111,15 @@ function EntryRow({
   replanMaxTries,
   busy,
   onPlan,
+  onFeedback,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
 }: EntryRowProps) {
   const [open, setOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const job = entry.job;
   const active = isJobActive(job);
   const status = STATUS[entry.status];
@@ -137,13 +155,13 @@ function EntryRow({
               {status.label}
             </Badge>
             {entry.version !== null && (
-              <Badge
-                variant="light"
-                title="The newest version of this scene's shot plan"
-              >
-                v{entry.version.version}
-              </Badge>
+              <PromptHoverCard jobId={entry.version.job_id} source={entry.version.source}>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{entry.version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
+            <FeedbackBadge text={entry.version?.feedback} />
             {entry.shots !== null && entry.total_seconds !== null && (
               <Badge variant="light" color="gray">
                 {entry.shots.shots.length} shots,{" "}
@@ -195,7 +213,7 @@ function EntryRow({
             </Alert>
           )}
         </Stack>
-        <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        <Group gap="xs" justify="flex-end" maw={420} style={{ flexShrink: 0 }}>
           {entry.timeline !== null && (
             <Button
               size="compact-xs"
@@ -214,17 +232,56 @@ function EntryRow({
               {open ? "Hide the shots" : "Show the shots"}
             </Button>
           )}
+          {entry.shots !== null && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={editing || active || busy}
+              onClick={() => {
+                onStartEdit();
+                setOpen(false);
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
           <Button
             size="compact-sm"
             variant="default"
             loading={active}
-            disabled={!entry.can_run || busy}
+            disabled={!entry.can_run || busy || editing}
             onClick={onPlan}
           >
             {planned ? "Plan again" : "Plan"}
           </Button>
+          {entry.shots !== null && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              title="Plan this scene again, with a note from you for the model"
+              disabled={!entry.can_run || busy || editing}
+              onClick={onFeedback}
+            >
+              Regenerate with feedback
+            </Button>
+          )}
         </Group>
       </Group>
+      {editing && entry.shots !== null && (
+        <Paper withBorder p="md" radius="sm" ml={48}>
+          <ShotPlanEditor
+            initial={entry.shots}
+            events={events}
+            units={units}
+            characterNames={characterNames}
+            saving={saving}
+            error={saveError}
+            onSave={(plan) => onSave(plan, () => setEditing(false))}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
       {entry.timeline !== null && (
         <Collapse expanded={timelineOpen}>
           <SceneTimelineView
@@ -233,7 +290,7 @@ function EntryRow({
           />
         </Collapse>
       )}
-      {entry.shots !== null && entry.version !== null && (
+      {entry.shots !== null && entry.version !== null && !editing && (
         <Collapse expanded={open}>
           <ArtifactViewer
             title="Shots"
@@ -266,6 +323,11 @@ export function ShotPlansPanel({ projectId }: ShotPlansPanelProps) {
   const { data, isLoading, isError, error } = useShotPlans(projectId);
   const planAll = usePlanAllShots(projectId);
   const planOne = usePlanOneSceneShots(projectId);
+  const save = useSaveShotPlan(projectId);
+  // The scene whose newest plan the user wrote, waiting for "yes, plan it again".
+  const [confirming, setConfirming] = useState<ShotPlanEntry | null>(null);
+  // The scene the user is writing a note about.
+  const [feedbackFor, setFeedbackFor] = useState<ShotPlanEntry | null>(null);
   // What a shot names (events, units and their measured length) comes from the earlier
   // stages. They are already loaded for their own panels, so this shares their queries.
   const sceneEvents = useSceneEvents(projectId).data;
@@ -368,10 +430,53 @@ export function ShotPlansPanel({ projectId }: ShotPlansPanelProps) {
             projectBlocked={projectBlocked}
             replanMaxTries={data?.replan_max_tries ?? 0}
             busy={busy}
-            onPlan={() => planOne.mutate(entry.id)}
+            onPlan={() =>
+              entry.needs_confirmation
+                ? setConfirming(entry)
+                : planOne.mutate({ sceneId: entry.id, confirmReplaceManual: false })
+            }
+            onFeedback={() => setFeedbackFor(entry)}
+            saving={save.isPending}
+            saveError={save.error}
+            onStartEdit={() => save.reset()}
+            onSave={(plan, done) =>
+              save.mutate({ sceneId: entry.id, plan }, { onSuccess: done })
+            }
           />
         ))}
       </Stack>
+      <FeedbackModal
+        opened={feedbackFor !== null}
+        title={`Feedback on the shot plan of ${feedbackFor?.title ?? "this scene"}`}
+        what="the shot plan of this scene"
+        initialText={feedbackFor?.version?.feedback ?? ""}
+        writtenByUser={feedbackFor?.needs_confirmation ?? false}
+        submitLabel="Plan with feedback"
+        onCancel={() => setFeedbackFor(null)}
+        onSubmit={(text) => {
+          if (feedbackFor !== null) {
+            planOne.mutate({
+              sceneId: feedbackFor.id,
+              confirmReplaceManual: feedbackFor.needs_confirmation,
+              feedback: text,
+            });
+          }
+          setFeedbackFor(null);
+        }}
+      />
+      <ReplaceManualModal
+        opened={confirming !== null}
+        title="Plan this scene again?"
+        what={`The newest shot plan of ${confirming?.title ?? "this scene"}`}
+        confirmLabel="Plan again"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming !== null) {
+            planOne.mutate({ sceneId: confirming.id, confirmReplaceManual: true });
+          }
+          setConfirming(null);
+        }}
+      />
     </Paper>
   );
 }

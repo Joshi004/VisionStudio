@@ -157,8 +157,12 @@ def trim_args(
 
     # `scale ... increase` covers the output size and `crop` takes the centre, so a 1088 wide
     # clip for a 1080 wide video only loses 4 pixels on each side, with no resampling.
+    # `tpad` repeats the last frame once, in case the clip is one frame short of its shot: a shot's
+    # length is stored on H3's own length, so a project at another frame rate can need one frame
+    # more than the clip has after the rates are converted (D-9). A longer clip is cut as before.
     video = (
-        f"[0:v:0]fps={fps},trim=end_frame={frames},setpts=PTS-STARTPTS,"
+        f"[0:v:0]fps={fps},tpad=stop_mode=clone:stop=1,trim=end_frame={frames},"
+        "setpts=PTS-STARTPTS,"
         f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={width}:{height},setsar=1,format=yuv420p[v]"
     )

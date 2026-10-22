@@ -49,9 +49,11 @@ from app.services import (
     scene_definition_writer,
     scene_definitions,
     scene_timeline,
+    shot_definition_writer,
     shot_plans,
     speech_units,
     story_bible,
+    user_feedback,
 )
 
 _logger = logging.getLogger(__name__)
@@ -63,6 +65,15 @@ DEDUPE_KEY: Final = "shot_key"
 # runs, the shots it works on cannot be defined.
 REPAIR_JOB_TYPE: Final = "repair_shot_cut"
 REPAIRING_REASON: Final = "This shot is being repaired for continuity."
+
+# Who wrote a specification: the model (a job), or the user's edit (PHASE-038).
+SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
+MANUAL_REPLACE_MESSAGE: Final = (
+    "The newest definition of this shot was written by you. Defining it again adds a new "
+    "version from the model, so it has to be confirmed."
+)
+SKIPPED_MANUAL: Final = "Written by you: use this shot's own button to replace it."
 
 # How many of a project's newest definition jobs are read to find each shot's newest one.
 _JOB_LOOKBACK: Final = 2000
@@ -109,6 +120,13 @@ class ShotEntry:
     @property
     def content(self) -> dict[str, Any] | None:
         return self.row.content if self.row is not None else None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        """The newest specification was written by the user: the model replaces it only when
+        asked (PHASE-038).
+        """
+        return self.row is not None and self.row.source == SOURCE_MANUAL
 
 
 @dataclass(frozen=True)
@@ -512,26 +530,35 @@ async def _queue(
     loaded: _Loaded,
     scene_id: str,
     shot_id: str,
+    feedback: user_feedback.Feedback | None = None,
 ) -> tuple[Job, bool]:
     """Queues the job for this shot and returns `(job, created)`. `created` is False when the
     shot already has a job waiting or running, which is returned instead. Raises
     ShotDefinitionsError when this shot cannot be defined, among other reasons because a cut
     repair is working on it.
+
+    `feedback` is the user's note on the newest specification (PHASE-038). The job is given the
+    note and the specification it is about; the version it saves records the note and the
+    version it was about.
     """
     refusal = _scene_refusal(loaded, scene_id)
     if refusal is not None:
         raise ShotDefinitionsError(refusal)
     if _shot_key(scene_id, shot_id) in await _repair_locked(session, project.id):
         raise ShotDefinitionsError(REPAIRING_REASON)
+    fields = _shot_fields(loaded, project.id, scene_id, shot_id)
+    if feedback is not None:
+        fields = {
+            **fields,
+            "inputs": {**fields["inputs"], "feedback": feedback.for_version()},
+            "feedback": feedback.for_job(),
+        }
     return await store.create_job(
         session,
         project_id=project.id,
         type=JOB_TYPE,
         provider="llm",
-        input={
-            DEDUPE_KEY: _shot_key(scene_id, shot_id),
-            **_shot_fields(loaded, project.id, scene_id, shot_id),
-        },
+        input={DEDUPE_KEY: _shot_key(scene_id, shot_id), **fields},
         dedupe_key=DEDUPE_KEY,
     )
 
@@ -639,15 +666,49 @@ async def start_shot(
     project: Project,
     scene_id: str,
     shot_id: str,
+    *,
+    confirm_replace_manual: bool = False,
+    feedback: str | None = None,
 ) -> Job:
     """Queues the job that defines one shot, and commits. If that shot already has a job
-    waiting or running, that job is returned and no new one is made. Raises
-    ShotDefinitionsError.
+    waiting or running, that job is returned and no new one is made. When the newest
+    specification was written by the user, it is replaced only when `confirm_replace_manual`
+    is true (PHASE-038).
+
+    `feedback` is the user's note on the newest specification: the shot is defined again with
+    the note and that specification in the request (PHASE-038). A note is never dropped silently,
+    so a shot that is being defined already refuses it. Raises ShotDefinitionsError.
     """
     loaded = await _load(session, project)
     _find_scene(loaded, scene_id)
-    job, _created = await _queue(session, project, loaded, scene_id, shot_id)
+    newest = await newest_row(session, project.id, scene_id, shot_id)
+    if newest is not None and newest.source == SOURCE_MANUAL and not confirm_replace_manual:
+        raise ShotDefinitionsError(MANUAL_REPLACE_MESSAGE)
+    note = _feedback_on(feedback, newest) if feedback is not None else None
+    job, created = await _queue(session, project, loaded, scene_id, shot_id, note)
+    if note is not None and not created:
+        raise ShotDefinitionsError("This shot is already being defined.")
     return job
+
+
+def _feedback_on(text: str, newest: ShotDefinition | None) -> user_feedback.Feedback:
+    """The user's note on the newest specification of a shot, with that specification as what it
+    is about. Raises ShotDefinitionsError when the note is not usable or the shot has no
+    specification to talk about.
+    """
+    try:
+        note = user_feedback.clean(text)
+    except ValueError as exc:
+        raise ShotDefinitionsError(str(exc)) from exc
+    if newest is None:
+        raise ShotDefinitionsError(
+            "This shot is not defined yet, so there is nothing to comment on."
+        )
+    return user_feedback.Feedback(
+        text=note,
+        previous=shot_definition_writer.previous_specification(newest.content),
+        base_version=newest.version,
+    )
 
 
 def _find_scene(loaded: _Loaded, scene_id: str) -> shot_plans.SceneEntry:
@@ -675,6 +736,9 @@ async def _start_scene_shots(
             result.skipped.append(
                 Skipped(scene_id, shot_id, title, "Already defined and up to date.")
             )
+            continue
+        if shot.needs_confirmation:
+            result.skipped.append(Skipped(scene_id, shot_id, title, SKIPPED_MANUAL))
             continue
         try:
             job, created = await _queue(session, project, loaded, scene_id, shot_id)
@@ -878,13 +942,15 @@ async def save_shot_definition(
     shot_id: str,
     shot_plan_id: int,
     content: dict[str, Any],
-    job_id: int,
+    job_id: int | None,
     inputs: dict[str, Any],
+    source: str = SOURCE_AI,
 ) -> ShotDefinition:
     """Adds the shot's next version. Flushes but does not commit: the job commits it together
     with finishing itself, so a job is never "succeeded" without its result.
 
-    `inputs` is what the job was started with and is stored as it is.
+    `inputs` is what the job was started with and is stored as it is. `job_id` is None and
+    `source` is `manual` for a specification the user edited (`save_manual`).
     """
     statement = select(func.max(ShotDefinition.version)).where(
         ShotDefinition.project_id == project_id,
@@ -898,7 +964,7 @@ async def save_shot_definition(
         shot_id=shot_id,
         shot_plan_id=shot_plan_id,
         version=(highest or 0) + 1,
-        source="ai",
+        source=source,
         job_id=job_id,
         inputs=inputs,
         content=content,
@@ -906,11 +972,69 @@ async def save_shot_definition(
     session.add(row)
     await session.flush()
     _logger.info(
-        "job %d: definition of shot '%s' of scene '%s' of project %d saved, version %d",
+        "job %s: definition of shot '%s' of scene '%s' of project %d saved, version %d (%s)",
         job_id,
         shot_id,
         scene_id,
         project_id,
         row.version,
+        source,
     )
+    return row
+
+
+async def save_manual(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    answer: dict[str, Any],
+) -> ShotDefinition:
+    """Stores the user's edited specification of one shot as its next version (`source` is
+    `manual`), and commits (PHASE-038). It needs what a run needs (a current plan, ready for
+    generation, the looks and states resolved, everything linked) and is refused while the shot
+    is being defined or repaired. The specification is checked the way the model's answer is
+    (`shot_definition_writer.check_answer`: the id, the scene, the duration and the dialogue are
+    set by code, as for a job), and the version records exactly what a job would. Raises
+    ShotDefinitionsError.
+
+    What follows a saved specification (references, generation request, prompt, continuity) is
+    the caller's to start: see `services/shot_chain.py`.
+    """
+    loaded = await _load(session, project)
+    _find_scene(loaded, scene_id)
+    refusal = _scene_refusal(loaded, scene_id)
+    if refusal is not None:
+        raise ShotDefinitionsError(refusal)
+    key = _shot_key(scene_id, shot_id)
+    if key in await _repair_locked(session, project.id):
+        raise ShotDefinitionsError(REPAIRING_REASON)
+    job = (await _newest_jobs(session, project.id)).get(key)
+    if job is not None and job.status in store.ACTIVE_STATUSES:
+        raise ShotDefinitionsError("This shot is already being defined.")
+
+    fields = _shot_fields(loaded, project.id, scene_id, shot_id)
+    try:
+        content = shot_definition_writer.check_answer(
+            answer,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            duration=fields["duration"],
+            scene_character_ids=fields["scene_character_ids"],
+            dialogue=fields["dialogue"],
+        )
+    except ValueError as exc:
+        raise ShotDefinitionsError(str(exc)) from exc
+    row = await save_shot_definition(
+        session,
+        project_id=project.id,
+        scene_id=scene_id,
+        shot_id=shot_id,
+        shot_plan_id=fields["shot_plan_id"],
+        content=content,
+        job_id=None,
+        inputs=fields["inputs"],
+        source=SOURCE_MANUAL,
+    )
+    await session.commit()
     return row

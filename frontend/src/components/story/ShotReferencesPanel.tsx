@@ -16,6 +16,7 @@ import {
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import {
+  useSaveShotReferences,
   useSelectAllReferences,
   useSelectOneShotReferences,
   useSelectSceneReferences,
@@ -24,6 +25,10 @@ import {
   type SceneShotReferences,
   type ShotReferenceEntry,
 } from "../../api/shotReferences";
+import { PromptHoverCard } from "./PromptHoverCard";
+import { pictureLabel } from "./referencePictureFormat";
+import { ReplaceManualModal } from "./ReplaceManualModal";
+import { ShotReferencesEditor } from "./ShotReferencesEditor";
 
 type ShotReferencesPanelProps = {
   projectId: number;
@@ -44,38 +49,27 @@ const FRAMING_LABELS: Record<string, string> = {
   wide: "wide",
 };
 
-function humanize(value: string): string {
-  return value.replace(/_/g, " ");
-}
-
-/** What a picture is, in a few words: whose, which angle, which look or state. */
-function pictureLabel(picture: ReferencePicture): string {
-  const view = picture.kind === "environment" ? "place" : humanize(picture.view);
-  const variant =
-    picture.variant === "default" ? "" : `, ${humanize(picture.variant)}`;
-  return `${picture.subject_name}: ${view}${variant}`;
-}
-
 /** One picture of the manifest. A character is shown at 2:3 and a place at 16:9. */
 function Thumbnail({ picture }: { picture: ReferencePicture }) {
   const environment = picture.kind === "environment";
   return (
     <Stack gap={2} w={environment ? 160 : 90}>
       {picture.url !== null ? (
-        <img
-          src={picture.url}
-          alt={pictureLabel(picture)}
-          title={picture.description}
-          loading="lazy"
-          style={{
-            width: "100%",
-            aspectRatio: environment ? "16 / 9" : "2 / 3",
-            objectFit: "cover",
-            borderRadius: 4,
-            display: "block",
-            background: "var(--mantine-color-gray-1)",
-          }}
-        />
+        <PromptHoverCard imageId={picture.lab_image_id} block>
+          <img
+            src={picture.url}
+            alt={pictureLabel(picture)}
+            loading="lazy"
+            style={{
+              width: "100%",
+              aspectRatio: environment ? "16 / 9" : "2 / 3",
+              objectFit: "cover",
+              borderRadius: 4,
+              display: "block",
+              background: "var(--mantine-color-gray-1)",
+            }}
+          />
+        </PromptHoverCard>
       ) : (
         <Text size="xs" c="red">
           The picture no longer exists.
@@ -103,6 +97,9 @@ function methodLabel(manifest: NonNullable<ShotReferenceEntry["manifest"]>) {
   if (manifest.method === "llm") {
     return "Chosen by the model";
   }
+  if (manifest.method === "manual") {
+    return "Chosen by you";
+  }
   return manifest.fallback_reason != null
     ? "Chosen by rule (model not used)"
     : "Chosen by rule";
@@ -117,11 +114,27 @@ type ShotRowProps = {
   entry: ShotReferenceEntry;
   busy: boolean;
   onSelect: () => void;
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (labImageIds: number[], done: () => void) => void;
 };
 
-/** One shot: its status, why it is out of date, and the pictures it is generated from. */
-function ShotRow({ entry, busy, onSelect }: ShotRowProps) {
+/**
+ * One shot: its status, why it is out of date, and the pictures it is generated from, which can
+ * be chosen by hand.
+ */
+function ShotRow({
+  entry,
+  busy,
+  onSelect,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
+}: ShotRowProps) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const { shot, manifest, version } = entry;
   const status = STATUS[entry.status];
   const chosen = entry.status !== "not_selected";
@@ -159,12 +172,15 @@ function ShotRow({ entry, busy, onSelect }: ShotRowProps) {
               </Badge>
             )}
             {version !== null && (
-              <Badge
-                variant="light"
-                title="The newest version of this shot's references"
+              <PromptHoverCard
+                jobId={version.job_id}
+                source={version.source}
+                codeNote="Chosen by the fixed rule in code. No model was asked."
               >
-                v{version.version}
-              </Badge>
+                <Badge variant="light" style={{ cursor: "help" }}>
+                  v{version.version}
+                </Badge>
+              </PromptHoverCard>
             )}
             {manifest !== null && (
               <Badge
@@ -221,11 +237,25 @@ function ShotRow({ entry, busy, onSelect }: ShotRowProps) {
               {open ? "Hide the references" : "Show the references"}
             </Button>
           )}
+          {manifest !== null && (
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={!entry.can_run || busy || choosing || editing}
+              onClick={() => {
+                onStartEdit();
+                setOpen(false);
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
           <Button
             size="compact-xs"
             variant="default"
             disabled={
-              !entry.can_run || busy || entry.status === "selected"
+              !entry.can_run || busy || editing || entry.status === "selected"
             }
             onClick={onSelect}
           >
@@ -233,7 +263,18 @@ function ShotRow({ entry, busy, onSelect }: ShotRowProps) {
           </Button>
         </Group>
       </Group>
-      {manifest !== null && (
+      {editing && manifest !== null && (
+        <Paper withBorder p="md" radius="sm">
+          <ShotReferencesEditor
+            manifest={manifest}
+            saving={saving}
+            error={saveError}
+            onSave={(ids) => onSave(ids, () => setEditing(false))}
+            onCancel={() => setEditing(false)}
+          />
+        </Paper>
+      )}
+      {manifest !== null && !editing && (
         <Collapse expanded={open}>
           <Group gap="md" align="flex-start" pt={4}>
             {manifest.references.map((picture) => (
@@ -250,11 +291,24 @@ type SceneRowProps = {
   scene: SceneShotReferences;
   busy: boolean;
   onSelectScene: () => void;
-  onSelectShot: (shotId: string) => void;
+  onSelectShot: (shot: ShotReferenceEntry) => void;
+  saving: boolean;
+  saveError: unknown;
+  onStartEdit: () => void;
+  onSave: (shotId: string, labImageIds: number[], done: () => void) => void;
 };
 
 /** One scene: how many of its shots have their references, and its shots. */
-function SceneRow({ scene, busy, onSelectScene, onSelectShot }: SceneRowProps) {
+function SceneRow({
+  scene,
+  busy,
+  onSelectScene,
+  onSelectShot,
+  saving,
+  saveError,
+  onStartEdit,
+  onSave,
+}: SceneRowProps) {
   const chosen = scene.shots.filter((shot) => shot.status === "selected").length;
   const outOfDate = scene.shots.filter(
     (shot) => shot.status === "out_of_date",
@@ -305,7 +359,11 @@ function SceneRow({ scene, busy, onSelectScene, onSelectShot }: SceneRowProps) {
               key={entry.shot.id}
               entry={entry}
               busy={busy}
-              onSelect={() => onSelectShot(entry.shot.id)}
+              onSelect={() => onSelectShot(entry)}
+              saving={saving}
+              saveError={saveError}
+              onStartEdit={onStartEdit}
+              onSave={(ids, done) => onSave(entry.shot.id, ids, done)}
             />
           ))}
         </Stack>
@@ -327,6 +385,12 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
   const selectAll = useSelectAllReferences(projectId);
   const selectScene = useSelectSceneReferences(projectId);
   const selectOne = useSelectOneShotReferences(projectId);
+  const save = useSaveShotReferences(projectId);
+  // The shot whose pictures the user chose, waiting for "yes, choose them again".
+  const [confirming, setConfirming] = useState<{
+    sceneId: string;
+    shotId: string;
+  } | null>(null);
 
   const entries = data?.entries ?? [];
   const busy =
@@ -437,12 +501,40 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
             scene={scene}
             busy={busy}
             onSelectScene={() => selectScene.mutate(scene.id)}
-            onSelectShot={(shotId) =>
-              selectOne.mutate({ sceneId: scene.id, shotId })
+            onSelectShot={(shot) =>
+              shot.needs_confirmation
+                ? setConfirming({ sceneId: scene.id, shotId: shot.shot.id })
+                : selectOne.mutate({
+                    sceneId: scene.id,
+                    shotId: shot.shot.id,
+                    confirmReplaceManual: false,
+                  })
+            }
+            saving={save.isPending}
+            saveError={save.error}
+            onStartEdit={() => save.reset()}
+            onSave={(shotId, labImageIds, done) =>
+              save.mutate(
+                { sceneId: scene.id, shotId, labImageIds },
+                { onSuccess: done },
+              )
             }
           />
         ))}
       </Stack>
+      <ReplaceManualModal
+        opened={confirming !== null}
+        title="Choose the pictures again?"
+        what={`The newest choice of pictures for ${confirming?.shotId ?? "this shot"}`}
+        confirmLabel="Choose again"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming !== null) {
+            selectOne.mutate({ ...confirming, confirmReplaceManual: true });
+          }
+          setConfirming(null);
+        }}
+      />
     </Paper>
   );
 }

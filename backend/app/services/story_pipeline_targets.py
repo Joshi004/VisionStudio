@@ -93,6 +93,22 @@ _MANUAL_UNITS: Final = (
     "The newest speech units of this scene were written by you, and planning them again "
     "replaces your cuts."
 )
+# PHASE-038: the directing stages.
+_MANUAL_SHOT_PLAN: Final = (
+    "The newest shot plan of this scene was written by you, and planning it again adds a "
+    "version from the model."
+)
+_MANUAL_SHOT_DEFINITION: Final = (
+    "The newest definition of this shot was written by you, and defining it again adds a "
+    "version from the model."
+)
+_MANUAL_REFERENCES: Final = (
+    "The newest references of this shot were chosen by you, and choosing them again replaces them."
+)
+_MANUAL_PROMPT: Final = (
+    "The newest prompt of this shot was written by you, and compiling it again adds a version "
+    "from the model."
+)
 
 Evaluate = Callable[[AsyncSession, Project, RunOptions], Awaitable[StepView]]
 # `deadline` is a `time.monotonic()` value: a start function that makes one job per target stops
@@ -950,6 +966,7 @@ async def _evaluate_shot_plans(
                 active=active,
                 block=block,
                 settling=settling,
+                consent=_MANUAL_SHOT_PLAN if entry.needs_confirmation and not done else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
             )
@@ -968,7 +985,14 @@ async def _start_shot_plans(
         session,
         targets,
         deadline,
-        lambda target: _ids_of(shot_plans.start_run(session, project, target.ref[0])),
+        lambda target: _ids_of(
+            shot_plans.start_run(
+                session,
+                project,
+                target.ref[0],
+                confirm_replace_manual=options.confirm_overwrite,
+            )
+        ),
     )
 
 
@@ -1005,6 +1029,9 @@ async def _evaluate_shot_definitions(
                     done,
                     active=active,
                     block=None if done or active else (shot.blocked_reason or scene.blocked_reason),
+                    consent=(
+                        _MANUAL_SHOT_DEFINITION if shot.needs_confirmation and not done else None
+                    ),
                     last_error=_failure(shot.job),
                     ref=(scene_id, shot_id),
                 )
@@ -1024,7 +1051,13 @@ async def _start_shot_definitions(
         targets,
         deadline,
         lambda target: _ids_of(
-            shot_definitions.start_shot(session, project, target.ref[0], target.ref[1])
+            shot_definitions.start_shot(
+                session,
+                project,
+                target.ref[0],
+                target.ref[1],
+                confirm_replace_manual=options.confirm_overwrite,
+            )
         ),
     )
 
@@ -1125,6 +1158,11 @@ async def _evaluate_references(
                 shot.status == "selected",
                 active=_active(shot.job),
                 block=None if shot.status == "selected" else shot.blocked_reason,
+                consent=(
+                    _MANUAL_REFERENCES
+                    if shot.needs_confirmation and shot.status != "selected"
+                    else None
+                ),
                 last_error=_failure(shot.job),
                 ref=(scene.item["id"], shot.shot["id"]),
             )
@@ -1145,7 +1183,9 @@ async def _start_references(
     # language model it queues a job for each shot, and the ids go onto the targets so that
     # cancelling the run cancels them.
     try:
-        result = await shot_references.select_all(session, project)
+        result = await shot_references.select_all(
+            session, project, confirm_replace_manual=options.confirm_overwrite
+        )
     except ValueError as exc:
         await session.rollback()
         return [Started(target, error=str(exc)) for target in targets]
@@ -1229,6 +1269,7 @@ async def _evaluate_prompts(
                     done,
                     active=active,
                     block=None if done or active else shot.blocked_reason,
+                    consent=_MANUAL_PROMPT if shot.needs_confirmation and not done else None,
                     last_error=_failure(shot.job),
                     ref=(scene.item["id"], shot.shot["id"]),
                 )
@@ -1248,7 +1289,13 @@ async def _start_prompts(
         targets,
         deadline,
         lambda target: _ids_of(
-            shot_prompts.start_shot(session, project, target.ref[0], target.ref[1])
+            shot_prompts.start_shot(
+                session,
+                project,
+                target.ref[0],
+                target.ref[1],
+                confirm_replace_manual=options.confirm_overwrite,
+            )
         ),
     )
 
@@ -1464,6 +1511,10 @@ _CONSENT_STEPS: Final[tuple[str, ...]] = (
     "scene_definitions",
     "events",
     "speech_units",
+    "shot_plans",
+    "shot_definitions",
+    "references",
+    "prompts",
 )
 
 

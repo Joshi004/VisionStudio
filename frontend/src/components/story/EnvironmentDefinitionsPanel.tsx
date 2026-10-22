@@ -28,6 +28,7 @@ import { isJobActive } from "../../api/polling";
 import { EnvironmentDefinitionView } from "../environmentLab/EnvironmentDefinitionView";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { PromptHoverCard } from "./PromptHoverCard";
 
 type EnvironmentDefinitionsPanelProps = {
   projectId: number;
@@ -76,20 +77,23 @@ function PictureBlock({ entry, busy, onRetry }: PictureProps) {
         </Group>
       )}
       {picture.status === "ready" && picture.image !== null && (
-        <img
-          src={picture.image.url}
-          alt={`${entry.name}, reference picture`}
-          loading="lazy"
-          style={{
-            width: "100%",
-            maxWidth: 420,
-            aspectRatio: "16 / 9",
-            objectFit: "cover",
-            borderRadius: 4,
-            display: "block",
-            background: "var(--mantine-color-gray-1)",
-          }}
-        />
+        <div style={{ maxWidth: 420 }}>
+          <PromptHoverCard imageId={picture.image.id} block>
+            <img
+              src={picture.image.url}
+              alt={`${entry.name}, reference picture`}
+              loading="lazy"
+              style={{
+                width: "100%",
+                aspectRatio: "16 / 9",
+                objectFit: "cover",
+                borderRadius: 4,
+                display: "block",
+                background: "var(--mantine-color-gray-1)",
+              }}
+            />
+          </PromptHoverCard>
+        </div>
       )}
       {picture.status === "failed" && (
         <Alert color="red" p="xs" title="The picture could not be made">

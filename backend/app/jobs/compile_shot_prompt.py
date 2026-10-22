@@ -15,6 +15,11 @@ Code writes the headings, the label definitions, the retention lines, the audio 
 time of each line, the sentences about who is not speaking, and `non_diegetic_music: N/A`
 (D-10); the model's answer does not carry them (`shot_prompt_writer.check_answer`).
 
+When the user wrote a note on the earlier prompt (PHASE-038), the job also holds `feedback` (the
+text, the number of the version it was about, and that prompt's pieces): the request gets them as
+data blocks, and the version the job saves records the note in its `inputs`. The prompt is never
+sent to the GPU by this job: the user reads it and generates.
+
 One job per shot, so shots are compiled side by side when the pools allow (`store.create_job`
 with `dedupe_key`). The model is the **story role** (`llm_target.STORY_MODEL_KEY`), like every
 story stage (D-12).
@@ -41,7 +46,7 @@ from app.db.session import SessionLocal
 from app.jobs import llm_call, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
-from app.services import discovery, llm_target, shot_prompt_writer, shot_prompts
+from app.services import discovery, llm_target, shot_prompt_writer, shot_prompts, user_feedback
 from app.services.llm_target import STORY_MODEL_KEY
 
 _logger = logging.getLogger(__name__)
@@ -67,6 +72,8 @@ class _Input:
     environment: dict[str, Any]
     inputs: dict[str, Any]
     bible_id: int
+    # The user's note on the earlier prompt, when this prompt is made from one (PHASE-038).
+    feedback: user_feedback.Feedback | None = None
 
 
 def _read_input(job_input: dict[str, Any]) -> _Input | None:
@@ -83,8 +90,10 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     environment = job_input.get("environment")
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
+    feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     if (
-        not isinstance(scene, dict)
+        not feedback_ok
+        or not isinstance(scene, dict)
         or not isinstance(scene_id, str)
         or not isinstance(shot_id, str)
         or not isinstance(request_id, int)
@@ -111,6 +120,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         environment=environment,
         inputs=inputs,
         bible_id=bible_id,
+        feedback=feedback,
     )
 
 
@@ -167,6 +177,7 @@ class CompileShotPromptHandler(JobHandler):
             characters=read.characters,
             environment=read.environment,
             model=target.model,
+            feedback=read.feedback,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

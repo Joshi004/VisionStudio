@@ -10,6 +10,8 @@ Two ranges, both set on the Settings page in whole seconds:
   prompt text.
 
 `shot_num_frames` is the pure rule that turns a shot length into the frame count to ask H3 for.
+The shot lengths a plan stores are moved onto H3's own lengths first (`h3_lengths`, D-9), so for
+them it returns exactly the length's frames.
 """
 
 from __future__ import annotations

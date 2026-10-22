@@ -42,6 +42,7 @@ from app.services import (
     scene_definitions,
     shot_definitions,
     shot_prompt_writer,
+    user_feedback,
 )
 
 _logger = logging.getLogger(__name__)
@@ -62,6 +63,15 @@ ENVIRONMENT_DEFINITION_KIND: Final = scene_definitions.ENVIRONMENT_DEFINITION_KI
 # What a prompt records of what its request and its context were built from.
 _FROM_REQUEST: Final = (MANIFEST_KIND, DEFINITION_KIND)
 _FROM_CONTEXT: Final = (STORY_BIBLE_KIND, CHARACTER_DEFINITION_KIND, ENVIRONMENT_DEFINITION_KIND)
+
+# Who wrote a prompt: the model (a job), or the user's edit (PHASE-038).
+SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
+MANUAL_REPLACE_MESSAGE: Final = (
+    "The newest prompt of this shot was written by you. Compiling it again adds a new version "
+    "from the model, so it has to be confirmed."
+)
+SKIPPED_MANUAL: Final = "Written by you: use this shot's own button to replace it."
 
 # `not_compiled`: no prompt was made for this shot. `compiled`: made, and nothing it was built
 # from has changed. `out_of_date`: made, and something it was built from has changed (see the
@@ -96,6 +106,13 @@ class ShotEntry:
     @property
     def content(self) -> dict[str, Any] | None:
         return self.row.content if self.row is not None else None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        """The newest prompt was written by the user: the model replaces it only when asked
+        (PHASE-038).
+        """
+        return self.row is not None and self.row.source == SOURCE_MANUAL
 
 
 @dataclass(frozen=True)
@@ -301,11 +318,16 @@ async def _queue(
     scene_id: str,
     shot: ShotEntry,
     context: dict[str, Any] | str,
+    feedback: user_feedback.Feedback | None = None,
 ) -> tuple[Job, bool]:
     """Queues the job for this shot and returns `(job, created)`. `created` is False when the
     shot already has a job waiting or running, which is returned instead. `context` is what
     `shot_definitions.shot_contexts` gave for the shot. Raises ShotPromptsError when this shot
     cannot be compiled.
+
+    `feedback` is the user's note on the newest prompt (PHASE-038). The job is given the note and
+    the pieces of the prompt it is about; the version it saves records the note and the version
+    it was about.
     """
     request = shot.request
     refusal = _refusal(request, shot.request_status)
@@ -327,6 +349,11 @@ async def _queue(
     except shot_prompt_writer.ShotPromptError as exc:
         raise ShotPromptsError(str(exc)) from exc
     shot_id = shot.shot["id"]
+    inputs = _inputs(project.id, scene_id, shot_id, request, context)
+    feedback_input: dict[str, Any] = {}
+    if feedback is not None:
+        inputs["feedback"] = feedback.for_version()
+        feedback_input = {"feedback": feedback.for_job()}
     return await store.create_job(
         session,
         project_id=project.id,
@@ -344,22 +371,64 @@ async def _queue(
             "shot_definition": definition.content,
             "characters": context["characters"],
             "environment": context["environment"],
-            "inputs": _inputs(project.id, scene_id, shot_id, request, context),
+            "inputs": inputs,
+            **feedback_input,
         },
         dedupe_key=DEDUPE_KEY,
     )
 
 
-async def start_shot(session: AsyncSession, project: Project, scene_id: str, shot_id: str) -> Job:
+async def start_shot(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    *,
+    confirm_replace_manual: bool = False,
+    feedback: str | None = None,
+) -> Job:
     """Queues the job that compiles one shot's prompt, and commits. If that shot already has a
-    job waiting or running, that job is returned and no new one is made. Raises
-    ShotPromptsError.
+    job waiting or running, that job is returned and no new one is made. When the newest prompt
+    was written by the user, it is replaced only when `confirm_replace_manual` is true
+    (PHASE-038).
+
+    `feedback` is the user's note on the newest prompt: the prompt is written again with the
+    note and the pieces of that prompt in the request (PHASE-038). The new prompt is never sent
+    to the GPU by this: the user reads it and generates. A note is never dropped silently, so a
+    shot that is being compiled already refuses it. Raises ShotPromptsError.
     """
     current = await state(session, project)
     _scene, shot = _find_shot(current, scene_id, shot_id)
+    if shot.needs_confirmation and not confirm_replace_manual:
+        raise ShotPromptsError(MANUAL_REPLACE_MESSAGE)
+    note = _feedback_on(feedback, shot.row) if feedback is not None else None
     contexts = await shot_definitions.shot_contexts(session, project, [(scene_id, shot_id)])
-    job, _created = await _queue(session, project, scene_id, shot, contexts[(scene_id, shot_id)])
+    job, created = await _queue(
+        session, project, scene_id, shot, contexts[(scene_id, shot_id)], note
+    )
+    if note is not None and not created:
+        raise ShotPromptsError("The prompt of this shot is already being compiled.")
     return job
+
+
+def _feedback_on(text: str, newest: ShotPrompt | None) -> user_feedback.Feedback:
+    """The user's note on the newest prompt of a shot, with that prompt's pieces as what it is
+    about (None when the prompt was made before its pieces were kept: the note then goes in
+    alone). Raises ShotPromptsError when the note is not usable or the shot has no prompt to
+    talk about.
+    """
+    try:
+        note = user_feedback.clean(text)
+    except ValueError as exc:
+        raise ShotPromptsError(str(exc)) from exc
+    if newest is None:
+        raise ShotPromptsError("This shot has no prompt yet, so there is nothing to comment on.")
+    pieces = newest.content.get("pieces")
+    return user_feedback.Feedback(
+        text=note,
+        previous=pieces if isinstance(pieces, dict) and pieces else None,
+        base_version=newest.version,
+    )
 
 
 async def _start_shots(
@@ -380,6 +449,9 @@ async def _start_shots(
             result.skipped.append(
                 Skipped(scene_id, shot_id, title, "Already compiled and up to date.")
             )
+            continue
+        if shot.needs_confirmation:
+            result.skipped.append(Skipped(scene_id, shot_id, title, SKIPPED_MANUAL))
             continue
         if shot.blocked_reason is not None:
             result.skipped.append(Skipped(scene_id, shot_id, title, shot.blocked_reason))
@@ -402,7 +474,7 @@ def _wanted_keys(scene: SceneEntry) -> list[tuple[str, str]]:
     return [
         (scene.item["id"], shot.shot["id"])
         for shot in scene.shots
-        if shot.status != "compiled" and shot.blocked_reason is None
+        if shot.status != "compiled" and shot.blocked_reason is None and not shot.needs_confirmation
     ]
 
 
@@ -451,6 +523,16 @@ async def queue_if_ready(
         _scene, shot = _find_shot(current, scene_id, shot_id)
         if shot.status == "compiled" or shot.blocked_reason is not None:
             return None
+        if shot.needs_confirmation:
+            # A prompt the user wrote is never replaced by itself (PHASE-038).
+            _logger.info(
+                "shot '%s' of scene '%s' of project %d: the prompt was written by the user and "
+                "is left as it is",
+                shot_id,
+                scene_id,
+                project_id,
+            )
+            return None
         contexts = await shot_definitions.shot_contexts(session, project, [(scene_id, shot_id)])
         job, created = await _queue(session, project, scene_id, shot, contexts[(scene_id, shot_id)])
     except ShotPromptsError as exc:
@@ -498,13 +580,15 @@ async def save_shot_prompt(
     shot_id: str,
     generation_request_id: int,
     content: dict[str, Any],
-    job_id: int,
+    job_id: int | None,
     inputs: dict[str, Any],
+    source: str = SOURCE_AI,
 ) -> ShotPrompt:
     """Adds the shot's next version. Flushes but does not commit: the job commits it together
     with finishing itself, so a job is never "succeeded" without its result.
 
-    `inputs` is what the job was started with and is stored as it is.
+    `inputs` is what the job was started with and is stored as it is. `job_id` is None and
+    `source` is `manual` for a prompt the user edited (`save_manual`).
     """
     statement = select(func.max(ShotPrompt.version)).where(
         ShotPrompt.project_id == project_id,
@@ -518,7 +602,7 @@ async def save_shot_prompt(
         shot_id=shot_id,
         generation_request_id=generation_request_id,
         version=(highest or 0) + 1,
-        source="ai",
+        source=source,
         job_id=job_id,
         inputs=inputs,
         content=content,
@@ -526,11 +610,62 @@ async def save_shot_prompt(
     session.add(row)
     await session.flush()
     _logger.info(
-        "job %d: prompt of shot '%s' of scene '%s' of project %d saved, version %d",
+        "job %s: prompt of shot '%s' of scene '%s' of project %d saved, version %d (%s)",
         job_id,
         shot_id,
         scene_id,
         project_id,
         row.version,
+        source,
     )
+    return row
+
+
+async def save_manual(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    pieces: dict[str, Any],
+) -> ShotPrompt:
+    """Stores the user's edit of one shot's prompt as its next version (`source` is `manual`),
+    and commits (PHASE-038). `pieces` are the creative pieces the model writes (the style, the
+    description of each subject, the summary, the shot and the soundscape; or the description
+    and the soundscape of the base format): the user does not write the fixed parts. Code
+    builds the prompt from them with the same checks as for the model's answer
+    (`shot_prompt_writer.check_answer`), so a label that is not sent, the exact words and start
+    time of each line of speech, the length limit and the music rule all hold.
+
+    It needs what a compile needs (the shot's request planned and current) and is refused while
+    the prompt is being compiled. The version records exactly what a job would. Nothing is
+    sent to the GPU: generating the clip is the user's own press. Raises ShotPromptsError.
+    """
+    current = await state(session, project)
+    _scene, shot = _find_shot(current, scene_id, shot_id)
+    if shot.blocked_reason is not None:
+        raise ShotPromptsError(shot.blocked_reason)
+    request = shot.request
+    assert request is not None  # a blocked shot was refused above
+    contexts = await shot_definitions.shot_contexts(session, project, [(scene_id, shot_id)])
+    context = contexts[(scene_id, shot_id)]
+    if isinstance(context, str):
+        raise ShotPromptsError(context)
+    try:
+        content = shot_prompt_writer.check_answer(
+            pieces, shot_prompt_writer.layout(request.content)
+        )
+    except ValueError as exc:  # a ShotPromptError is one too
+        raise ShotPromptsError(str(exc)) from exc
+    row = await save_shot_prompt(
+        session,
+        project_id=project.id,
+        scene_id=scene_id,
+        shot_id=shot_id,
+        generation_request_id=request.id,
+        content=content,
+        job_id=None,
+        inputs=_inputs(project.id, scene_id, shot_id, request, context),
+        source=SOURCE_MANUAL,
+    )
+    await session.commit()
     return row

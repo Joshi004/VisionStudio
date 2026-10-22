@@ -20,7 +20,8 @@ A take whose shot carries dialogue is **not selected here** (PHASE-031): when it
 `check_take_dialogue` job is queued in the same transaction, and that job selects the take if the
 speech in the clip matches the dialogue.
 
-The clip is not trimmed here: the render does that, to the shot's exact length (D-9).
+The clip is not trimmed here: the render cuts it to the shot's exact length, which is normally
+the clip's own length (D-9, `services/h3_lengths`).
 
 A clip that fails for a reason a new seed can fix (it cannot be read or decoded, it has no sound,
 its size or number of frames is wrong) starts another take by itself after the row is saved

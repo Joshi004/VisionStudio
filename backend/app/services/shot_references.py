@@ -73,6 +73,16 @@ RESOLUTION_KIND: Final = shot_definitions.RESOLUTION_KIND
 CHARACTER_KIND: Final = scene_definitions.CHARACTER_DEFINITION_KIND
 ENVIRONMENT_KIND: Final = scene_definitions.ENVIRONMENT_DEFINITION_KIND
 
+# Who made a manifest: code or the language model (a manifest the fixed rule chose has no job),
+# or the user's own choice (PHASE-038).
+SOURCE_AI: Final = "ai"
+SOURCE_MANUAL: Final = "manual"
+MANUAL_REPLACE_MESSAGE: Final = (
+    "The newest references of this shot were chosen by you. Choosing them again replaces them "
+    "with the choice of the fixed rule or the model, so it has to be confirmed."
+)
+SKIPPED_MANUAL: Final = "Chosen by you: use this shot's own button to replace it."
+
 # `not_selected`: no manifest was made for this shot. `selected`: made, and nothing it was
 # built from has changed. `out_of_date`: made, and something it was built from has changed (see
 # the reasons).
@@ -101,6 +111,13 @@ class ShotEntry:
     job: Job | None
     can_run: bool
     blocked_reason: str | None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        """The newest manifest was chosen by the user: the fixed rule or the model replaces it
+        only when asked (PHASE-038).
+        """
+        return self.row is not None and self.row.source == SOURCE_MANUAL
 
 
 @dataclass(frozen=True)
@@ -606,13 +623,15 @@ async def save_manifest(
     fallback_reason: str | None,
     job_id: int | None,
     inputs: dict[str, Any],
+    source: str = SOURCE_AI,
 ) -> ShotReferenceManifest:
     """Adds the shot's next manifest. Flushes but does not commit: the caller commits (a
     selection job together with finishing itself, so a job is never "succeeded" without its
     result).
 
-    `method` is how the pictures were chosen (`deterministic` or `llm`). `fallback_reason` says
-    why the fixed rule was used when the model was meant to choose, else None.
+    `method` is how the pictures were chosen (`deterministic`, `llm` or `manual`).
+    `fallback_reason` says why the fixed rule was used when the model was meant to choose, else
+    None. `source` is `manual` for the user's own choice (`save_manual`).
     """
     highest = (
         await session.execute(
@@ -637,7 +656,7 @@ async def save_manifest(
         shot_id=shot_id,
         shot_definition_id=shot_definition_id,
         version=(highest or 0) + 1,
-        source="ai",
+        source=source,
         job_id=job_id,
         inputs=inputs,
         content={
@@ -742,10 +761,13 @@ async def _select_entries(
     state_entry: SceneEntry,
     result: SelectResult,
     use_model: bool,
+    confirm_replace_manual: bool = False,
 ) -> None:
     """Chooses the references of every shot of the scene that has none or an out of date
     manifest, adding to `result`: by the fixed rule now, or with `use_model` by queuing a job for
-    the language model. A shot that cannot be done is skipped with the reason.
+    the language model. A shot that cannot be done is skipped with the reason. A manifest the
+    user chose is left as it is, with the reason, unless `confirm_replace_manual` is true
+    (PHASE-038).
     """
     scene_id = state_entry.item["id"]
     title = state_entry.item["title"]
@@ -757,6 +779,8 @@ async def _select_entries(
             result.skipped.append(
                 Skipped(scene_id, shot_id, title, "Already chosen and up to date.")
             )
+        elif shot.needs_confirmation and not confirm_replace_manual:
+            result.skipped.append(Skipped(scene_id, shot_id, title, SKIPPED_MANUAL))
         elif shot.blocked_reason is not None:
             result.skipped.append(Skipped(scene_id, shot_id, title, shot.blocked_reason))
         elif use_model:
@@ -780,16 +804,10 @@ async def _select_entries(
                 result.selected.append(Selected(scene_id, shot_id, row.version))
 
 
-async def select_shot(
-    session: AsyncSession, project: Project, scene_id: str, shot_id: str
-) -> SelectResult:
-    """Chooses the references of one shot and commits: by the fixed rule now, or, when the
-    setting says the language model chooses, by queuing its job. A manifest that is current
-    already is not made again (the answer says so). Raises ShotReferencesError when the shot
-    cannot be done.
-    """
-    ctx = await _load(session, project)
-    current = await _current(session, project, ctx)
+def _find_shot(
+    current: ShotReferencesState, scene_id: str, shot_id: str
+) -> tuple[SceneEntry, ShotEntry]:
+    """The scene and the shot of the state. Raises ShotReferencesError for an unknown one."""
     scene = next((entry for entry in current.entries if entry.item["id"] == scene_id), None)
     if scene is None:
         raise ShotReferencesError(f"There is no scene '{scene_id}' in the newest list of scenes.")
@@ -798,6 +816,26 @@ async def select_shot(
         raise ShotReferencesError(
             f"There is no shot '{shot_id}' in the newest shot plan of the scene '{scene_id}'."
         )
+    return scene, shot
+
+
+async def select_shot(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    *,
+    confirm_replace_manual: bool = False,
+) -> SelectResult:
+    """Chooses the references of one shot and commits: by the fixed rule now, or, when the
+    setting says the language model chooses, by queuing its job. A manifest that is current
+    already is not made again (the answer says so). A manifest the user chose is replaced only
+    when `confirm_replace_manual` is true (PHASE-038). Raises ShotReferencesError when the shot
+    cannot be done.
+    """
+    ctx = await _load(session, project)
+    current = await _current(session, project, ctx)
+    scene, shot = _find_shot(current, scene_id, shot_id)
     result = SelectResult(selected=[], skipped=[])
     if shot.status == "selected":
         result.skipped.append(
@@ -806,6 +844,8 @@ async def select_shot(
         return result
     if shot.blocked_reason is not None:
         raise ShotReferencesError(shot.blocked_reason)
+    if shot.needs_confirmation and not confirm_replace_manual:
+        raise ShotReferencesError(MANUAL_REPLACE_MESSAGE)
     definitions = next(entry for entry in ctx.definitions.entries if entry.item["id"] == scene_id)
     definition = next(entry for entry in definitions.shots if entry.shot["id"] == shot_id)
     if await _use_model(session):
@@ -825,8 +865,8 @@ async def select_shot(
 
 async def select_scene(session: AsyncSession, project: Project, scene_id: str) -> SelectResult:
     """Chooses the references of every shot of one scene that has none or an out of date
-    manifest, and commits once (with the model, a job for each shot is queued instead). Raises
-    ShotReferencesError for an unknown scene.
+    manifest, and commits once (with the model, a job for each shot is queued instead). A
+    manifest the user chose is left as it is. Raises ShotReferencesError for an unknown scene.
     """
     ctx = await _load(session, project)
     current = await _current(session, project, ctx)
@@ -839,11 +879,14 @@ async def select_scene(session: AsyncSession, project: Project, scene_id: str) -
     return result
 
 
-async def select_all(session: AsyncSession, project: Project) -> SelectResult:
+async def select_all(
+    session: AsyncSession, project: Project, *, confirm_replace_manual: bool = False
+) -> SelectResult:
     """Chooses the references of every shot, in every scene, that has none or an out of date
     manifest, and commits once (with the model, a job for each shot is queued instead). A shot
-    that cannot be done is skipped with the reason. Raises ShotReferencesError when nothing can
-    be done yet.
+    that cannot be done is skipped with the reason. A manifest the user chose is left as it is,
+    unless `confirm_replace_manual` is true (the pipeline's "Allow overwrite", PHASE-038). Raises
+    ShotReferencesError when nothing can be done yet.
     """
     ctx = await _load(session, project)
     if ctx.definitions.blocked_reason is not None:
@@ -852,9 +895,59 @@ async def select_all(session: AsyncSession, project: Project) -> SelectResult:
     use_model = await _use_model(session)
     result = SelectResult(selected=[], skipped=[])
     for scene in current.entries:
-        await _select_entries(session, project, ctx, scene, result, use_model)
+        await _select_entries(
+            session, project, ctx, scene, result, use_model, confirm_replace_manual
+        )
     await _commit(session)
     return result
+
+
+async def save_manual(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot_id: str,
+    image_ids: list[int],
+) -> ShotReferenceManifest:
+    """Stores the user's choice of pictures for one shot, in the order given, as its next
+    manifest (`source` is `manual`, `method` is `manual`), and commits (PHASE-038). It needs what
+    a selection needs (the shot defined and current) and is refused while the references are
+    being chosen. The pictures must be ones the shot can use now (`reference_selection.manual`)
+    and the manifest records exactly what a selection would. Raises ShotReferencesError.
+
+    What follows (the generation request, the prompt) is the caller's to start: see
+    `services/shot_chain.py`.
+    """
+    ctx = await _load(session, project)
+    current = await _current(session, project, ctx)
+    _scene, shot = _find_shot(current, scene_id, shot_id)
+    if shot.blocked_reason is not None:
+        raise ShotReferencesError(shot.blocked_reason)
+    definitions = next(entry for entry in ctx.definitions.entries if entry.item["id"] == scene_id)
+    definition = next(entry for entry in definitions.shots if entry.shot["id"] == shot_id)
+    definition_row = definition.row
+    assert definition_row is not None  # a blocked shot was refused above
+    catalog, artifacts = await _catalog(session, ctx, scene_id, definition_row.content)
+    try:
+        selection = reference_selection.manual(definition_row.content, catalog, image_ids)
+    except reference_selection.ReferenceSelectionError as exc:
+        raise ShotReferencesError(str(exc)) from exc
+    row = await save_manifest(
+        session,
+        project_id=project.id,
+        scene_id=scene_id,
+        shot_id=shot_id,
+        shot_definition_id=definition_row.id,
+        selection=selection,
+        catalog=catalog,
+        method=reference_selection.METHOD_MANUAL,
+        fallback_reason=None,
+        job_id=None,
+        inputs=_inputs(project.id, scene_id, shot_id, definition_row, ctx, artifacts),
+        source=SOURCE_MANUAL,
+    )
+    await _commit(session)
+    return row
 
 
 async def select_if_ready(
