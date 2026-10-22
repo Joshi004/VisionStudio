@@ -135,6 +135,10 @@ H3_MAX_SHOT_KEY = "h3_max_shot_seconds"
 # a problem (PHASE-021). Not part of the order below: it is a count, not a length.
 SHOT_REPLAN_MAX_TRIES_KEY = "shot_replan_max_tries"
 
+# How many times a shot whose clip failed its technical check is generated again by itself, with
+# another seed (PHASE-029). Also a count, not a length.
+SHOT_TAKE_MAX_RETRIES_KEY = "shot_take_max_retries"
+
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
 SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
@@ -411,6 +415,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "are planned again automatically, up to this many times. Each re-plan is a paid "
             "model call. 0 turns automatic re-planning off. Pressing Plan yourself starts the "
             "count again."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=5,
+    ),
+    SettingSpec(
+        key=SHOT_TAKE_MAX_RETRIES_KEY,
+        group=GROUP_DURATION,
+        label="Automatic retries of a shot's clip",
+        help=(
+            "When a generated clip fails its technical check (it cannot be read, it has no "
+            "sound, or its size or number of frames is not what was asked), the shot is "
+            "generated again automatically with another seed, up to this many times. Each retry "
+            "is a new GPU run of 10 to 20 minutes. 0 turns automatic retries off. Pressing "
+            "Generate yourself starts the count again."
         ),
         value_type="integer",
         default=2,

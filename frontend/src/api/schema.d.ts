@@ -2737,6 +2737,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-takes/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Takes
+         * @description Starts the job that checks the clips made before the checks existed. It starts no
+         *     generation. If it is already waiting or running, that job's id is returned.
+         */
+        post: operations["check_takes_api_projects__project_id__shot_takes_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-takes/run": {
         parameters: {
             query?: never;
@@ -4283,7 +4304,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes";
             /**
              * Status
              * @enum {string}
@@ -4336,7 +4357,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes";
             /**
              * Status
              * @enum {string}
@@ -5238,7 +5259,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes";
             /** Running */
             running: number;
             /** Queued */
@@ -6877,6 +6898,14 @@ export interface components {
             /** Selected At */
             selected_at: string | null;
             job: components["schemas"]["DiscoveryJobOut"] | null;
+            validation: components["schemas"]["TakeValidationOut"] | null;
+            /** Retry Attempt */
+            retry_attempt: number;
+        };
+        /** ShotTakesCheckOut */
+        ShotTakesCheckOut: {
+            /** Job Id */
+            job_id: number;
         };
         /** ShotTakesEntryOut */
         ShotTakesEntryOut: {
@@ -6885,7 +6914,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "not_generated" | "generated" | "out_of_date";
+            status: "not_generated" | "generated" | "out_of_date" | "failed" | "unchecked";
             /** Reasons */
             reasons: string[];
             /**
@@ -6911,6 +6940,11 @@ export interface components {
             entries: components["schemas"]["SceneShotTakesOut"][];
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Unchecked Count */
+            unchecked_count: number;
+            check_job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Max Retries */
+            max_retries: number;
         };
         /** ShotTakesRunManyOut */
         ShotTakesRunManyOut: {
@@ -7647,6 +7681,13 @@ export interface components {
             last_frame_ref: components["schemas"]["FirstFrameOut"] | null;
             audio_ref: components["schemas"]["TakeAudioOut"] | null;
         };
+        /** TakeProblemOut */
+        TakeProblemOut: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
         /** TakeShotSkeletonOut */
         TakeShotSkeletonOut: {
             /** Id */
@@ -7660,6 +7701,21 @@ export interface components {
             description: string;
             /** Duration Seconds */
             duration_seconds: number;
+        };
+        /**
+         * TakeValidationOut
+         * @description The technical check of a take's clip (PHASE-029). `kind` is `clip` when another seed may
+         *     fix it (retried automatically) and `plan` when the shot's scene has to be planned again.
+         */
+        TakeValidationOut: {
+            /** Passed */
+            passed: boolean;
+            /** Kind */
+            kind: ("clip" | "plan") | null;
+            /** Problems */
+            problems: components["schemas"]["TakeProblemOut"][];
+            /** Checked At */
+            checked_at: string | null;
         };
         /** TakesOut */
         TakesOut: {
@@ -13835,6 +13891,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_takes_api_projects__project_id__shot_takes_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotTakesCheckOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take cannot be selected, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

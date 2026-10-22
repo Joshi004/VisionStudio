@@ -2,10 +2,13 @@
 
 - `GET ...` answers everything the story workspace shows in one call: the newest list of scenes,
   and for each scene its shots (from the newest shot plan) with the status of each shot's
-  generation (`not_generated`, `generated`, `out_of_date`), why it is out of date, every take of
-  the shot (newest first, with the clip's address, its measured length and its state:
-  `generating`, `ready` or `failed`), which take is selected, the newest job, and whether
-  Generate may be pressed. Out of date is worked out on every read.
+  generation (`not_generated`, `generated`, `out_of_date`, `failed`, `unchecked`), why it is out
+  of date, every take of the shot (newest first, with the clip's address, its measured length,
+  its state: `generating`, `ready` or `failed`, and its technical check), which take is
+  selected (only a take that passed its check can be), the newest job, and whether Generate may
+  be pressed. Out of date is worked out on every read.
+- `POST .../check` ("Check takes") starts the local job that checks the clips made before the
+  checks existed. It starts no generation.
 - `POST .../run` ("Generate all") starts one job for every shot, in every scene, whose prompt is
   compiled and current and that has no current take and is not already being generated.
 - `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
@@ -20,7 +23,7 @@ other shot changes. The answers never return ORM objects.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
@@ -48,10 +51,27 @@ _INVALID = {
     }
 }
 
-Status = Literal["not_generated", "generated", "out_of_date"]
+Status = Literal["not_generated", "generated", "out_of_date", "failed", "unchecked"]
 TakeState = Literal["generating", "ready", "failed"]
 PromptStatus = Literal["not_compiled", "compiled", "out_of_date"]
 ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
+ProblemKind = Literal["clip", "plan"]
+
+
+class TakeProblemOut(BaseModel):
+    code: str
+    message: str
+
+
+class TakeValidationOut(BaseModel):
+    """The technical check of a take's clip (PHASE-029). `kind` is `clip` when another seed may
+    fix it (retried automatically) and `plan` when the shot's scene has to be planned again.
+    """
+
+    passed: bool
+    kind: ProblemKind | None
+    problems: list[TakeProblemOut]
+    checked_at: datetime | None
 
 
 class ShotTakeOut(BaseModel):
@@ -75,6 +95,10 @@ class ShotTakeOut(BaseModel):
     created_at: datetime
     selected_at: datetime | None
     job: DiscoveryJobOut | None
+    # The technical check, or None when the clip has not been checked.
+    validation: TakeValidationOut | None
+    # 0 for a take somebody asked for; n for the nth automatic retry of a failed clip.
+    retry_attempt: int
 
 
 class TakeShotSkeletonOut(BaseModel):
@@ -116,6 +140,11 @@ class ShotTakesOut(BaseModel):
     entries: list[SceneShotTakesOut]
     # Why nothing can be generated yet, or None.
     blocked_reason: str | None
+    # How many ready takes have no check yet, and the newest job that checks them.
+    unchecked_count: int
+    check_job: DiscoveryJobOut | None
+    # The most automatic retries a failed clip gets (0 means none).
+    max_retries: int
 
 
 class ShotTakesSkippedOut(BaseModel):
@@ -140,6 +169,10 @@ class SelectedTakeOut(BaseModel):
     selected_at: datetime
 
 
+class ShotTakesCheckOut(BaseModel):
+    job_id: int
+
+
 def _job_out(job: Job | None) -> DiscoveryJobOut | None:
     if job is None:
         return None
@@ -148,6 +181,21 @@ def _job_out(job: Job | None) -> DiscoveryJobOut | None:
         status=cast(JobStatus, job.status),
         phase=job.phase,
         error=job.error,
+    )
+
+
+def _validation_out(validation: dict[str, Any] | None) -> TakeValidationOut | None:
+    if validation is None:
+        return None
+    checked_at = validation.get("checked_at")
+    return TakeValidationOut(
+        passed=validation.get("passed") is True,
+        kind=cast(ProblemKind | None, validation.get("kind")),
+        problems=[
+            TakeProblemOut(code=problem["code"], message=problem["message"])
+            for problem in validation.get("problems", [])
+        ],
+        checked_at=datetime.fromisoformat(checked_at) if isinstance(checked_at, str) else None,
     )
 
 
@@ -171,6 +219,8 @@ def _take_out(entry: TakeEntry) -> ShotTakeOut:
         created_at=row.created_at,
         selected_at=row.selected_at,
         job=_job_out(entry.job),
+        validation=_validation_out(entry.validation),
+        retry_attempt=entry.retry_attempt,
     )
 
 
@@ -236,7 +286,29 @@ async def get_shot_takes(project_id: int, session: SessionDep) -> ShotTakesOut:
         scenes_version=result.scenes_version,
         entries=[_scene_out(entry) for entry in result.entries],
         blocked_reason=result.blocked_reason,
+        unchecked_count=result.unchecked_count,
+        check_job=_job_out(result.check_job),
+        max_retries=result.max_retries,
     )
+
+
+@router.post(
+    "/projects/{project_id}/shot-takes/check",
+    response_model=ShotTakesCheckOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def check_takes(project_id: int, session: SessionDep) -> ShotTakesCheckOut:
+    """Starts the job that checks the clips made before the checks existed. It starts no
+    generation. If it is already waiting or running, that job's id is returned.
+    """
+    project = await load_project(session, project_id)
+    try:
+        job = await shot_takes.start_check(session, project)
+    except shot_takes.ShotTakesError as exc:
+        raise _refused(exc) from exc
+    dispatcher.nudge()
+    return ShotTakesCheckOut(job_id=job.id)
 
 
 @router.post(

@@ -8,13 +8,18 @@ and a pre-emption sends the same request again. Polling, the download, the clean
 cancelling and the GPU slots (an H3 clip holds 4 or 8 GPUs, `pools.slot_cost`) are the shared ones
 of `RemoteVideoHandler`.
 
-Only `_check_and_store` differs. The clip is checked with ffprobe, stored under the **project's**
-media folder (not `media/lab/`), and written on the `shot_take` row the job was queued with
-(found by `shot_take.job_id`): the file, its checksum, its size and frame count and its audio
-track, and `selected_at`, so the take that has just finished is the shot's selected take. The row
-and the finished job are saved in one transaction. The clip is not trimmed here: the render does
-that, to the shot's exact length (D-9). It is not judged either: validation and retry are
-PHASE-029.
+Only `_check_and_store` differs. The clip is read with ffprobe and decoded to the end, stored
+under the **project's** media folder (not `media/lab/`), and written on the `shot_take` row the
+job was queued with (found by `shot_take.job_id`): the file, its checksum, its size and frame
+count and its audio track, and its technical check (`validation`, PHASE-029). `selected_at` is
+set only when the clip **passed**, so the take that has just finished is the shot's selected take
+only if it is good. The row and the finished job are saved in one transaction. The clip is not
+trimmed here: the render does that, to the shot's exact length (D-9).
+
+A clip that fails for a reason a new seed can fix (it cannot be read or decoded, it has no sound,
+its size or number of frames is wrong) starts another take by itself after the row is saved
+(`shot_takes.queue_retry`, up to the `shot_take_max_retries` setting). A shot whose own length is
+out of the H3 bounds is not retried: its scene has to be planned again.
 """
 
 from __future__ import annotations
@@ -28,9 +33,9 @@ from sqlalchemy import select
 from app.core import outbound
 from app.db.models import Job, ShotTake
 from app.db.session import SessionLocal
-from app.jobs import store
+from app.jobs import dispatcher, store
 from app.jobs.generate_lab_video import GenerateLabVideoHandler
-from app.services import ffmpeg, shot_takes
+from app.services import shot_takes, take_validation
 from app.services.storage import TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -49,12 +54,16 @@ class GenerateShotHandler(GenerateLabVideoHandler):
             await self._fail_and_purge(job, base_url, "The clip belongs to no project.")
             return
         recorded = job.input if isinstance(job.input, dict) else {}
+        request_body = recorded.get("request")
+        request_body = request_body if isinstance(request_body, dict) else None
 
-        probe = await ffmpeg.probe_video(dest)
-        if probe is None or probe.frame_count is None:
+        measured, probe = await shot_takes.measure_clip(dest)
+        if probe is None or not measured.readable:
+            take_id = await self._record_unreadable(job, measured, request_body)
             await self._fail_and_purge(
                 job, base_url, "The downloaded clip could not be read. Generate it again."
             )
+            await self._retry(take_id)
             return
 
         audio = (
@@ -89,10 +98,12 @@ class GenerateShotHandler(GenerateLabVideoHandler):
         stored = await storage.save(temp, job.project_id, "mp4")
 
         # The take and the finished job are saved together or not at all.
+        retry_take_id: int | None = None
         async with SessionLocal() as session:
             statement = select(ShotTake).where(ShotTake.job_id == job.id)
             take = (await session.execute(statement)).scalars().first()
             if take is not None:
+                validation = await shot_takes.judge_take(session, take, measured, request_body)
                 take.path = stored.relative_path
                 take.size_bytes = result.size_bytes
                 take.sha256 = result.sha256
@@ -101,11 +112,19 @@ class GenerateShotHandler(GenerateLabVideoHandler):
                 take.frame_count = probe.frame_count
                 take.duration_s = probe.duration_s
                 take.audio = audio
-                take.selected_at = await shot_takes.selection_time(
-                    session, take.project_id, take.scene_id, take.shot_id
-                )
+                take.validation = validation
+                if validation["passed"]:
+                    take.selected_at = await shot_takes.selection_time(
+                        session, take.project_id, take.scene_id, take.shot_id
+                    )
+                elif validation["kind"] == "clip":
+                    retry_take_id = take.id
                 output["take_id"] = take.id
                 output["take_number"] = take.take_number
+                output["check"] = {
+                    "passed": validation["passed"],
+                    "problems": [problem["code"] for problem in validation["problems"]],
+                }
             else:
                 _logger.warning("job %d: clip stored but its take is gone", job.id)
             if not await store.finish_job(session, job.id, output):
@@ -120,7 +139,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
             await session.commit()
 
         _logger.info(
-            "job %d: shot clip stored: take=%s frames=%d %sx%s %.2f fps audio=%s",
+            "job %d: shot clip stored: take=%s frames=%d %sx%s %.2f fps audio=%s check=%s",
             job.id,
             output.get("take_id"),
             probe.frame_count,
@@ -128,9 +147,45 @@ class GenerateShotHandler(GenerateLabVideoHandler):
             probe.height,
             probe.fps or 0.0,
             audio["codec"] if audio else "none",
+            output.get("check"),
         )
 
         # Best effort: a failure here is recorded and never fails the clip.
         purge = await self._purge(base_url, job.provider_job_id)
         async with SessionLocal() as session:
             await store.merge_output(session, job.id, {"purge": purge})
+
+        await self._retry(retry_take_id)
+
+    @staticmethod
+    async def _record_unreadable(
+        job: Job, measured: take_validation.Measured, request_body: dict[str, Any] | None
+    ) -> int | None:
+        """Writes the failed check on the take of a clip that could not be read, and returns the
+        take's id. The take has no file: it reads as failed, and the job fails after this.
+        """
+        async with SessionLocal() as session:
+            statement = select(ShotTake).where(ShotTake.job_id == job.id)
+            take = (await session.execute(statement)).scalars().first()
+            if take is None:
+                return None
+            take.validation = await shot_takes.judge_take(session, take, measured, request_body)
+            await session.commit()
+            return take.id
+
+    @staticmethod
+    async def _retry(take_id: int | None) -> None:
+        """Queues the automatic retry of a take that failed its check, when the rules allow it.
+        Never raises: the clip's own outcome is already saved.
+        """
+        if take_id is None:
+            return
+        try:
+            async with SessionLocal() as session:
+                retry_job = await shot_takes.queue_retry(session, take_id)
+        except Exception:
+            _logger.exception("take %d: the automatic retry could not be queued", take_id)
+            return
+        if retry_job is not None:
+            dispatcher.nudge()
+            _logger.info("take %d failed its check: retry queued as job %d", take_id, retry_job.id)

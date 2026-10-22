@@ -196,6 +196,12 @@ def trimming_shot(number: int, total: int) -> str:
     return f"trimming shot {number} of {total}"
 
 
+# --- Running: the check of earlier takes (PHASE-029) ---------------------------------------
+# `check_shot_takes` is a local job: ffprobe and FFmpeg on this machine.
+def checking_take(number: int, total: int) -> str:
+    return f"checking clip {number} of {total}"
+
+
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
     CLIP_FINISHING_PHASES | FRAME_FINISHING_PHASES | REFERENCE_FINISHING_PHASES

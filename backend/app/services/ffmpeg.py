@@ -239,6 +239,27 @@ async def probe_video(path: Path, *, timeout_s: float = 120.0) -> VideoProbe | N
     return _parse_video_probe(data)
 
 
+async def decode_problem(path: Path, *, timeout_s: float = 300.0) -> str | None:
+    """Decodes a whole media file and throws the pictures and sound away, to find out whether it
+    decodes to the end (a damaged or cut-off file is read by ffprobe but fails here). Returns
+    None when it decodes, else a short message with the first error. Never raises.
+
+    `-xerror` stops at the first decoding error and makes FFmpeg exit with a failure.
+    """
+    args = ["-v", "error", "-xerror", "-i", file_input(path), "-f", "null", "-"]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not decode a clip: %s", exc)
+        return str(exc)
+    if result.returncode == 0:
+        return None
+    stderr = result.stderr.decode("utf-8", errors="replace").strip()
+    first_line = stderr.splitlines()[0] if stderr else ""
+    _logger.info("ffmpeg decode exit code %s: %s", result.returncode, stderr[:_STDERR_LOG_CHARS])
+    return first_line[:200] or f"ffmpeg exited with code {result.returncode}."
+
+
 def _frame_rate(value: object) -> float | None:
     """ffprobe prints a rate as a fraction such as "24/1"."""
     if not isinstance(value, str) or "/" not in value:

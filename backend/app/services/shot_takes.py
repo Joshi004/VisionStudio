@@ -13,9 +13,13 @@ run side by side when the GPU pool allows (`store.create_job` with `dedupe_key`)
   and the frame count, PHASE-025) and its compiled prompt (PHASE-026), with a **new random seed
   for every take** and the `gpu_partition` setting. The endpoint is checked against the newest
   recorded GPU API. The body is stored on the job and sent again unchanged after a pre-emption.
-- **The selected take of a shot is its ready take with the newest `selected_at`.** A take gets
-  `selected_at` when its job finishes and when the user selects it, so whichever happened last
-  decides.
+- **The selected take of a shot is its ready take that passed its technical check, with the
+  newest `selected_at`.** A take gets `selected_at` when its job finishes (only if it passed) and
+  when the user selects it (only a passing take), so whichever happened last decides.
+- **Every clip is checked in code (PHASE-029, `take_validation.py`)** when it is stored. A clip
+  that fails for a reason a new seed can fix is generated again by itself, up to the
+  `shot_take_max_retries` setting (`queue_retry`). The takes made before the checks existed are
+  checked by the `check_shot_takes` job (`start_check`).
 - `state` is what the story workspace shows. **Out of date is worked out on every read** and never
   stored: the shot's prompt was compiled again since the take was made, or is itself out of date
   (which already covers the request, the references and the definition).
@@ -27,6 +31,7 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Final, Literal
 
 from sqlalchemy import func, select
@@ -45,12 +50,23 @@ from app.db.models import (
 from app.db.types import utcnow
 from app.jobs import store
 from app.providers import contract_guard, video_generator
-from app.services import api_contract, shot_prompts, video_lab, video_models
+from app.services import (
+    api_contract,
+    ffmpeg,
+    shot_prompts,
+    take_validation,
+    video_lab,
+    video_models,
+)
+from app.services.duration_policy import DurationPolicy, DurationPolicyError, read_duration_policy
+from app.services.frame_counts import H3_FPS, H3_MAX_FRAMES
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = "generate_shot"
+# The local job that checks the takes that have no stored check (PHASE-029).
+CHECK_JOB_TYPE: Final = "check_shot_takes"
 # Two presses on one shot make one job; two shots run side by side. The key is `scene/shot`.
 DEDUPE_KEY: Final = "shot_key"
 
@@ -60,10 +76,12 @@ AUDIO_MIME: Final = "audio/wav"
 PROMPT_KIND: Final = "shot_prompt"
 REQUEST_KIND: Final = shot_prompts.REQUEST_KIND
 
-# `not_generated`: no take of this shot is ready. `generated`: its selected take was made from
-# the shot's current prompt. `out_of_date`: the selected take was made from something that has
-# changed (see the reasons).
-Status = Literal["not_generated", "generated", "out_of_date"]
+# `not_generated`: the shot has no take yet, or its first take is being made. `generated`: its
+# selected take was made from the shot's current prompt. `out_of_date`: the selected take was
+# made from something that has changed (see the reasons). `failed`: no take passed its technical
+# check (PHASE-029) or its job ended without a clip, and nothing is being generated. `unchecked`:
+# no take passed, and a clip that was made before the checks existed has not been checked yet.
+Status = Literal["not_generated", "generated", "out_of_date", "failed", "unchecked"]
 # `generating`: the take's job is waiting or running. `ready`: the clip is stored. `failed`: the
 # job ended without a clip (failed or cancelled).
 TakeState = Literal["generating", "ready", "failed"]
@@ -84,6 +102,10 @@ class TakeEntry:
     selected: bool
     # Why this take is out of date, one sentence each. Empty when it is current.
     reasons: list[str]
+    # The technical check as stored (`take_validation`), or None when the clip is not checked.
+    validation: dict[str, Any] | None
+    # 0 for a take somebody asked for; n for the nth automatic retry of a failed clip.
+    retry_attempt: int
 
 
 @dataclass(frozen=True)
@@ -125,6 +147,12 @@ class ShotTakesState:
     entries: list[SceneEntry]
     # Why nothing can be generated yet, or None.
     blocked_reason: str | None
+    # How many ready takes have no stored check (made before PHASE-029), and the newest job of
+    # the action that checks them.
+    unchecked_count: int
+    check_job: Job | None
+    # The `shot_take_max_retries` setting, for showing "retry n of m".
+    max_retries: int
 
 
 @dataclass(frozen=True)
@@ -162,11 +190,23 @@ def _take_state(row: ShotTake, job: Job | None) -> TakeState:
     return "failed"
 
 
+def _retry_attempt(row: ShotTake) -> int:
+    retry = row.inputs.get("retry") if isinstance(row.inputs, dict) else None
+    attempt = retry.get("attempt") if isinstance(retry, dict) else None
+    return attempt if isinstance(attempt, int) and not isinstance(attempt, bool) else 0
+
+
 def _selected_id(rows: list[ShotTake]) -> int | None:
-    """The id of the shot's selected take: its ready take with the newest `selected_at`."""
+    """The id of the shot's selected take: its ready take that passed its technical check, with
+    the newest `selected_at`. A take that failed or was never checked is never selected.
+    """
     newest: ShotTake | None = None
     for row in rows:
-        if not _is_ready(row) or row.selected_at is None:
+        if (
+            not _is_ready(row)
+            or row.selected_at is None
+            or not take_validation.passed(row.validation)
+        ):
             continue
         if (
             newest is None
@@ -248,6 +288,8 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                     state=_take_state(row, jobs.get(row.job_id) if row.job_id else None),
                     selected=row.id == selected_id,
                     reasons=_take_reasons(row, prompt) if _is_ready(row) else [],
+                    validation=row.validation if isinstance(row.validation, dict) else None,
+                    retry_attempt=_retry_attempt(row),
                 )
                 for row in rows
             ]
@@ -257,6 +299,9 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
             if selected is not None:
                 reasons = selected.reasons
                 status = "out_of_date" if reasons else "generated"
+            elif takes and not _already_generating_takes(takes):
+                has_unchecked = any(_is_ready(t.row) and t.validation is None for t in takes)
+                status = "unchecked" if has_unchecked else "failed"
             blocked = _refusal(prompt, takes)
             shots.append(
                 ShotEntry(
@@ -276,7 +321,21 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
         scenes_version=prompts.scenes_version,
         entries=entries,
         blocked_reason=prompts.blocked_reason,
+        unchecked_count=sum(
+            1
+            for rows in grouped.values()
+            for row in rows
+            if _is_ready(row) and row.validation is None
+        ),
+        check_job=await store.latest_job(session, project.id, CHECK_JOB_TYPE),
+        max_retries=await settings_service.get_int(
+            session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY
+        ),
     )
+
+
+def _already_generating_takes(takes: list[TakeEntry]) -> bool:
+    return any(take.state == "generating" for take in takes)
 
 
 # --- Starting runs ------------------------------------------------------------------------
@@ -386,11 +445,17 @@ async def _next_take_number(
 
 
 async def _queue(
-    session: AsyncSession, project: Project, scene_id: str, shot: ShotEntry, prompt: ShotPrompt
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot: ShotEntry,
+    prompt: ShotPrompt,
+    retry: dict[str, Any] | None = None,
 ) -> tuple[Job, bool]:
     """Adds the take and queues the job of one shot that `can_run`. Flushes, does not commit.
     Returns `(job, created)`: the job already generating the shot when it was not created (no
-    take is added then). Raises ShotTakesError.
+    take is added then). `retry` is `{attempt, of_take_id, problems}` for the automatic retry of
+    a failed clip, and is recorded on the take. Raises ShotTakesError.
     """
     request_row = (
         await session.get(GenerationRequest, prompt.generation_request_id)
@@ -457,6 +522,8 @@ async def _queue(
             "endpoint": content["endpoint"],
             "num_frames": content["num_frames"],
             "target_seconds": content["target_seconds"],
+            # Only a take made by the automatic retry of a failed clip has this (PHASE-029).
+            **({"retry": retry} if retry is not None else {}),
         },
     )
     session.add(take)
@@ -523,6 +590,18 @@ async def _start_shots(
         if shot.status == "generated":
             result.skipped.append(
                 Skipped(scene_id, shot_id, title, "Already generated and up to date.")
+            )
+            continue
+        if shot.status == "unchecked":
+            # A clip made before the checks existed may be fine: checking it costs seconds, a
+            # new take costs a GPU run. Regenerate on the shot itself if a new take is wanted.
+            result.skipped.append(
+                Skipped(
+                    scene_id,
+                    shot_id,
+                    title,
+                    "Its clips have not been checked yet. Press Check takes first.",
+                )
             )
             continue
         if shot.blocked_reason is not None:
@@ -596,9 +675,212 @@ async def select_take(
         )
     if not _is_ready(take):
         raise ShotTakesError("This take has no clip yet, so it cannot be selected.")
+    if take.validation is None:
+        raise ShotTakesError("This take has not been checked yet. Press Check takes first.")
+    if not take_validation.passed(take.validation):
+        raise ShotTakesError(
+            "This take failed its technical check, so it cannot be selected: "
+            + _problem_text(take.validation)
+        )
     take.selected_at = await selection_time(session, project.id, scene_id, shot_id)
     await session.commit()
     return take
+
+
+def _problem_text(validation: dict[str, Any]) -> str:
+    problems = validation.get("problems")
+    if not isinstance(problems, list):
+        return "no reason was recorded."
+    messages = [
+        problem["message"]
+        for problem in problems
+        if isinstance(problem, dict) and isinstance(problem.get("message"), str)
+    ]
+    return " ".join(messages) or "no reason was recorded."
+
+
+# --- Checking a clip ----------------------------------------------------------------------
+
+
+async def measure_clip(
+    path: Path,
+) -> tuple[take_validation.Measured, ffmpeg.VideoProbe | None]:
+    """Reads a clip with ffprobe and decodes it to the end. The probe is None, and the
+    measurement says `readable=False`, when ffprobe cannot read the file. Never raises.
+    """
+    probe = await ffmpeg.probe_video(path)
+    if probe is None or probe.frame_count is None:
+        unreadable = take_validation.Measured(
+            frame_count=None,
+            width=None,
+            height=None,
+            duration_s=None,
+            has_audio=False,
+            readable=False,
+        )
+        return unreadable, probe
+    measured = take_validation.Measured(
+        frame_count=probe.frame_count,
+        width=probe.width,
+        height=probe.height,
+        duration_s=probe.duration_s,
+        has_audio=probe.audio is not None,
+        decode_problem=await ffmpeg.decode_problem(path),
+    )
+    return measured, probe
+
+
+async def _policy_now(session: AsyncSession) -> DurationPolicy:
+    """The duration policy that applies now. When the saved settings are out of order, only the
+    server's own limit is enforced, so a clip is not failed because of a settings mistake.
+    """
+    try:
+        return await read_duration_policy(session)
+    except DurationPolicyError:
+        return DurationPolicy(
+            hard_min_s=0, hard_max_s=H3_MAX_FRAMES // H3_FPS, target_min_s=0, target_max_s=0
+        )
+
+
+async def judge_take(
+    session: AsyncSession,
+    take: ShotTake,
+    measured: take_validation.Measured,
+    request_body: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """The value for `shot_take.validation` of a take whose clip was measured. `request_body` is
+    the body that was sent to the server when it is still known (the job's input), else None and
+    the take's generation request says what was asked.
+    """
+    request_row = (
+        await session.get(GenerationRequest, take.generation_request_id)
+        if take.generation_request_id is not None
+        else None
+    )
+    expected = take_validation.expected_of(
+        take_inputs=take.inputs if isinstance(take.inputs, dict) else {},
+        request_body=request_body,
+        request_content=request_row.content if request_row is not None else None,
+    )
+    checked_at = utcnow()
+    if expected is None:
+        return {
+            "version": take_validation.VERSION,
+            "passed": False,
+            "kind": "plan",
+            "checked_at": checked_at.isoformat(),
+            "problems": [
+                {
+                    "code": "request_missing",
+                    "message": (
+                        "What this take was asked for is no longer known, so it cannot be "
+                        "checked. Generate the shot again."
+                    ),
+                }
+            ],
+            "measured": None,
+            "expected": None,
+        }
+    verdict = take_validation.validate(measured, expected, await _policy_now(session))
+    return verdict.to_json(measured, expected, checked_at=checked_at)
+
+
+# --- Retrying a failed clip ---------------------------------------------------------------
+
+
+async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
+    """Queues another take of a shot whose take `take_id` failed its technical check, with a new
+    seed, and commits. Returns the job, or None when no retry is made: the clip did not fail for
+    a reason another seed can fix (`kind` is not `clip`), the tries are used up
+    (`shot_take_max_retries`), the take is not the shot's newest take any more, or the shot
+    cannot be generated now (its prompt or request changed meanwhile; the user presses Generate).
+    """
+    take = await session.get(ShotTake, take_id)
+    if take is None or not isinstance(take.validation, dict):
+        return None
+    validation = take.validation
+    if validation.get("passed") is not False or validation.get("kind") != "clip":
+        return None
+    attempt = _retry_attempt(take)
+    max_tries = await settings_service.get_int(session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY)
+    if attempt >= max_tries:
+        _logger.info(
+            "shot '%s' of scene '%s' of project %d: take %d failed its check; the %d retries "
+            "are used",
+            take.shot_id,
+            take.scene_id,
+            take.project_id,
+            take.take_number,
+            max_tries,
+        )
+        return None
+    newest = (await _next_take_number(session, take.project_id, take.scene_id, take.shot_id)) - 1
+    project = await session.get(Project, take.project_id)
+    if project is None or take.take_number != newest:
+        return None
+
+    try:
+        current = await state(session, project)
+        _scene, shot = _find_shot(current, take.scene_id, take.shot_id)
+        prompt = await _newest_prompt(session, project.id, take.scene_id, take.shot_id)
+        if shot.blocked_reason is not None or prompt is None or prompt.id != take.shot_prompt_id:
+            _logger.info(
+                "shot '%s' of scene '%s' of project %d: not generated again by itself: %s",
+                take.shot_id,
+                take.scene_id,
+                take.project_id,
+                shot.blocked_reason or "its prompt was compiled again",
+            )
+            return None
+        retry = {
+            "attempt": attempt + 1,
+            "of_take_id": take.id,
+            "problems": [
+                p["code"]
+                for p in validation.get("problems", [])
+                if isinstance(p, dict) and isinstance(p.get("code"), str)
+            ],
+        }
+        job, created = await _queue(session, project, take.scene_id, shot, prompt, retry)
+    except ShotTakesError as exc:
+        await session.rollback()
+        _logger.info(
+            "shot '%s' of scene '%s' of project %d: not generated again by itself: %s",
+            take.shot_id,
+            take.scene_id,
+            take.project_id,
+            exc,
+        )
+        return None
+    await session.commit()
+    return job if created else None
+
+
+# --- Checking takes made before the checks existed -----------------------------------------
+
+
+async def start_check(session: AsyncSession, project: Project) -> Job:
+    """Queues the job that checks every ready take of the project that has no stored check, and
+    commits. If that job is already waiting or running, it is returned. Raises ShotTakesError
+    when no take needs a check.
+    """
+    statement = select(func.count(ShotTake.id)).where(
+        ShotTake.project_id == project.id,
+        ShotTake.path.is_not(None),
+        ShotTake.validation.is_(None),
+    )
+    if not (await session.execute(statement)).scalar_one():
+        raise ShotTakesError("Every clip of this project has been checked already.")
+    job, created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=CHECK_JOB_TYPE,
+        provider="local",
+        input={"requested": CHECK_JOB_TYPE},
+    )
+    if created:
+        _logger.info("takes of project %d: check queued as job %d", project.id, job.id)
+    return job
 
 
 async def selection_time(
