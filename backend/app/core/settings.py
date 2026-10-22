@@ -147,6 +147,12 @@ DIALOGUE_MATCH_THRESHOLD_KEY = "dialogue_match_threshold"
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
 SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
 
+# How the reference pictures of a shot are chosen (PHASE-033): by the language model, with the
+# fixed rule of PHASE-024 as the fallback, or by the fixed rule alone.
+REFERENCE_SELECTION_METHOD_KEY = "reference_selection_method"
+REFERENCE_METHOD_LLM = "llm"
+REFERENCE_METHOD_DETERMINISTIC = "deterministic"
+
 # From the smallest value to the largest: each setting must be at or below the next one.
 DURATION_ORDER: tuple[str, ...] = (
     H3_MIN_SHOT_KEY,
@@ -546,6 +552,27 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=10,
         min_value=1,
         max_value=120,
+    ),
+    SettingSpec(
+        key=REFERENCE_SELECTION_METHOD_KEY,
+        group=GROUP_STORY,
+        label="How shot references are chosen",
+        help=(
+            "The language model reads each shot's definition and the pictures that could "
+            "matter to it, and chooses the fewest that are enough (one paid model call per "
+            "shot, by the story provider). When its answer cannot be used, or the call fails, "
+            "the fixed rule chooses instead and the shot says so. The fixed rule alone uses no "
+            "model: it takes the pictures that suit the shot size. It applies to the next "
+            "choice; references already chosen are kept."
+        ),
+        value_type="string",
+        default=REFERENCE_METHOD_LLM,
+        choices=(
+            SettingChoice(
+                REFERENCE_METHOD_LLM, "Language model chooses, the fixed rule is the fallback"
+            ),
+            SettingChoice(REFERENCE_METHOD_DETERMINISTIC, "Fixed rule only"),
+        ),
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

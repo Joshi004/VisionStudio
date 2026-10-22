@@ -1,9 +1,16 @@
 """The reference manifest of a shot (PHASE-024, `Path_ahead.md` Section 28).
 
 The manifest is the minimum set of pictures one shot is generated from: its visible characters
-(with the look the scene resolved to) and its environment (with the resolved state). Code makes
-it, with no model and no job: `services/reference_selection` holds the rule, this module builds
-the catalog the rule chooses from, stores the result and says where each shot stands.
+(with the look the scene resolved to) and its environment (with the resolved state).
+`services/reference_selection` holds the fixed rule, this module builds the catalog the choice is
+made from, stores the result and says where each shot stands.
+
+- **Two methods** (the setting `reference_selection_method`, PHASE-033). `deterministic`: code
+  chooses inside the request, with no model and no job. `llm`: a `select_shot_references` job per
+  shot asks the language model (`reference_selection_writer`), and falls back to the fixed rule
+  when the answer cannot be used; `jobs/select_shot_references.py` stores the result with
+  `save_from_job`. A manifest records its `method`, a `reason` for each picture the model chose
+  and, when the model was not used, the `fallback_reason`.
 
 - **The catalog** is read from what the project **pins**: for each character visible in the shot,
   the pictures of the pinned `library_character_version` (the default look in `look_references`,
@@ -19,22 +26,24 @@ the catalog the rule chooses from, stores the result and says where each shot st
 - **Out of date is worked out on every read** and never stored: the shot was defined again or its
   definition is out of date, the looks and states were resolved again, or the pinned version of a
   character or the environment it used has changed (new pictures, a remade look).
-- `select_shot`, `select_scene` and `select_all` are the buttons; they commit once.
-  `select_if_ready` is called by the `define_shot` job after it has committed, so a defined shot
-  gets its manifest by itself.
+- `select_shot`, `select_scene` and `select_all` are the buttons. With the fixed rule they commit
+  once; with the model they queue the jobs (each commits). `select_if_ready` is called by the
+  `define_shot` job after it has committed, so a defined shot gets its manifest by itself.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import settings as settings_service
 from app.db.models import (
+    Job,
     LabImage,
     LabRun,
     LibraryCharacterVersion,
@@ -52,6 +61,12 @@ from app.services import (
 from app.services.reference_selection import CatalogPicture
 
 _logger = logging.getLogger(__name__)
+
+JOB_TYPE: Final = "select_shot_references"
+# Two presses on one shot make one job; two shots run side by side. The key is `scene/shot`.
+DEDUPE_KEY: Final = "shot_key"
+# How many of a project's newest selection jobs are read to find each shot's newest one.
+_JOB_LOOKBACK: Final = 2000
 
 SHOT_DEFINITION_KIND: Final = "shot_definition"
 RESOLUTION_KIND: Final = shot_definitions.RESOLUTION_KIND
@@ -81,6 +96,9 @@ class ShotEntry:
     reasons: list[str]
     # The newest manifest of this shot, when it has one.
     row: ShotReferenceManifest | None
+    # The newest selection job of this shot, whatever its status (none when the fixed rule has
+    # always chosen).
+    job: Job | None
     can_run: bool
     blocked_reason: str | None
 
@@ -116,9 +134,21 @@ class Skipped:
 
 
 @dataclass(frozen=True)
+class Queued:
+    """A shot whose references the language model is to choose: the job that does it."""
+
+    scene_id: str
+    shot_id: str
+    job_id: int
+
+
+@dataclass(frozen=True)
 class SelectResult:
+    """`selected` were chosen by the fixed rule in the request; `queued` wait for the model."""
+
     selected: list[Selected]
     skipped: list[Skipped]
+    queued: list[Queued] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -431,18 +461,49 @@ async def _newest_rows(session: AsyncSession, project_id: int) -> dict[str, Shot
     return newest
 
 
-def _build(ctx: _Context, rows: dict[str, ShotReferenceManifest]) -> ShotReferencesState:
+async def _newest_jobs(session: AsyncSession, project_id: int) -> dict[str, Job]:
+    """The newest selection job of each shot of the project, by its `scene/shot` key."""
+    statement = (
+        select(Job)
+        .where(Job.project_id == project_id, Job.type == JOB_TYPE)
+        .order_by(Job.id.desc())
+        .limit(_JOB_LOOKBACK)
+        .execution_options(populate_existing=True)
+    )
+    newest: dict[str, Job] = {}
+    for job in (await session.execute(statement)).scalars():
+        key = job.input.get(DEDUPE_KEY) if isinstance(job.input, dict) else None
+        if isinstance(key, str) and key not in newest:
+            newest[key] = job
+    return newest
+
+
+async def _current(session: AsyncSession, project: Project, ctx: _Context) -> ShotReferencesState:
+    return _build(
+        ctx,
+        await _newest_rows(session, project.id),
+        await _newest_jobs(session, project.id),
+    )
+
+
+def _build(
+    ctx: _Context, rows: dict[str, ShotReferenceManifest], jobs: dict[str, Job]
+) -> ShotReferencesState:
     entries: list[SceneEntry] = []
     for scene in ctx.definitions.entries:
         shots: list[ShotEntry] = []
         for entry in scene.shots:
-            row = rows.get(_key(scene.item["id"], entry.shot["id"]))
+            key = _key(scene.item["id"], entry.shot["id"])
+            row = rows.get(key)
+            job = jobs.get(key)
             status: Status = "not_selected"
             reasons: list[str] = []
             if row is not None:
                 reasons = _out_of_date_reasons(row, entry, ctx)
                 status = "out_of_date" if reasons else "selected"
             blocked = _refusal(entry)
+            if blocked is None and job is not None and job.status in store.ACTIVE_STATUSES:
+                blocked = "The references of this shot are being chosen."
             shots.append(
                 ShotEntry(
                     shot=entry.shot,
@@ -451,6 +512,7 @@ def _build(ctx: _Context, rows: dict[str, ShotReferenceManifest]) -> ShotReferen
                     status=status,
                     reasons=reasons,
                     row=row,
+                    job=job,
                     can_run=blocked is None,
                     blocked_reason=blocked,
                 )
@@ -468,7 +530,7 @@ async def state(session: AsyncSession, project: Project) -> ShotReferencesState:
     read; nothing here is stored.
     """
     ctx = await _load(session, project)
-    return _build(ctx, await _newest_rows(session, project.id))
+    return await _current(session, project, ctx)
 
 
 # --- Selecting -----------------------------------------------------------------------------
@@ -481,59 +543,112 @@ async def _add(
     scene_id: str,
     entry: shot_definitions.ShotEntry,
 ) -> ShotReferenceManifest:
-    """Chooses and adds the shot's next manifest. Flushes but does not commit. Raises
-    ShotReferencesError.
+    """Chooses the shot's next manifest by the fixed rule and adds it. Flushes but does not
+    commit. Raises ShotReferencesError.
     """
     definition = entry.row
-    resolution = ctx.resolution.version
-    assert definition is not None and resolution is not None  # the callers refused otherwise
-    shot_id = entry.shot["id"]
+    assert definition is not None  # the callers refused otherwise
     catalog, artifacts = await _catalog(session, ctx, scene_id, definition.content)
     try:
         selection = reference_selection.select(definition.content, catalog)
     except reference_selection.ReferenceSelectionError as exc:
         raise ShotReferencesError(str(exc)) from exc
+    return await save_manifest(
+        session,
+        project_id=project.id,
+        scene_id=scene_id,
+        shot_id=entry.shot["id"],
+        shot_definition_id=definition.id,
+        selection=selection,
+        catalog=catalog,
+        method=reference_selection.METHOD_DETERMINISTIC,
+        fallback_reason=None,
+        job_id=None,
+        inputs=_inputs(project.id, scene_id, entry.shot["id"], definition, ctx, artifacts),
+    )
 
+
+def _inputs(
+    project_id: int,
+    scene_id: str,
+    shot_id: str,
+    definition: Any,
+    ctx: _Context,
+    artifacts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The `inputs` written onto a manifest (D-3): the shot definition and the look and state
+    resolution it was chosen from, and the pinned character and environment definitions.
+    """
+    resolution = ctx.resolution.version
+    assert resolution is not None  # the callers refused otherwise
+    return {
+        "project_id": project_id,
+        "scene_id": scene_id,
+        "shot_id": shot_id,
+        "artifacts": [
+            {"kind": SHOT_DEFINITION_KIND, "id": definition.id, "version": definition.version},
+            {"kind": RESOLUTION_KIND, "id": resolution.id, "version": resolution.version},
+            *artifacts,
+        ],
+    }
+
+
+async def save_manifest(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    scene_id: str,
+    shot_id: str,
+    shot_definition_id: int | None,
+    selection: reference_selection.Selection,
+    catalog: list[CatalogPicture],
+    method: str,
+    fallback_reason: str | None,
+    job_id: int | None,
+    inputs: dict[str, Any],
+) -> ShotReferenceManifest:
+    """Adds the shot's next manifest. Flushes but does not commit: the caller commits (a
+    selection job together with finishing itself, so a job is never "succeeded" without its
+    result).
+
+    `method` is how the pictures were chosen (`deterministic` or `llm`). `fallback_reason` says
+    why the fixed rule was used when the model was meant to choose, else None.
+    """
     highest = (
         await session.execute(
             select(func.max(ShotReferenceManifest.version)).where(
-                ShotReferenceManifest.project_id == project.id,
+                ShotReferenceManifest.project_id == project_id,
                 ShotReferenceManifest.scene_id == scene_id,
                 ShotReferenceManifest.shot_id == shot_id,
             )
         )
     ).scalar_one_or_none()
+    references: list[dict[str, Any]] = []
+    for order, (picture, fallback) in enumerate(
+        zip(selection.pictures, selection.fallbacks, strict=True), start=1
+    ):
+        reference: dict[str, Any] = {"order": order, "fallback": fallback, **picture.as_dict()}
+        if selection.reasons:
+            reference["reason"] = selection.reasons[order - 1]
+        references.append(reference)
     row = ShotReferenceManifest(
-        project_id=project.id,
+        project_id=project_id,
         scene_id=scene_id,
         shot_id=shot_id,
-        shot_definition_id=definition.id,
+        shot_definition_id=shot_definition_id,
         version=(highest or 0) + 1,
         source="ai",
-        job_id=None,
-        inputs={
-            "project_id": project.id,
-            "scene_id": scene_id,
-            "shot_id": shot_id,
-            "artifacts": [
-                {"kind": SHOT_DEFINITION_KIND, "id": definition.id, "version": definition.version},
-                {"kind": RESOLUTION_KIND, "id": resolution.id, "version": resolution.version},
-                *artifacts,
-            ],
-        },
+        job_id=job_id,
+        inputs=inputs,
         content={
             "shot_id": shot_id,
             "scene_id": scene_id,
-            "method": reference_selection.METHOD_DETERMINISTIC,
+            "method": method,
+            "fallback_reason": fallback_reason,
             "shot_size": selection.shot_size,
             "framing": selection.framing,
             "focus_character_id": selection.focus_character_id,
-            "references": [
-                {"order": order, "fallback": fallback, **picture.as_dict()}
-                for order, (picture, fallback) in enumerate(
-                    zip(selection.pictures, selection.fallbacks, strict=True), start=1
-                )
-            ],
+            "references": references,
             "catalog": [picture.as_dict() for picture in catalog],
             "notes": selection.notes,
         },
@@ -541,14 +656,72 @@ async def _add(
     session.add(row)
     await session.flush()
     _logger.info(
-        "references of shot '%s' of scene '%s' of project %d chosen, version %d (%d pictures)",
+        "references of shot '%s' of scene '%s' of project %d chosen by %s, version %d "
+        "(%d pictures)",
         shot_id,
         scene_id,
-        project.id,
+        project_id,
+        method,
         row.version,
         len(selection.pictures),
     )
     return row
+
+
+async def _queue(
+    session: AsyncSession,
+    project: Project,
+    ctx: _Context,
+    scene_id: str,
+    entry: shot_definitions.ShotEntry,
+) -> tuple[Job, bool]:
+    """Queues the job that makes the language model choose this shot's references and returns
+    `(job, created)`; `created` is False when the shot already has a job waiting or running,
+    which is returned instead. Commits (with the job). Raises ShotReferencesError, in the same
+    cases as the fixed rule: nothing is queued, and no paid call made, for a shot that cannot be
+    given its pictures.
+    """
+    definition = entry.row
+    assert definition is not None  # the callers refused otherwise
+    shot_id = entry.shot["id"]
+    catalog, artifacts = await _catalog(session, ctx, scene_id, definition.content)
+    try:
+        # The fixed rule is the fallback of the job: when it would refuse now, so would the job.
+        reference_selection.select(definition.content, catalog)
+    except reference_selection.ReferenceSelectionError as exc:
+        raise ShotReferencesError(str(exc)) from exc
+    return await store.create_job(
+        session,
+        project_id=project.id,
+        type=JOB_TYPE,
+        provider="llm",
+        input={
+            DEDUPE_KEY: _key(scene_id, shot_id),
+            "scene_id": scene_id,
+            "shot_id": shot_id,
+            "shot_definition_id": definition.id,
+            "shot_definition": definition.content,
+            "catalog": [picture.as_dict() for picture in catalog],
+            "inputs": _inputs(project.id, scene_id, shot_id, definition, ctx, artifacts),
+        },
+        dedupe_key=DEDUPE_KEY,
+    )
+
+
+async def _use_model(session: AsyncSession) -> bool:
+    """Whether the setting says the language model chooses (else the fixed rule alone)."""
+    method = await settings_service.get_str(
+        session, settings_service.REFERENCE_SELECTION_METHOD_KEY
+    )
+    return method == settings_service.REFERENCE_METHOD_LLM
+
+
+def _wake() -> None:
+    """Wakes the dispatcher so a job just queued starts now."""
+    # Imported here: the dispatcher imports the handlers, which import this module.
+    from app.jobs import dispatcher
+
+    dispatcher.nudge()
 
 
 async def _commit(session: AsyncSession) -> None:
@@ -568,9 +741,11 @@ async def _select_entries(
     ctx: _Context,
     state_entry: SceneEntry,
     result: SelectResult,
+    use_model: bool,
 ) -> None:
     """Chooses the references of every shot of the scene that has none or an out of date
-    manifest, adding to `result`. A shot that cannot be done is skipped with the reason.
+    manifest, adding to `result`: by the fixed rule now, or with `use_model` by queuing a job for
+    the language model. A shot that cannot be done is skipped with the reason.
     """
     scene_id = state_entry.item["id"]
     title = state_entry.item["title"]
@@ -584,6 +759,18 @@ async def _select_entries(
             )
         elif shot.blocked_reason is not None:
             result.skipped.append(Skipped(scene_id, shot_id, title, shot.blocked_reason))
+        elif use_model:
+            try:
+                job, created = await _queue(session, project, ctx, scene_id, by_id[shot_id])
+            except ShotReferencesError as exc:
+                result.skipped.append(Skipped(scene_id, shot_id, title, str(exc)))
+            else:
+                if created:
+                    result.queued.append(Queued(scene_id, shot_id, job.id))
+                else:
+                    result.skipped.append(
+                        Skipped(scene_id, shot_id, title, "Already being chosen.")
+                    )
         else:
             try:
                 row = await _add(session, project, ctx, scene_id, by_id[shot_id])
@@ -596,11 +783,13 @@ async def _select_entries(
 async def select_shot(
     session: AsyncSession, project: Project, scene_id: str, shot_id: str
 ) -> SelectResult:
-    """Chooses the references of one shot and commits. A manifest that is current already is not
-    made again (the answer says so). Raises ShotReferencesError when the shot cannot be done.
+    """Chooses the references of one shot and commits: by the fixed rule now, or, when the
+    setting says the language model chooses, by queuing its job. A manifest that is current
+    already is not made again (the answer says so). Raises ShotReferencesError when the shot
+    cannot be done.
     """
     ctx = await _load(session, project)
-    current = _build(ctx, await _newest_rows(session, project.id))
+    current = await _current(session, project, ctx)
     scene = next((entry for entry in current.entries if entry.item["id"] == scene_id), None)
     if scene is None:
         raise ShotReferencesError(f"There is no scene '{scene_id}' in the newest list of scenes.")
@@ -619,6 +808,15 @@ async def select_shot(
         raise ShotReferencesError(shot.blocked_reason)
     definitions = next(entry for entry in ctx.definitions.entries if entry.item["id"] == scene_id)
     definition = next(entry for entry in definitions.shots if entry.shot["id"] == shot_id)
+    if await _use_model(session):
+        job, created = await _queue(session, project, ctx, scene_id, definition)
+        if created:
+            result.queued.append(Queued(scene_id, shot_id, job.id))
+        else:
+            result.skipped.append(
+                Skipped(scene_id, shot_id, scene.item["title"], "Already being chosen.")
+            )
+        return result
     row = await _add(session, project, ctx, scene_id, definition)
     await _commit(session)
     result.selected.append(Selected(scene_id, shot_id, row.version))
@@ -627,31 +825,34 @@ async def select_shot(
 
 async def select_scene(session: AsyncSession, project: Project, scene_id: str) -> SelectResult:
     """Chooses the references of every shot of one scene that has none or an out of date
-    manifest, and commits once. Raises ShotReferencesError for an unknown scene.
+    manifest, and commits once (with the model, a job for each shot is queued instead). Raises
+    ShotReferencesError for an unknown scene.
     """
     ctx = await _load(session, project)
-    current = _build(ctx, await _newest_rows(session, project.id))
+    current = await _current(session, project, ctx)
     scene = next((entry for entry in current.entries if entry.item["id"] == scene_id), None)
     if scene is None:
         raise ShotReferencesError(f"There is no scene '{scene_id}' in the newest list of scenes.")
     result = SelectResult(selected=[], skipped=[])
-    await _select_entries(session, project, ctx, scene, result)
+    await _select_entries(session, project, ctx, scene, result, await _use_model(session))
     await _commit(session)
     return result
 
 
 async def select_all(session: AsyncSession, project: Project) -> SelectResult:
     """Chooses the references of every shot, in every scene, that has none or an out of date
-    manifest, and commits once. A shot that cannot be done is skipped with the reason. Raises
-    ShotReferencesError when nothing can be done yet.
+    manifest, and commits once (with the model, a job for each shot is queued instead). A shot
+    that cannot be done is skipped with the reason. Raises ShotReferencesError when nothing can
+    be done yet.
     """
     ctx = await _load(session, project)
     if ctx.definitions.blocked_reason is not None:
         raise ShotReferencesError(ctx.definitions.blocked_reason)
-    current = _build(ctx, await _newest_rows(session, project.id))
+    current = await _current(session, project, ctx)
+    use_model = await _use_model(session)
     result = SelectResult(selected=[], skipped=[])
     for scene in current.entries:
-        await _select_entries(session, project, ctx, scene, result)
+        await _select_entries(session, project, ctx, scene, result, use_model)
     await _commit(session)
     return result
 
@@ -660,8 +861,10 @@ async def select_if_ready(
     session: AsyncSession, project_id: int, scene_id: str, shot_id: str
 ) -> bool:
     """Chooses the references of this shot when it is defined and has no current manifest;
-    commits. Returns whether a manifest was made. Called after every `define_shot` job; a shot
-    that cannot be done is logged and left for the user's **Select references**.
+    commits. Returns whether a manifest was made **now**: with the language model choosing, the
+    job is queued and this returns False (the job plans the shot's request when it is done).
+    Called after every `define_shot` job; a shot that cannot be done is logged and left for the
+    user's **Select references**.
     """
     project = await session.get(Project, project_id)
     if project is None:
@@ -677,4 +880,6 @@ async def select_if_ready(
             exc,
         )
         return False
+    if result.queued:
+        _wake()
     return bool(result.selected)

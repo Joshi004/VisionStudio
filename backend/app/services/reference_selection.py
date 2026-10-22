@@ -30,6 +30,8 @@ from app.services import character_library
 from app.services.shot_definition_writer import FRAMING_OF_SIZE
 
 METHOD_DETERMINISTIC: Final = "deterministic"
+# The pictures were chosen by the language model (PHASE-033, `services/reference_selection_writer`).
+METHOD_LLM: Final = "llm"
 
 # The `view` of an environment's picture. A character's picture has its angle as the view.
 ENVIRONMENT_VIEW: Final = "environment"
@@ -59,6 +61,37 @@ class CatalogPicture:
     is_resolved: bool
     description: str
 
+    @classmethod
+    def from_dict(cls, data: Any) -> CatalogPicture | None:
+        """A picture read back from `as_dict` (a stored catalog or a job's input), or None when
+        `data` is not the right shape.
+        """
+        if not isinstance(data, dict):
+            return None
+        image_id = data.get("lab_image_id")
+        kind = data.get("kind")
+        if (
+            not isinstance(image_id, int)
+            or isinstance(image_id, bool)
+            or kind not in ("character", "environment")
+            or not isinstance(data.get("is_resolved"), bool)
+            or not all(
+                isinstance(data.get(key), str)
+                for key in ("subject_id", "subject_name", "view", "variant", "description")
+            )
+        ):
+            return None
+        return cls(
+            lab_image_id=image_id,
+            kind=kind,
+            subject_id=data["subject_id"],
+            subject_name=data["subject_name"],
+            view=data["view"],
+            variant=data["variant"],
+            is_resolved=data["is_resolved"],
+            description=data["description"],
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "lab_image_id": self.lab_image_id,
@@ -76,7 +109,8 @@ class CatalogPicture:
 class Selection:
     """The result: the framing used, who is first, the ordered pictures and notes for the user.
     `fallbacks` has the same length as `pictures`: True where the default look was used because
-    the resolved look had no picture of the angle.
+    the resolved look had no picture of the angle. `reasons` is the language model's reason for
+    each picture (PHASE-033), or empty when the fixed rule chose.
     """
 
     shot_size: str
@@ -85,6 +119,7 @@ class Selection:
     pictures: list[CatalogPicture]
     fallbacks: list[bool]
     notes: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
 
 
 def framing_for(shot_size: str) -> str:
@@ -106,7 +141,17 @@ def focus_character(composition: dict[str, Any], character_ids: list[str]) -> st
     return next((item for item in character_ids if item.lower() == wanted), None)
 
 
-def _ordered(character_ids: list[str], focus: str | None) -> list[str]:
+def visible_characters(content: dict[str, Any]) -> list[str]:
+    """The ids of the characters visible in the shot, in the shot's own order."""
+    return [
+        entry["id"]
+        for entry in content.get("characters") or []
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    ]
+
+
+def ordered(character_ids: list[str], focus: str | None) -> list[str]:
+    """The focus character first, then the others in the shot's own order."""
     if focus is None:
         return list(character_ids)
     return [focus, *(item for item in character_ids if item != focus)]
@@ -135,16 +180,12 @@ def select(content: dict[str, Any], catalog: list[CatalogPicture]) -> Selection:
     framing = framing_for(shot_size)
     angles = character_library.references_for(framing)  # type: ignore[arg-type]
 
-    visible = [
-        entry["id"]
-        for entry in content.get("characters") or []
-        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
-    ]
+    visible = visible_characters(content)
     focus = focus_character(composition, visible)
 
     chosen: list[tuple[CatalogPicture, bool]] = []
     missing: list[str] = []
-    for character_id in _ordered(visible, focus):
+    for character_id in ordered(visible, focus):
         mine = [
             picture
             for picture in catalog

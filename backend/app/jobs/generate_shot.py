@@ -13,7 +13,8 @@ under the **project's** media folder (not `media/lab/`), and written on the `sho
 job was queued with (found by `shot_take.job_id`): the file, its checksum, its size and frame
 count and its audio track, and its technical check (`validation`, PHASE-029). `selected_at` is
 set only when the clip **passed**, so the take that has just finished is the shot's selected take
-only if it is good. The row and the finished job are saved in one transaction.
+only if it is good, and only if the user did not select another take while it was being made.
+The row and the finished job are saved in one transaction.
 
 A take whose shot carries dialogue is **not selected here** (PHASE-031): when its clip passed, the
 `check_take_dialogue` job is queued in the same transaction, and that job selects the take if the
@@ -147,7 +148,7 @@ class GenerateShotHandler(GenerateLabVideoHandler):
                         # take is never seen as "not checked" without a job making it.
                         await shot_takes.queue_dialogue_check(session, take, commit=False)
                         queued_dialogue_check = True
-                    else:
+                    elif not await shot_takes.chosen_since(session, take):
                         take.selected_at = await shot_takes.selection_time(
                             session, take.project_id, take.scene_id, take.shot_id
                         )

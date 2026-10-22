@@ -58,6 +58,7 @@ JobType = Literal[
     "check_shot_takes",
     "story_pipeline",
     "check_take_dialogue",
+    "select_shot_references",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

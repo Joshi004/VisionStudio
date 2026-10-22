@@ -311,8 +311,10 @@ class RepairShotCutHandler(JobHandler):
             outcome.usage,
         )
 
-        # The references of a shot are chosen by code from its specification (PHASE-024). A
-        # separate step: a failure here must not fail a job that has succeeded.
+        # The references of a shot are chosen from its specification: by the fixed rule here
+        # (PHASE-024), or by a job of the language model that does the steps below itself when
+        # it is done (PHASE-033). A separate step: a failure here must not fail a job that has
+        # succeeded.
         for item in saved:
             try:
                 async with SessionLocal() as session:

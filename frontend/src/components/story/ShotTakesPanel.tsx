@@ -59,9 +59,16 @@ function CheckBadge({ take }: { take: ShotTake }) {
       </Badge>
     ) : null;
   }
-  return take.validation.passed ? (
-    <Badge variant="light" color="green">
-      Check passed
+  if (take.validation.passed) {
+    return (
+      <Badge variant="light" color="green">
+        Check passed
+      </Badge>
+    );
+  }
+  return take.validation.accepted ? (
+    <Badge variant="light" color="orange">
+      Check failed, used anyway
     </Badge>
   ) : (
     <Badge variant="light" color="red">
@@ -96,9 +103,16 @@ function DialogueBadge({ take }: { take: ShotTake }) {
       </Badge>
     );
   }
-  return check.passed ? (
-    <Badge variant="light" color="green">
-      Dialogue matched ({check.similarity}%)
+  if (check.passed) {
+    return (
+      <Badge variant="light" color="green">
+        Dialogue matched ({check.similarity}%)
+      </Badge>
+    );
+  }
+  return check.accepted ? (
+    <Badge variant="light" color="orange">
+      Dialogue {check.similarity}%, used anyway
     </Badge>
   ) : (
     <Badge variant="light" color="red">
@@ -107,14 +121,26 @@ function DialogueBadge({ take }: { take: ShotTake }) {
   );
 }
 
-/** A take may be selected when its clip passed, and so did its dialogue when it has any. */
-function canSelect(take: ShotTake): boolean {
+/** The clip failed its technical check, or its dialogue did not match. */
+function failedACheck(take: ShotTake): boolean {
   return (
-    take.state === "ready" &&
-    !take.selected &&
-    take.validation?.passed === true &&
-    (take.dialogue.length === 0 || take.dialogue_check?.passed === true)
+    take.validation?.passed === false || take.dialogue_check?.passed === false
   );
+}
+
+/**
+ * A take may be selected once its checks are done, also one that failed a check: the user may
+ * use it anyway. A clip that passed its technical check still needs its dialogue checked.
+ */
+function canSelect(take: ShotTake): boolean {
+  if (take.state !== "ready" || take.selected || take.validation === null) {
+    return false;
+  }
+  const dialoguePending =
+    take.validation.passed &&
+    take.dialogue.length > 0 &&
+    take.dialogue_check === null;
+  return !dialoguePending;
 }
 
 const TAKE_STATE: Record<ShotTake["state"], { label: string; color: string }> =
@@ -184,16 +210,28 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
           take.dialogue_job.status !== "succeeded" && (
             <JobStatusBadge job={take.dialogue_job} />
           )}
-        {canSelect(take) && (
-          <Button
-            size="compact-xs"
-            variant="default"
-            disabled={busy}
-            onClick={onSelect}
-          >
-            Select
-          </Button>
-        )}
+        {canSelect(take) &&
+          (failedACheck(take) ? (
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="orange"
+              disabled={busy}
+              onClick={onSelect}
+              title="Use this clip although it failed a check. The shot's automatic retries stop."
+            >
+              Use anyway
+            </Button>
+          ) : (
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={busy}
+              onClick={onSelect}
+            >
+              Select
+            </Button>
+          ))}
       </Group>
       {take.dialogue.length > 0 && take.dialogue_check !== null && (
         <Stack gap={0} ml={8}>
@@ -287,6 +325,12 @@ function failureLines(
           ? "Automatic retries are off. Press Regenerate to try again."
           : `Retries used up (${newest.retry_attempt} of ${maxRetries}). Press Regenerate to try again.`,
       key: "retries",
+    });
+  }
+  if (entry.takes.some(canSelect)) {
+    lines.push({
+      text: "To use a clip as it is, show the takes and press Use anyway.",
+      key: "use-anyway",
     });
   }
   return lines;
@@ -385,7 +429,8 @@ function ShotRow({
           {retrying && (
             <Text size="xs" c="blue">
               The last clip failed a check. Generating it again automatically
-              (retry {newest.retry_attempt} of {maxRetries}).
+              (retry {newest.retry_attempt} of {maxRetries}). Selecting a take
+              stops the retries.
             </Text>
           )}
           {takes.some((take) => take.state === "checking_dialogue") && (
@@ -441,7 +486,11 @@ function ShotRow({
             {shot.duration_seconds} s; the clip is trimmed to that when the
             video is put together.
             {heard !== null &&
-              ` Its speech matched the dialogue by ${heard.similarity}%.`}
+              (heard.passed
+                ? ` Its speech matched the dialogue by ${heard.similarity}%.`
+                : ` Its speech matched the dialogue by only ${heard.similarity}%; you chose to use it anyway.`)}
+            {selected.validation?.passed === false &&
+              " It failed its technical check; you chose to use it anyway."}
           </Text>
         </Stack>
       )}
@@ -555,11 +604,11 @@ function SceneRow({
  * the video model, and the clip is stored as a take of the shot. Every press makes one more
  * take; the take that finished (or was selected) last is the selected one. Nothing starts by
  * itself: a clip holds 4 to 8 GPUs for minutes. Each clip is checked in code when it is stored;
- * only a clip that passed can be selected or rendered, and one that failed is generated again
- * by the server with another seed, up to the limit in Settings (PHASE-029). A clip of a shot
- * with dialogue is then transcribed, and its speech must match the lines closely enough
- * (a setting) before it can be selected; one that does not is generated again the same way
- * (PHASE-031).
+ * one that failed is generated again by the server with another seed, up to the limit in
+ * Settings (PHASE-029). A clip of a shot with dialogue is then transcribed, and its speech must
+ * match the lines closely enough (a setting) to be selected by itself; one that does not is
+ * generated again the same way (PHASE-031). The user may still use a clip that failed either
+ * check, and selecting a take stops the shot's automatic retries.
  */
 export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const { data, isLoading, isError, error } = useShotTakes(projectId);
@@ -604,13 +653,14 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
               Sends each shot&apos;s prompt, pictures and dialogue speech to the
               video model and keeps the clip as a take of the shot. Shots run
               side by side when the GPU server has room. Each press adds a take,
-              and the take that finished or was selected last is the one used,
-              but only a clip that passed its technical check (it decodes, has
-              sound, and has the size and number of frames asked for) can be
-              selected or rendered. For a shot with dialogue, the speech in the
-              clip is also transcribed and must match the lines. A clip that
-              fails either check is generated again by itself with another seed,
-              up to the limit in Settings. Nothing else starts by itself.
+              and the take that finished or was selected last is the one used.
+              Each clip gets a technical check (it decodes, has sound, and has
+              the size and number of frames asked for), and for a shot with
+              dialogue the speech in the clip is transcribed and must match the
+              lines. A clip that fails either check is generated again by itself
+              with another seed, up to the limit in Settings. You can still use
+              a clip that failed with Use anyway; selecting a take stops the
+              shot&apos;s automatic retries. Nothing else starts by itself.
             </Text>
           </Stack>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>

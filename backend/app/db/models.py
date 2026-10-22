@@ -99,7 +99,8 @@ class Job(Base):
         # revision 0047, and the render of the story's video, since revision 0048, and the
         # check of the shots' takes, since revision 0049, and the run of the whole story
         # pipeline, since revision 0050, and the speech-recognition check of a take's
-        # dialogue, since revision 0051.
+        # dialogue, since revision 0051, and the choice of a shot's reference pictures by the
+        # language model, since revision 0052.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -109,7 +110,7 @@ class Job(Base):
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
             "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
             "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes', "
-            "'story_pipeline', 'check_take_dialogue')",
+            "'story_pipeline', 'check_take_dialogue', 'select_shot_references')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -481,7 +482,9 @@ class ShotReferenceManifest(Base):
     the specification row the pictures were chosen for. `inputs` records what the selection was
     built from (the shot definition, the look and state resolution, and the pinned definitions
     of the characters and the environment). `content` is the manifest: the ordered pictures and
-    the catalog they were chosen from. There is no job: deterministic code makes it.
+    the catalog they were chosen from. The fixed rule makes it with no job (`job_id` NULL); the
+    language model's choice (PHASE-033) is made by a `select_shot_references` job, whose id is in
+    `job_id`.
     """
 
     __tablename__ = "shot_reference_manifest"
@@ -501,7 +504,7 @@ class ShotReferenceManifest(Base):
     )
     version: Mapped[int]
     source: Mapped[str]
-    # Always NULL for now: no job makes a manifest.
+    # The `select_shot_references` job that made it, or NULL when the fixed rule made it.
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
@@ -599,8 +602,8 @@ class ShotTake(Base):
     plan. `shot_prompt_id` and `generation_request_id` are the rows the take was made from
     (`inputs` records them with their versions, D-3). A shot's takes are numbered from 1 and a
     stored take is never changed, except that `selected_at` is set each time the take is chosen:
-    when its job finishes, and when the user selects it. The selected take of a shot is its
-    ready take with the newest `selected_at`.
+    when its job finishes, and when the user selects it (which also stamps `accepted_at` on a
+    failed check). The selected take of a shot is its ready take with the newest `selected_at`.
     """
 
     __tablename__ = "shot_take"
@@ -635,11 +638,12 @@ class ShotTake(Base):
     duration_s: Mapped[float | None] = mapped_column(default=None)
     audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # The technical check of the clip (PHASE-029, `services/take_validation.py`). NULL: not
-    # checked. Only a take that passed is selected by itself, selected by the user or rendered.
+    # checked. Only a take that passed is selected by itself; the user may select a failed one,
+    # which adds `accepted_at` to the failed check.
     validation: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # The speech-recognition check of the shot's dialogue (PHASE-031,
     # `services/dialogue_check.py`). NULL: not checked, and always NULL for a take whose shot
-    # carries no dialogue. A take with dialogue is selected only when this passed too.
+    # carries no dialogue. A take with dialogue is selected by itself only when this passed too.
     dialogue_check: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     selected_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

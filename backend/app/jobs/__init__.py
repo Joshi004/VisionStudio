@@ -12,8 +12,8 @@
   `define_environment.py`, `define_scene.py`, `extract_events.py`,
   `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`, `define_shot.py`,
   `check_shot_continuity.py`, `repair_shot_cut.py`, `compile_shot_prompt.py`, `generate_shot.py`,
-  `render_story.py`, `check_shot_takes.py`, `check_take_dialogue.py`), the run of the whole
-  story pipeline (`story_pipeline.py`)
+  `render_story.py`, `check_shot_takes.py`, `check_take_dialogue.py`,
+  `select_shot_references.py`), the run of the whole story pipeline (`story_pipeline.py`)
   and the environment library
   (`write_environment_prompt.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
@@ -58,6 +58,7 @@ def register_handlers() -> None:
     from app.jobs.render_story import RenderStoryHandler
     from app.jobs.repair_shot_cut import RepairShotCutHandler
     from app.jobs.resolve_looks_states import ResolveLooksStatesHandler
+    from app.jobs.select_shot_references import SelectShotReferencesHandler
     from app.jobs.story_pipeline import StoryPipelineHandler
     from app.jobs.synthesize_speech_unit import SynthesizeSpeechUnitHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
@@ -95,3 +96,4 @@ def register_handlers() -> None:
     handlers.register(CheckShotTakesHandler())
     handlers.register(StoryPipelineHandler())
     handlers.register(CheckTakeDialogueHandler())
+    handlers.register(SelectShotReferencesHandler())

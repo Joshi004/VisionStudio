@@ -143,7 +143,10 @@ export function useGenerateOneShot(projectId: number) {
   });
 }
 
-/** Makes a ready take the selected one of its shot. */
+/**
+ * Makes a ready take the selected one of its shot, also one that failed a check. It cancels the
+ * shot's automatic retries, so the jobs are loaded again as well.
+ */
 export function useSelectTake(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -176,8 +179,7 @@ export function useSelectTake(projectId: number) {
       }
       return data;
     },
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: shotTakesKey(projectId) }),
+    onSettled: () => refreshAfterRun(queryClient, projectId),
   });
 }
 

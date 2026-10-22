@@ -281,9 +281,12 @@ class DefineShotHandler(JobHandler):
             outcome.usage,
         )
 
-        # The shot's reference pictures are chosen by code, with no model call (PHASE-024). Also
-        # a separate step: a shot that cannot be given its pictures yet is left for the user's
-        # **Select references**, and a failure here must not fail a job that has succeeded.
+        # The shot's reference pictures are chosen: by the fixed rule here, with no model call
+        # (PHASE-024), or, when the setting says the language model chooses, by a job of its own
+        # that is queued here and that plans the request and compiles the prompt when it is done
+        # (PHASE-033). Also a separate step: a shot that cannot be given its pictures yet is left
+        # for the user's **Select references**, and a failure here must not fail a job that has
+        # succeeded.
         try:
             async with SessionLocal() as session:
                 await shot_references.select_if_ready(session, project_id, read.scene_id, shot_id)

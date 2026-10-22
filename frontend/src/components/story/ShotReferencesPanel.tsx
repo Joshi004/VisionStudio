@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
+import { isJobActive } from "../../api/polling";
 import {
   useSelectAllReferences,
   useSelectOneShotReferences,
@@ -88,8 +89,28 @@ function Thumbnail({ picture }: { picture: ReferencePicture }) {
           default look (fallback)
         </Text>
       )}
+      {picture.reason != null && (
+        <Text size="xs" c="dimmed" style={{ wordBreak: "break-word" }}>
+          {picture.reason}
+        </Text>
+      )}
     </Stack>
   );
+}
+
+/** How the manifest was chosen, in a few words. */
+function methodLabel(manifest: NonNullable<ShotReferenceEntry["manifest"]>) {
+  if (manifest.method === "llm") {
+    return "Chosen by the model";
+  }
+  return manifest.fallback_reason != null
+    ? "Chosen by rule (model not used)"
+    : "Chosen by rule";
+}
+
+/** A reason that only says a shot is already done or being done: not worth an alert. */
+function isRoutineSkip(reason: string): boolean {
+  return reason.startsWith("Already") || reason.includes("being chosen");
 }
 
 type ShotRowProps = {
@@ -104,6 +125,12 @@ function ShotRow({ entry, busy, onSelect }: ShotRowProps) {
   const { shot, manifest, version } = entry;
   const status = STATUS[entry.status];
   const chosen = entry.status !== "not_selected";
+  const choosing = isJobActive(entry.job);
+  // The newest model job failed and nothing newer was stored: say why.
+  const failed =
+    entry.job?.status === "failed" && entry.status !== "selected"
+      ? entry.job.error
+      : null;
 
   return (
     <Stack gap={4}>
@@ -121,12 +148,30 @@ function ShotRow({ entry, busy, onSelect }: ShotRowProps) {
             <Badge variant="light" color={status.color}>
               {status.label}
             </Badge>
+            {choosing && (
+              <Badge
+                variant="light"
+                color="blue"
+                leftSection={<Loader size={10} />}
+                title={entry.job?.phase ?? undefined}
+              >
+                Choosing...
+              </Badge>
+            )}
             {version !== null && (
               <Badge
                 variant="light"
                 title="The newest version of this shot's references"
               >
                 v{version.version}
+              </Badge>
+            )}
+            {manifest !== null && (
+              <Badge
+                variant="light"
+                color={manifest.method === "llm" ? "teal" : "gray"}
+              >
+                {methodLabel(manifest)}
               </Badge>
             )}
             {manifest !== null && (
@@ -143,6 +188,16 @@ function ShotRow({ entry, busy, onSelect }: ShotRowProps) {
           {!entry.can_run && entry.blocked_reason !== null && (
             <Text size="xs" c="dimmed">
               {entry.blocked_reason}
+            </Text>
+          )}
+          {failed !== null && (
+            <Text size="xs" c="red">
+              {failed}
+            </Text>
+          )}
+          {manifest?.fallback_reason != null && (
+            <Text size="xs" c="dimmed">
+              The model was not used: {manifest.fallback_reason}
             </Text>
           )}
           {entry.reasons.map((text) => (
@@ -261,10 +316,11 @@ function SceneRow({ scene, busy, onSelectScene, onSelectShot }: SceneRowProps) {
 
 /**
  * The Reference selection stage: for each defined shot, the smallest set of pictures it is
- * generated from. Code chooses them (no model): the framing of the shot gives the angles of
- * each visible character, taken from the look the scene uses (or the default look when that
- * look lacks the angle), then the environment's picture, at most nine in all. A shot's pictures
- * are chosen by themselves when it is defined.
+ * generated from. The language model chooses them from a catalog and says why, and code checks
+ * the choice; the fixed rule (the framing of the shot gives the angles of each visible
+ * character, taken from the look the scene uses, then the environment's picture, at most nine
+ * in all) is the fallback and can be the only method (a setting). A shot's pictures are chosen
+ * by themselves when it is defined.
  */
 export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
   const { data, isLoading, isError, error } = useShotReferences(projectId);
@@ -290,6 +346,15 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
     ...(selectScene.data?.skipped ?? []),
     ...(selectOne.data?.skipped ?? []),
   ].filter((item) => item.shot_id !== null);
+  // The shots the last press handed to the language model: their pictures appear as each ends.
+  const queuedCount =
+    (selectAll.data?.queued.length ?? 0) +
+    (selectScene.data?.queued.length ?? 0) +
+    (selectOne.data?.queued.length ?? 0);
+  const choosingCount = entries.reduce(
+    (sum, scene) => sum + scene.shots.filter((shot) => isJobActive(shot.job)).length,
+    0,
+  );
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -299,10 +364,13 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
             <Title order={4}>Shot references</Title>
             <Text size="sm" c="dimmed">
               Chooses the pictures each shot is generated from: the visible
-              characters, shown from the angles that suit the shot&apos;s
-              framing in the look the scene uses, and the place. Never more than
-              nine, and never the narration. This is done by rule, not by a
-              model, and by itself when a shot is defined.
+              characters, shown from the angles that suit the shot, in the look
+              the scene uses, and the place. The fewest that are enough, never
+              more than nine, and never the narration. The language model
+              chooses and says why; when its answer cannot be used, the fixed
+              rule for the shot&apos;s framing chooses instead (the setting
+              &quot;How shot references are chosen&quot; can turn the model
+              off). Done by itself when a shot is defined.
             </Text>
           </Stack>
           <Button
@@ -335,11 +403,19 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
               </Alert>
             ),
         )}
-        {skipped.some((item) => !item.reason.startsWith("Already")) && (
+        {(queuedCount > 0 || choosingCount > 0) && (
+          <Alert color="blue" title="Choosing with the language model">
+            {choosingCount > 0
+              ? `${choosingCount} ${choosingCount === 1 ? "shot is" : "shots are"} being chosen. `
+              : ""}
+            Each shot&apos;s pictures appear when its model call ends.
+          </Alert>
+        )}
+        {skipped.some((item) => !isRoutineSkip(item.reason)) && (
           <Alert color="blue" title="Not chosen">
             <Stack gap={2}>
               {skipped
-                .filter((item) => !item.reason.startsWith("Already"))
+                .filter((item) => !isRoutineSkip(item.reason))
                 .map((item) => (
                   <Text key={`${item.scene_id}/${item.shot_id}`} size="sm">
                     {item.title}, {item.shot_id}: {item.reason}

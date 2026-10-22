@@ -1038,7 +1038,8 @@ async def _start_shot_continuity(
     return await _start_each(session, targets, deadline, make)
 
 
-# --- Shot references and generation requests (inline) ---------------------------------------
+# --- Shot references (a job per shot with the language model, else inline) and generation
+# requests (inline) ----------------------------------------------------------------------------
 
 
 async def _evaluate_references(
@@ -1053,7 +1054,9 @@ async def _evaluate_references(
                 _shot_key(scene.item["id"], shot.shot["id"]),
                 _shot_label(scene.item, shot.shot),
                 shot.status == "selected",
+                active=_active(shot.job),
                 block=None if shot.status == "selected" else shot.blocked_reason,
+                last_error=_failure(shot.job),
                 ref=(scene.item["id"], shot.shot["id"]),
             )
             for scene in state.entries
@@ -1069,15 +1072,32 @@ async def _start_references(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    async def work() -> dict[str, str]:
+    # One call for all the targets. With the fixed rule the manifests are made in it; with the
+    # language model it queues a job for each shot, and the ids go onto the targets so that
+    # cancelling the run cancels them.
+    try:
         result = await shot_references.select_all(session, project)
-        return {
-            _shot_key(skipped.scene_id, skipped.shot_id): skipped.reason
-            for skipped in result.skipped
-            if skipped.shot_id is not None
-        }
-
-    return await _start_inline(session, targets, work)
+    except ValueError as exc:
+        await session.rollback()
+        return [Started(target, error=str(exc)) for target in targets]
+    except Exception as exc:
+        _logger.exception("pipeline: choosing the references failed unexpectedly")
+        await session.rollback()
+        return [Started(target, error=f"Unexpected error: {exc}") for target in targets]
+    skipped = {
+        _shot_key(item.scene_id, item.shot_id): item.reason
+        for item in result.skipped
+        if item.shot_id is not None
+    }
+    queued = {_shot_key(item.scene_id, item.shot_id): item.job_id for item in result.queued}
+    return [
+        Started(
+            target,
+            job_ids=(queued[target.key],) if target.key in queued else (),
+            error=None if target.key in queued else skipped.get(target.key),
+        )
+        for target in targets
+    ]
 
 
 async def _evaluate_generation_requests(
@@ -1188,7 +1208,10 @@ def _failed_shot_reason(shot: shot_takes.ShotEntry) -> str:
                 f"The planned length of the shot is not possible for the clip model: {text} "
                 "Plan the scene's shots again."
             )
-        return f"No take passed its check: {text} Generate the shot from its own button to retry."
+        return (
+            f"No take passed its check: {text} Generate the shot from its own button to retry, "
+            "or select one of its takes to use it anyway."
+        )
     dialogue = newest.dialogue_result
     if isinstance(dialogue, dict) and dialogue.get("passed") is False:
         messages = [
@@ -1199,7 +1222,8 @@ def _failed_shot_reason(shot: shot_takes.ShotEntry) -> str:
         text = " ".join(messages) or "The speech in the clip does not match the dialogue."
         return (
             f"No take passed its dialogue check: {text} "
-            "Generate the shot from its own button to retry."
+            "Generate the shot from its own button to retry, or select one of its takes to use "
+            "it anyway."
         )
     error = _failure(newest.job)
     if error is not None:

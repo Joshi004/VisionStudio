@@ -51,8 +51,9 @@ async function fetchShotReferences(projectId: number) {
 
 /**
  * Where each shot's reference manifest stands. A manifest is chosen by the server right after a
- * shot is defined, so it is loaded again every few seconds while any definition job is waiting
- * or running, and for a short while after.
+ * shot is defined (by rule at once, or by a job of the language model), so it is loaded again
+ * every few seconds while any definition job or any selection job is waiting or running, and
+ * for a short while after.
  */
 export function useShotReferences(projectId: number) {
   const lastActive = useRef(0);
@@ -64,8 +65,12 @@ export function useShotReferences(projectId: number) {
     queryKey: shotReferencesKey(projectId),
     queryFn: () => fetchShotReferences(projectId),
     enabled: isValidProjectId(projectId),
-    refetchInterval: () => {
-      if (definitionsActive) {
+    refetchInterval: (query) => {
+      const selecting =
+        query.state.data?.entries.some((scene) =>
+          scene.shots.some((shot) => isJobActive(shot.job)),
+        ) ?? false;
+      if (definitionsActive || selecting) {
         lastActive.current = Date.now();
         return ACTIVE_POLL_MS;
       }

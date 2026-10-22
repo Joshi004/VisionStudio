@@ -11,10 +11,13 @@
 - `POST .../{scene_id}/run` does the same for one scene.
 - `POST .../{scene_id}/{shot_id}/run` does it for one shot.
 
-Choosing is done by code in the request, with no model and no job, so the answer is 200 and says
-which shots were done and which were skipped and why. A manifest is a new version of the shot's
-manifest (`services/shot_references.py`); nothing is written to the Character Lab. The answers
-never return ORM objects.
+The setting `reference_selection_method` says who chooses (PHASE-033). The fixed rule chooses
+in the request, with no model and no job. With the language model, a job is queued for each shot
+(`select_shot_references`) and its manifest appears when it is done. Either way the answer is 200
+and says which shots were chosen now (`selected`), which were queued (`queued`) and which were
+skipped and why. A manifest is a new version of the shot's manifest
+(`services/shot_references.py`); nothing is written to the Character Lab. The answers never
+return ORM objects.
 """
 
 from __future__ import annotations
@@ -27,11 +30,14 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
+from app.api.jobs import JobStatus
 from app.api.projects import load_project
 from app.db.models import LabImage
 from app.db.session import SessionDep
+from app.jobs import dispatcher
 from app.services import generation_requests, shot_prompts, shot_references, storage
 from app.services.shot_references import SceneEntry, ShotEntry
 
@@ -49,6 +55,7 @@ _INVALID = {
 }
 
 Source = Literal["ai", "manual"]
+Method = Literal["deterministic", "llm"]
 Status = Literal["not_selected", "selected", "out_of_date"]
 ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
 PictureKind = Literal["character", "environment"]
@@ -73,6 +80,9 @@ class ReferencePictureOut(BaseModel):
     # look's was used instead.
     fallback: bool
     description: str
+    # Why the language model chose this picture. None when the fixed rule chose, and for a
+    # manifest made before PHASE-033.
+    reason: str | None = None
 
 
 class CatalogPictureOut(BaseModel):
@@ -90,8 +100,11 @@ class CatalogPictureOut(BaseModel):
 
 
 class ShotReferenceManifestOut(BaseModel):
-    # How it was chosen. `deterministic` today.
-    method: str
+    # How it was chosen: by the language model, or by the fixed rule.
+    method: Method
+    # Why the fixed rule chose when the language model was meant to (its answer could not be
+    # used, or the call failed). None otherwise.
+    fallback_reason: str | None = None
     shot_size: str
     framing: str
     focus_character_id: str | None
@@ -124,6 +137,9 @@ class ShotReferenceEntryOut(BaseModel):
     reasons: list[str]
     manifest: ShotReferenceManifestOut | None
     version: ShotReferenceVersionOut | None
+    # The newest job that chose this shot's references with the language model, whatever its
+    # status. None when the fixed rule has always chosen.
+    job: DiscoveryJobOut | None
     can_run: bool
     blocked_reason: str | None
 
@@ -159,8 +175,17 @@ class ShotReferenceSkippedOut(BaseModel):
     reason: str
 
 
+class ShotReferenceQueuedOut(BaseModel):
+    scene_id: str
+    shot_id: str
+    job_id: int
+
+
 class ShotReferencesRunOut(BaseModel):
+    # Chosen by the fixed rule, inside the request.
     selected: list[ShotReferenceSelectedOut]
+    # Handed to the language model: a job for each, whose result appears when it is done.
+    queued: list[ShotReferenceQueuedOut]
     skipped: list[ShotReferenceSkippedOut]
 
 
@@ -183,6 +208,8 @@ async def _urls(state: shot_references.ShotReferencesState, session: SessionDep)
 def _manifest_out(content: dict[str, Any], urls: dict[int, str]) -> ShotReferenceManifestOut:
     return ShotReferenceManifestOut(
         method=content["method"],
+        # A manifest made before PHASE-033 has no `fallback_reason`.
+        fallback_reason=content.get("fallback_reason"),
         shot_size=content["shot_size"],
         framing=content["framing"],
         focus_character_id=content["focus_character_id"],
@@ -222,6 +249,16 @@ def _shot_out(entry: ShotEntry, urls: dict[int, str]) -> ShotReferenceEntryOut:
             if row is not None
             else None
         ),
+        job=(
+            DiscoveryJobOut(
+                id=entry.job.id,
+                status=cast(JobStatus, entry.job.status),
+                phase=entry.job.phase,
+                error=entry.job.error,
+            )
+            if entry.job is not None
+            else None
+        ),
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
     )
@@ -245,6 +282,10 @@ def _run_out(result: shot_references.SelectResult) -> ShotReferencesRunOut:
             )
             for item in result.selected
         ],
+        queued=[
+            ShotReferenceQueuedOut(scene_id=item.scene_id, shot_id=item.shot_id, job_id=item.job_id)
+            for item in result.queued
+        ],
         skipped=[
             ShotReferenceSkippedOut(
                 scene_id=item.scene_id, shot_id=item.shot_id, title=item.title, reason=item.reason
@@ -263,8 +304,12 @@ async def _plan_requests(
 ) -> None:
     """Plans the generation request of each shot whose references were just chosen (PHASE-025).
     A shot that cannot be planned yet is left for the user's **Plan** and never fails the press.
-    A shot that was planned has its prompt compiled next (PHASE-026).
+    A shot that was planned has its prompt compiled next (PHASE-026). The shots handed to the
+    language model (`result.queued`) are planned by their own job when it is done; here the
+    dispatcher is only woken for them.
     """
+    if result.queued:
+        dispatcher.nudge()
     for item in result.selected:
         try:
             planned = await generation_requests.plan_if_ready(

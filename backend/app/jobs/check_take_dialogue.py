@@ -268,11 +268,13 @@ class CheckTakeDialogueHandler(JobHandler):
                 # Only a clip that passed its technical check is ever sent here, but the
                 # selection rule is kept in one place and never trusts that. A take that
                 # already has a `selected_at` (made before this phase, or chosen by the user)
-                # keeps it: checking it again must not move the shot's selection.
+                # keeps it: checking it again must not move the shot's selection. Nor does a
+                # take the user selected while this one was being made.
                 if (
                     take.selected_at is None
                     and take.path is not None
                     and take_validation.passed(take.validation)
+                    and not await shot_takes.chosen_since(session, take)
                 ):
                     take.selected_at = await shot_takes.selection_time(
                         session, take.project_id, take.scene_id, take.shot_id

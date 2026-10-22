@@ -14,7 +14,8 @@
 - `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
 - `POST .../{scene_id}/{shot_id}/run` starts one more take of one shot (Generate or Regenerate).
 - `POST .../{scene_id}/{shot_id}/takes/{take_id}/select` makes a ready take the shot's selected
-  one.
+  one, also a take that failed a check (the user accepts it), and stops the shot's automatic
+  retries.
 
 A shot that continues the one before it (PHASE-032) names it in `continues_from`, waits (its
 `blocked_reason` says so) until that shot has a take that passed its checks, and carries on each
@@ -26,6 +27,7 @@ other shot changes. The answers never return ORM objects.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Literal, cast
 
@@ -34,6 +36,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import jobs as jobs_api
 from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
@@ -45,6 +48,8 @@ from app.jobs import dispatcher
 from app.services import shot_takes, storage
 from app.services.shot_takes import SceneEntry, ShotEntry, TakeEntry
 
+_logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No such project."}}
@@ -52,8 +57,9 @@ _INVALID = {
     422: {
         "model": ErrorResponse,
         "description": "The shot's prompt is not compiled and current, a picture or an audio "
-        "file is missing, the GPU API has no such endpoint, the take cannot be selected, or "
-        "the scene, shot or take is not in the newest list of scenes and shot plan.",
+        "file is missing, the GPU API has no such endpoint, the take has no clip or its checks "
+        "are not done, or the scene, shot or take is not in the newest list of scenes and shot "
+        "plan.",
     }
 }
 
@@ -78,6 +84,8 @@ class TakeValidationOut(BaseModel):
     kind: ProblemKind | None
     problems: list[TakeProblemOut]
     checked_at: datetime | None
+    # True when the check failed and the user selected the take anyway.
+    accepted: bool
 
 
 class DialogueLineOut(BaseModel):
@@ -102,6 +110,8 @@ class TakeDialogueOut(BaseModel):
     expected_text: str
     heard_text: str
     checked_at: datetime | None
+    # True when the check failed and the user selected the take anyway.
+    accepted: bool
 
 
 AnchorUse = Literal["first_frame", "reference"]
@@ -256,6 +266,7 @@ def _validation_out(validation: dict[str, Any] | None) -> TakeValidationOut | No
             for problem in validation.get("problems", [])
         ],
         checked_at=datetime.fromisoformat(checked_at) if isinstance(checked_at, str) else None,
+        accepted=validation.get("accepted_at") is not None,
     )
 
 
@@ -276,6 +287,7 @@ def _dialogue_check_out(result: dict[str, Any] | None) -> TakeDialogueOut | None
         expected_text=str(result.get("expected_text", "")),
         heard_text=str(result.get("heard_text", "")),
         checked_at=datetime.fromisoformat(checked_at) if isinstance(checked_at, str) else None,
+        accepted=result.get("accepted_at") is not None,
     )
 
 
@@ -511,11 +523,35 @@ async def select_take(
     take_id: int,
     session: SessionDep,
 ) -> SelectedTakeOut:
-    """Makes a ready take the selected one of its shot. The other shots do not change."""
+    """Makes a ready take the selected one of its shot. A take that failed a check is accepted
+    as it is. The shot's automatic retries that are waiting or running are cancelled, since the
+    user is satisfied. When the take was accepted although it failed and was made by **Generate
+    all** or **Generate scene**, the shot that continues it is queued, as it would have been had
+    the take passed. The other shots do not change.
+    """
     project = await load_project(session, project_id)
     try:
         take = await shot_takes.select_take(session, project, scene_id, shot_id, take_id)
     except shot_takes.ShotTakesError as exc:
         raise _refused(exc) from exc
     assert take.selected_at is not None  # `select_take` just set it
-    return SelectedTakeOut(take_id=take.id, selected_at=take.selected_at)
+    selected = SelectedTakeOut(take_id=take.id, selected_at=take.selected_at)
+    accepted_failed_take = shot_takes.overridden(take)
+
+    # A retry that cannot be cancelled now (it is downloading its clip, or the GPU server does
+    # not answer) finishes, but neither replaces this choice nor is retried (`chosen_since`).
+    for job in await shot_takes.active_retry_jobs(session, project.id, scene_id, shot_id):
+        try:
+            await jobs_api.cancel_job(job.id, session)
+        except HTTPException as exc:
+            _logger.info("take %d selected: retry job %d not cancelled: %s", take_id, job.id, exc)
+
+    if accepted_failed_take:
+        try:
+            dependent = await shot_takes.start_dependents(session, take_id)
+        except Exception:
+            _logger.exception("take %d: the shot that continues it could not be queued", take_id)
+        else:
+            if dependent is not None:
+                dispatcher.nudge()
+    return selected

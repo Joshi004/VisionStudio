@@ -15,7 +15,11 @@ run side by side when the GPU pool allows (`store.create_job` with `dedupe_key`)
   recorded GPU API. The body is stored on the job and sent again unchanged after a pre-emption.
 - **The selected take of a shot is its ready take that passed its technical check, with the
   newest `selected_at`.** A take gets `selected_at` when its job finishes (only if it passed) and
-  when the user selects it (only a passing take), so whichever happened last decides.
+  when the user selects it, so whichever happened last decides.
+- **The user may select a take that failed a check** (its technical check or its dialogue
+  check): the failed check gets `accepted_at` and counts as passed. Selecting a take stops the
+  shot's automatic retries: the API cancels their jobs, and a retry that could not be cancelled
+  neither replaces the user's choice nor is retried again (`chosen_since`).
 - **Every clip is checked in code (PHASE-029, `take_validation.py`)** when it is stored. A clip
   that fails for a reason a new seed can fix is generated again by itself, up to the
   `shot_take_max_retries` setting (`queue_retry`). The takes made before the checks existed are
@@ -23,8 +27,9 @@ run side by side when the GPU pool allows (`store.create_job` with `dedupe_key`)
 - **A take whose shot carries dialogue is checked a second time (PHASE-031).** After its clip
   passes the technical check, the `check_take_dialogue` job transcribes it with Parakeet and
   compares the heard words with the shot's dialogue lines (`dialogue_check.py`); the result is on
-  `shot_take.dialogue_check`. Such a take is selected, by the job or by the user, only when both
-  checks passed, and a take whose speech does not match is generated again by `queue_retry`, with
+  `shot_take.dialogue_check`. Such a take is selected by the job only when both checks passed
+  (the user may still select it), and a take whose speech does not match is generated again by
+  `queue_retry`, with
   the same limit as any failed clip. A shot with no dialogue is never transcribed.
 - `state` is what the story workspace shows. **Out of date is worked out on every read** and never
   stored: the shot's prompt was compiled again since the take was made, or is itself out of date
@@ -246,14 +251,28 @@ def _needs_dialogue_check(row: ShotTake, lines: list[dialogue_check.DialogueLine
     return bool(lines) and take_validation.passed(row.validation) and row.dialogue_check is None
 
 
+def _accepted(check: Any) -> bool:
+    """Whether the user chose to use the take although this stored check failed."""
+    return isinstance(check, dict) and check.get("accepted_at") is not None
+
+
+def overridden(take: ShotTake) -> bool:
+    """Whether the user chose to use this take although one of its checks failed."""
+    return _accepted(take.validation) or _accepted(take.dialogue_check)
+
+
 def _usable(row: ShotTake, lines: list[dialogue_check.DialogueLine]) -> bool:
     """A take that may be a shot's selected take: its clip is stored and passed its technical
-    check, and, when the shot carries dialogue, its speech passed the dialogue check.
+    check, and, when the shot carries dialogue, its speech passed the dialogue check. A failed
+    check that the user accepted counts as passed. A clip whose technical check was accepted was
+    never transcribed, so it needs no dialogue check.
     """
-    return (
-        _is_ready(row)
-        and take_validation.passed(row.validation)
-        and (not lines or dialogue_check.passed(row.dialogue_check))
+    if not _is_ready(row):
+        return False
+    if _accepted(row.validation):
+        return True
+    return take_validation.passed(row.validation) and (
+        not lines or dialogue_check.passed(row.dialogue_check) or _accepted(row.dialogue_check)
     )
 
 
@@ -1015,7 +1034,10 @@ async def select_take(
 ) -> ShotTake:
     """Makes one ready take the shot's selected take, and commits. The take that was selected
     last is the selected one, so this stamps `selected_at` with a time after every other take's.
-    Raises ShotTakesError.
+
+    A take that failed its technical check or its dialogue check can be selected too: the user
+    has seen it and is satisfied, so the failed check gets `accepted_at` and counts as passed
+    from then on. Its checks must have been made. Raises ShotTakesError.
     """
     take = await session.get(ShotTake, take_id)
     if (
@@ -1029,39 +1051,61 @@ async def select_take(
         )
     if not _is_ready(take):
         raise ShotTakesError("This take has no clip yet, so it cannot be selected.")
-    if take.validation is None:
+    if not isinstance(take.validation, dict):
         raise ShotTakesError("This take has not been checked yet. Press Check takes first.")
-    if not take_validation.passed(take.validation):
-        raise ShotTakesError(
-            "This take failed its technical check, so it cannot be selected: "
-            + _problem_text(take.validation)
-        )
     lines = await dialogue_lines(session, take)
-    if lines and take.dialogue_check is None:
+    clip_passed = take_validation.passed(take.validation)
+    if lines and clip_passed and not isinstance(take.dialogue_check, dict):
         raise ShotTakesError(
             "The speech in this take has not been checked against the dialogue yet. "
             "Wait for the check, or press Check takes."
         )
-    if lines and not dialogue_check.passed(take.dialogue_check):
-        raise ShotTakesError(
-            "This take failed its dialogue check, so it cannot be selected: "
-            + _problem_text(take.dialogue_check)
-        )
+    accepted_at = utcnow().isoformat()
+    if not clip_passed:
+        take.validation = {**take.validation, "accepted_at": accepted_at}
+    elif lines and not dialogue_check.passed(take.dialogue_check):
+        take.dialogue_check = {**take.dialogue_check, "accepted_at": accepted_at}
     take.selected_at = await selection_time(session, project.id, scene_id, shot_id)
     await session.commit()
     return take
 
 
-def _problem_text(validation: dict[str, Any]) -> str:
-    problems = validation.get("problems")
-    if not isinstance(problems, list):
-        return "no reason was recorded."
-    messages = [
-        problem["message"]
-        for problem in problems
-        if isinstance(problem, dict) and isinstance(problem.get("message"), str)
-    ]
-    return " ".join(messages) or "no reason was recorded."
+async def active_retry_jobs(
+    session: AsyncSession, project_id: int, scene_id: str, shot_id: str
+) -> list[Job]:
+    """The waiting or running jobs of a shot's automatic retries (takes made by `queue_retry`)."""
+    statement = (
+        select(ShotTake)
+        .where(
+            ShotTake.project_id == project_id,
+            ShotTake.scene_id == scene_id,
+            ShotTake.shot_id == shot_id,
+            ShotTake.job_id.is_not(None),
+        )
+        .execution_options(populate_existing=True)
+    )
+    rows = [row for row in (await session.execute(statement)).scalars() if _retry_attempt(row)]
+    jobs = await _jobs_of(session, rows)
+    return [job for job in jobs.values() if job.status in store.ACTIVE_STATUSES]
+
+
+async def chosen_since(session: AsyncSession, take: ShotTake) -> bool:
+    """Whether another take of the shot was selected after this take was queued: the user chose
+    a take while this one was being made. This take then does not replace that choice when it
+    finishes, and is not generated again when it fails.
+    """
+    statement = (
+        select(func.count())
+        .select_from(ShotTake)
+        .where(
+            ShotTake.project_id == take.project_id,
+            ShotTake.scene_id == take.scene_id,
+            ShotTake.shot_id == take.shot_id,
+            ShotTake.id != take.id,
+            ShotTake.selected_at > take.created_at,
+        )
+    )
+    return bool((await session.execute(statement)).scalar_one())
 
 
 # --- Checking a clip ----------------------------------------------------------------------
@@ -1178,11 +1222,22 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
     """Queues another take of a shot whose take `take_id` failed its technical check or its
     dialogue check, with a new seed, and commits. Returns the job, or None when no retry is made:
     the take did not fail for a reason another seed can fix (`kind` is not `clip`), the tries are
-    used up (`shot_take_max_retries`), the take is not the shot's newest take any more, or the shot
+    used up (`shot_take_max_retries`), the take is not the shot's newest take any more, the user
+    selected a take of the shot while this one was being made (`chosen_since`), or the shot
     cannot be generated now (its prompt or request changed meanwhile; the user presses Generate).
     """
     take = await session.get(ShotTake, take_id)
     if take is None:
+        return None
+    if await chosen_since(session, take):
+        _logger.info(
+            "shot '%s' of scene '%s' of project %d: take %d failed its check; not retried, "
+            "a take was selected meanwhile",
+            take.shot_id,
+            take.scene_id,
+            take.project_id,
+            take.take_number,
+        )
         return None
     validation = _retryable_failure(take)
     if validation is None:

@@ -179,6 +179,11 @@ SAVING_CONTINUITY_CHECK: Final = "saving the continuity check"
 # `repair_shot_cut` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_CUT_REPAIR: Final = "saving the repaired shots"
 
+# --- Running: choosing a shot's references (PHASE-033) -----------------------------------
+# `select_shot_references` also uses PREPARING_PROMPT and `asking_model` from above.
+USING_FIXED_RULE: Final = "choosing the references by the fixed rule"
+SAVING_SHOT_REFERENCES: Final = "saving the shot references"
+
 # --- Running: shot prompt compilation (PHASE-026) ----------------------------------------
 # `compile_shot_prompt` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_SHOT_PROMPT: Final = "saving the shot prompt"

@@ -4378,7 +4378,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references";
             /**
              * Status
              * @enum {string}
@@ -4431,7 +4431,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references";
             /**
              * Status
              * @enum {string}
@@ -5431,7 +5431,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references";
             /** Running */
             running: number;
             /** Queued */
@@ -5707,6 +5707,8 @@ export interface components {
             fallback: boolean;
             /** Description */
             description: string;
+            /** Reason */
+            reason?: string | null;
         };
         /** RelationCharacterOut */
         RelationCharacterOut: {
@@ -6942,6 +6944,7 @@ export interface components {
             reasons: string[];
             manifest: components["schemas"]["ShotReferenceManifestOut"] | null;
             version: components["schemas"]["ShotReferenceVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Can Run */
             can_run: boolean;
             /** Blocked Reason */
@@ -6949,8 +6952,13 @@ export interface components {
         };
         /** ShotReferenceManifestOut */
         ShotReferenceManifestOut: {
-            /** Method */
-            method: string;
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "deterministic" | "llm";
+            /** Fallback Reason */
+            fallback_reason?: string | null;
             /** Shot Size */
             shot_size: string;
             /** Framing */
@@ -6963,6 +6971,15 @@ export interface components {
             catalog: components["schemas"]["CatalogPictureOut"][];
             /** Notes */
             notes: string[];
+        };
+        /** ShotReferenceQueuedOut */
+        ShotReferenceQueuedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string;
+            /** Job Id */
+            job_id: number;
         };
         /** ShotReferenceSelectedOut */
         ShotReferenceSelectedOut: {
@@ -7029,6 +7046,8 @@ export interface components {
         ShotReferencesRunOut: {
             /** Selected */
             selected: components["schemas"]["ShotReferenceSelectedOut"][];
+            /** Queued */
+            queued: components["schemas"]["ShotReferenceQueuedOut"][];
             /** Skipped */
             skipped: components["schemas"]["ShotReferenceSkippedOut"][];
         };
@@ -7785,6 +7804,8 @@ export interface components {
             heard_text: string;
             /** Checked At */
             checked_at: string | null;
+            /** Accepted */
+            accepted: boolean;
         };
         /** TakeIn */
         TakeIn: {
@@ -7977,6 +7998,8 @@ export interface components {
             problems: components["schemas"]["TakeProblemOut"][];
             /** Checked At */
             checked_at: string | null;
+            /** Accepted */
+            accepted: boolean;
         };
         /** TakesOut */
         TakesOut: {

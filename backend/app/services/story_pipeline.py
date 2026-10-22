@@ -109,7 +109,6 @@ STEPS: Final[tuple[Step, ...]] = (
         "references",
         "Choose the references",
         ("shot_continuity", "look_state_images"),
-        inline=True,
     ),
     Step("generation_requests", "Plan the generation requests", ("references",), inline=True),
     Step("prompts", "Compile the shot prompts", ("generation_requests",)),
