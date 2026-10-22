@@ -16,6 +16,9 @@ lives in `services/story_pipeline_targets.py`.
 - **Pauses.** At the start the user ticks the steps to pause after (none by default). The run
   pauses once a ticked step is complete, only if the run made jobs in it, and goes on when the
   user presses Continue.
+- **Scope (PHASE-040).** A run is of scope `all` (everything that is not up to date, including
+  what was never made) or `out_of_date` (only what exists and is out of date, plus what those
+  regenerations make necessary; anything else is "left alone"). See `plan_step`.
 - **Overwrites.** Some targets hold what the user chose or wrote (a library character, a
   hand-written relation, a hand-picked narrator voice). The run replaces them only when the user
   allowed it once at the start (`confirm_overwrite`).
@@ -37,6 +40,12 @@ from app.db.models import Job, Project
 from app.jobs import phases, store
 
 JOB_TYPE: Final = store.PIPELINE_RUN_TYPE
+# What a run makes: everything that is not up to date, or only what exists and is out of date
+# (and what that makes necessary).
+Scope = Literal["all", "out_of_date"]
+SCOPES: Final[tuple[Scope, ...]] = ("all", "out_of_date")
+SCOPE_ALL: Final[Scope] = "all"
+SCOPE_OUT_OF_DATE: Final[Scope] = "out_of_date"
 # Jobs one target may be given in one step in one run.
 MAX_TRIES: Final = 3
 # Saved in `job.provider_job_id` so the dispatcher asks the run `poll` at every tick. It is not
@@ -148,6 +157,8 @@ class RunOptions:
     pause_after: frozenset[str] = frozenset()
     # Whether the run may replace what the user chose or wrote.
     confirm_overwrite: bool = False
+    # What the run makes (PHASE-040).
+    scope: Scope = SCOPE_ALL
 
     @classmethod
     def from_input(cls, value: object) -> RunOptions:
@@ -158,6 +169,7 @@ class RunOptions:
                 key for key in (keys if isinstance(keys, list) else []) if key in STEP_KEYS
             ),
             confirm_overwrite=data.get("confirm_overwrite") is True,
+            scope=SCOPE_OUT_OF_DATE if data.get("scope") == SCOPE_OUT_OF_DATE else SCOPE_ALL,
         )
 
 
@@ -187,6 +199,14 @@ class Target:
     waits_for: tuple[str, ...] = ()
     # What the start function of the stage needs to find it (a scene id, a shot id).
     ref: tuple[str, ...] = ()
+    # An output of this target exists and its stage says it is out of date (PHASE-040). Only the
+    # `out_of_date` scope reads it.
+    stale: bool = False
+    # The targets that belong together (the scene of a shot or a line). None: the whole step.
+    group: str | None = None
+    # The stage already has something for this target that is not usable (a shot whose clips
+    # all failed). It is not a missing target, so the `out_of_date` scope does not add it.
+    existing: bool = False
 
 
 @dataclass(frozen=True)
@@ -240,6 +260,8 @@ class StepPlan:
     creates: list[Target]
     problems: list[Problem]
     warnings: list[str] = field(default_factory=list)
+    # Targets the `out_of_date` scope leaves as they are. They are not in `done` or `total`.
+    left_alone: int = 0
 
     @property
     def complete(self) -> bool:
@@ -266,21 +288,53 @@ def consent_message(consent: str) -> str:
     )
 
 
+def in_scope(
+    target: Target, options: RunOptions, made_upstream: bool, groups: set[str | None]
+) -> bool:
+    """Whether the run looks at a target that is not done. Pure.
+
+    Scope `all`: always. Scope `out_of_date`: a target whose output is out of date, one that is
+    being worked on, or one that was never made but that the run's own work upstream makes
+    necessary (`made_upstream`) in a group that already has an output (a new shot of a scene
+    that was planned again). Everything else is left alone.
+    """
+    if options.scope == SCOPE_ALL:
+        return True
+    if target.stale or target.active or target.settling:
+        return True
+    return made_upstream and not target.existing and target.group in groups
+
+
 def plan_step(
     step: Step,
     view: StepView,
     tries: Mapping[str, int],
     errors: Mapping[str, str],
     options: RunOptions,
+    made_upstream: bool = False,
 ) -> StepPlan:
     """What to do now about a step. Pure.
 
-    For each target that is not done, in this order: wait when work is in progress for it; wait
-    when a target it waits for is not done yet; wait while the stage's own follow-on work settles;
-    report it when it needs consent that was not given, when nothing can be made for it, or when
-    it has had `MAX_TRIES`; otherwise create the next job.
+    For each target that is not done, in this order: leave it alone when the scope says so; wait
+    when work is in progress for it; wait when a target it waits for is not done yet; wait while
+    the stage's own follow-on work settles; report it when it needs consent that was not given,
+    when nothing can be made for it, or when it has had `MAX_TRIES`; otherwise create the next
+    job.
+
+    `made_upstream` is whether the run has made work in a step this one needs (scope
+    `out_of_date` only).
     """
     pending = [target for target in view.targets if not target.done]
+    # The groups that already have an output (a done or an out-of-date target, or one that is
+    # being worked on): what "the same scene already has shots" is judged by.
+    groups = {
+        target.group for target in view.targets if target.done or target.stale or target.active
+    }
+    left_alone = [
+        target for target in pending if not in_scope(target, options, made_upstream, groups)
+    ]
+    left_keys = {target.key for target in left_alone}
+    pending = [target for target in pending if target.key not in left_keys]
     pending_keys = {target.key for target in pending}
     waiting = 0
     creates: list[Target] = []
@@ -320,13 +374,15 @@ def plan_step(
         # Otherwise the one it waits for is reported, and counting this one as going on would
         # keep the run alive for ever.
 
+    pending_count = len(view.targets) - len(left_alone)
     return StepPlan(
-        done=len(view.targets) - len(pending),
-        total=len(view.targets),
+        done=pending_count - len(pending),
+        total=pending_count,
         waiting=waiting,
         creates=creates,
         problems=problems,
         warnings=list(view.warnings),
+        left_alone=len(left_alone),
     )
 
 
@@ -365,7 +421,10 @@ COMPLETE_STATUSES: Final = ("done", "skipped")
 def new_output() -> dict[str, Any]:
     """The output of a run that has just started: every step waiting, nothing made yet."""
     return {
-        "steps": {step.key: {"status": "pending", "done": 0, "total": 0} for step in STEPS},
+        "steps": {
+            step.key: {"status": "pending", "done": 0, "total": 0, "left_alone": 0}
+            for step in STEPS
+        },
         # step key -> target key -> how many jobs this run has given the target.
         "tries": {step.key: {} for step in STEPS},
         # step key -> target key -> why the newest try failed.
@@ -418,6 +477,7 @@ def record_progress(
     entry["status"] = status
     entry["done"] = plan.done
     entry["total"] = plan.total
+    entry["left_alone"] = plan.left_alone
 
 
 def made_no_jobs(output: Mapping[str, Any], step_key: str) -> bool:
@@ -442,9 +502,14 @@ def add_warnings(output: dict[str, Any], warnings: Sequence[str]) -> None:
             output["warnings"].append(text)
 
 
-def phase_of(output: Mapping[str, Any], running: Sequence[tuple[str, int, int]]) -> str:
+def phase_of(
+    output: Mapping[str, Any],
+    running: Sequence[tuple[str, int, int]],
+    scope: Scope = SCOPE_ALL,
+) -> str:
     """The phase label of the run: how many steps are complete and what is going on."""
-    return phases.pipeline_progress(len(complete_keys(output)), len(STEPS), running)
+    text = phases.pipeline_progress(len(complete_keys(output)), len(STEPS), running)
+    return f"Regenerating what is out of date: {text}" if scope == SCOPE_OUT_OF_DATE else text
 
 
 # --- Starting, continuing and stopping a run ------------------------------------------------
@@ -489,6 +554,7 @@ async def start_run(
     *,
     pause_after: Sequence[str],
     confirm_overwrite: bool,
+    scope: Scope = SCOPE_ALL,
 ) -> tuple[Job, bool]:
     """Queues a run, and commits. Returns `(job, created)`: a run that is already waiting or
     running is returned as it is (`created` False), with the choices it was started with.
@@ -496,6 +562,8 @@ async def start_run(
 
     Whether the user has allowed the overwrites is decided by the caller (`confirmations`).
     """
+    if scope not in SCOPES:
+        raise StoryPipelineError(f"There is no scope {scope!r}.")
     unknown = [key for key in pause_after if key not in STEP_KEYS]
     if unknown:
         raise StoryPipelineError(f"There is no step {', '.join(repr(key) for key in unknown)}.")
@@ -515,6 +583,7 @@ async def start_run(
             # In the order of the steps, without repeats.
             "pause_after": [key for key in STEP_KEYS if key in set(pause_after)],
             "confirm_overwrite": confirm_overwrite,
+            "scope": scope,
         },
     )
     return job, created
@@ -534,7 +603,12 @@ async def continue_run(session: AsyncSession, project: Project) -> Job:
     if paused not in output["continued"]:
         output["continued"].append(paused)
     output["paused_at"] = None
-    if not await store.save_progress(session, run.id, phase=phase_of(output, []), output=output):
+    if not await store.save_progress(
+        session,
+        run.id,
+        phase=phase_of(output, [], RunOptions.from_input(run.input).scope),
+        output=output,
+    ):
         await session.rollback()
         raise StoryPipelineError("The run is no longer going.")
     await session.commit()

@@ -6,7 +6,9 @@ one click (PHASE-030).
   where it is paused, whether a run can start now and why not, the targets a run would replace
   that the user must allow first, and how many tries each target gets.
 - `POST .../run` starts the run. Body: `pause_after` (the keys of the steps to pause after, none
-  by default) and `confirm_overwrite`. A run that is already waiting or running is returned and
+  by default), `confirm_overwrite` and `scope` (`all`, the default, or `out_of_date`: only what
+  exists and is out of date, and what those regenerations make necessary, PHASE-040;
+  422 when nothing is out of date). A run that is already waiting or running is returned and
   no second one is made. 409 while there are targets to replace and `confirm_overwrite` is false.
 - `POST .../continue` lets a paused run go on.
 
@@ -17,7 +19,7 @@ have not started. The answers never return ORM objects.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -28,7 +30,7 @@ from app.api.projects import load_project
 from app.db.models import Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
-from app.services import story_pipeline, story_pipeline_targets
+from app.services import staleness, story_pipeline, story_pipeline_targets
 from app.services.story_pipeline import StepStatus
 
 router = APIRouter()
@@ -67,6 +69,9 @@ class PipelineStepProgressOut(BaseModel):
     # How many targets of the step are done, of how many. 0 of 0 before the run got to it.
     done: int
     total: int
+    # How many targets the `out_of_date` scope left as they are (not counted in `done` or
+    # `total`). Always 0 for a run of scope `all`.
+    left_alone: int
 
 
 class PipelineProblemOut(BaseModel):
@@ -94,6 +99,10 @@ class PipelineRunOut(BaseModel):
     # What the run was started with.
     pause_after: list[str]
     confirm_overwrite: bool
+    # What the run makes: everything that is not up to date, or only what is out of date.
+    scope: Literal["all", "out_of_date"]
+    # How many jobs the run has made so far (a stage that does its work in the run adds none).
+    jobs_made: int
 
 
 class PipelineConfirmationOut(BaseModel):
@@ -113,6 +122,8 @@ class StoryPipelineOut(BaseModel):
     # What a run started now would replace, and needs the user's consent for. Empty while a run
     # cannot start.
     confirmations: list[PipelineConfirmationOut]
+    # The same for a run of scope `out_of_date`: only what is out of date now.
+    regenerate_confirmations: list[PipelineConfirmationOut]
     # How many jobs each target gets per step in one run.
     max_tries: int
 
@@ -125,6 +136,8 @@ class PipelineRunBody(BaseModel):
     # Allows the run to replace what the user chose or wrote (library characters and
     # environments, hand-written relations, a hand-chosen narrator voice).
     confirm_overwrite: bool = False
+    # `out_of_date`: regenerate only what exists and is out of date (PHASE-040).
+    scope: Literal["all", "out_of_date"] = "all"
 
 
 class PipelineRunStartedOut(BaseModel):
@@ -153,6 +166,7 @@ def _run_out(job: Job) -> PipelineRunOut:
                 status=cast(StepStatus, output["steps"][step.key].get("status", "pending")),
                 done=_count(output["steps"][step.key].get("done")),
                 total=_count(output["steps"][step.key].get("total")),
+                left_alone=_count(output["steps"][step.key].get("left_alone")),
             )
             for step in story_pipeline.STEPS
         ],
@@ -162,6 +176,8 @@ def _run_out(job: Job) -> PipelineRunOut:
         paused_at=output["paused_at"] if active else None,
         pause_after=[key for key in story_pipeline.STEP_KEYS if key in options.pause_after],
         confirm_overwrite=options.confirm_overwrite,
+        scope=options.scope,
+        jobs_made=len(output["job_ids"]),
     )
 
 
@@ -205,16 +221,15 @@ async def get_story_pipeline(project_id: int, session: SessionDep) -> StoryPipel
         run=_run_out(run) if run is not None else None,
         can_start=blocked is None,
         start_block=blocked,
-        confirmations=[
-            PipelineConfirmationOut(
-                step=item.step_key,
-                step_label=item.step_label,
-                target=item.target,
-                reason=item.reason,
-            )
-            for item in pending
-        ],
+        confirmations=[_confirmation_out(item) for item in pending],
+        regenerate_confirmations=[_confirmation_out(item) for item in pending if item.stale],
         max_tries=story_pipeline.MAX_TRIES,
+    )
+
+
+def _confirmation_out(item: story_pipeline_targets.Confirmation) -> PipelineConfirmationOut:
+    return PipelineConfirmationOut(
+        step=item.step_key, step_label=item.step_label, target=item.target, reason=item.reason
     )
 
 
@@ -258,7 +273,17 @@ async def run_story_pipeline(
         )
         if blocked is not None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, blocked)
+        if (
+            body.scope == story_pipeline.SCOPE_OUT_OF_DATE
+            and (await staleness.overview(session, project)).count == 0
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Nothing is out of date, so there is nothing to regenerate.",
+            )
         pending = await story_pipeline_targets.confirmations(session, project)
+        if body.scope == story_pipeline.SCOPE_OUT_OF_DATE:
+            pending = [item for item in pending if item.stale]
         if pending and not body.confirm_overwrite:
             raise HTTPException(status.HTTP_409_CONFLICT, _unconfirmed_message(pending))
     try:
@@ -267,6 +292,7 @@ async def run_story_pipeline(
             project,
             pause_after=body.pause_after,
             confirm_overwrite=body.confirm_overwrite,
+            scope=body.scope,
         )
     except story_pipeline.StoryPipelineError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

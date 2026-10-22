@@ -67,6 +67,9 @@ export function StalenessPanel({ projectId }: StalenessPanelProps) {
               keeps it and records that it was made from what is current now. It makes nothing
               again, and what was made from it stays as it is. Work from the top: a step that
               needs an earlier one to be current is refused until that one is.
+              To make what is out of date again, choose &quot;Only what is out
+              of date&quot; in the &quot;Run the whole story&quot; panel and press
+              Regenerate out-of-date.
             </Text>
           </Stack>
           {data !== undefined && (

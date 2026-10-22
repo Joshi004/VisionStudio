@@ -120,9 +120,9 @@ def _stop_reason(
     return pipeline.idle_message(done, len(pipeline.STEPS), [item.step for item in going])
 
 
-def _phase_of(output: dict[str, Any], going: list[_Going]) -> str:
+def _phase_of(output: dict[str, Any], going: list[_Going], scope: pipeline.Scope) -> str:
     running = [(item.step.label, item.plan.done, item.plan.total) for item in going]
-    return pipeline.phase_of(output, running)
+    return pipeline.phase_of(output, running, scope)
 
 
 async def _cancel_jobs(session: AsyncSession, job_ids: list[int]) -> None:
@@ -166,7 +166,7 @@ class StoryPipelineHandler(JobHandler):
             saved = await store.save_progress(
                 session,
                 job_id,
-                phase=_phase_of(output, []),
+                phase=_phase_of(output, [], pipeline.RunOptions.from_input(job.input).scope),
                 output=output,
                 provider_job_id=pipeline.MARKER,
             )
@@ -256,8 +256,15 @@ class StoryPipelineHandler(JobHandler):
             if not all(key in complete for key in step.needs):
                 continue
             view = await ADAPTERS[step.key].evaluate(session, project, options)
+            # Work this run has made in a step this one needs (scope `out_of_date` only).
+            made_upstream = any(output["tries"][key] for key in step.needs)
             plan = pipeline.plan_step(
-                step, view, output["tries"][step.key], output["errors"][step.key], options
+                step,
+                view,
+                output["tries"][step.key],
+                output["errors"][step.key],
+                options,
+                made_upstream,
             )
             pipeline.add_warnings(output, plan.warnings)
             if plan.complete:
@@ -338,7 +345,7 @@ class StoryPipelineHandler(JobHandler):
                     if key in output["steps"]:
                         output["steps"][key]["status"] = "failed"
 
-        phase = paused_phase or _phase_of(output, result.going)
+        phase = paused_phase or _phase_of(output, result.going, options.scope)
         nothing_new = (
             not started_any
             and failure is None

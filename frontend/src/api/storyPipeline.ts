@@ -49,7 +49,10 @@ function runSignature(run: PipelineRun | null | undefined): string | null {
     run.status,
     run.phase ?? "",
     run.paused_at ?? "",
-    ...run.steps.map((step) => `${step.status}:${step.done}/${step.total}`),
+    ...run.steps.map(
+      (step) => `${step.status}:${step.done}/${step.total}/${step.left_alone}`,
+    ),
+    run.jobs_made,
   ].join("|");
 }
 
@@ -96,11 +99,16 @@ export function useStoryPipeline(projectId: number) {
   return query;
 }
 
+/** What a run makes: everything not up to date, or only what is out of date. */
+export type PipelineScope = components["schemas"]["PipelineRunBody"]["scope"];
+
 type StartOptions = {
   /** The keys of the steps to pause after. */
   pauseAfter: string[];
   /** Allows the run to replace what the user chose or wrote. */
   confirmOverwrite: boolean;
+  /** `out_of_date` regenerates only what exists and is out of date. */
+  scope: PipelineScope;
 };
 
 /** Starts the run. A 409 means there is something to allow first (its message says what). */
@@ -115,6 +123,7 @@ export function useStartStoryPipeline(projectId: number) {
           body: {
             pause_after: options.pauseAfter,
             confirm_overwrite: options.confirmOverwrite,
+            scope: options.scope,
           },
         },
       );

@@ -5804,6 +5804,12 @@ export interface components {
              * @default false
              */
             confirm_overwrite: boolean;
+            /**
+             * Scope
+             * @default all
+             * @enum {string}
+             */
+            scope: "all" | "out_of_date";
         };
         /** PipelineRunOut */
         PipelineRunOut: {
@@ -5837,6 +5843,13 @@ export interface components {
             pause_after: string[];
             /** Confirm Overwrite */
             confirm_overwrite: boolean;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "all" | "out_of_date";
+            /** Jobs Made */
+            jobs_made: number;
         };
         /** PipelineRunStartedOut */
         PipelineRunStartedOut: {
@@ -5868,6 +5881,8 @@ export interface components {
             done: number;
             /** Total */
             total: number;
+            /** Left Alone */
+            left_alone: number;
         };
         /**
          * PoolCapacity
@@ -8510,6 +8525,8 @@ export interface components {
             start_block: string | null;
             /** Confirmations */
             confirmations: components["schemas"]["PipelineConfirmationOut"][];
+            /** Regenerate Confirmations */
+            regenerate_confirmations: components["schemas"]["PipelineConfirmationOut"][];
             /** Max Tries */
             max_tries: number;
         };

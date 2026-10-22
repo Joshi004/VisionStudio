@@ -58,6 +58,7 @@ from app.services import (
 from app.services.projects import SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION
 from app.services.story_pipeline import (
     PROJECT_KEY,
+    SCOPE_OUT_OF_DATE,
     STEP_KEYS,
     STEP_LABELS,
     RunOptions,
@@ -264,6 +265,7 @@ async def _evaluate_story_bible(
                     else None
                 ),
                 last_error=_failure(job),
+                stale=bible is not None and not done,
             )
         ]
     )
@@ -305,6 +307,7 @@ def _discovery_adapter(kind: discovery.StageKind) -> Adapter:
                         else None
                     ),
                     last_error=_failure(job),
+                    stale=row is not None and not done,
                 )
             ]
         )
@@ -396,6 +399,7 @@ async def _evaluate_relations(
                     else None
                 ),
                 last_error=_failure(state.job),
+                stale=state.version is not None and not done,
             )
         ]
     )
@@ -434,6 +438,7 @@ async def _evaluate_character_definitions(
                 ),
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
+                stale=entry.status == "out_of_date",
             )
         )
     return StepView(targets)
@@ -502,6 +507,7 @@ async def _evaluate_environment_definitions(
                 ),
                 last_error=last_error,
                 ref=(discovery_id, step),
+                stale=entry.status == "out_of_date",
             )
         )
     return StepView(targets)
@@ -562,6 +568,7 @@ async def _evaluate_character_images(
                 last_error=entry.error,
                 waits_for=waits_for,
                 ref=(discovery_id,),
+                stale=entry.status == "out_of_date",
             )
         )
     return StepView(targets)
@@ -621,6 +628,7 @@ async def _evaluate_voices(
                 ),
                 last_error=entry.error or _failure(entry.job),
                 ref=(discovery_id,),
+                stale=entry.status == "out_of_date",
             )
         )
     if needs_narrator:
@@ -641,6 +649,7 @@ async def _evaluate_voices(
                 ),
                 last_error=narrator.error or _failure(narrator.job),
                 ref=(_NARRATOR_KEY,),
+                stale=narrator.status == "out_of_date",
             )
         )
     return StepView(targets)
@@ -692,6 +701,8 @@ async def _evaluate_scene_definitions(
                 consent=_MANUAL_DEFINITION if entry.needs_confirmation and not done else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
+                stale=entry.status == "out_of_date",
+                group=entry.item["id"],
             )
         )
     return StepView(targets)
@@ -739,6 +750,8 @@ async def _evaluate_events(
                 consent=_MANUAL_EVENTS if entry.needs_confirmation and not done else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
+                stale=entry.status == "out_of_date",
+                group=entry.item["id"],
             )
         )
     return StepView(targets)
@@ -784,6 +797,7 @@ async def _evaluate_resolution(
                 active=active,
                 block=None if done or active else state.blocked_reason,
                 last_error=_failure(state.job),
+                stale=state.version is not None and not done,
             )
         ]
     )
@@ -815,6 +829,7 @@ async def _evaluate_look_state_images(
                 block=block,
                 last_error=item.error,
                 ref=(item.kind, str(item.record_id)),
+                stale=bool(item.reasons),
             )
         )
     return StepView(targets)
@@ -860,6 +875,8 @@ async def _evaluate_speech_units(
                     else None
                 ),
                 ref=(entry.item["id"],),
+                stale=entry.status == "out_of_date",
+                group=entry.item["id"],
             )
             for entry in state.entries
         ]
@@ -873,6 +890,16 @@ async def _start_speech_units(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
+    if options.scope == SCOPE_OUT_OF_DATE:
+        # Only the scenes the run chose: "plan all" would also plan scenes it leaves alone.
+        async def plan_scene(target: Target) -> tuple[int, ...]:
+            await speech_units.plan_scene(
+                session, project, target.ref[0], confirm_replace_manual=options.confirm_overwrite
+            )
+            return ()
+
+        return await _start_each(session, targets, deadline, plan_scene)
+
     async def work() -> dict[str, str]:
         result = await speech_units.plan_all(
             session, project, confirm_replace_manual=options.confirm_overwrite
@@ -902,6 +929,8 @@ async def _evaluate_speech_synthesis(
                     block=None if done or active else unit.blocked_reason,
                     last_error=unit.error or _failure(unit.job),
                     ref=(scene_id, unit_id),
+                    stale=unit.status == "out_of_date",
+                    group=scene_id,
                 )
             )
     if not targets and state.blocked_reason is not None:
@@ -969,6 +998,8 @@ async def _evaluate_shot_plans(
                 consent=_MANUAL_SHOT_PLAN if entry.needs_confirmation and not done else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
+                stale=entry.status == "out_of_date",
+                group=entry.item["id"],
             )
         )
     return StepView(targets)
@@ -1015,6 +1046,7 @@ async def _evaluate_shot_definitions(
                     _scene_label(scene.item),
                     False,
                     block=scene.blocked_reason or "This scene has no planned shots.",
+                    group=scene_id,
                 )
             )
         for shot in scene.shots:
@@ -1034,6 +1066,8 @@ async def _evaluate_shot_definitions(
                     ),
                     last_error=_failure(shot.job),
                     ref=(scene_id, shot_id),
+                    stale=shot.status == "out_of_date",
+                    group=scene_id,
                 )
             )
     return StepView(targets)
@@ -1114,6 +1148,9 @@ async def _evaluate_shot_continuity(
                 settling=settling,
                 last_error=_failure(entry.job),
                 ref=(scene_id,),
+                # A check was made for shots that have changed since.
+                stale=entry.status == "not_checked" and entry.row is not None,
+                group=scene_id,
             )
         )
     return StepView(targets, warnings=warnings)
@@ -1165,6 +1202,8 @@ async def _evaluate_references(
                 ),
                 last_error=_failure(shot.job),
                 ref=(scene.item["id"], shot.shot["id"]),
+                stale=shot.status == "out_of_date",
+                group=scene.item["id"],
             )
             for scene in state.entries
             for shot in scene.shots
@@ -1179,6 +1218,19 @@ async def _start_references(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
+    if options.scope == SCOPE_OUT_OF_DATE:
+        # Only the shots the run chose: "select all" would also choose for shots it leaves alone.
+        async def select(target: Target) -> tuple[int, ...]:
+            result = await shot_references.select_shot(
+                session,
+                project,
+                target.ref[0],
+                target.ref[1],
+                confirm_replace_manual=options.confirm_overwrite,
+            )
+            return tuple(item.job_id for item in result.queued)
+
+        return await _start_each(session, targets, deadline, select)
     # One call for all the targets. With the fixed rule the manifests are made in it; with the
     # language model it queues a job for each shot, and the ids go onto the targets so that
     # cancelling the run cancels them.
@@ -1223,6 +1275,8 @@ async def _evaluate_generation_requests(
                 shot.status == "planned",
                 block=None if shot.status == "planned" else shot.blocked_reason,
                 ref=(scene.item["id"], shot.shot["id"]),
+                stale=shot.status == "out_of_date",
+                group=scene.item["id"],
             )
             for scene in state.entries
             for shot in scene.shots
@@ -1237,6 +1291,14 @@ async def _start_generation_requests(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
+    if options.scope == SCOPE_OUT_OF_DATE:
+        # Only the shots the run chose: "plan all" would also plan shots it leaves alone.
+        async def plan(target: Target) -> tuple[int, ...]:
+            await generation_requests.plan_shot(session, project, target.ref[0], target.ref[1])
+            return ()
+
+        return await _start_each(session, targets, deadline, plan)
+
     async def work() -> dict[str, str]:
         result = await generation_requests.plan_all(session, project)
         return {
@@ -1272,6 +1334,8 @@ async def _evaluate_prompts(
                     consent=_MANUAL_PROMPT if shot.needs_confirmation and not done else None,
                     last_error=_failure(shot.job),
                     ref=(scene.item["id"], shot.shot["id"]),
+                    stale=shot.status == "out_of_date",
+                    group=scene.item["id"],
                 )
             )
     return StepView(targets)
@@ -1388,6 +1452,10 @@ async def _evaluate_shot_generation(
                 last_error=_failure(shot.job),
                 waits_for=waits_for,
                 ref=(scene_id, shot_id, _CHECK if unchecked else _GENERATE),
+                stale=shot.status == "out_of_date",
+                group=scene_id,
+                # A failed or unchecked shot has clips already: it is not a missing one.
+                existing=bool(shot.takes),
             )
             targets.append(target)
             previous = target
@@ -1451,6 +1519,7 @@ async def _evaluate_render(
                 active=active,
                 block=None if done or active or state.can_render else state.blocked_reason,
                 last_error=_failure(state.job),
+                stale=bool(state.renders) and state.renders[0].status == "out_of_date",
             )
         ]
     )
@@ -1527,6 +1596,8 @@ class Confirmation:
     # What is replaced ("Mira", "Narrator"); empty for the project.
     target: str
     reason: str
+    # The target exists and is out of date: the `out_of_date` scope asks about these only.
+    stale: bool = False
 
 
 async def confirmations(session: AsyncSession, project: Project) -> list[Confirmation]:
@@ -1538,7 +1609,7 @@ async def confirmations(session: AsyncSession, project: Project) -> list[Confirm
     for key in _CONSENT_STEPS:
         view = await ADAPTERS[key].evaluate(session, project, options)
         found.extend(
-            Confirmation(key, STEP_LABELS[key], target.label, target.consent)
+            Confirmation(key, STEP_LABELS[key], target.label, target.consent, target.stale)
             for target in view.targets
             if not target.done and target.consent is not None
         )

@@ -8,6 +8,7 @@ import {
   Group,
   Loader,
   Paper,
+  SegmentedControl,
   Stack,
   Text,
   Title,
@@ -22,8 +23,10 @@ import {
   useContinueStoryPipeline,
   useStartStoryPipeline,
   useStoryPipeline,
+  type PipelineScope,
   type PipelineStepProgress,
 } from "../../api/storyPipeline";
+import { useStaleness } from "../../api/staleness";
 import { formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 
@@ -42,9 +45,19 @@ const STEP_STATUS: Record<
   failed: { label: "Problem", color: "red" },
 };
 
-/** "3 of 12" for a step with several targets, nothing for a step with one (or none yet). */
+/**
+ * "3 of 12" for a step with several targets, nothing for a step with one (or none yet), and
+ * how many a run that regenerates only what is out of date left as they are.
+ */
 function progressText(step: PipelineStepProgress): string {
-  return step.total > 1 ? `${step.done} of ${step.total}` : "";
+  const parts: string[] = [];
+  if (step.total > 1) {
+    parts.push(`${step.done} of ${step.total}`);
+  }
+  if (step.left_alone > 0) {
+    parts.push(`${step.left_alone} left alone`);
+  }
+  return parts.join(", ");
 }
 
 /**
@@ -62,10 +75,15 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
   const [pauseAfter, setPauseAfter] = useState<string[]>([]);
   const [showPauses, setShowPauses] = useState(false);
   const [allowOverwrite, setAllowOverwrite] = useState(false);
+  const [scope, setScope] = useState<PipelineScope>("all");
+  const staleness = useStaleness(projectId);
+  const outOfDateCount = staleness.data?.count ?? 0;
 
   const run = data?.run ?? null;
   const active = isJobActive(run);
-  const confirmations = data?.confirmations ?? [];
+  const regenerating = scope === "out_of_date";
+  const confirmations =
+    (regenerating ? data?.regenerate_confirmations : data?.confirmations) ?? [];
   const needsConsent = confirmations.length > 0 && !allowOverwrite;
   const pausedLabel =
     run?.paused_at != null
@@ -75,7 +93,7 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
 
   function startRun() {
     start.mutate(
-      { pauseAfter, confirmOverwrite: allowOverwrite },
+      { pauseAfter, confirmOverwrite: allowOverwrite, scope },
       { onSuccess: () => setAllowOverwrite(false) },
     );
   }
@@ -106,16 +124,26 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
               It runs every stage in order, skips whatever is already up to
               date, and stops when nothing can go on. A failed step is tried up
               to {data?.max_tries ?? 3} times (the paid calls included).
+              &quot;Only what is out of date&quot; makes again only what exists
+              and is out of date, with what that makes necessary (and the
+              render), and leaves everything else as it is. Earlier clips, speech
+              and renders stay until a new one replaces them.
             </Text>
           </Stack>
           {!active && (
             <Button
               onClick={startRun}
               loading={start.isPending}
-              disabled={isLoading || isError || !data?.can_start || needsConsent}
+              disabled={
+                isLoading ||
+                isError ||
+                !data?.can_start ||
+                needsConsent ||
+                (regenerating && outOfDateCount === 0)
+              }
               style={{ flexShrink: 0 }}
             >
-              Run whole pipeline
+              {regenerating ? "Regenerate out-of-date" : "Run whole pipeline"}
             </Button>
           )}
           {active && run !== null && (
@@ -163,6 +191,30 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
             Stop cancels the jobs that have not started. A job that is already
             running finishes.
           </Text>
+        )}
+
+        {data && !active && (
+          <Group gap="xs">
+            <SegmentedControl
+              size="xs"
+              value={scope}
+              onChange={(value) => {
+                setScope(value as PipelineScope);
+                setAllowOverwrite(false);
+              }}
+              data={[
+                { value: "all", label: "Everything" },
+                { value: "out_of_date", label: "Only what is out of date" },
+              ]}
+            />
+            {regenerating && (
+              <Text size="xs" c="dimmed">
+                {outOfDateCount === 0
+                  ? "Nothing is out of date."
+                  : `${outOfDateCount} out of date (see the list below).`}
+              </Text>
+            )}
+          </Group>
         )}
 
         {data && !active && data.can_start && (
@@ -233,9 +285,15 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
               <Badge variant="outline" color="gray">
                 {active ? "Running now" : "Last run"}
               </Badge>
+              {run.scope === "out_of_date" && (
+                <Badge variant="light" color="orange">
+                  Only what is out of date
+                </Badge>
+              )}
               <JobStatusBadge job={run} />
               <Text size="xs" c="dimmed">
                 Started {formatDateTime(run.created_at)}
+                {run.jobs_made > 0 ? `, ${run.jobs_made} jobs made` : ""}
               </Text>
             </Group>
 
