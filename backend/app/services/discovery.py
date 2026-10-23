@@ -30,6 +30,7 @@ from app.db.models import (
     EnvironmentDiscovery,
     Job,
     Project,
+    ProjectMissingLibraryItem,
     SceneDiscovery,
     StoryBible,
 )
@@ -116,7 +117,7 @@ async def start_run(
         # them, and the hash is recorded on the version so a changed cast makes it out of date.
         members = await project_cast.usable_members(session, project.id, cast_kind)
         job_input["cast"] = project_cast.prompt_entries(members)
-        job_input["cast_sha256"] = project_cast.cast_sha256(members)
+        job_input["cast_sha256"] = await current_cast_sha256(session, project.id, kind)
     job, _created = await store.create_job(
         session,
         project_id=project.id,
@@ -141,13 +142,25 @@ def cast_kind_of(kind: StageKind) -> project_cast.Kind | None:
 async def current_cast_sha256(
     session: AsyncSession, project_id: int, kind: StageKind
 ) -> str | None:
-    """The hash of the project's cast of this kind, or None for scenes (they have no cast)."""
+    """The hash of the project's cast of this kind, or None for scenes (they have no cast).
+
+    A cast member that was deleted from the library (PHASE-055) still counts, so deleting it
+    does not make the discovered list out of date; only the entry it was linked to is flagged.
+    """
     cast_kind = cast_kind_of(kind)
     if cast_kind is None:
         return None
-    return project_cast.cast_sha256(
-        await project_cast.usable_members(session, project_id, cast_kind)
+    members = await project_cast.usable_members(session, project_id, cast_kind)
+    item_kind = "character" if cast_kind == "characters" else "environment"
+    deleted = await session.execute(
+        select(ProjectMissingLibraryItem.library_id).where(
+            ProjectMissingLibraryItem.project_id == project_id,
+            ProjectMissingLibraryItem.kind == item_kind,
+            ProjectMissingLibraryItem.in_cast.is_(True),
+        )
     )
+    ids = [member.library_id for member in members] + list(deleted.scalars())
+    return project_cast.cast_sha256_of_ids(ids)
 
 
 async def get_bible(session: AsyncSession, project_id: int, bible_id: int) -> StoryBible | None:

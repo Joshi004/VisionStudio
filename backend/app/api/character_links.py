@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Path, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deletion import MissingItemOut
 from app.api.errors import ErrorResponse
 from app.api.library_adoption import VersionIn, refused
 from app.api.projects import load_project
@@ -84,6 +85,8 @@ class LinkEntryOut(BaseModel):
     name: str
     description: str
     link: LinkedCharacterOut | None
+    # Set when the library item this entry was linked to was deleted (PHASE-055).
+    missing: MissingItemOut | None = None
 
 
 class CharacterLinksOut(BaseModel):
@@ -123,6 +126,11 @@ async def _state_out(session: AsyncSession, project_id: int) -> CharacterLinksOu
                 name=entry.item["name"],
                 description=entry.item["description"],
                 link=_linked_out(entry.info) if entry.info is not None else None,
+                missing=(
+                    MissingItemOut(name=entry.missing.name, deleted_at=entry.missing.deleted_at)
+                    if entry.missing is not None
+                    else None
+                ),
             )
             for entry in links.entries
         ],

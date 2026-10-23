@@ -8,8 +8,9 @@ changes one class. The rules:
 - every path is checked to stay inside the media folder;
 - the database keeps only the relative path, and the URL is `/media/` plus
   that path (nginx serves it read-only from the same volume);
-- stored files are never deleted in iteration 1. Only temporary working files
-  in `tmp_dir` are.
+- stored files are deleted only when the user deletes a project or a library item
+  (PHASE-055: `delete_media`, `delete_project_dir`). Temporary working files in `tmp_dir`
+  are cleared freely.
 
 An upload is received into `tmp_dir` first, checked by the caller, and then
 moved into place with `save`. Temp files are created with `open(..., "xb")`
@@ -22,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import shutil
 import uuid
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
@@ -171,6 +173,39 @@ class Storage:
         if path.resolve().parent != self._tmp_dir.resolve():
             raise StorageError(f"Not a temp file: {path}")
         path.unlink(missing_ok=True)
+
+    async def delete_media(self, relative_path: str) -> bool:
+        """Removes one stored file (PHASE-055). Refuses a path that is not a valid stored file
+        path. Returns False when the file was already gone. Deleting a file that something
+        still uses is the caller's mistake to avoid: this does not check.
+        """
+        path = self.get_path(relative_path)
+        return await anyio.to_thread.run_sync(self._unlink, path)
+
+    @staticmethod
+    def _unlink(path: Path) -> bool:
+        if not path.is_file() and not path.is_symlink():
+            return False
+        path.unlink()
+        return True
+
+    async def delete_project_dir(self, project_id: int) -> bool:
+        """Removes a project's media folder `media/<project_id>/` and everything in it
+        (PHASE-055). Only that one folder directly under the media folder is ever touched.
+        Returns False when the project had no folder.
+        """
+        media_root = self._media_dir.resolve()
+        folder = (media_root / str(int(project_id))).resolve()
+        if folder.parent != media_root:
+            raise StorageError(f"Not a project folder: {folder}")
+        return await anyio.to_thread.run_sync(self._remove_tree, folder)
+
+    @staticmethod
+    def _remove_tree(folder: Path) -> bool:
+        if not folder.is_dir():
+            return False
+        shutil.rmtree(folder)
+        return True
 
     def clear_tmp(self) -> None:
         """Creates the temp folder if needed and removes the files in it.

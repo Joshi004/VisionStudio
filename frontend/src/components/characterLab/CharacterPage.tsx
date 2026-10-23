@@ -24,6 +24,7 @@ import {
 } from "../../api/characterLab";
 import type { CharacterDefinition } from "../../api/characterDefinitions";
 import { describeError } from "../../api/errors";
+import { DeleteLibraryItemModal } from "../library/DeleteLibraryItemModal";
 import { CharacterDefinitionView } from "./CharacterDefinitionView";
 import { CreatePanel } from "./CreatePanel";
 import { LOOK_STEP, PROFILE_STEP, VOICE_STEP, type DrawerStep } from "./CharacterDrawer";
@@ -147,6 +148,7 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
   // Followed here too, so a look that is made after the drawer is closed still shows up.
   const looks = useCharacterLooks(characterId);
   const edit = useEditCharacter();
+  const [deleteOpened, setDeleteOpened] = useState(false);
   // The Create panel's form lives here, so a take in the gallery can fill it.
   const [takeForm, setTakeForm] = useState<TakeFormState>(DEFAULT_TAKE_FORM);
 
@@ -189,6 +191,14 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
   return (
     <Stack gap="md">
       {back}
+      <DeleteLibraryItemModal
+        kind="character"
+        libraryId={data.id}
+        name={data.name}
+        opened={deleteOpened}
+        onClose={() => setDeleteOpened(false)}
+        onDeleted={onBack}
+      />
       <Grid gap="lg">
         <Grid.Col span={{ base: 12, lg: 4 }}>
           <Paper withBorder p="md" radius="md">
@@ -248,6 +258,14 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
                   onClick={() => edit.mutate({ characterId: data.id, body: { archived: !data.archived } })}
                 >
                   {data.archived ? "Unarchive" : "Archive"}
+                </Button>
+                <Button
+                  size="compact-sm"
+                  variant="subtle"
+                  color="red"
+                  onClick={() => setDeleteOpened(true)}
+                >
+                  Delete
                 </Button>
               </Group>
               {edit.isError && (

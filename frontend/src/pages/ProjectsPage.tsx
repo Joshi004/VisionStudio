@@ -1,15 +1,18 @@
 import { Alert, Anchor, Badge, Button, Group, Loader, Stack, Table, Text, Title } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import { useState } from "react";
 import { Link } from "react-router";
 
 import { describeError } from "../api/errors";
 import { useProjects } from "../api/projects";
 import { CreateProjectModal } from "../components/projects/CreateProjectModal";
+import { DeleteProjectModal } from "../components/projects/DeleteProjectModal";
 import { capitalise } from "../format";
 
 export function ProjectsPage() {
   const { data, isLoading, isError, error } = useProjects();
   const [modalOpened, modal] = useDisclosure(false);
+  const [toDelete, setToDelete] = useState<{ id: number; name: string } | null>(null);
 
   return (
     <Stack gap="md">
@@ -36,6 +39,7 @@ export function ProjectsPage() {
               <Table.Th>Orientation</Table.Th>
               <Table.Th>Created</Table.Th>
               <Table.Th>Story</Table.Th>
+              <Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -51,6 +55,16 @@ export function ProjectsPage() {
                 </Table.Td>
                 <Table.Td>{new Date(project.created_at).toLocaleString()}</Table.Td>
                 <Table.Td>{project.has_script ? "Yes" : "No"}</Table.Td>
+                <Table.Td>
+                  <Button
+                    variant="subtle"
+                    color="red"
+                    size="compact-sm"
+                    onClick={() => setToDelete({ id: project.id, name: project.name })}
+                  >
+                    Delete
+                  </Button>
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -58,6 +72,7 @@ export function ProjectsPage() {
       )}
 
       <CreateProjectModal opened={modalOpened} onClose={modal.close} />
+      <DeleteProjectModal project={toDelete} onClose={() => setToDelete(null)} />
     </Stack>
   );
 }

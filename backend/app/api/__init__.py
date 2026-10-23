@@ -10,6 +10,7 @@ from app.api import (
     character_lab,
     character_links,
     character_relations,
+    deletion,
     discovery,
     environment_definitions,
     environment_lab,
@@ -88,3 +89,4 @@ api_router.include_router(story_renders.router, tags=["story-renders"])
 api_router.include_router(story_pipeline.router, tags=["story-pipeline"])
 api_router.include_router(project_cast.router, tags=["project-cast"])
 api_router.include_router(staleness.router, tags=["staleness"])
+api_router.include_router(deletion.router, tags=["deletion"])

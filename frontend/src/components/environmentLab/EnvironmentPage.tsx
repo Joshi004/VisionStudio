@@ -16,6 +16,7 @@ import {
 import type { EnvironmentDefinition } from "../../api/environmentDefinitions";
 import { useEditEnvironment, useLibraryEnvironment } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
+import { DeleteLibraryItemModal } from "../library/DeleteLibraryItemModal";
 import { EnvironmentDefinitionView } from "./EnvironmentDefinitionView";
 import { EnvironmentStates } from "./EnvironmentStates";
 import { EnvironmentViews } from "./EnvironmentViews";
@@ -84,6 +85,7 @@ function DefinitionSection({ definition }: { definition: EnvironmentDefinition |
 export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPageProps) {
   const environment = useLibraryEnvironment(environmentId);
   const edit = useEditEnvironment();
+  const [deleteOpened, setDeleteOpened] = useState(false);
 
   const back = (
     <Group>
@@ -117,6 +119,14 @@ export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPa
   return (
     <Stack gap="md">
       {back}
+      <DeleteLibraryItemModal
+        kind="environment"
+        libraryId={data.id}
+        name={data.name}
+        opened={deleteOpened}
+        onClose={() => setDeleteOpened(false)}
+        onDeleted={onBack}
+      />
       <Grid gap="lg">
         <Grid.Col span={{ base: 12, lg: 5 }}>
           <Paper withBorder p="md" radius="md">
@@ -163,6 +173,14 @@ export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPa
                   }
                 >
                   {data.archived ? "Unarchive" : "Archive"}
+                </Button>
+                <Button
+                  size="compact-sm"
+                  variant="subtle"
+                  color="red"
+                  onClick={() => setDeleteOpened(true)}
+                >
+                  Delete
                 </Button>
               </Group>
               {edit.isError && (

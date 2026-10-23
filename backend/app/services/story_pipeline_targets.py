@@ -27,7 +27,7 @@ from typing import Any, Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job, Project
+from app.db.models import Job, Project, ProjectMissingLibraryItem
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
@@ -341,6 +341,18 @@ def _discovery_adapter(kind: discovery.StageKind) -> Adapter:
 # --- Linking (inline) -----------------------------------------------------------------------
 
 
+def _deleted_block(missing: ProjectMissingLibraryItem | None, kind: str) -> str | None:
+    """Why an entry cannot be linked by the run: its library item was deleted (PHASE-055), so
+    the user has to create it again or pick another one first.
+    """
+    if missing is None:
+        return None
+    return (
+        f"'{missing.name}' was deleted from the {kind} library. "
+        f"Create the {kind} again or pick another one in the links step."
+    )
+
+
 async def _evaluate_links(session: AsyncSession, project: Project, options: RunOptions) -> StepView:
     characters = await character_links.state(session, project.id)
     environments = await environment_links.state(session, project.id)
@@ -350,6 +362,7 @@ async def _evaluate_links(session: AsyncSession, project: Project, options: RunO
             str(entry.item.get("name", entry.item["id"])),
             entry.info is not None,
             ref=("character",),
+            block=_deleted_block(entry.missing, "character"),
         )
         for entry in characters.entries
     ] + [
@@ -358,6 +371,7 @@ async def _evaluate_links(session: AsyncSession, project: Project, options: RunO
             str(entry.item.get("name", entry.item["id"])),
             entry.info is not None,
             ref=("environment",),
+            block=_deleted_block(entry.missing, "environment"),
         )
         for entry in environments.entries
     ]

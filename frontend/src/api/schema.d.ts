@@ -1388,7 +1388,11 @@ export interface paths {
         get: operations["get_character_api_lab_characters__character_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Character
+         * @description Deletes the character for good. Projects that used it are flagged, not changed.
+         */
+        delete: operations["delete_character_api_lab_characters__character_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -1812,7 +1816,11 @@ export interface paths {
         get: operations["get_environment_api_lab_environments__environment_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Environment
+         * @description Deletes the environment for good. Projects that used it are flagged, not changed.
+         */
+        delete: operations["delete_environment_api_lab_environments__environment_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -3669,6 +3677,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Project Deletion Preview */
+        get: operations["get_project_deletion_preview_api_projects__project_id__deletion_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Project
+         * @description Deletes the project, its files, and the chosen characters and environments.
+         */
+        post: operations["delete_project_api_projects__project_id__delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Character Deletion Preview */
+        get: operations["get_character_deletion_preview_api_lab_characters__character_id__deletion_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Environment Deletion Preview */
+        get: operations["get_environment_deletion_preview_api_lab_environments__environment_id__deletion_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4389,6 +4468,29 @@ export interface components {
             created_at: string;
         };
         /**
+         * DeletionItemOut
+         * @description One library item a project used, as the delete dialog lists it.
+         */
+        DeletionItemOut: {
+            /** Library Id */
+            library_id: number;
+            /** Name */
+            name: string;
+            /**
+             * How
+             * @enum {string}
+             */
+            how: "created" | "mapped" | "cast" | "made_for_project";
+            /** Archived */
+            archived: boolean;
+            /** In Cast */
+            in_cast: boolean;
+            /** Other Projects */
+            other_projects: string[];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
+        /**
          * DialogueLineOut
          * @description One dialogue line the clip must contain.
          */
@@ -4663,6 +4765,7 @@ export interface components {
             /** Description */
             description: string;
             link: components["schemas"]["LinkedEnvironmentOut"] | null;
+            missing?: components["schemas"]["MissingItemOut"] | null;
         };
         /** EnvironmentLinksOut */
         EnvironmentLinksOut: {
@@ -5882,6 +5985,17 @@ export interface components {
             /** Duration S */
             duration_s: number | null;
         };
+        /** LibraryDeletionPreviewOut */
+        LibraryDeletionPreviewOut: {
+            /** Library Id */
+            library_id: number;
+            /** Name */
+            name: string;
+            /** Projects */
+            projects: components["schemas"]["ProjectUseOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
         /**
          * LinkEntryOut
          * @description One entry of the newest discovered list. `link` is None while it is unlinked.
@@ -5894,6 +6008,7 @@ export interface components {
             /** Description */
             description: string;
             link: components["schemas"]["LinkedCharacterOut"] | null;
+            missing?: components["schemas"]["MissingItemOut"] | null;
         };
         /**
          * LinkedCharacterOut
@@ -6196,6 +6311,19 @@ export interface components {
             pictures: number;
             /** Audios */
             audios: number;
+        };
+        /**
+         * MissingItemOut
+         * @description What a project's link panel shows for an entry whose library item was deleted.
+         */
+        MissingItemOut: {
+            /** Name */
+            name: string;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
         };
         /** ModelFieldsIn */
         ModelFieldsIn: {
@@ -6830,6 +6958,33 @@ export interface components {
              */
             speech_mode: "both" | "no_dialogue" | "no_narration";
         };
+        /**
+         * ProjectDeleteIn
+         * @description The library items to delete with the project. Anything left out stays in the library.
+         */
+        ProjectDeleteIn: {
+            /** Character Ids */
+            character_ids?: number[];
+            /** Environment Ids */
+            environment_ids?: number[];
+        };
+        /** ProjectDeletionPreviewOut */
+        ProjectDeletionPreviewOut: {
+            /** Project Id */
+            project_id: number;
+            /** Name */
+            name: string;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Take Count */
+            take_count: number;
+            /** Render Count */
+            render_count: number;
+            /** Characters */
+            characters: components["schemas"]["DeletionItemOut"][];
+            /** Environments */
+            environments: components["schemas"]["DeletionItemOut"][];
+        };
         /** ProjectDetail */
         ProjectDetail: {
             /** Id */
@@ -6935,6 +7090,20 @@ export interface components {
             script_text?: string | null;
             /** Review Points */
             review_points?: ("story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots")[] | null;
+        };
+        /**
+         * ProjectUseOut
+         * @description A project that uses a library item.
+         */
+        ProjectUseOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+            /** Discovery Id */
+            discovery_id: string | null;
+            /** In Cast */
+            in_cast: boolean;
         };
         /**
          * PromptCutOut
@@ -13626,6 +13795,53 @@ export interface operations {
             };
         };
     };
+    delete_character_api_lab_characters__character_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project or library item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Work on it is still running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     edit_character_api_lab_characters__character_id__patch: {
         parameters: {
             query?: never;
@@ -14580,6 +14796,53 @@ export interface operations {
             };
             /** @description No environment has this id. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_environment_api_lab_environments__environment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project or library item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Work on it is still running. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -18565,6 +18828,177 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_project_deletion_preview_api_projects__project_id__deletion_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDeletionPreviewOut"];
+                };
+            };
+            /** @description No such project or library item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_api_projects__project_id__delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectDeleteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project or library item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Work on it is still running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A chosen item is not the project's. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_character_deletion_preview_api_lab_characters__character_id__deletion_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryDeletionPreviewOut"];
+                };
+            };
+            /** @description No such project or library item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_environment_deletion_preview_api_lab_environments__environment_id__deletion_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryDeletionPreviewOut"];
+                };
+            };
+            /** @description No such project or library item. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

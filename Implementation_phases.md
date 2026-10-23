@@ -305,6 +305,7 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 | PHASE-052 | Environment views: plan, prompts and pictures | M7 | 017, 050, 051 | In Progress |
 | PHASE-053 | Views in each environment state | M7 | 017, 052 | In Progress |
 | PHASE-054 | Shots use the staging and the views | M7 | 022, 024, 051, 052, 053 | In Progress |
+| PHASE-055 | Delete projects, characters and environments | M7 | 008, 013, 039, 048 | In Progress |
 | PHASE-034 | Background music layer (supplied track) | M8 | 028 | Not Started |
 | PHASE-035 | Music Planner | M8 | 034 | Not Started |
 | PHASE-037 | Editing of story-structure and scene artifacts | M9 | 028 | In Progress |
@@ -2557,6 +2558,39 @@ flowchart TD
 
 ---
 
+### PHASE-055 — Delete projects, characters and environments
+
+**Status:** In Progress (code written 2026-10-24; waiting for the owner's run) · **Milestone:** M7 · **Vision:** §38
+
+**Objective.** Let the owner delete a project, a library character or a library environment, and keep every project that used a deleted item safe and honest about it.
+
+**Scope.**
+- Deleting a project opens a dialog that lists the characters and environments the project used (linked, in its cast, or made for it). Everything is ticked; the owner unticks what stays in the library. An item that other projects use too is marked with their names. The project's rows go by cascade, and its media folder is removed.
+- Deleting a library character or environment (its own page) lists the projects that use it. The row, its versions, looks, takes, states, views, links and cast rows go; the pictures, cut-outs, speech and clips only it used are removed, and a file anything else still uses stays.
+- A project that used a deleted item is not changed. It gets one record (`project_missing_library_item`, migration `0061`): its entry shows "Deleted from library", the pipeline's links step stops on it and never makes a new item by itself, and the owner chooses **Create again** or **Use an existing** one. Linking again clears the record, and the existing staleness rules mark the scenes, shots and takes that used the old item out of date, so **Regenerate out-of-date** rebuilds them.
+- A deletion is refused (409) while work on the item, or in a project that uses it, is running.
+
+**Out of scope.** Undo, a recycle bin, and deleting saved voices (the Voice lab keeps them).
+
+**Dependencies.** PHASE-008, PHASE-013, PHASE-039, PHASE-048.
+
+**Expected outcome.** Projects and library items can be removed for good, and no other project is broken or silently changed by it.
+
+**Verification criteria.** Deleting a project whose character another project also links removes the project and the character, flags the other project's entry, and leaves its discovered list current; "Create again" clears the flag and makes the old scenes and shots out of date; a picture frozen in another character's version is not deleted. Standard checks (§3.5).
+
+**Observable improvements.** The library and the project list can be tidied.
+
+**Completion checklist.**
+- [x] Migration `0061`, table
+- [x] Deletion services, file clean-up, API
+- [x] Link state, flag and pipeline block
+- [x] Dialogs and buttons
+- [ ] Owner's run with real projects
+
+**Completion notes.** _(fill in after the owner's run)_
+
+---
+
 ### M8 — Music
 
 ---
@@ -3321,3 +3355,4 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-23 | PHASE-042 | In Progress | Planned with the owner: **an adopted lab version counts as defined and keeps the project's own provenance** (a lab version has no `inputs`, so a moved pin would have turned the entry into "not defined"), and **adopting only moves the pins** (the user presses Regenerate out-of-date per project). Code complete: migration `0056` (`provenance_version` on both link tables), `services/library_adoption.py`, the lab's `POST .../adopt` and the project's `PUT .../version` for characters and environments, `complete`, `preselected` and `blocked_reason` in the lab's project lists, the **Adopt** dialog and the version selects, `DATABASE_STRUCTURE.md`. Verified on a throwaway database (58 checks); the end-to-end Arjun example with real models and the owner's run on the rebuilt app are still open. |
 | 2026-10-23 | PHASE-043 | In Progress | Code complete: the guide confirmed the reference-mode multi-shot form (Step 0); `rapid_exchange` on a shot plan (checked, editable), `exchange.cuts` on the generation request, a per-cut prompt compiler where code writes the `[Shot n] At <cue>` tags, and the UI. No migration. The owner's lab check V6b and one real exchange shot on the rebuilt app are still open (see the Completion notes). |
 | 2026-10-24 | **PHASE-050 to PHASE-054 added: environment views and scene staging (M7):** a spatial plan in the environment definition, a Scene Staging stage, camera-direction views of an environment made by editing its master picture, views in each state, and shots that pick the view behind their subject. Depends on 012, 013, 014, 015, 017, 022 and 024. | Owner: two speakers in one room always stood in front of the same wall, because a place had one picture. |
+| 2026-10-24 | **PHASE-055 added: delete projects, characters and environments (M7):** a delete dialog for a project that offers its characters and environments (all ticked), delete on a library character or environment, and a "deleted from the library" flag in the projects that used it, with "Create again" or "Use an existing". Depends on 008, 013, 039 and 048. | Owner: wanted to remove projects and library items without breaking other projects. |

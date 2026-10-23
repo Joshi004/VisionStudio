@@ -194,6 +194,8 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
   const entries = data?.entries ?? [];
   const orphaned = data?.orphaned ?? [];
   const unlinkedCount = entries.filter((entry) => entry.link === null).length;
+  // An entry whose library item was deleted waits for a choice; "Link all" leaves it alone.
+  const linkableCount = entries.filter((entry) => entry.link === null && !entry.missing).length;
 
   // A library character is used for one entry of a project, so the ones already linked are not
   // offered again.
@@ -226,7 +228,7 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
           <Button
             onClick={() => linkAll.mutate()}
             loading={linkAll.isPending}
-            disabled={isLoading || isError || busy || unlinkedCount === 0}
+            disabled={isLoading || isError || busy || linkableCount === 0}
           >
             Link all
           </Button>
@@ -291,38 +293,52 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
                   }
                 />
               ) : (
-                <Group gap="xs">
-                  <Button
-                    size="compact-sm"
-                    variant="default"
-                    loading={create.isPending && create.variables === entry.id}
-                    disabled={busy}
-                    onClick={() => create.mutate(entry.id)}
-                  >
-                    Create in lab
-                  </Button>
-                  <Select
-                    aria-label={`Use an existing character for ${entry.name}`}
-                    size="xs"
-                    w={240}
-                    searchable
-                    clearable={false}
-                    placeholder={
-                      options.length === 0
-                        ? "No other characters in the lab"
-                        : "Use an existing character"
-                    }
-                    nothingFoundMessage="No such character"
-                    data={options}
-                    value={null}
-                    disabled={busy || options.length === 0}
-                    onChange={(value) => {
-                      if (value !== null) {
-                        map.mutate({ discoveryId: entry.id, characterId: Number(value) });
+                <Stack gap={4}>
+                  {entry.missing && (
+                    <Group gap="xs" wrap="nowrap" align="flex-start">
+                      <Badge variant="light" color="red" style={{ flexShrink: 0 }}>
+                        Deleted from library
+                      </Badge>
+                      <Text size="xs" c="red">
+                        {entry.missing.name} was deleted from the Character Lab. Create it again or
+                        pick another character; the scenes and shots that used it will need
+                        regenerating.
+                      </Text>
+                    </Group>
+                  )}
+                  <Group gap="xs">
+                    <Button
+                      size="compact-sm"
+                      variant="default"
+                      loading={create.isPending && create.variables === entry.id}
+                      disabled={busy}
+                      onClick={() => create.mutate(entry.id)}
+                    >
+                      {entry.missing ? "Create again" : "Create in lab"}
+                    </Button>
+                    <Select
+                      aria-label={`Use an existing character for ${entry.name}`}
+                      size="xs"
+                      w={240}
+                      searchable
+                      clearable={false}
+                      placeholder={
+                        options.length === 0
+                          ? "No other characters in the lab"
+                          : "Use an existing character"
                       }
-                    }}
-                  />
-                </Group>
+                      nothingFoundMessage="No such character"
+                      data={options}
+                      value={null}
+                      disabled={busy || options.length === 0}
+                      onChange={(value) => {
+                        if (value !== null) {
+                          map.mutate({ discoveryId: entry.id, characterId: Number(value) });
+                        }
+                      }}
+                    />
+                  </Group>
+                </Stack>
               )}
             </Group>
           </Stack>

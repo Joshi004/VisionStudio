@@ -191,8 +191,14 @@ def cast_sha256(members: list[CastMember]) -> str:
     makes the discovered list out of date. The modes do not count: they change nothing the
     model is shown.
     """
-    ids = sorted(member.library_id for member in members)
-    return hashlib.sha256(json.dumps(ids).encode("utf-8")).hexdigest()
+    return cast_sha256_of_ids([member.library_id for member in members])
+
+
+def cast_sha256_of_ids(library_ids: list[int]) -> str:
+    """The same hash from library ids alone. The ids of library items that were deleted from
+    the lab while in the cast (PHASE-055) are counted too, so a deletion does not change it.
+    """
+    return hashlib.sha256(json.dumps(sorted(set(library_ids))).encode("utf-8")).hexdigest()
 
 
 # The hash of an empty cast: what a discovered list made before the cast existed is taken to

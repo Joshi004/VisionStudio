@@ -46,9 +46,16 @@ from app.db.models import (
     LibraryCharacterVersion,
     Project,
     ProjectCharacterLink,
+    ProjectMissingLibraryItem,
 )
 from app.db.types import utcnow
-from app.services import character_library, character_versions, discovery, project_cast
+from app.services import (
+    character_library,
+    character_versions,
+    discovery,
+    missing_items,
+    project_cast,
+)
 
 _KIND: Final = "characters"
 
@@ -78,10 +85,13 @@ class LinkInfo:
 
 @dataclass(frozen=True)
 class EntryState:
-    """One entry of the newest discovered list, and its link (None while it is unlinked)."""
+    """One entry of the newest discovered list, and its link (None while it is unlinked).
+    `missing` is set for an unlinked entry whose library character was deleted (PHASE-055).
+    """
 
     item: dict[str, Any]
     info: LinkInfo | None
+    missing: ProjectMissingLibraryItem | None = None
 
 
 @dataclass(frozen=True)
@@ -164,9 +174,17 @@ async def state(session: AsyncSession, project_id: int) -> LinksState:
     by_discovery_id = {info.link.discovery_id: info for info in infos}
     items = _items(newest) if newest is not None else []
     listed = {item["id"] for item in items}
+    missing = await missing_items.by_discovery_id(session, project_id, "character")
     return LinksState(
         discovery_version=newest.version if newest is not None else None,
-        entries=[EntryState(item=item, info=by_discovery_id.get(item["id"])) for item in items],
+        entries=[
+            EntryState(
+                item=item,
+                info=by_discovery_id.get(item["id"]),
+                missing=missing.get(item["id"]) if item["id"] not in by_discovery_id else None,
+            )
+            for item in items
+        ],
         orphaned=[info for info in infos if info.link.discovery_id not in listed],
     )
 
@@ -238,6 +256,7 @@ async def _create_one(
     )
     session.add(link)
     await session.flush()
+    await missing_items.clear_for_entry(session, project_id, "character", item["id"])
     return link
 
 
@@ -265,7 +284,10 @@ async def link_all(session: AsyncSession, project: Project) -> int:
     if newest is None:
         raise CharacterLinkError("Find the characters first: there is nothing to link yet.")
     links = await _project_links(session, project.id)
+    # An entry whose character was deleted waits for the user's choice (PHASE-055): it is not
+    # made again by itself.
     linked = {link.discovery_id for link in links}
+    linked |= set(await missing_items.by_discovery_id(session, project.id, "character"))
     used = {link.character_id for link in links}
     in_cast = await project_cast.cast_modes(session, project.id, _KIND)
     made = 0
@@ -345,6 +367,7 @@ async def _map_one(
         existing.discovery_version = newest.version
         existing.updated_at = utcnow()
     await session.flush()
+    await missing_items.clear_for_entry(session, project_id, "character", discovery_id)
 
 
 async def map_to_existing(

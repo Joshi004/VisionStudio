@@ -880,8 +880,8 @@ class LabRun(Base):
     A Seedream run is one synchronous call, not a `job`: the lab is not tied to a project. A run
     on the GPU server's Qwen-Image-2.1 takes minutes, so it is a `lab_image` job (`job_id`) and
     the row is `running` until the job ends. Either way the row keeps the exact request and
-    the raw response (image data replaced by sizes), so results can be compared later. Never
-    deleted in iteration 1.
+    the raw response (image data replaced by sizes), so results can be compared later. Deleted
+    only with the character or environment it was made for (PHASE-055).
     """
 
     __tablename__ = "lab_run"
@@ -1008,7 +1008,7 @@ class LabVideoRun(Base):
 class Voice(Base):
     """A saved voice: a clean recording and its exact transcript, which Breeze TTS clones
     (Phase 21). A voice made in the Voice lab points at the lab run that made it and shares
-    that run's file. A voice is never deleted, like every stored file.
+    that run's file. A voice is never deleted by the labs, nor with a project (PHASE-055).
     """
 
     __tablename__ = "voice"
@@ -1188,7 +1188,8 @@ class LibraryCharacter(Base):
     has typed before, as a growing list of suggestions, computed from what every character
     already holds (`services/character_card.suggested_options`).
 
-    Never deleted in iteration 1.
+    Deleted only by the user, for good (`services/library_deletion`, PHASE-055); a project that
+    used it is flagged, not changed.
     """
 
     __tablename__ = "library_character"
@@ -1577,8 +1578,8 @@ class LibraryEnvironment(Base):
     link to and pin a version of (`ProjectEnvironmentLink`, PHASE-013).
 
     This is the editable head, like `library_character`. Every change to the profile adds one
-    immutable `library_environment_version` row (`services/environment_versions`). Never
-    deleted, only archived.
+    immutable `library_environment_version` row (`services/environment_versions`). Archived, or
+    deleted for good by the user (`services/library_deletion`, PHASE-055).
 
     `era_kind`, `era_years` and `era_setting` follow the same rules as a character's. A place
     has no mouth, species or voice, so the profile is only a description, the era, an optional
@@ -2037,3 +2038,41 @@ class EnvironmentViewState(Base):
     )
     inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ProjectMissingLibraryItem(Base):
+    """A library character or environment that a story project used and that was deleted from
+    the library (PHASE-055).
+
+    Deleting a library item removes its links and cast rows by cascade, so this record is
+    written first, one per project that used the item. It lets the project say "this entry was
+    deleted" instead of quietly making a new item for it, and it is what the user acts on
+    ("create it again" or "pick another").
+
+    `library_id` is the deleted item's id as a plain number, not a link: the row is gone.
+    `discovery_id` is the slug id of the discovered entry that was linked to it; NULL when it
+    was only in the project's cast, or once the entry has been linked again. `in_cast` is true
+    when the item was in the project's cast: the id is then still counted in the cast hash
+    (`services/discovery.current_cast_sha256`), so deleting it does not make the whole
+    discovered list out of date. A project has at most one record per deleted item.
+    """
+
+    __tablename__ = "project_missing_library_item"
+    __table_args__ = (
+        CheckConstraint("kind IN ('character', 'environment')", name="kind_valid"),
+        UniqueConstraint(
+            "project_id", "kind", "library_id", name="uq_project_missing_library_item_library"
+        ),
+        UniqueConstraint(
+            "project_id", "kind", "discovery_id", name="uq_project_missing_library_item_discovery"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    kind: Mapped[str]
+    library_id: Mapped[int]
+    discovery_id: Mapped[str | None] = mapped_column(default=None)
+    name: Mapped[str]
+    in_cast: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    deleted_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
