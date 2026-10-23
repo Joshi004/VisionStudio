@@ -24,6 +24,7 @@ const ACCEPT_STAGES: readonly string[] = [
   "relations",
   "scene_definitions",
   "events",
+  "scene_staging",
   "speech_units",
   "shot_plans",
   "shot_definitions",

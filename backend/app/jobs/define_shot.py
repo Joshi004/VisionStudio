@@ -85,6 +85,9 @@ class _Input:
     bible_id: int
     # The user's note on the earlier specification, when this one is made from one (PHASE-038).
     feedback: user_feedback.Feedback | None = None
+    # Where the characters stand at this shot and the views that may stand behind it
+    # (PHASE-054); None on a job made before the staging existed.
+    staging: dict[str, Any] | None = None
 
 
 def _is_number(value: Any) -> bool:
@@ -112,9 +115,11 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     environment = job_input.get("environment")
     inputs = job_input.get("inputs")
     bible_id = job_input.get("story_bible_id")
+    staging = job_input.get("staging")
     feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     if (
         not feedback_ok
+        or not (staging is None or isinstance(staging, dict))
         or not isinstance(scene, dict)
         or not isinstance(scene_id, str)
         or not isinstance(shot_id, str)
@@ -159,6 +164,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         inputs=inputs,
         bible_id=bible_id,
         feedback=feedback,
+        staging=staging,
     )
 
 
@@ -183,6 +189,7 @@ class DefineShotHandler(JobHandler):
                 scene_character_ids=read.scene_character_ids,
                 dialogue=read.dialogue,
                 exchange=read.shot.get("rapid_exchange") is True,
+                staging=read.staging,
             )
         except ValueError as exc:
             return str(exc), None
@@ -228,6 +235,7 @@ class DefineShotHandler(JobHandler):
             environment=read.environment,
             model=target.model,
             feedback=read.feedback,
+            staging=read.staging,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

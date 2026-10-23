@@ -1,8 +1,9 @@
 """The edit prompts that make a new look and a new environment state (PHASE-017).
 
-A new look is made by editing the character's canonical front picture, and a new state by
-editing the environment's canonical picture, so the face or the layout stays fixed and only the
-wardrobe or the condition changes. The words are fixed here, in the same way as the angle
+A new look is made by editing the character's canonical front picture, a new state by editing
+the environment's canonical picture, and a view in a state (PHASE-053) by editing the view's
+picture into the condition the state's picture shows, so the face or the layout stays fixed and
+only the wardrobe or the condition changes. The words are fixed here, in the same way as the angle
 prompts of `services/character_looks.py`: no language model writes them. The only thing that
 varies is the description PHASE-016 stored for the named look or state, which is a short line
 of at most `look_state_resolution_writer.DESCRIPTION_MAX_CHARS` characters.
@@ -31,6 +32,13 @@ _STATE_TEMPLATE: Final = (
     "about the picture changes."
 )
 
+_VIEW_STATE_TEMPLATE: Final = (
+    "Picture 1 is one view of a place and picture 2 shows the same place in a new condition. "
+    "Make picture 1 exactly as it is, with the same viewpoint, framing, layout, architecture, "
+    "furniture and objects in the same positions, empty with no people, but in the condition "
+    "shown by picture 2: {description} Nothing else about picture 1 changes."
+)
+
 
 def _sentence(description: str) -> str:
     """The description as one finished sentence, so the template's last sentence starts
@@ -56,3 +64,10 @@ def look_edit_prompt(description: str) -> str:
 def state_edit_prompt(description: str) -> str:
     """The prompt that edits an environment's canonical picture into the named state."""
     return _checked(_STATE_TEMPLATE.format(description=_sentence(description)))
+
+
+def view_state_edit_prompt(description: str) -> str:
+    """The prompt that edits a view of an environment (picture 1) into the condition of a state
+    (picture 2, the state's own picture, PHASE-053).
+    """
+    return _checked(_VIEW_STATE_TEMPLATE.format(description=_sentence(description)))

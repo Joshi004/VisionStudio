@@ -136,6 +136,13 @@ DURATION POLICY. Choose every "target_duration" from that list: code moves any o
 the nearest one on it, which can make a shot a little shorter or longer than you planned.
 - Do not invent events, characters or places the scene does not have.
 
+If the user message also holds STAGING, the scene was staged: it says where each character \
+stands, which side of the screen they are on and what is behind them, and which two characters \
+the camera keeps on opposite sides of the screen. Plan shots that suit it: a conversation can be \
+cut between a shot of each speaker, each with their own background, or shown together in a \
+shot of the group. Never plan a shot that needs two characters on the same side of the screen \
+or on the same background. Do not describe the staging in the shots' descriptions.
+
 If the user message also holds PREVIOUS SHOTS and TIMELINE PROBLEMS, an earlier plan of this \
 same scene was checked by code and had the problems listed. Plan the whole scene again so that \
 none of those problems remains: for example, merge a shot that is too short with a neighbour, \
@@ -178,6 +185,7 @@ def build_request(
     replan: dict[str, Any] | None = None,
     feedback: user_feedback.Feedback | None = None,
     speech_mode: str = SPEECH_BOTH,
+    staging: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
@@ -189,6 +197,9 @@ def build_request(
     description, definition}` and `environment` is `{id, name, description, definition}`;
     `events` is the scene's stored events; `units` is a list of `{id, event_id, kind,
     speaker_id, text, measured_seconds}`. The target range comes from the duration policy.
+
+    `staging` is the scene's staging (`shot_staging.planner_block`, PHASE-054) or None: it adds
+    `STAGING`.
 
     `h3_lengths_seconds` is the lengths H3 makes inside the hard bounds (`h3_lengths.grid_lengths`),
     given to the model as part of the duration policy data (D-8, never written into the
@@ -218,6 +229,8 @@ def build_request(
         "SPEECH UNITS (JSON):\n" + json.dumps(units, ensure_ascii=False, indent=2),
         "DURATION POLICY (JSON):\n" + json.dumps(policy, ensure_ascii=False, indent=2),
     ]
+    if staging is not None:
+        parts.append("STAGING (JSON):\n" + json.dumps(staging, ensure_ascii=False, indent=2))
     if replan is not None:
         parts.append(
             "PREVIOUS SHOTS (JSON):\n"

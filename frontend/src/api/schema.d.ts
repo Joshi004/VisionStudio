@@ -2165,6 +2165,148 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/environment-views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Environment Views */
+        get: operations["get_environment_views_api_projects__project_id__environment_views_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-views/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan All
+         * @description Starts a planning job for every environment that is not planned and current, can be
+         *     planned and is not already being planned. The others are skipped, with the reason.
+         */
+        post: operations["plan_all_api_projects__project_id__environment_views_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-views/{discovery_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan One
+         * @description Starts the job that plans one environment's views. If it already has a job waiting or
+         *     running, that job's id is returned and no second job is made.
+         */
+        post: operations["plan_one_api_projects__project_id__environment_views__discovery_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-views/{discovery_id}/pictures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make Pictures
+         * @description Starts the picture of every view of the plan that has none and is not being made. A
+         *     view of what is behind the master camera waits for the left and right views.
+         */
+        post: operations["make_pictures_api_projects__project_id__environment_views__discovery_id__pictures_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-views/views/{view_id}/remake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remake Project View
+         * @description Makes one view's picture again, from the master picture the project pins.
+         */
+        post: operations["remake_project_view_api_projects__project_id__environment_views_views__view_id__remake_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Environment Views
+         * @description The views of this environment, oldest first, each with its picture once it is made. A
+         *     story project's plan creates them.
+         */
+        get: operations["list_environment_views_api_lab_environments__environment_id__views_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/views/{view_id}/remake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remake Lab View
+         * @description Makes one view's picture again, from the master picture of the environment's newest
+         *     version.
+         */
+        post: operations["remake_lab_view_api_lab_environments__environment_id__views__view_id__remake_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/scene-definitions": {
         parameters: {
             query?: never;
@@ -2324,6 +2466,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/scene-staging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scene Staging */
+        get: operations["get_scene_staging_api_projects__project_id__scene_staging_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-staging/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run All
+         * @description Starts a job for every scene that is not staged and up to date already, can be staged
+         *     and is not already being staged. The others are skipped, with the reason.
+         */
+        post: operations["run_all_api_projects__project_id__scene_staging_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-staging/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run One
+         * @description Starts the job that stages one scene. If it already has a job waiting or running, that
+         *     job's id is returned and no second job is made.
+         */
+        post: operations["run_one_api_projects__project_id__scene_staging__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-staging/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Staging
+         * @description Saves the whole edited staging of one scene as its next version, written by the user.
+         */
+        put: operations["save_staging_api_projects__project_id__scene_staging__scene_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/looks-and-states": {
         parameters: {
             query?: never;
@@ -2436,6 +2657,27 @@ export interface paths {
          * @description Starts the picture of one new state. If it is being made already, nothing new starts.
          */
         post: operations["run_state_api_projects__project_id__look_state_images_states__record_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/look-state-images/view-states/{view_id}/{state_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run View State
+         * @description Starts the picture of one view in one state (PHASE-053). If it is being made already,
+         *     nothing new starts.
+         */
+        post: operations["run_view_state_api_projects__project_id__look_state_images_view_states__view_id___state_id__run_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3441,7 +3683,7 @@ export interface components {
              * Stage
              * @enum {string}
              */
-            stage: "story_bible" | "character_discovery" | "environment_discovery" | "scene_discovery" | "relations" | "scene_definitions" | "events" | "speech_units" | "shot_plans" | "shot_definitions" | "references" | "prompts";
+            stage: "story_bible" | "character_discovery" | "environment_discovery" | "scene_discovery" | "relations" | "scene_definitions" | "events" | "scene_staging" | "speech_units" | "shot_plans" | "shot_definitions" | "references" | "prompts";
             /** Scene Id */
             scene_id?: string | null;
             /** Shot Id */
@@ -3525,6 +3767,27 @@ export interface components {
         AuditionsIn: {
             /** Line */
             line: string;
+        };
+        /** AxisIn */
+        AxisIn: {
+            /** Between */
+            between?: string[];
+            /** Camera Half */
+            camera_half?: string | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** AxisOut */
+        AxisOut: {
+            /** Between */
+            between: string[];
+            /** Camera Half */
+            camera_half: ("ahead" | "left" | "right" | "behind") | null;
+            /** Note */
+            note: string;
         };
         /** BehaviorOut */
         BehaviorOut: {
@@ -4313,6 +4576,7 @@ export interface components {
             architecture: string;
             /** Layout */
             layout: string;
+            spatial_plan?: components["schemas"]["EnvironmentSpatialPlanOut"] | null;
             visual_identity: components["schemas"]["EnvironmentVisualIdentityOut"];
             /** Important Landmarks */
             important_landmarks: string[];
@@ -4558,6 +4822,17 @@ export interface components {
             /** Job Id */
             job_id: number;
         };
+        /** EnvironmentSidesOut */
+        EnvironmentSidesOut: {
+            /** Ahead */
+            ahead: string;
+            /** Left */
+            left: string;
+            /** Right */
+            right: string;
+            /** Behind */
+            behind: string;
+        };
         /** EnvironmentSkippedOut */
         EnvironmentSkippedOut: {
             /** Discovery Id */
@@ -4566,6 +4841,18 @@ export interface components {
             name: string;
             /** Reason */
             reason: string;
+        };
+        /**
+         * EnvironmentSpatialPlanOut
+         * @description What is on every side of the master picture's camera, and where people can stand
+         *     (PHASE-050).
+         */
+        EnvironmentSpatialPlanOut: {
+            /** Master View */
+            master_view: string;
+            sides: components["schemas"]["EnvironmentSidesOut"];
+            /** Zones */
+            zones: components["schemas"]["EnvironmentZoneOut"][];
         };
         /**
          * EnvironmentStateOut
@@ -4640,7 +4927,7 @@ export interface components {
              */
             source: "ai" | "manual";
             /** Changes */
-            changes: ("created" | "profile" | "definition" | "states")[];
+            changes: ("created" | "profile" | "definition" | "states" | "views")[];
             profile: components["schemas"]["EnvironmentProfileOut"];
             image: components["schemas"]["PictureOut"] | null;
             definition: components["schemas"]["EnvironmentDefinitionOut"] | null;
@@ -4650,6 +4937,51 @@ export interface components {
             pinned_by: components["schemas"]["PinnedByOut"][];
             /** States */
             states: components["schemas"]["StatePictureOut"][];
+            /** Views */
+            views: components["schemas"]["ViewPictureOut"][];
+        };
+        /** EnvironmentViewsEntryOut */
+        EnvironmentViewsEntryOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_planned" | "planned" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            version: components["schemas"]["PlanVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Scenes */
+            scenes: string[];
+            /** Coverage */
+            coverage: components["schemas"]["SceneCoverageOut"][];
+            /** Views */
+            views: components["schemas"]["ViewOut"][];
+            /**
+             * Pictures Status
+             * @enum {string}
+             */
+            pictures_status: "none" | "in_progress" | "failed" | "ready";
+            /** Can Plan */
+            can_plan: boolean;
+            /** Plan Blocked Reason */
+            plan_blocked_reason: string | null;
+            /** Can Make Pictures */
+            can_make_pictures: boolean;
+            /** Pictures Blocked Reason */
+            pictures_blocked_reason: string | null;
+            master: components["schemas"]["PictureOut"] | null;
+        };
+        /** EnvironmentViewsOut */
+        EnvironmentViewsOut: {
+            /** Entries */
+            entries: components["schemas"]["EnvironmentViewsEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
         };
         /** EnvironmentVisualIdentityOut */
         EnvironmentVisualIdentityOut: {
@@ -4665,6 +4997,20 @@ export interface components {
             furniture: string;
             /** Color Palette */
             color_palette: string;
+        };
+        /** EnvironmentZoneOut */
+        EnvironmentZoneOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "ahead" | "left" | "right" | "behind";
+            /** Description */
+            description: string;
         };
         /** EnvironmentsOut */
         EnvironmentsOut: {
@@ -4999,7 +5345,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
             /**
              * Status
              * @enum {string}
@@ -5052,7 +5398,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
             /**
              * Kind
              * @enum {string}
@@ -5074,6 +5420,11 @@ export interface components {
             feedback: string | null;
             media: components["schemas"]["MediaRequestOut"] | null;
         };
+        /** JobRunOut */
+        JobRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
         /** JobSummary */
         JobSummary: {
             /** Id */
@@ -5086,7 +5437,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
             /**
              * Status
              * @enum {string}
@@ -5649,7 +6000,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "look" | "state";
+            kind: "look" | "state" | "view_state";
             /** Id */
             id: number;
             /** Slug */
@@ -5685,6 +6036,10 @@ export interface components {
             blocked_reason: string | null;
             /** Reasons */
             reasons: string[];
+            /** View Id */
+            view_id: number | null;
+            /** State Id */
+            state_id: number | null;
         };
         /** LookStateImagesOut */
         LookStateImagesOut: {
@@ -5740,6 +6095,8 @@ export interface components {
             look_ids: number[];
             /** State Ids */
             state_ids: number[];
+            /** View State Ids */
+            view_state_ids: number[];
             /** Skipped */
             skipped: components["schemas"]["LookStateSkippedOut"][];
         };
@@ -5773,7 +6130,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "look" | "state";
+            kind: "look" | "state" | "view_state";
             /** Id */
             id: number;
             /** Name */
@@ -5853,6 +6210,42 @@ export interface components {
             };
             /** Prompt Job Id */
             prompt_job_id?: number | null;
+        };
+        /** MoveIn */
+        MoveIn: {
+            /** After Event Id */
+            after_event_id: string;
+            /** Character Id */
+            character_id: string;
+            /** Zone */
+            zone: string;
+            /** Faces */
+            faces: string;
+            /** Screen Side */
+            screen_side: string;
+            /** Background Side */
+            background_side: string;
+        };
+        /** MoveOut */
+        MoveOut: {
+            /** After Event Id */
+            after_event_id: string;
+            /** Character Id */
+            character_id: string;
+            /** Zone */
+            zone: string;
+            /** Faces */
+            faces: string;
+            /**
+             * Screen Side
+             * @enum {string}
+             */
+            screen_side: "left" | "right" | "center";
+            /**
+             * Background Side
+             * @enum {string}
+             */
+            background_side: "ahead" | "left" | "right" | "behind";
         };
         /**
          * MusicBrief
@@ -6178,6 +6571,13 @@ export interface components {
             /** Url */
             url: string;
         };
+        /** PicturesRunOut */
+        PicturesRunOut: {
+            /** Started */
+            started: number[];
+            /** Waiting */
+            waiting: number[];
+        };
         /**
          * PinnedByOut
          * @description A story project that pins a version.
@@ -6313,6 +6713,70 @@ export interface components {
             left_alone: number;
         };
         /**
+         * PlacementIn
+         * @description One placement of an edited staging. The rules are checked by
+         *     `scene_staging_writer.check_answer`; these limits only keep a request from being huge.
+         */
+        PlacementIn: {
+            /** Character Id */
+            character_id: string;
+            /** Zone */
+            zone: string;
+            /** Posture */
+            posture: string;
+            /** Faces */
+            faces: string;
+            /** Screen Side */
+            screen_side: string;
+            /** Background Side */
+            background_side: string;
+        };
+        /** PlacementOut */
+        PlacementOut: {
+            /** Character Id */
+            character_id: string;
+            /** Zone */
+            zone: string;
+            /** Posture */
+            posture: string;
+            /** Faces */
+            faces: string;
+            /**
+             * Screen Side
+             * @enum {string}
+             */
+            screen_side: "left" | "right" | "center";
+            /**
+             * Background Side
+             * @enum {string}
+             */
+            background_side: "ahead" | "left" | "right" | "behind";
+        };
+        /** PlanRunAllOut */
+        PlanRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["app__api__environment_views__SkippedOut"][];
+        };
+        /** PlanVersionOut */
+        PlanVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * PoolCapacity
          * @description One of the two shared pools: how many jobs may run in it, and what is in it now.
          */
@@ -6344,7 +6808,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
             /** Running */
             running: number;
             /** Queued */
@@ -6400,7 +6864,7 @@ export interface components {
             /** Script Text */
             script_text: string | null;
             /** Review Points */
-            review_points: ("story_structure" | "images" | "scenes" | "shot_plans" | "shots")[];
+            review_points: ("story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots")[];
             story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
@@ -6470,7 +6934,7 @@ export interface components {
             /** Script Text */
             script_text?: string | null;
             /** Review Points */
-            review_points?: ("story_structure" | "images" | "scenes" | "shot_plans" | "shots")[] | null;
+            review_points?: ("story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots")[] | null;
         };
         /**
          * PromptCutOut
@@ -6925,7 +7389,7 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "story_structure" | "images" | "scenes" | "shot_plans" | "shots";
+            key: "story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots";
             /** Label */
             label: string;
             /** Steps */
@@ -6940,7 +7404,7 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "story_structure" | "images" | "scenes" | "shot_plans" | "shots";
+            key: "story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots";
             /** Label */
             label: string;
             /** Steps */
@@ -6971,7 +7435,7 @@ export interface components {
             /** Job Ids */
             job_ids: number[];
             /** Skipped */
-            skipped: components["schemas"]["SkippedOut"][];
+            skipped: components["schemas"]["app__api__character_definitions__SkippedOut"][];
         };
         /** RunIn */
         RunIn: {
@@ -7015,6 +7479,22 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+        };
+        /**
+         * SceneCoverageOut
+         * @description The views that cover each background side of one scene and its group.
+         */
+        SceneCoverageOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Title */
+            title: string;
+            /** By Side */
+            by_side: {
+                [key: string]: string[];
+            };
+            /** Group */
+            group: string[];
         };
         /**
          * SceneDefinitionEntryOut
@@ -7522,6 +8002,19 @@ export interface components {
             /** Shots */
             shots: components["schemas"]["ShotTakesEntryOut"][];
         };
+        /** SceneStagingOut */
+        SceneStagingOut: {
+            /** Scenes Version */
+            scenes_version: number | null;
+            /** Characters */
+            characters: components["schemas"]["StagingCharacterOut"][];
+            /** Environments */
+            environments: components["schemas"]["StagingEnvironmentOut"][];
+            /** Entries */
+            entries: components["schemas"]["StagingEntryOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
         /** SceneStoryContextIn */
         SceneStoryContextIn: {
             /** Before */
@@ -7730,6 +8223,12 @@ export interface components {
             pose: string;
             /** Gaze */
             gaze: string;
+            /** Zone */
+            zone?: string | null;
+            /** Screen Side */
+            screen_side?: string | null;
+            /** Background Side */
+            background_side?: string | null;
         };
         /** ShotCharacterOut */
         ShotCharacterOut: {
@@ -7741,6 +8240,12 @@ export interface components {
             pose: string;
             /** Gaze */
             gaze: string;
+            /** Zone */
+            zone?: string | null;
+            /** Screen Side */
+            screen_side?: string | null;
+            /** Background Side */
+            background_side?: string | null;
         };
         /** ShotCompositionIn */
         ShotCompositionIn: {
@@ -7750,6 +8255,8 @@ export interface components {
             angle: string;
             /** Focus */
             focus: string;
+            /** View */
+            view?: string | null;
         };
         /** ShotCompositionOut */
         ShotCompositionOut: {
@@ -7759,6 +8266,8 @@ export interface components {
             angle: string;
             /** Focus */
             focus: string;
+            /** View */
+            view?: string | null;
         };
         /**
          * ShotContinuityFlagOut
@@ -7850,6 +8359,7 @@ export interface components {
             blocked_reason: string | null;
             /** Needs Confirmation */
             needs_confirmation: boolean;
+            staging?: components["schemas"]["ShotStagingOut"] | null;
         };
         /** ShotDefinitionIn */
         ShotDefinitionIn: {
@@ -8016,6 +8526,21 @@ export interface components {
             rapid_exchange: boolean;
             /** Description */
             description: string;
+        };
+        /** ShotPlacementOut */
+        ShotPlacementOut: {
+            /** Character Id */
+            character_id: string;
+            /** Zone */
+            zone: string;
+            /** Posture */
+            posture: string;
+            /** Faces */
+            faces: string;
+            /** Screen Side */
+            screen_side: string;
+            /** Background Side */
+            background_side: string;
         };
         /** ShotPlanContentOut */
         ShotPlanContentOut: {
@@ -8451,6 +8976,18 @@ export interface components {
             /** Start Seconds */
             start_seconds: number | null;
         };
+        /**
+         * ShotStagingOut
+         * @description Where the characters stand at the start of the shot, and the views allowed behind it.
+         */
+        ShotStagingOut: {
+            /** Placements */
+            placements: components["schemas"]["ShotPlacementOut"][];
+            /** Group Side */
+            group_side: string;
+            /** Views */
+            views: components["schemas"]["ShotViewOut"][];
+        };
         /** ShotTakeOut */
         ShotTakeOut: {
             /** Id */
@@ -8570,14 +9107,23 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /** SkippedOut */
-        SkippedOut: {
-            /** Discovery Id */
-            discovery_id: string;
+        /**
+         * ShotViewOut
+         * @description A view of the shot's place that may stand behind it (PHASE-054).
+         */
+        ShotViewOut: {
+            /** Id */
+            id: string;
             /** Name */
             name: string;
-            /** Reason */
-            reason: string;
+            /** Side */
+            side: string;
+            /** Framing */
+            framing: string;
+            /** Description */
+            description: string;
+            /** Allowed For */
+            allowed_for: string[];
         };
         /** SourceApprovalOut */
         SourceApprovalOut: {
@@ -8853,6 +9399,129 @@ export interface components {
          * @description The provenance of the newest plan of a scene (D-3).
          */
         SpeechUnitsVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** StagingCharacterOut */
+        StagingCharacterOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** StagingContentOut */
+        StagingContentOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Placements */
+            placements: components["schemas"]["PlacementOut"][];
+            axis: components["schemas"]["AxisOut"];
+            /**
+             * Group Side
+             * @enum {string}
+             */
+            group_side: "ahead" | "left" | "right" | "behind";
+            /** Moves */
+            moves: components["schemas"]["MoveOut"][];
+        };
+        /**
+         * StagingEntryOut
+         * @description One scene of the newest list of scenes.
+         */
+        StagingEntryOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_staged" | "staged" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            staging: components["schemas"]["StagingContentOut"] | null;
+            version: components["schemas"]["StagingVersionOut"] | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+        };
+        /**
+         * StagingEnvironmentOut
+         * @description An environment with its zones, so the editor can offer them.
+         */
+        StagingEnvironmentOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Zones */
+            zones: components["schemas"]["EnvironmentZoneOut"][];
+        };
+        /** StagingRunAllOut */
+        StagingRunAllOut: {
+            /** Job Ids */
+            job_ids: number[];
+            /** Skipped */
+            skipped: components["schemas"]["StagingSkippedOut"][];
+        };
+        /** StagingRunIn */
+        StagingRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /** StagingRunOut */
+        StagingRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** StagingSaveIn */
+        StagingSaveIn: {
+            /** Placements */
+            placements: components["schemas"]["PlacementIn"][];
+            axis: components["schemas"]["AxisIn"];
+            /** Group Side */
+            group_side: string;
+            /** Moves */
+            moves?: components["schemas"]["MoveIn"][];
+        };
+        /** StagingSkippedOut */
+        StagingSkippedOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * StagingVersionOut
+         * @description The provenance of the newest staging of a scene (D-3).
+         */
+        StagingVersionOut: {
             /** Version */
             version: number;
             /**
@@ -9600,6 +10269,91 @@ export interface components {
             /** Has Visible Mouth */
             has_visible_mouth: boolean;
         };
+        /**
+         * ViewOut
+         * @description One view of an environment and where its picture stands.
+         */
+        ViewOut: {
+            /** Id */
+            id: number;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "ahead" | "left" | "right" | "behind";
+            /**
+             * Framing
+             * @enum {string}
+             */
+            framing: "wide" | "medium" | "close";
+            /** Zone */
+            zone: string | null;
+            /** Description */
+            description: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Prompt */
+            prompt: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "in_progress" | "failed" | "ready";
+            /** Stage */
+            stage: ("writing_prompt" | "drawing" | "waiting") | null;
+            /** Error */
+            error: string | null;
+            /** Reasons */
+            reasons: string[];
+            /** Scenes */
+            scenes: string[];
+            /** Reused */
+            reused: boolean;
+            image: components["schemas"]["PictureOut"] | null;
+            /** States */
+            states: components["schemas"]["ViewStatePictureOut"][];
+        };
+        /**
+         * ViewPictureOut
+         * @description The picture of one environment view as a version froze it (PHASE-052).
+         */
+        ViewPictureOut: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            image: components["schemas"]["PictureOut"] | null;
+            /** States */
+            states: components["schemas"]["StatePictureOut"][];
+        };
+        /**
+         * ViewStatePictureOut
+         * @description The picture of a view in one named state of its environment (PHASE-053).
+         */
+        ViewStatePictureOut: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            image: components["schemas"]["PictureOut"];
+        };
+        /** ViewStateRunOut */
+        ViewStateRunOut: {
+            /** View State Id */
+            view_state_id: number;
+        };
         /** VisualIdentityOut */
         VisualIdentityOut: {
             /** Apparent Age */
@@ -9713,6 +10467,24 @@ export interface components {
             name?: string | null;
             /** Transcript */
             transcript?: string | null;
+        };
+        /** SkippedOut */
+        app__api__character_definitions__SkippedOut: {
+            /** Discovery Id */
+            discovery_id: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+        };
+        /** SkippedOut */
+        app__api__environment_views__SkippedOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
         };
     };
     responses: never;
@@ -14615,6 +15387,290 @@ export interface operations {
             };
         };
     };
+    get_environment_views_api_projects__project_id__environment_views_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentViewsOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_all_api_projects__project_id__environment_views_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scenes are not staged, the environment has no master picture or spatial plan, or there is nothing to start. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    plan_one_api_projects__project_id__environment_views__discovery_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scenes are not staged, the environment has no master picture or spatial plan, or there is nothing to start. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    make_pictures_api_projects__project_id__environment_views__discovery_id__pictures_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PicturesRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scenes are not staged, the environment has no master picture or spatial plan, or there is nothing to start. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    remake_project_view_api_projects__project_id__environment_views_views__view_id__remake_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                view_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scenes are not staged, the environment has no master picture or spatial plan, or there is nothing to start. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_environment_views_api_lab_environments__environment_id__views_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewOut"][];
+                };
+            };
+            /** @description No such environment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remake_lab_view_api_lab_environments__environment_id__views__view_id__remake_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+                view_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunOut"];
+                };
+            };
+            /** @description No such environment. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scenes are not staged, the environment has no master picture or spatial plan, or there is nothing to start. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_scene_definitions_api_projects__project_id__scene_definitions_get: {
         parameters: {
             query?: never;
@@ -14955,6 +16011,176 @@ export interface operations {
             };
         };
     };
+    get_scene_staging_api_projects__project_id__scene_staging_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneStagingOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_all_api_projects__project_id__scene_staging_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagingRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or the scene is not defined and extracted yet, or the environment has no spatial plan, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_one_api_projects__project_id__scene_staging__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StagingRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagingRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or the scene is not defined and extracted yet, or the environment has no spatial plan, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_staging_api_projects__project_id__scene_staging__scene_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StagingSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneStagingOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no saved story, up-to-date Story Bible or lists, or the scene is not defined and extracted yet, or the environment has no spatial plan, or the scene is not in the newest list. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_looks_and_states_api_projects__project_id__looks_and_states_get: {
         parameters: {
             query?: never;
@@ -15175,6 +16401,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no resolution or it is out of date, or the look or state is not in it, or its character or environment is not ready for it. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_view_state_api_projects__project_id__look_state_images_view_states__view_id___state_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                view_id: number;
+                state_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewStateRunOut"];
                 };
             };
             /** @description No such project. */

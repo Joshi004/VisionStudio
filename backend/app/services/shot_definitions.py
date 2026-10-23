@@ -47,13 +47,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project, ShotDefinition, ShotPlan, StoryBible
 from app.jobs import store
 from app.services import (
+    environment_views,
     look_state_resolution,
     provenance,
     scene_definition_writer,
     scene_definitions,
+    scene_staging,
     scene_timeline,
     shot_definition_writer,
     shot_plans,
+    shot_staging,
     speech_units,
     story_bible,
     user_feedback,
@@ -85,6 +88,8 @@ STORY_BIBLE_KIND: Final = "story_bible"
 SCENE_DEFINITION_KIND: Final = "scene_definition"
 SHOT_PLAN_KIND: Final = "shot_plan"
 RESOLUTION_KIND: Final = "look_state_resolution"
+STAGING_KIND: Final = "scene_staging"
+VIEW_PLAN_KIND: Final = "environment_view_plan"
 CHARACTER_DEFINITION_KIND: Final = scene_definitions.CHARACTER_DEFINITION_KIND
 ENVIRONMENT_DEFINITION_KIND: Final = scene_definitions.ENVIRONMENT_DEFINITION_KIND
 
@@ -119,6 +124,9 @@ class ShotEntry:
     # Whether the Define button may be pressed, and the reason when it may not.
     can_run: bool
     blocked_reason: str | None
+    # Where the characters stand in this shot and the views that may stand behind it
+    # (`shot_staging.for_shot`), or None when the scene is not staged yet (PHASE-054).
+    staging: dict[str, Any] | None = None
 
     @property
     def content(self) -> dict[str, Any] | None:
@@ -187,6 +195,9 @@ class _Loaded:
     definitions: dict[str, scene_definitions.SceneEntry]
     current: dict[tuple[str, str], scene_definitions.CurrentDefinition]
     speech: dict[str, speech_units.SceneEntry]
+    # The staging of each scene and the view plan of each environment (PHASE-054), by id.
+    staging: dict[str, scene_staging.SceneEntry]
+    views: dict[str, environment_views.EnvironmentEntry]
     blocked_reason: str | None
 
 
@@ -209,6 +220,8 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
     definitions = await scene_definitions.state(session, project)
     speech = await speech_units.state(session, project)
     bible = await story_bible.latest(session, project.id)
+    staging = await scene_staging.state(session, project)
+    views = await environment_views.state(session, project)
     return _Loaded(
         story=project.script_text,
         bible=bible,
@@ -219,6 +232,8 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         definitions={entry.item["id"]: entry for entry in definitions.entries},
         current=await scene_definitions.current_definitions(session, project),
         speech={entry.item["id"]: entry for entry in speech.entries},
+        staging={entry.item["id"]: entry for entry in staging.entries},
+        views={entry.discovery_id: entry for entry in views.entries},
         blocked_reason=_blocked_reason(project.script_text, bible, plans.blocked_reason),
     )
 
@@ -270,6 +285,29 @@ def _scene_refusal(loaded: _Loaded, scene_id: str) -> str | None:
                 f"The {what} '{discovery_id}' of this scene is not linked and defined. "
                 "Define the scene again first."
             )
+    return _staging_refusal(loaded, scene_id, definition.row.content["environment_id"])
+
+
+def _staging_refusal(loaded: _Loaded, scene_id: str, environment_id: str) -> str | None:
+    """Why the scene's shots cannot be defined for want of the views of its place (PHASE-054),
+    or None. A scene that was never staged is defined as before, with no view. A staged scene's
+    shots are defined from where everyone stands and from the views that may stand behind
+    them, so the staging must be current and the views of its place planned and drawn.
+    """
+    staged = loaded.staging.get(scene_id)
+    if staged is None or staged.row is None:
+        return None
+    if staged.status == "out_of_date":
+        return "The staging of this scene is out of date. Stage it again first."
+    entry = loaded.views.get(environment_id)
+    if entry is None or entry.plan is None:
+        return "Plan the views of this scene's place first: each shot is shown in front of a view."
+    if entry.status == "out_of_date":
+        return "The views planned for this scene's place are out of date. Plan them again first."
+    if not any(item["scene_id"] == scene_id for item in entry.plan.content["scenes"]):
+        return "The planned views of this scene's place do not cover this scene. Plan them again."
+    if entry.pictures_status != "ready":
+        return "Make the pictures of the views of this scene's place first."
     return None
 
 
@@ -483,6 +521,59 @@ def _narrowed_inputs(inputs: dict[str, Any], content: dict[str, Any]) -> dict[st
     return stored
 
 
+_VIEW_FIELDS: Final = ("id", "name", "side", "framing", "zone", "description")
+
+
+def _shot_staging(loaded: _Loaded, scene_id: str, shot: dict[str, Any]) -> dict[str, Any] | None:
+    """What this shot is staged and framed from (`shot_staging.for_shot`), or None when the
+    scene is not staged or its place has no planned views yet. Pure; the scene is not refused.
+    """
+    staged = loaded.staging.get(scene_id)
+    definition = loaded.definitions.get(scene_id)
+    speech = loaded.speech.get(scene_id)
+    if (
+        staged is None
+        or staged.content is None
+        or definition is None
+        or definition.row is None
+        or speech is None
+        or speech.events.row is None
+    ):
+        return None
+    environment_id = definition.row.content["environment_id"]
+    entry = loaded.views.get(environment_id)
+    if entry is None or entry.plan is None:
+        return None
+    coverage = next(
+        (item for item in entry.plan.content["scenes"] if item["scene_id"] == scene_id), None
+    )
+    if coverage is None:
+        return None
+    current = loaded.current.get((ENVIRONMENT_DEFINITION_KIND, environment_id))
+    plan = current.definition.get("spatial_plan") if current is not None else None
+    master = plan.get("master_view") if isinstance(plan, dict) else None
+    views = [shot_staging.establishing_view(master if isinstance(master, str) else None)]
+    views += [
+        {key: view[key] for key in _VIEW_FIELDS}
+        for view in entry.plan.content["views"]
+        if view["id"] != shot_staging.ESTABLISHING
+    ]
+    return shot_staging.for_shot(
+        staging=staged.content,
+        scene_event_ids=[event["id"] for event in speech.events.row.content["events"]],
+        shot_event_ids=shot["source_event_ids"],
+        views=views,
+        coverage=coverage,
+    )
+
+
+def _staging_sha256(staging: dict[str, Any] | None) -> str | None:
+    if staging is None:
+        return None
+    text = json.dumps(staging, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) -> dict[str, Any]:
     """Everything the model is shown about one shot, as the fields of a job's input (without
     the dedupe key): the scene and its definition, the shot with its neighbours, its events and
@@ -542,6 +633,24 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
     )
     chosen = [environment_key, *chosen_characters]
 
+    # None for a scene that was never staged: its shots are defined as before.
+    staging = _shot_staging(loaded, scene_id, shot)
+    staged = loaded.staging[scene_id].row if scene_id in loaded.staging else None
+    environment_views_entry = loaded.views.get(definition["environment_id"])
+    plan_of_views = environment_views_entry.plan if environment_views_entry is not None else None
+    staging_artifacts: list[dict[str, Any]] = []
+    if staging is not None:
+        assert staged is not None and plan_of_views is not None  # `_shot_staging` found them
+        staging_artifacts = [
+            {"kind": STAGING_KIND, "id": staged.id, "version": staged.version},
+            {
+                "kind": VIEW_PLAN_KIND,
+                "id": plan_of_views.id,
+                "version": plan_of_views.version,
+                "discovery_id": definition["environment_id"],
+            },
+        ]
+
     shot_for_model = {
         **_skeleton(shot, duration),
         "position": position + 1,
@@ -566,6 +675,7 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
                 "id": resolution_row.id,
                 "version": resolution_row.version,
             },
+            *staging_artifacts,
             *(
                 _shown(kind, discovery_id, loaded.current[(kind, discovery_id)])
                 for kind, discovery_id in chosen
@@ -576,6 +686,8 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
             "duration_seconds": duration,
             "skeleton_sha256": _skeleton_sha256(shot, duration, speech),
         },
+        # What the shot was staged from; the shot is out of date when it changes.
+        **({"staging": {"sha256": _staging_sha256(staging)}} if staging is not None else {}),
         # Narrowed to what the shot uses by `save_shot_definition` (PHASE-039).
         "resolved": _resolved_record(resolved),
     }
@@ -602,6 +714,7 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         "duration": duration,
         "characters": characters,
         "environment": environment,
+        "staging": staging,
         # Written onto the version the job makes (D-3).
         "inputs": inputs,
     }
@@ -938,6 +1051,7 @@ def _out_of_date_reasons(
     plan: shot_plans.SceneEntry,
     resolved: look_state_resolution.SceneResolution | None,
     skeleton_sha256: str | None,
+    staging_sha256: str | None,
 ) -> list[str]:
     """Why a specification made for this shot is no longer current, one sentence each.
 
@@ -960,6 +1074,16 @@ def _out_of_date_reasons(
                 reasons.append("This shot was changed when the scene's shots were planned again.")
         elif not provenance.same_row(_recorded(inputs, SHOT_PLAN_KIND), plan.row):
             reasons.append("The shots of the scene were planned again since this shot was defined.")
+
+    recorded_staging = inputs.get("staging")
+    recorded_sha = recorded_staging.get("sha256") if isinstance(recorded_staging, dict) else None
+    if isinstance(recorded_sha, str):
+        if staging_sha256 is None:
+            reasons.append("The scene's staging or the views of its place are no longer there.")
+        elif recorded_sha != staging_sha256:
+            reasons.append("The staging of this shot or the views of its place changed.")
+    elif staging_sha256 is not None:
+        reasons.append("This shot was defined before its scene was staged.")
 
     newest = loaded.resolution.version
     uses = inputs.get("uses")
@@ -1033,11 +1157,17 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
             row = rows.get(key)
             job = jobs.get(key)
             active = job is not None and job.status in store.ACTIVE_STATUSES
+            staging = _shot_staging(loaded, scene_id, shot)
             status: Status = "not_defined"
             reasons: list[str] = []
             if row is not None and isinstance(row.inputs, dict):
                 reasons = _out_of_date_reasons(
-                    row, loaded, plan, resolved, current_skeleton_sha256(plan, shot, units)
+                    row,
+                    loaded,
+                    plan,
+                    resolved,
+                    current_skeleton_sha256(plan, shot, units),
+                    _staging_sha256(staging),
                 )
                 status = "out_of_date" if reasons else "defined"
             blocked = refusal
@@ -1057,6 +1187,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                     job=job,
                     can_run=blocked is None,
                     blocked_reason=blocked,
+                    staging=staging,
                 )
             )
         entries.append(
@@ -1190,6 +1321,8 @@ async def save_manual(
             duration=fields["duration"],
             scene_character_ids=fields["scene_character_ids"],
             dialogue=fields["dialogue"],
+            exchange=fields["shot"].get("rapid_exchange") is True,
+            staging=fields["staging"],
         )
     except ValueError as exc:
         raise ShotDefinitionsError(str(exc)) from exc

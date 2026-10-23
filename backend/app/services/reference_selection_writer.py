@@ -15,7 +15,7 @@ that are enough, with a short reason for each.
 - every id is in the catalog and none is repeated;
 - no picture belongs to a character who is not visible in the shot, and every visible character
   has from `MIN_PER_CHARACTER` to `MAX_PER_CHARACTER` pictures, at most one of each view;
-- the environment has exactly one picture;
+- the environment has exactly one picture, and it is one of the shot's view (PHASE-054);
 - the whole set is at most `H3_MAX_REFERENCE_IMAGES` pictures (the video model's limit);
 - for each view the picture of the look or state the scene uses is chosen when it has one: a
   default picture stands in only for a view the scene's look lacks (and is marked `fallback`).
@@ -65,7 +65,9 @@ INSTRUCTIONS: Final = (
     f"- Choose between {MIN_PER_CHARACTER} and {MAX_PER_CHARACTER} pictures of EACH character "
     "listed in the shot's `characters`, with at most one picture of each view of a character. "
     "A character who is not listed in the shot's `characters` must not get a picture.\n"
-    "- Choose exactly ONE picture of the environment.\n"
+    "- Choose exactly ONE picture of the environment. The CATALOG only lists the environment "
+    "pictures of the view the shot is in front of (`environment_view` in the HINTS); that "
+    "view is part of the shot's specification, so do not look for another.\n"
     f"- Choose at most {H3_MAX_REFERENCE_IMAGES} pictures in all.\n"
     "- Choose only ids that are in the CATALOG, each at most once.\n"
     "- Each catalog entry has `is_scene_look`: true when it is the look or state the scene "
@@ -123,6 +125,18 @@ def usual_views(content: dict[str, Any]) -> list[str]:
     return list(character_library.references_for(framing))  # type: ignore[arg-type]
 
 
+def narrowed_catalog(
+    content: dict[str, Any], catalog: list[CatalogPicture]
+) -> list[CatalogPicture]:
+    """The catalog this shot may choose from: every picture of a character, and of the
+    environment only those of the shot's view (`reference_selection.environment_candidates`).
+    """
+    return [
+        *(picture for picture in catalog if picture.kind != "environment"),
+        *reference_selection.environment_candidates(content, catalog),
+    ]
+
+
 def build_request(
     *, shot_definition: dict[str, Any], catalog: list[CatalogPicture], model: str
 ) -> dict[str, Any]:
@@ -138,7 +152,9 @@ def build_request(
         "focus": (shot_definition.get("composition") or {}).get("focus"),
         "characters_in_the_shot": reference_selection.visible_characters(shot_definition),
         "most_pictures": H3_MAX_REFERENCE_IMAGES,
+        "environment_view": (shot_definition.get("composition") or {}).get("view"),
     }
+    catalog = narrowed_catalog(shot_definition, catalog)
     parts = [
         "SHOT SPECIFICATION (JSON):\n" + _dump(shot_definition),
         "HINTS (JSON):\n" + _dump(hints),
@@ -198,6 +214,7 @@ def check_answer(answer: Any, content: dict[str, Any], catalog: list[CatalogPict
     if not isinstance(shot_size, str):
         raise ValueError("The shot has no shot size.")
     framing = reference_selection.framing_for(shot_size)
+    catalog = narrowed_catalog(content, catalog)
 
     by_id: dict[int, CatalogPicture] = {}
     for picture in catalog:

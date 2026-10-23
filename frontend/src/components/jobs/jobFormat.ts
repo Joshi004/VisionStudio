@@ -33,6 +33,9 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   story_pipeline: "Story pipeline",
   check_take_dialogue: "Dialogue check",
   select_shot_references: "Shot references",
+  stage_scene: "Scene staging",
+  plan_environment_views: "Environment view plan",
+  write_environment_view_prompt: "Environment view prompt",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

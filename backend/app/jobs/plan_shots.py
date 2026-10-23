@@ -91,6 +91,8 @@ class _Input:
     speech_mode: str = SPEECH_BOTH
     # The user's note on the earlier plan, when this plan is made from one (PHASE-038).
     feedback: user_feedback.Feedback | None = None
+    # The scene's staging for the planner (PHASE-054); None on a job queued before it.
+    staging: dict[str, Any] | None = None
 
 
 def _read_replan(value: Any) -> tuple[bool, dict[str, Any] | None]:
@@ -127,7 +129,8 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     replan_ok, replan = _read_replan(job_input.get("replan"))
     feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
-    if not replan_ok or not feedback_ok:
+    staging = job_input.get("staging")
+    if not replan_ok or not feedback_ok or not (staging is None or isinstance(staging, dict)):
         return None
     if (
         speech_mode not in SPEECH_MODES
@@ -168,6 +171,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         replan=replan,
         speech_mode=speech_mode,
         feedback=feedback,
+        staging=staging,
     )
 
 
@@ -272,6 +276,7 @@ class PlanShotsHandler(JobHandler):
             ),
             feedback=read.feedback,
             speech_mode=read.speech_mode,
+            staging=read.staging,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

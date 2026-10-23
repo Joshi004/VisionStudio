@@ -152,6 +152,31 @@ export function useMakeStateImage(projectId: number) {
   });
 }
 
+/** Starts the picture of one view of an environment in one state (also after a failure). */
+export function useMakeViewStateImage(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { viewId: number; stateId: number }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/look-state-images/view-states/{view_id}/{state_id}/run",
+        {
+          params: {
+            path: { project_id: projectId, view_id: input.viewId, state_id: input.stateId },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not start the picture (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
 /** Makes one angle of a new look again (the Character lab's own endpoint). */
 export function useRedoLookAngle(projectId: number) {
   const queryClient = useQueryClient();

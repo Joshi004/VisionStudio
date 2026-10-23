@@ -288,6 +288,45 @@ async def _environment_pictures(
                         state_description,
                     )
                 )
+    found.extend(_view_pictures(version.views, state_slug, state_description))
+    return found
+
+
+def _view_pictures(
+    views: Any, state_slug: str | None, state_description: str | None
+) -> list[tuple[int, str, str, bool, str | None]]:
+    """The pictures of the environment's other views that the pinned version froze (PHASE-054):
+    each view's own picture under the `view` of its slug, and its picture in the resolved state
+    when the scene has one and the view has been made in it. The master picture stays the view
+    `environment` (the `establishing` view).
+    """
+    default = _is_default(state_slug)
+    found: list[tuple[int, str, str, bool, str | None]] = []
+    for view in views or []:
+        if not isinstance(view, dict) or not isinstance(view.get("slug"), str):
+            continue
+        slug = view["slug"]
+        if isinstance(view.get("reference_image_id"), int):
+            found.append(
+                (
+                    view["reference_image_id"],
+                    slug,
+                    reference_selection.DEFAULT_VARIANT,
+                    default,
+                    None,
+                )
+            )
+        if default:
+            continue
+        for entry in view.get("states") or []:
+            if (
+                isinstance(entry, dict)
+                and entry.get("slug") == state_slug
+                and isinstance(entry.get("reference_image_id"), int)
+            ):
+                found.append(
+                    (entry["reference_image_id"], slug, str(state_slug), True, state_description)
+                )
     return found
 
 

@@ -39,6 +39,7 @@ from app.api.library_adoption import AdoptIn
 from app.db.models import (
     EnvironmentReference,
     EnvironmentState,
+    EnvironmentView,
     Job,
     LabImage,
     LabRun,
@@ -359,6 +360,16 @@ class StatePictureOut(BaseModel):
     image: PictureOut | None
 
 
+class ViewPictureOut(BaseModel):
+    """The picture of one environment view as a version froze it (PHASE-052)."""
+
+    slug: str
+    name: str
+    image: PictureOut | None
+    # The view's pictures in the environment's states (PHASE-053), by state slug.
+    states: list[StatePictureOut]
+
+
 class EnvironmentVersionOut(BaseModel):
     id: int
     version: int
@@ -379,6 +390,8 @@ class EnvironmentVersionOut(BaseModel):
     # The pictures of the environment's states (such as night) this version froze, by slug
     # (PHASE-017). Empty when there were none.
     states: list[StatePictureOut]
+    # The pictures of the environment's views (PHASE-052) this version froze, by slug.
+    views: list[ViewPictureOut]
 
 
 @router.get(
@@ -398,12 +411,22 @@ async def list_versions(
     entries = await environment_versions.list_versions(session, environment_id)
     usages = await environment_links.used_by(session, environment_id)
     state_ids = {frozen["state_id"] for entry in entries for frozen in entry.version.states or []}
+    for entry in entries:
+        for frozen_view in entry.version.views or []:
+            state_ids.update(frozen["state_id"] for frozen in frozen_view["states"])
     state_names: dict[int, str] = {}
     if state_ids:
         found = await session.execute(
             select(EnvironmentState).where(EnvironmentState.id.in_(state_ids))
         )
         state_names = {record.id: record.name for record in found.scalars()}
+    view_ids = {frozen["view_id"] for entry in entries for frozen in entry.version.views or []}
+    view_names: dict[int, str] = {}
+    if view_ids:
+        found_views = await session.execute(
+            select(EnvironmentView).where(EnvironmentView.id.in_(view_ids))
+        )
+        view_names = {record.id: record.name for record in found_views.scalars()}
     return [
         EnvironmentVersionOut(
             id=entry.version.id,
@@ -435,6 +458,22 @@ async def list_versions(
                     image=await _picture(session, frozen["reference_image_id"]),
                 )
                 for frozen in entry.version.states or []
+            ],
+            views=[
+                ViewPictureOut(
+                    slug=frozen["slug"],
+                    name=view_names.get(frozen["view_id"], frozen["slug"]),
+                    image=await _picture(session, frozen["reference_image_id"]),
+                    states=[
+                        StatePictureOut(
+                            slug=frozen_state["slug"],
+                            name=state_names.get(frozen_state["state_id"], frozen_state["slug"]),
+                            image=await _picture(session, frozen_state["reference_image_id"]),
+                        )
+                        for frozen_state in frozen["states"]
+                    ],
+                )
+                for frozen in entry.version.views or []
             ],
         )
         for entry in entries

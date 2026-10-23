@@ -16,7 +16,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, Literal
 
-ReviewPointKey = Literal["story_structure", "images", "scenes", "shot_plans", "shots"]
+ReviewPointKey = Literal["story_structure", "images", "scenes", "staging", "shot_plans", "shots"]
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,11 @@ REVIEW_POINTS: Final[tuple[ReviewPoint, ...]] = (
         ("character_images", "environment_definitions"),
     ),
     ReviewPoint("scenes", "After scene definition and events", ("scene_definitions", "events")),
+    ReviewPoint(
+        "staging",
+        "After staging and environment views",
+        ("scene_staging", "environment_views"),
+    ),
     ReviewPoint("shot_plans", "After shot planning", ("shot_plans",)),
     ReviewPoint("shots", "After generated shots", ("shot_generation",)),
 )

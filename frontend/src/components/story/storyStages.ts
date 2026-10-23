@@ -67,6 +67,20 @@ export const STORY_STAGES: readonly StoryStage[] = [
     available: true,
   },
   {
+    id: "scene-staging",
+    name: "Scene staging",
+    description:
+      "Decides where each character stands in a scene, which way they face and what is behind them.",
+    available: true,
+  },
+  {
+    id: "environment-views",
+    name: "Environment views",
+    description:
+      "Draws each place from the directions its scenes need, so every shot has the right background.",
+    available: true,
+  },
+  {
     id: "looks-and-states",
     name: "Looks and environment states",
     description:

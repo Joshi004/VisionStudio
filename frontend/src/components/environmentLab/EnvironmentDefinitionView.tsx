@@ -56,6 +56,7 @@ function ItemList({ title, items }: { title: string; items: string[] }) {
  */
 export function EnvironmentDefinitionView({ definition }: { definition: EnvironmentDefinition }) {
   const visual = definition.visual_identity;
+  const plan = definition.spatial_plan;
   return (
     <Stack gap="sm">
       <Section
@@ -65,6 +66,27 @@ export function EnvironmentDefinitionView({ definition }: { definition: Environm
           ["Layout", definition.layout],
         ]}
       />
+      {plan ? (
+        <>
+          <Section
+            title="Spatial plan"
+            rows={[
+              ["Master picture", plan.master_view],
+              ["Ahead", plan.sides.ahead],
+              ["Left", plan.sides.left],
+              ["Right", plan.sides.right],
+              ["Behind", plan.sides.behind],
+            ]}
+          />
+          <Section
+            title="Zones"
+            rows={plan.zones.map((zone): [string, string] => [
+              zone.name,
+              `${zone.side}: ${zone.description}`,
+            ])}
+          />
+        </>
+      ) : null}
       <Section
         title="Visual identity"
         rows={[

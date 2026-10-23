@@ -38,12 +38,14 @@ from app.services import (
     discovery,
     environment_definitions,
     environment_links,
+    environment_views,
     generation_requests,
     look_state_images,
     look_state_resolution,
     review_points,
     scene_definitions,
     scene_events,
+    scene_staging,
     shot_continuity,
     shot_definitions,
     shot_plans,
@@ -94,6 +96,10 @@ _MANUAL_EVENTS: Final = (
 _MANUAL_UNITS: Final = (
     "The newest speech units of this scene were written by you, and planning them again "
     "replaces your cuts."
+)
+_MANUAL_STAGING: Final = (
+    "The newest staging of this scene was written by you, and staging it again adds a version "
+    "from the model."
 )
 # PHASE-038: the directing stages.
 _MANUAL_SHOT_PLAN: Final = (
@@ -802,6 +808,114 @@ async def _start_events(
     )
 
 
+# --- Scene staging and environment views (PHASE-051, PHASE-052) ------------------------------
+
+
+async def _evaluate_scene_staging(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    state = await scene_staging.state(session, project)
+    if not state.entries and state.blocked_reason is not None:
+        return _blocked_project(state.blocked_reason)
+    targets: list[Target] = []
+    for entry in state.entries:
+        done = entry.status == "staged"
+        active = _active(entry.job)
+        targets.append(
+            Target(
+                f"scene:{entry.item['id']}",
+                _scene_label(entry.item),
+                done,
+                active=active,
+                block=None if done or active else entry.blocked_reason,
+                consent=_MANUAL_STAGING if entry.needs_confirmation and not done else None,
+                last_error=_failure(entry.job),
+                ref=(entry.item["id"],),
+                stale=entry.status == "out_of_date",
+                group=entry.item["id"],
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_scene_staging(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    return await _start_each(
+        session,
+        targets,
+        deadline,
+        lambda target: _ids_of(
+            scene_staging.start_run(
+                session,
+                project,
+                target.ref[0],
+                confirm_replace_manual=_options_for(options, target).confirm_overwrite,
+            )
+        ),
+    )
+
+
+async def _evaluate_environment_views(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    state = await environment_views.state(session, project)
+    if not state.entries and state.blocked_reason is not None:
+        return _blocked_project(state.blocked_reason)
+    targets: list[Target] = []
+    for entry in state.entries:
+        planned = entry.status == "planned"
+        pictures = entry.pictures_status
+        done = planned and pictures == "ready"
+        active = _active(entry.job) or (planned and pictures == "in_progress")
+        block: str | None = None
+        last_error = _failure(entry.job)
+        if planned:
+            # The plan is there: what is missing is the pictures of its views.
+            step = "pictures"
+            if not done and not active and not entry.can_make_pictures:
+                block = entry.pictures_blocked_reason
+            last_error = next((item.error for item in entry.views if item.error), last_error)
+        else:
+            step = "plan"
+            if not active and not entry.can_plan:
+                block = entry.plan_blocked_reason
+        targets.append(
+            Target(
+                f"environment:{entry.discovery_id}",
+                entry.name,
+                done,
+                active=active,
+                block=None if done else block,
+                last_error=last_error,
+                ref=(entry.discovery_id, step),
+                stale=entry.status == "out_of_date" or any(item.reasons for item in entry.views),
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_environment_views(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        discovery_id, what = target.ref
+        if what == "plan":
+            return await _ids_of(environment_views.start_plan(session, project, discovery_id))
+        await environment_views.start_pictures(session, project, discovery_id)
+        return ()
+
+    return await _start_each(session, targets, deadline, make)
+
+
 # --- Looks and states -----------------------------------------------------------------------
 
 
@@ -843,15 +957,21 @@ async def _evaluate_look_state_images(
         block: str | None = None
         if not done and not active:
             block = state.blocked_reason or (None if item.can_run else item.blocked_reason)
+        # A view in a state has no record until it is made: it is told apart by its two ids.
+        record = (
+            f"{item.view_id}/{item.state_id}"
+            if item.kind == look_state_images.VIEW_STATE
+            else str(item.record_id)
+        )
         targets.append(
             Target(
-                f"{item.kind}:{item.record_id}",
+                f"{item.kind}:{record}",
                 f"{item.subject_name}: {item.name}",
                 done,
                 active=active,
                 block=block,
                 last_error=item.error,
-                ref=(item.kind, str(item.record_id)),
+                ref=(item.kind, record),
                 stale=bool(item.reasons),
             )
         )
@@ -869,6 +989,11 @@ async def _start_look_state_images(
         kind, record_id = target.ref
         if kind == "look":
             await look_state_images.start_look_record(session, project, int(record_id))
+        elif kind == look_state_images.VIEW_STATE:
+            view_id, state_id = record_id.split("/")
+            await look_state_images.start_view_state_record(
+                session, project, int(view_id), int(state_id)
+            )
         else:
             await look_state_images.start_state_record(session, project, int(record_id))
         return ()
@@ -1570,6 +1695,8 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "scene_definitions": Adapter(_evaluate_scene_definitions, _start_scene_definitions),
     "events": Adapter(_evaluate_events, _start_events),
     "resolution": Adapter(_evaluate_resolution, _project_start(_call_resolution)),
+    "scene_staging": Adapter(_evaluate_scene_staging, _start_scene_staging),
+    "environment_views": Adapter(_evaluate_environment_views, _start_environment_views),
     "look_state_images": Adapter(_evaluate_look_state_images, _start_look_state_images),
     "speech_units": Adapter(_evaluate_speech_units, _start_speech_units),
     "speech_synthesis": Adapter(_evaluate_speech_synthesis, _start_speech_synthesis),
@@ -1602,6 +1729,7 @@ _CONSENT_STEPS: Final[tuple[str, ...]] = (
     "voices",
     "scene_definitions",
     "events",
+    "scene_staging",
     "speech_units",
     "shot_plans",
     "shot_definitions",

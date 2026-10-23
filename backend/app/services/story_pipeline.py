@@ -106,14 +106,28 @@ STEPS: Final[tuple[Step, ...]] = (
     Step("events", "Extract the events", ("scene_definitions",)),
     Step("resolution", "Resolve looks and states", ("scene_definitions",)),
     Step(
+        "scene_staging",
+        "Stage the scenes",
+        ("scene_definitions", "events", "environment_definitions"),
+    ),
+    Step(
+        "environment_views",
+        "Plan and draw the views of each place",
+        ("scene_staging",),
+    ),
+    Step(
         "look_state_images",
         "Draw the looks and states",
-        ("resolution", "character_images", "environment_definitions"),
+        ("resolution", "character_images", "environment_definitions", "environment_views"),
     ),
     Step("speech_units", "Plan the speech", ("events",), inline=True),
     Step("speech_synthesis", "Speak the lines", ("speech_units", "voices")),
-    Step("shot_plans", "Plan the shots", ("speech_synthesis",)),
-    Step("shot_definitions", "Define the shots", ("shot_plans", "resolution")),
+    Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging")),
+    Step(
+        "shot_definitions",
+        "Define the shots",
+        ("shot_plans", "resolution", "environment_views"),
+    ),
     Step("shot_continuity", "Check shot continuity", ("shot_definitions",)),
     Step(
         "references",

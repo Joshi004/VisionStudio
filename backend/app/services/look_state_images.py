@@ -48,6 +48,8 @@ from app.db.models import (
     CharacterLook,
     CharacterNamedLook,
     EnvironmentState,
+    EnvironmentView,
+    EnvironmentViewState,
     LabImage,
     LabRun,
     LibraryEnvironment,
@@ -63,6 +65,7 @@ from app.services import (
     environment_definitions,
     environment_references,
     environment_versions,
+    environment_views,
     image_lab,
     library_adoption,
     look_state_resolution,
@@ -77,6 +80,7 @@ _logger = logging.getLogger(__name__)
 
 LOOK: Final = "look"
 STATE: Final = "state"
+VIEW_STATE: Final = "view_state"
 
 # The statuses of a job that will not produce a picture any more.
 _DEAD_JOB_STATUSES: Final = ("failed", "cancelled")
@@ -87,7 +91,7 @@ _OUT_OF_DATE: Final = "The looks and states are out of date. Resolve them again 
 _BEING_MADE: Final = "The pictures are already being made."
 _HAS_PICTURES: Final = "Already has its pictures."
 
-Kind = Literal["look", "state"]
+Kind = Literal["look", "state", "view_state"]
 # `unavailable`: no pictures yet, and none can be started (see `blocked_reason`).
 # `none`: no pictures yet, and they can be started. `in_progress`: being made. `failed`: the
 # last attempt did not work. `ready`: the pictures exist.
@@ -136,6 +140,10 @@ class ImageItem:
     # were edited from a canonical picture that was replaced since. The status stays `ready` so
     # the one-click run does not count it as unfinished; making them again is PHASE-040.
     reasons: list[str] = field(default_factory=list)
+    # A view in a state (PHASE-053) only: the view and the state it is made for. Its
+    # `record_id` is the id of its record, or 0 while it has none.
+    view_id: int | None = None
+    state_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +171,7 @@ class Skipped:
 class StartAllResult:
     look_ids: list[int]
     state_ids: list[int]
+    view_state_ids: list[int]
     skipped: list[Skipped]
 
 
@@ -353,7 +362,7 @@ def _state_refusal(
 
 
 async def _state_progress(
-    session: AsyncSession, record: EnvironmentState
+    session: AsyncSession, record: EnvironmentState | EnvironmentViewState
 ) -> tuple[Status, Stage | None, str | None, LabImage | None]:
     """Where a state's picture stands: ready (its image), not started, still being drawn, or
     failed with the reason.
@@ -438,6 +447,122 @@ async def _state_item(
     )
 
 
+@dataclass
+class _ViewStateUse:
+    view: EnvironmentView
+    state: EnvironmentState
+    subject_id: str
+    scenes: list[str]
+
+
+async def _view_state_uses(
+    session: AsyncSession,
+    content: dict[str, Any],
+    titles: dict[str, str],
+    plans: dict[str, Any],
+    states: dict[int, EnvironmentState],
+    by_environment: dict[str, environment_definitions.EntryDefinition],
+) -> list[_ViewStateUse]:
+    """The (view, state) pairs the scenes need (PHASE-053): for every scene whose environment
+    is resolved to a named state, each view of the environment's plan that the scene uses.
+    A pair is listed once, with the titles of the scenes that use it.
+    """
+    found: dict[tuple[int, int], _ViewStateUse] = {}
+    rows_by_environment: dict[int, dict[str, EnvironmentView]] = {}
+    for scene in content["scenes"]:
+        environment = scene["environment"]
+        record = states.get(environment["state_id"]) if environment["state_id"] else None
+        discovery_id = environment["discovery_id"]
+        plan = plans.get(discovery_id)
+        entry = by_environment.get(discovery_id)
+        if record is None or plan is None or entry is None or entry.entry.info is None:
+            continue
+        library_id = entry.entry.info.environment.id
+        if library_id not in rows_by_environment:
+            rows_by_environment[library_id] = {
+                view.slug: view for view in await environment_views.views_of(session, library_id)
+            }
+        planned = next(
+            (item for item in plan.content["scenes"] if item["scene_id"] == scene["scene_id"]),
+            None,
+        )
+        if planned is None:
+            continue
+        slugs: list[str] = []
+        for ids in [*planned["by_side"].values(), planned["group"]]:
+            slugs += [slug for slug in ids if slug not in slugs]
+        for slug in slugs:
+            view = rows_by_environment[library_id].get(slug)
+            if view is None:
+                continue
+            title = titles.get(scene["scene_id"], scene["scene_id"])
+            use = found.setdefault(
+                (view.id, record.id), _ViewStateUse(view, record, discovery_id, [])
+            )
+            if title not in use.scenes:
+                use.scenes.append(title)
+    return list(found.values())
+
+
+def _view_state_refusal(use: _ViewStateUse) -> str | None:
+    """Why this view in this state cannot be made now, or None when it can."""
+    if use.view.reference_image_id is None:
+        return f"Make the picture of the view '{use.view.name}' first (Environment views)."
+    if use.state.reference_image_id is None:
+        return f"Make the picture of the state '{use.state.name}' first."
+    return None
+
+
+async def _view_state_item(
+    session: AsyncSession,
+    use: _ViewStateUse,
+    record: EnvironmentViewState | None,
+    entry: environment_definitions.EntryDefinition | None,
+) -> ImageItem:
+    status: Status = "none"
+    stage: Stage | None = None
+    error: str | None = None
+    image: LabImage | None = None
+    if record is not None:
+        status, stage, error, image = await _state_progress(session, record)
+    refusal = _view_state_refusal(use)
+    blocked = refusal
+    if status == "ready":
+        blocked = _HAS_PICTURES
+    elif status == "in_progress":
+        blocked = _BEING_MADE
+    elif refusal is not None and status == "none":
+        status = "unavailable"
+
+    reasons: list[str] = []
+    made_from = record.inputs if record is not None and isinstance(record.inputs, dict) else {}
+    if status == "ready" and (
+        made_from.get("view_image_id") != use.view.reference_image_id
+        or made_from.get("state_image_id") != use.state.reference_image_id
+    ):
+        reasons.append("The picture of the view or of the state was replaced since this was made.")
+    return ImageItem(
+        kind=VIEW_STATE,
+        record_id=record.id if record is not None else 0,
+        slug=f"{use.view.slug}__{use.state.slug}",
+        name=f"{use.view.name}, {use.state.name}",
+        description=use.state.description,
+        subject_id=use.subject_id,
+        subject_name=entry.item["name"] if entry is not None else use.subject_id,
+        scenes=use.scenes,
+        status=status,
+        stage=stage,
+        error=error,
+        image=image,
+        can_run=blocked is None,
+        blocked_reason=blocked,
+        source_image_id=use.view.reference_image_id,
+        reasons=reasons,
+        view_id=use.view.id,
+        state_id=use.state.id,
+    )
+
+
 async def state(session: AsyncSession, project: Project) -> ImagesState:
     """The new looks and states of the newest resolution, with where each one's pictures stand.
     Worked out on every read; nothing here is stored.
@@ -497,6 +622,28 @@ async def state(session: AsyncSession, project: Project) -> ImagesState:
             item.can_run = False
             item.blocked_reason = global_block
         items.append(item)
+
+    # The pictures of the views in those states (PHASE-053).
+    plans = await environment_views.newest_plans(session, project.id)
+    view_uses = await _view_state_uses(session, row.content, titles, plans, states, by_environment)
+    if view_uses:
+        found_records = await session.execute(
+            select(EnvironmentViewState)
+            .where(EnvironmentViewState.view_id.in_({use.view.id for use in view_uses}))
+            .execution_options(populate_existing=True)
+        )
+        records = {(rec.view_id, rec.state_id): rec for rec in found_records.scalars()}
+        for use in view_uses:
+            item = await _view_state_item(
+                session,
+                use,
+                records.get((use.view.id, use.state.id)),
+                by_environment.get(use.subject_id),
+            )
+            if global_block is not None and item.can_run:
+                item.can_run = False
+                item.blocked_reason = global_block
+            items.append(item)
     return ImagesState(row.version, items, global_block)
 
 
@@ -594,6 +741,105 @@ async def _start_state(
     return record
 
 
+async def _start_view_state(
+    session: AsyncSession, project: Project, item: ImageItem, resolution_version: int | None
+) -> EnvironmentViewState:
+    """Starts one edit run for a view-in-a-state item that `can_run`, and commits. A record that
+    failed earlier is used again.
+    """
+    view = await session.get(EnvironmentView, item.view_id or 0)
+    state_record = await session.get(EnvironmentState, item.state_id or 0)
+    if (
+        view is None
+        or state_record is None
+        or view.reference_image_id is None
+        or state_record.reference_image_id is None
+    ):
+        raise LookStateImageError("This view has no pictures to be drawn from.")
+    record = (
+        (
+            await session.execute(
+                select(EnvironmentViewState).where(
+                    EnvironmentViewState.view_id == view.id,
+                    EnvironmentViewState.state_id == state_record.id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if record is None:
+        record = EnvironmentViewState(view_id=view.id, state_id=state_record.id)
+        session.add(record)
+        await session.flush()
+    mode = image_models_service.resolve_mode(
+        await settings_service.get_str(session, IMAGE_MODE_KEY)
+    )
+    try:
+        form = QwenEditForm(
+            prompt=prompts.view_state_edit_prompt(state_record.description),
+            mode=mode,
+            aspect_ratio=environment_references.REFERENCE_SHAPE,
+            seed=None,
+            steps=None,
+            references=[
+                Ref(source="lab", id=view.reference_image_id),
+                Ref(source="lab", id=state_record.reference_image_id),
+            ],
+        )
+        run, _job = await image_lab.create_qwen_edit_run(session, form, commit=False)
+    except (LabInputError, ValueError) as exc:
+        await session.rollback()
+        raise LookStateImageError(str(exc)) from exc
+    record.reference_image_id = None
+    record.lab_run_id = run.id
+    record.inputs = {
+        "project_id": project.id,
+        "discovery_id": item.subject_id,
+        "slug": item.slug,
+        "resolution_version": resolution_version,
+        "view_image_id": view.reference_image_id,
+        "state_image_id": state_record.reference_image_id,
+    }
+    await session.commit()
+    _logger.info(
+        "project %d: view '%s' in state '%s' started for '%s': run=%d",
+        project.id,
+        view.slug,
+        state_record.slug,
+        item.subject_id,
+        run.id,
+    )
+    return record
+
+
+async def start_view_state_record(
+    session: AsyncSession, project: Project, view_id: int, state_id: int
+) -> tuple[int, bool]:
+    """Starts the picture of one view in one state, and commits. Returns `(record id, created)`:
+    when it is being made already, `created` is False. Raises LookStateImageError.
+    """
+    result = await state(session, project)
+    item = next(
+        (
+            candidate
+            for candidate in result.items
+            if candidate.kind == VIEW_STATE
+            and candidate.view_id == view_id
+            and candidate.state_id == state_id
+        ),
+        None,
+    )
+    if item is None:
+        raise LookStateImageError("This view is not used in this state by the newest resolution.")
+    if item.status == "in_progress":
+        return item.record_id, False
+    if not item.can_run:
+        raise LookStateImageError(item.blocked_reason or "This picture cannot be made now.")
+    record = await _start_view_state(session, project, item, result.resolution_version)
+    return record.id, True
+
+
 async def start_look_record(
     session: AsyncSession, project: Project, record_id: int
 ) -> tuple[int, bool]:
@@ -637,6 +883,7 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         raise LookStateImageError(result.blocked_reason)
     look_ids: list[int] = []
     state_ids: list[int] = []
+    view_state_ids: list[int] = []
     skipped: list[Skipped] = []
     for item in result.items:
         if not item.can_run:
@@ -645,10 +892,15 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         if item.kind == LOOK:
             look = await _start_look(session, project, item, result.resolution_version)
             look_ids.append(look.id)
+        elif item.kind == VIEW_STATE:
+            view_record = await _start_view_state(session, project, item, result.resolution_version)
+            view_state_ids.append(view_record.id)
         else:
             record = await _start_state(session, project, item, result.resolution_version)
             state_ids.append(record.id)
-    return StartAllResult(look_ids=look_ids, state_ids=state_ids, skipped=skipped)
+    return StartAllResult(
+        look_ids=look_ids, state_ids=state_ids, view_state_ids=view_state_ids, skipped=skipped
+    )
 
 
 # --- When a state's picture is stored -----------------------------------------------------
@@ -690,6 +942,50 @@ async def on_state_image_stored(run_id: int) -> bool:
         await session.commit()
     _logger.info(
         "environment state %d: picture attached: image=%d pinned_version=%s",
+        record.id,
+        image.id,
+        pinned,
+    )
+    return True
+
+
+async def on_view_state_image_stored(run_id: int) -> bool:
+    """Called (best effort) once a `lab_image` job has stored its picture. When the picture is
+    the one a view in a state was waiting for (PHASE-053), it becomes that picture, and the
+    environment's next version freezes it the way a view's own picture is frozen
+    (`environment_views.pin_next_version`). Returns True when the picture was attached. Does
+    nothing (False) for any other picture.
+    """
+    async with SessionLocal() as session:
+        record = (
+            (
+                await session.execute(
+                    select(EnvironmentViewState).where(EnvironmentViewState.lab_run_id == run_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if record is None or record.reference_image_id is not None:
+            await session.commit()
+            return False
+        image = (
+            (await session.execute(select(LabImage).where(LabImage.run_id == run_id)))
+            .scalars()
+            .first()
+        )
+        view = await session.get(EnvironmentView, record.view_id)
+        if image is None or view is None:
+            await session.commit()
+            return False
+        record.reference_image_id = image.id
+        await session.flush()
+        pinned = await environment_views.pin_next_version(
+            session, view.environment_id, record.inputs
+        )
+        await session.commit()
+    _logger.info(
+        "environment view state %d: picture attached: image=%d pinned_version=%s",
         record.id,
         image.id,
         pinned,

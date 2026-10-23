@@ -24,7 +24,7 @@ written to the Character Lab. The answers never return ORM objects.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -68,12 +68,48 @@ class ShotCharacterOut(BaseModel):
     expression: str
     pose: str
     gaze: str
+    # Where the character stands in this shot, written by code from the scene's staging
+    # (PHASE-054). None on a specification made before the staging existed.
+    zone: str | None = None
+    screen_side: str | None = None
+    background_side: str | None = None
 
 
 class ShotCompositionOut(BaseModel):
     shot_size: str
     angle: str
     focus: str
+    # The id of the view of the place behind the shot; None before the staging existed.
+    view: str | None = None
+
+
+class ShotViewOut(BaseModel):
+    """A view of the shot's place that may stand behind it (PHASE-054)."""
+
+    id: str
+    name: str
+    side: str
+    framing: str
+    description: str
+    # The ids of the characters it may stand behind, and `group` for a shot of several people.
+    allowed_for: list[str]
+
+
+class ShotPlacementOut(BaseModel):
+    character_id: str
+    zone: str
+    posture: str
+    faces: str
+    screen_side: str
+    background_side: str
+
+
+class ShotStagingOut(BaseModel):
+    """Where the characters stand at the start of the shot, and the views allowed behind it."""
+
+    placements: list[ShotPlacementOut]
+    group_side: str
+    views: list[ShotViewOut]
 
 
 class ShotCameraOut(BaseModel):
@@ -159,6 +195,8 @@ class ShotDefinitionEntryOut(BaseModel):
     # True when the newest definition was written by the user: defining it again by model has
     # to be confirmed (PHASE-038).
     needs_confirmation: bool
+    # None when the scene is not staged or its place has no planned views yet (PHASE-054).
+    staging: ShotStagingOut | None = None
 
 
 class SceneShotDefinitionsOut(BaseModel):
@@ -227,6 +265,10 @@ class ShotCharacterIn(BaseModel):
     expression: str = _Text
     pose: str = _Text
     gaze: str = _Text
+    # Written by code from the staging; accepted so an unchanged specification can be sent back.
+    zone: str | None = Field(default=None, max_length=200)
+    screen_side: str | None = Field(default=None, max_length=200)
+    background_side: str | None = Field(default=None, max_length=200)
 
 
 class ShotCompositionIn(BaseModel):
@@ -235,6 +277,8 @@ class ShotCompositionIn(BaseModel):
     shot_size: str = Field(max_length=100)
     angle: str = _Text
     focus: str = _Text
+    # An id from the shot's allowed views; `check_answer` refuses a missing or wrong one.
+    view: str | None = Field(default=None, max_length=200)
 
 
 class ShotCameraIn(BaseModel):
@@ -271,6 +315,19 @@ class ShotDefinitionIn(BaseModel):
     continuity_start: dict[str, str] = Field(max_length=200)
     continuity_end: dict[str, str] = Field(max_length=200)
     audio_intent: ShotAudioIntentIn
+
+
+def _staging_out(staging: dict[str, Any] | None) -> ShotStagingOut | None:
+    if staging is None:
+        return None
+    return ShotStagingOut(
+        placements=[
+            ShotPlacementOut(character_id=character_id, **placed)
+            for character_id, placed in staging["characters"].items()
+        ],
+        group_side=staging["group_side"],
+        views=[ShotViewOut.model_validate(view) for view in staging["views"]],
+    )
 
 
 def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
@@ -318,6 +375,7 @@ def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
         needs_confirmation=entry.needs_confirmation,
+        staging=_staging_out(entry.staging),
     )
 
 

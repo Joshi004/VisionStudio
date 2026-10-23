@@ -27,12 +27,14 @@ from app.services import (
     discovery,
     discovery_edits,
     environment_definitions,
+    environment_views,
     generation_requests,
     look_state_images,
     look_state_resolution,
     project_cast,
     scene_definitions,
     scene_events,
+    scene_staging,
     shot_definitions,
     shot_plans,
     shot_prompts,
@@ -54,6 +56,7 @@ AcceptStage = Literal[
     "relations",
     "scene_definitions",
     "events",
+    "scene_staging",
     "speech_units",
     "shot_plans",
     "shot_definitions",
@@ -75,6 +78,7 @@ _STAGE_ERRORS: Final = (
     character_relations.CharacterRelationError,
     scene_definitions.SceneDefinitionError,
     scene_events.SceneEventsError,
+    scene_staging.SceneStagingError,
     speech_units.SpeechUnitsError,
     shot_plans.ShotPlansError,
     shot_definitions.ShotDefinitionsError,
@@ -313,6 +317,33 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                 ),
             )
 
+    for staging in (await scene_staging.state(session, project)).entries:
+        if staging.status == "out_of_date":
+            found.add(
+                "scene_staging",
+                Item(
+                    "scene_staging",
+                    _scene_title(staging.item),
+                    staging.reasons,
+                    acceptable=True,
+                    scene_id=staging.item["id"],
+                ),
+            )
+
+    for views in (await environment_views.state(session, project)).entries:
+        reasons = [*views.reasons, *(reason for item in views.views for reason in item.reasons)]
+        if views.status == "out_of_date" or reasons:
+            found.add(
+                "environment_views",
+                Item(
+                    "environment_views",
+                    views.name,
+                    reasons or ["The views of this place are out of date."],
+                    acceptable=False,
+                    discovery_id=views.discovery_id,
+                ),
+            )
+
     resolution = await look_state_resolution.state(session, project)
     if resolution.version is not None and resolution.reasons:
         found.add(
@@ -487,6 +518,8 @@ async def _accept(
         await scene_definitions.accept_as_is(session, project, _need(scene_id, "scene"))
     elif stage == "events":
         await scene_events.accept_as_is(session, project, _need(scene_id, "scene"))
+    elif stage == "scene_staging":
+        await scene_staging.accept_as_is(session, project, _need(scene_id, "scene"))
     elif stage == "speech_units":
         await speech_units.accept_as_is(session, project, _need(scene_id, "scene"))
     elif stage == "shot_plans":

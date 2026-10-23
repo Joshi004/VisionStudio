@@ -691,6 +691,8 @@ async def _queue_repair(
             "speech": item.fields["speech"],
             "dialogue": item.fields["dialogue"],
             "duration": item.fields["duration"],
+            # Where the characters stand in this shot and the views that may stand behind it.
+            "staging": item.fields["staging"],
             # What the repair read: it is not saved over a newer version.
             "specification": item.row.content,
             "read_definition_id": item.row.id,

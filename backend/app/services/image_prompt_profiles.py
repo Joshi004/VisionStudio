@@ -515,6 +515,13 @@ _ENVIRONMENT_SHEET_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
         "eave. Pale blue mountain ridges rise behind it into morning mist.\n"
         "Atmosphere: quiet, cool and still, like the first hour of the day."
     ),
+    "spatial": (
+        "Camera: Standing on the terrace at the foot of the stone path, facing the tea house.\n"
+        "Ahead, filling the back of the frame: the tea house beside the pine, with mountain "
+        "ridges and mist behind it.\n"
+        "At the left edge of the frame: clipped green shrubs along the stone path.\n"
+        "At the right edge of the frame: a low dry-stone wall at the edge of the terrace."
+    ),
 }
 
 _ENVIRONMENT_SHEET_EXAMPLE_PROMPT: Final = (
@@ -523,7 +530,8 @@ _ENVIRONMENT_SHEET_EXAMPLE_PROMPT: Final = (
     "stands on a terrace of flat stone slabs, its sliding paper doors closed and a row of "
     "round red paper lanterns hanging unlit under the front eave. In the foreground a stone "
     "path winds up from the lower left between clipped green shrubs; in the middle of the "
-    "picture the tea house sits slightly right of centre beside a gnarled pine; behind it, "
+    "picture the tea house sits slightly right of centre beside a gnarled pine, and a low "
+    "dry-stone wall edges the terrace at the right of the frame; behind it, "
     "pale blue mountain ridges rise one beyond the other into soft mist, filling the upper "
     "part of the frame. The camera is at eye level with a gentle 35 mm look and a calm, "
     "balanced composition. Cool, low light from the left runs across the roof and the "
@@ -534,7 +542,7 @@ _ENVIRONMENT_SHEET_EXAMPLE_PROMPT: Final = (
 
 QWEN_IMAGE_21_ENVIRONMENT_SHEET: Final = ImagePromptProfile(
     id="qwen-image-2.1-environment-sheet",
-    version=1,
+    version=2,
     image_model="Qwen-Image-2.1",
     prompt_rules="\n".join(
         [
@@ -557,7 +565,11 @@ QWEN_IMAGE_21_ENVIRONMENT_SHEET: Final = ImagePromptProfile(
             "4. Then say where things sit in the frame (the foreground, the middle and the "
             "background; left, centre and right; the upper and lower parts of the picture), "
             "the angle (a wide establishing view at eye level) and the lens look (for "
-            "example '35 mm look'). The frame is wide, so spread the place across it.",
+            "example '35 mm look'). The frame is wide, so spread the place across it. When "
+            "a spatial plan is given, draw the picture from the camera it describes: what "
+            "it puts ahead fills the back of the frame, what it puts at the left and right "
+            "edges appears at those edges, and nothing else of the place is shown (never "
+            "what is behind the camera). Keep every feature of the plan on its side.",
             "5. Then the light (where it comes from, its direction and quality), the time of "
             "day, the weather, the colour palette and the mood. Use the atmosphere you are "
             "given for the mood and the light.",
@@ -597,3 +609,105 @@ QWEN_IMAGE_21_ENVIRONMENT_SHEET: Final = ImagePromptProfile(
 
 # A library environment's canonical picture: an empty wide view of the place, not cut out.
 ACTIVE_ENVIRONMENT_SHEET_PROFILE: Final = QWEN_IMAGE_21_ENVIRONMENT_SHEET
+
+# A view of a library environment (PHASE-052): an edit of the master picture that shows the same
+# place from another direction. The image model is shown the master picture (and, for a view
+# of what is behind the master camera, the finished left and right views) and this prompt.
+# Like the other Qwen profiles it follows the published guidance and has not been checked
+# against real pictures here: check it and raise `version` when it changes.
+
+_ENVIRONMENT_VIEW_EXAMPLE_INPUTS: Final[dict[str, Any]] = {
+    "view": (
+        "Name: The pine and the wall.\n"
+        "Side: right (relative to Picture 1)\n"
+        "Framing: medium\n"
+        "What it shows: the dry-stone wall at the edge of the terrace, with the valley and "
+        "the far ridges beyond it."
+    ),
+    "camera": (
+        "Turn the camera about 90 degrees to the right of the direction Picture 1 looks, and "
+        "keep it at the same height and in the same spot."
+    ),
+    "side_text": (
+        "A low dry-stone wall edges the terrace; beyond it the ground falls away to a pine "
+        "valley and pale ridges."
+    ),
+    "pictures": "Picture 1: the master picture of the place.",
+}
+
+_ENVIRONMENT_VIEW_EXAMPLE_PROMPT: Final = (
+    "Using Picture 1 as the place, make a new picture of the very same mountain terrace seen "
+    "from the same spot and at the same eye height, with the camera turned about 90 degrees "
+    "to the right so that the tea house has turned out of the frame. A low dry-stone wall of grey, "
+    "moss-edged stones runs from the lower left across the middle of the frame to the right "
+    "edge, and the flat stone slabs of the terrace fill the lower part of the picture. "
+    "Beyond the wall the ground falls away into a valley of dark pines, and pale blue "
+    "mountain ridges rise one behind another into soft mist, filling the upper half of the "
+    "frame. The framing is a medium view, wide in 16:9, with the wall as the main feature "
+    "and bare stone slabs in front of it. Keep exactly the materials, the colours, the cool "
+    "low light from the left, the morning mist, the time of day and the natural photographic "
+    "look of Picture 1. The place stands empty, quiet and still."
+)
+
+QWEN_IMAGE_21_ENVIRONMENT_VIEW: Final = ImagePromptProfile(
+    id="qwen-image-2.1-environment-view",
+    version=1,
+    image_model="Qwen-Image-2.1",
+    prompt_rules="\n".join(
+        [
+            'Rules for "image_prompt", the edit prompt for the image model. The picture is a '
+            "new view of a place whose master picture the model is shown as Picture 1: the "
+            "same place, from another direction.",
+            "1. One paragraph of plain English prose, in complete sentences and the present "
+            "tense, 150 to 250 words. No lists, no headings, no labels and no piles of "
+            "comma-separated keywords.",
+            "2. Open by naming Picture 1 as the place and by saying what changes: the same "
+            "spot and eye height, with the camera turned as the camera instruction says "
+            "(follow it exactly: the direction and the angle).",
+            "3. Then say what fills the frame in this direction, from the view's text and the "
+            "text of that side of the place: the main features, their materials and colours, "
+            "where each sits in the frame (foreground, middle and background; left, centre "
+            "and right) and what is at the edges. Take it from what you are given and add "
+            "nothing that changes what the place is.",
+            "4. Say how close the view is: a wide view shows the whole side, a medium view "
+            "shows its main feature with room around it, a close view shows a part of it "
+            "large in the frame, a plain surface or object that a person can later be placed "
+            "in front of.",
+            "5. When more pictures are listed, say which one gives what: for a view of what is "
+            "behind the master camera, the left and right views show the edges of that space "
+            "and must agree with it at the frame's edges.",
+            "6. Then say what stays exactly as in Picture 1: the materials, the colour "
+            "palette, the direction and the quality of the light, the time of day, the "
+            "weather, the mood and the style of the picture. The frame is wide (16:9).",
+            "7. The place stands empty: put no person, animal or vehicle in it, and do not "
+            "mention any.",
+            "8. Nothing is written in the picture: describe any surface that could carry "
+            "words as plain or blank, and do not name writing of any kind, not even to say "
+            "there is none.",
+            "9. Describe only what is visible. The model has no negative prompt, and naming a "
+            "thing, even to rule it out ('no', 'without'), can make it appear. Say what fills "
+            "the space instead.",
+            "10. Never write the place's name, and never name a real place or a famous "
+            "building: describe the looks only.",
+            "11. Concrete nouns and plain adjectives. No quality tags (such as 8k, "
+            "masterpiece or highly detailed) and no camera brand names.",
+        ]
+    ),
+    example_inputs=_ENVIRONMENT_VIEW_EXAMPLE_INPUTS,
+    example_answer=json.dumps(
+        {"image_prompt": _ENVIRONMENT_VIEW_EXAMPLE_PROMPT}, ensure_ascii=False
+    ),
+    min_words=150,
+    max_words=250,
+    rules=(
+        *SEEDREAM_50_LITE.rules,
+        TextRule(
+            _NEGATIVE_WORDS,
+            "A negative found (no, not, without, nothing). The image model has no negative "
+            "prompt, and naming a thing can make it appear: say what is there instead.",
+        ),
+    ),
+    uses_references=True,
+)
+
+ACTIVE_ENVIRONMENT_VIEW_PROFILE: Final = QWEN_IMAGE_21_ENVIRONMENT_VIEW

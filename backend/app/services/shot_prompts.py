@@ -43,6 +43,7 @@ from app.services import (
     scene_definitions,
     shot_definitions,
     shot_prompt_writer,
+    shot_staging,
     user_feedback,
 )
 
@@ -371,12 +372,22 @@ async def _queue(
             "scene": context["scene"],
             "shot_definition": definition.content,
             "characters": context["characters"],
-            "environment": context["environment"],
+            "environment": _environment_with_view(context, definition.content),
             "inputs": inputs,
             **feedback_input,
         },
         dedupe_key=DEDUPE_KEY,
     )
+
+
+def _environment_with_view(context: dict[str, Any], definition: dict[str, Any]) -> dict[str, Any]:
+    """The environment the prompt writer reads, with the view the shot is framed in front of
+    (PHASE-054) when its specification names one.
+    """
+    composition = definition.get("composition")
+    view_id = composition.get("view") if isinstance(composition, dict) else None
+    view = shot_staging.view_for_prompt(context.get("staging"), view_id)
+    return {**context["environment"], "view": view} if view is not None else context["environment"]
 
 
 async def start_shot(

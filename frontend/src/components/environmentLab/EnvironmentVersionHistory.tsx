@@ -79,6 +79,40 @@ function VersionDetails({ version }: { version: EnvironmentVersion }) {
           )}
         </Stack>
       ))}
+      {version.views.map((view) => (
+        <Stack key={view.slug} gap={4}>
+          <Text size="sm" fw={600}>
+            View: {view.name}
+          </Text>
+          {view.image !== null ? (
+            <img
+              src={view.image.url}
+              alt={`${view.name} view, version ${version.version}`}
+              loading="lazy"
+              style={PICTURE_STYLE}
+            />
+          ) : (
+            <Text size="xs" c="dimmed">
+              Its picture is gone.
+            </Text>
+          )}
+          {view.states.map((state) => (
+            <Stack key={state.slug} gap={4}>
+              <Text size="xs" c="dimmed">
+                In the state: {state.name}
+              </Text>
+              {state.image !== null && (
+                <img
+                  src={state.image.url}
+                  alt={`${view.name} view in ${state.name}, version ${version.version}`}
+                  loading="lazy"
+                  style={PICTURE_STYLE}
+                />
+              )}
+            </Stack>
+          ))}
+        </Stack>
+      ))}
       {version.job_id !== null && (
         <Text size="xs" c="dimmed">
           Written by job {version.job_id} of a story project.

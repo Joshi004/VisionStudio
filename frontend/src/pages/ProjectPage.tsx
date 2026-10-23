@@ -16,7 +16,9 @@ import { LookStateImagesPanel } from "../components/story/LookStateImagesPanel";
 import { LooksAndStatesPanel } from "../components/story/LooksAndStatesPanel";
 import { NarratorVoicePanel } from "../components/story/NarratorVoicePanel";
 import { SceneDefinitionsPanel } from "../components/story/SceneDefinitionsPanel";
+import { EnvironmentViewsPanel } from "../components/story/EnvironmentViewsPanel";
 import { SceneEventsPanel } from "../components/story/SceneEventsPanel";
+import { SceneStagingPanel } from "../components/story/SceneStagingPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
 import { GenerationRequestsPanel } from "../components/story/GenerationRequestsPanel";
 import { ShotDefinitionsPanel } from "../components/story/ShotDefinitionsPanel";
@@ -125,6 +127,12 @@ export function ProjectPage() {
           </div>
           <div id="pipeline-step-events">
             <SceneEventsPanel projectId={project.id} speechMode={project.speech_mode} />
+          </div>
+          <div id="pipeline-step-scene_staging">
+            <SceneStagingPanel projectId={project.id} />
+          </div>
+          <div id="pipeline-step-environment_views">
+            <EnvironmentViewsPanel projectId={project.id} />
           </div>
           <LooksAndStatesPanel projectId={project.id} />
           <LookStateImagesPanel projectId={project.id} />

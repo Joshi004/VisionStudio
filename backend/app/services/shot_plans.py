@@ -47,8 +47,10 @@ from app.services import (
     provenance,
     scene_definition_writer,
     scene_definitions,
+    scene_staging,
     scene_timeline,
     shot_planning_writer,
+    shot_staging,
     speech_synthesis,
     story_bible,
     user_feedback,
@@ -182,6 +184,8 @@ class _Loaded:
     definitions: dict[str, scene_definitions.SceneEntry]
     # The characters and environments that are linked and defined, by `(kind, discovery id)`.
     current: dict[tuple[str, str], scene_definitions.CurrentDefinition]
+    # The newest staging of each scene (PHASE-054), by scene id.
+    staging: dict[str, scene_staging.SceneEntry]
     policy: duration_policy.DurationPolicy | None
     replan_max_tries: int
     blocked_reason: str | None
@@ -197,6 +201,9 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         for entry in (await scene_definitions.state(session, project)).entries
     }
     current = await scene_definitions.current_definitions(session, project)
+    staging = {
+        entry.item["id"]: entry for entry in (await scene_staging.state(session, project)).entries
+    }
     scenes = cast(SceneDiscovery | None, await discovery.latest(session, "scenes", project.id))
 
     policy: duration_policy.DurationPolicy | None = None
@@ -213,6 +220,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         audio=audio,
         definitions=definitions,
         current=current,
+        staging=staging,
         policy=policy,
         replan_max_tries=await settings_service.get_int(
             session, settings_service.SHOT_REPLAN_MAX_TRIES_KEY
@@ -471,6 +479,7 @@ async def _queue(
                 _for_model(loaded.current[key]) for key in prepared.chosen_characters
             ],
             "environment": _for_model(loaded.current[prepared.environment_key]),
+            "staging": _staging_for_planner(loaded, item["id"], prepared),
             "events": prepared.events,
             "units": prepared.units,
             "target_min_seconds": policy.target_min_s,
@@ -480,6 +489,19 @@ async def _queue(
         },
         dedupe_key=DEDUPE_KEY,
     )
+
+
+def _staging_for_planner(
+    loaded: _Loaded, scene_id: str, prepared: _Prepared
+) -> dict[str, Any] | None:
+    """The scene's newest staging for the planner (PHASE-054), or None when it has none. The
+    plan does not depend on it: a shot is judged against the staging when it is defined.
+    """
+    staged = loaded.staging.get(scene_id)
+    if staged is None or staged.content is None:
+        return None
+    names = {key[1]: loaded.current[key].name for key in prepared.chosen_characters}
+    return shot_staging.planner_block(staged.content, names)
 
 
 def _find_scene(loaded: _Loaded, scene_id: str) -> speech_synthesis.SceneAudio:

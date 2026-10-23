@@ -109,7 +109,9 @@ class Job(Base):
         # check of the shots' takes, since revision 0049, and the run of the whole story
         # pipeline, since revision 0050, and the speech-recognition check of a take's
         # dialogue, since revision 0051, and the choice of a shot's reference pictures by the
-        # language model, since revision 0052, and the two Music lab jobs, since revision 0057.
+        # language model, since revision 0052, and the two Music lab jobs, since revision 0057, and
+        # the staging of a scene, since revision 0058, and the planning of an environment's views
+        # and the writing of a view's prompt, since revision 0059.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -120,7 +122,8 @@ class Job(Base):
             "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
             "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes', "
             "'story_pipeline', 'check_take_dialogue', 'select_shot_references', "
-            "'lab_music', 'write_lab_music_prompt')",
+            "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
+            "'plan_environment_views', 'write_environment_view_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -351,6 +354,40 @@ class SceneEvents(Base):
         CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
         UniqueConstraint("project_id", "scene_id", "version"),
         Index("idx_scene_events_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SceneStaging(Base):
+    """One version of one scene's staging (PHASE-051, `Path_ahead.md` Section 46): where each
+    character of the scene stands, which way they face, which side of the screen they appear on
+    and which side of the place is behind them, plus the axis of the main conversation, the
+    background of the group and the moves that change a placement after an event.
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version` of that scene, and a stored row is never changed.
+    `scene_id` is the slug `id` of the scene inside the project's `scene_discovery` content.
+    `inputs` records what the version was built from (the story hash and the artifacts: the
+    StoryBible, the scene's definition, the scene's events and the environment's definition).
+    """
+
+    __tablename__ = "scene_staging"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "version"),
+        Index("idx_scene_staging_project_scene", "project_id", "scene_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1726,6 +1763,10 @@ class LibraryEnvironmentVersion(Base):
     # The pictures of the environment's states (PHASE-017) as this version froze them:
     # `[{"slug", "state_id", "reference_image_id"}]`, sorted by slug. Empty when there are none.
     states: Mapped[Any] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # The pictures of the environment's views (PHASE-052) as this version froze them:
+    # `[{"slug", "view_id", "reference_image_id", "states": []}]`, sorted by slug. Empty when
+    # there are none.
+    views: Mapped[Any] = mapped_column(JSON, default=list, server_default=text("'[]'"))
 
 
 class EnvironmentReference(Base):
@@ -1872,6 +1913,125 @@ class EnvironmentState(Base):
     # The edit run that makes the state's picture (PHASE-017), and what it was made from
     # (`{"project_id", "discovery_id", "environment_version", "source_image_id",
     # "resolution_version"}`). NULL until a picture is started.
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EnvironmentView(Base):
+    """A named view of a library environment (PHASE-052, `Path_ahead.md` Section 46): the place
+    seen from another direction than its master picture, for example "the wall behind the
+    stove". `side` is relative to the master picture (`ahead`, `left`, `right` or `behind`) and
+    `framing` how close the view is. The master picture is the implicit `establishing` view and
+    has no row here (`slug` can never be `establishing`).
+
+    Like a state, a view belongs to the library environment and not to one version: creating
+    one adds no version and moves no pin. Its picture is an edit of the master picture
+    (`reference_image_id`, made by `lab_run_id`); the written edit prompt is `prompt` (written
+    by the job `prompt_job_id`). `inputs` records what the picture was made from
+    (`{"project_id", "discovery_id", "master_version", "source_image_id", "plan_version"}`); a
+    picture is out of date when `source_image_id` is no longer the pinned master. `inputs` is
+    NULL for a view made by hand.
+    """
+
+    __tablename__ = "environment_view"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        CheckConstraint("slug <> 'establishing'", name="slug_not_establishing"),
+        CheckConstraint("side IN ('ahead', 'left', 'right', 'behind')", name="side_valid"),
+        CheckConstraint("framing IN ('wide', 'medium', 'close')", name="framing_valid"),
+        UniqueConstraint("environment_id", "slug"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    environment_id: Mapped[int] = mapped_column(
+        ForeignKey("library_environment.id", ondelete="CASCADE")
+    )
+    slug: Mapped[str]
+    name: Mapped[str]
+    side: Mapped[str]
+    framing: Mapped[str]
+    # The zone of the environment's spatial plan the view looks at, when it looks at one.
+    zone: Mapped[str | None] = mapped_column(default=None)
+    description: Mapped[str]
+    source: Mapped[str]
+    origin_project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project.id", ondelete="SET NULL"), default=None
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    prompt: Mapped[str | None] = mapped_column(default=None)
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    reference_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EnvironmentViewPlan(Base):
+    """One version of the plan of the views one environment needs in one project (PHASE-052,
+    `Path_ahead.md` Section 46): which views the environment has for the project's scenes (new
+    ones and reused library ones) and, for every scene, which views cover each side that is
+    behind a character and the group.
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version` of that discovered environment, and a stored row is never
+    changed. `discovery_id` is the slug `id` of the environment inside the project's
+    `environment_discovery` content. `inputs` records what the plan was built from (the
+    stagings of the scenes that use the place, the environment's definition and its pinned
+    master picture).
+    """
+
+    __tablename__ = "environment_view_plan"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "discovery_id", "version"),
+        Index("idx_environment_view_plan_project_discovery", "project_id", "discovery_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    discovery_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class EnvironmentViewState(Base):
+    """The picture of one view of an environment in one named state of it (PHASE-053,
+    `Path_ahead.md` Section 46): for example the stove wall at night. It is an edit of the view's
+    picture in the condition shown by the state's picture (`reference_image_id`, made by
+    `lab_run_id`). `inputs` records what it was made from (`{"project_id", "discovery_id",
+    "slug", "resolution_version", "view_image_id", "state_image_id", "environment_version"}`):
+    a picture is out of date when either source picture was replaced since.
+
+    Like a state or a view, it belongs to the library environment (through its view): creating
+    one adds no version and moves no pin until its picture is stored.
+    """
+
+    __tablename__ = "environment_view_state"
+    __table_args__ = (UniqueConstraint("view_id", "state_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    view_id: Mapped[int] = mapped_column(ForeignKey("environment_view.id", ondelete="CASCADE"))
+    state_id: Mapped[int] = mapped_column(ForeignKey("environment_state.id", ondelete="CASCADE"))
+    reference_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
     lab_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
     )

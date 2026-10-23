@@ -128,6 +128,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-043 rapid exchange, 2026-10-23): no migration, no new table, no new column, no new job type.** **One shot can hold a quick back-and-forth between two characters: the clip cuts at each line.** (1) **`shot_plan.content.shots[].rapid_exchange`** (boolean): the Shot Planning model or the user sets it; a plan stored before this phase has no such key and reads as `false`. It is accepted only for a shot that carries two or three lines of dialogue (no narration) from exactly two speakers who take turns, and never together with `continues_previous`. (2) **`generation_request.content.exchange`** (`{cuts: [{shot, audio, speaker_id, at_s}]}`) is set for such a shot and absent (null) otherwise: one cut for each line in order, the first at 0 and each later one at its line's `starts_in_shot_seconds`. The route stays `reference`; both speakers must be visible with a character picture, and the shot cannot have a continuity anchor. (3) **`shot_prompt.content.pieces`** has `shot_1`, `shot_2`, ... instead of `shot`, and **`content.cuts`** (`[{shot, cue, audio_label, speaker, subject_label, text}]`) lists the internal shots; both are absent from the prompt of any other shot. The prompt's `detailed_description` holds `[Shot 1]` and then `[Shot n] At MM:SS.mmm, ...` for every later cut, written by code. (4) The skeleton that a shot definition is checked against gains `rapid_exchange: true` **only for an exchange shot**, so no other shot's definition becomes out of date. Section 5 (the shot plan, the generation request and the shot prompt) says the same where those artifacts are described.
 
+**Update (PHASE-050 to PHASE-054 environment views, scene staging and shot-aware backgrounds, 2026-10-23):** migrations `0058`, `0059` and `0060`. **Two speakers in one room no longer get the same background.** A place is mapped, each scene is staged, a place gets several views, and every shot picks one. (1) **A spatial plan** (PHASE-050): `library_environment.definition` and `library_environment_version.definition` gain `spatial_plan` (`master_view`, `sides`, `zones`, Section 5); the canonical picture profile is `QWEN_IMAGE_21_ENVIRONMENT_SHEET` version 2. No column is added: it is part of the definition JSON. (2) **Scene staging** (PHASE-051, migration `0058`): new table `scene_staging` (Section 4.51), one immutable row per version of one scene's staging (where each character stands, the screen side, the background side, the axis and the moves), following Section 2.1. (3) **Environment views** (PHASE-052, migration `0059`): new tables `environment_view` (Section 4.52, a named view of a library environment, an edit of the master picture, never a version) and `environment_view_plan` (Section 4.53, one version of the views one environment needs in one project and which views cover each background side of each scene); `library_environment_version` gains `views` (JSON, default `'[]'`, Section 4.32), the pictures of the views a version froze. (4) **Views in states** (PHASE-053, migration `0060`): new table `environment_view_state` (Section 4.54), the picture of one view in one named state of the environment; the frozen `views` of a version hold them as `states`. (5) **Shots** (PHASE-054): no table or column. A shot definition's `content` gains `composition.view` (the id of the view behind the shot, or `establishing` for the master picture) and, for each entry of `characters`, `zone`, `screen_side` and `background_side`, written by code from the staging; its `inputs` gain `staging.sha256` (what the shot was staged from; the shot is out of date when it changes) and two artifacts (`scene_staging`, `environment_view_plan`). A scene that was never staged is defined as before, with none of these; a definition without them reads as out of date once its scene is staged. The reference catalog (`shot_reference_manifest`) now offers each view's picture under `view` = the view's slug, and its pictures in states under `variant` = the state's slug; the master stays `view` = `environment`. (6) `job.type` gains `stage_scene`, `plan_environment_views` and `write_environment_view_prompt`: the CHECK is rebuilt in batch mode (migrations `0058` and `0059`). All three belong to a project, are `provider='llm'` with the restart rule `never_rerun` and use the story model (D-12), except the prompt job, which uses the image-prompt model. (7) The story pipeline has two new steps, `scene_staging` and `environment_views`, and a new review point, `staging` (`services/review_points.py`, off by default; stored in `project.review_points` like the others). Nothing about staleness is stored: it is computed on read (D-3). Migration `0057` (the Music lab's `lab_music_run` table and its two job types) is not described in this document. See Sections 2.1, 4.32, 4.51 to 4.54 and 5.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -1676,6 +1678,7 @@ The head is the **current** profile. Every change that alters one of the seven p
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | PHASE-013. The `define_environment` job that wrote this version. NULL for a manual version and for the first version of an environment the pipeline created. `ON DELETE SET NULL` |
 | `inputs` | JSON | NULL | — | PHASE-013. The D-3 inputs of Section 2.1 the definition was made from: `project_id`, `discovery_id`, the story hash, the entry's hash and the artifacts read (the StoryBible, the list of environments and the scenes, each with its version). NULL for a version made by hand |
 | `states` | JSON | NOT NULL | `'[]'` | PHASE-017 (migration `0037`). The pictures of the environment's named states as the version froze them: `[{"slug", "state_id", "reference_image_id"}]`, sorted by `slug`, only for a state that has a picture |
+| `views` | JSON | NOT NULL | `'[]'` | PHASE-052 (migration `0059`). The pictures of the environment's views as the version froze them: `[{"slug", "view_id", "reference_image_id", "states": [{"slug", "state_id", "reference_image_id"}]}]`, sorted by `slug`, only for a view that has a picture; `states` (PHASE-053) are the view's pictures in the environment's named states. The master picture is `reference_image_id` of the version itself, never an entry here |
 
 ```sql
 CREATE TABLE library_environment_version (
@@ -1690,6 +1693,7 @@ CREATE TABLE library_environment_version (
     job_id             INTEGER REFERENCES job(id) ON DELETE SET NULL,
     inputs             JSON,
     states             JSON NOT NULL DEFAULT '[]',
+    views              JSON NOT NULL DEFAULT '[]',
     UNIQUE (environment_id, version)
 );
 CREATE INDEX idx_library_environment_version_environment ON library_environment_version (environment_id);
@@ -2372,6 +2376,145 @@ CREATE TABLE story_render (
 CREATE INDEX idx_story_render_project ON story_render (project_id);
 ```
 
+### 4.51 `scene_staging`
+
+*Added in PHASE-051 (migration `0058`).* One row per **version of one scene's staging** (`Path_ahead.md` Section 46): where each character of the scene stands in the place, which way they face, which side of the screen they appear on and which side of the place is behind them, plus the axis of the main conversation, the side seen behind the group and the moves that change a placement. It has the shape and provenance of `scene_definition` (Section 4.36): `source`, `job_id`, `version`, `inputs`, `created_at`, and a stored row is never changed. `scene_id` is the slug `id` of the scene (not a foreign key). Written by `services/scene_staging.save_staging` in the same transaction that finishes its `stage_scene` job, or by the user's edit (`source = 'manual'`). The rules are in `services/scene_staging.py` and `services/scene_staging_writer.py`. A shot reads the placements at its first event (`scene_staging_writer.staging_at`).
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NOT NULL | — | The scene's slug `id` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... for this scene. `UNIQUE (project_id, scene_id, version)` |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `stage_scene` job that wrote it. NULL for a manual version. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | The story hash and the artifacts read: the StoryBible, the scene's definition, its events and the environment's definition (Section 5, "The scene staging") |
+| `content` | JSON | NOT NULL | — | The staging (Section 5, "The scene staging") |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE scene_staging (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scene_id    TEXT NOT NULL,
+    version     INTEGER NOT NULL,
+    source      TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id      INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs      JSON NOT NULL,
+    content     JSON NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, scene_id, version)
+);
+CREATE INDEX idx_scene_staging_project_scene ON scene_staging (project_id, scene_id);
+```
+
+### 4.52 `environment_view`
+
+*Added in PHASE-052 (migration `0059`).* A **named view of a library environment**: the place seen from another direction than its master picture, for example "the wall behind the stove". Like a state (Section 4.39) it belongs to the library environment and not to one version: creating one adds no version and moves no pin until its picture is stored, and then `environment_versions.record_version_if_changed` freezes it into the next version's `views` (Section 4.32). The master picture is the implicit view `establishing` and has no row (`CHECK (slug <> 'establishing')`). A view's picture is a **Qwen edit of the master picture** (`reference_image_id`, made by the lab run `lab_run_id`); a `behind` view is edited from the master and the left and right views of its plan. The edit prompt (`prompt`) is written per view by a `write_environment_view_prompt` job (`prompt_job_id`). A picture is out of date when `inputs.source_image_id` is no longer the pinned master (worked out on read).
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `environment_id` | INTEGER, FK → `library_environment.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `slug` | TEXT | NOT NULL | — | The view's id, unique for the environment (`UNIQUE (environment_id, slug)`); never `establishing` |
+| `name` | TEXT | NOT NULL | — | Shown to the user |
+| `side` | TEXT | NOT NULL | — | Relative to the master picture: `ahead`, `left`, `right` or `behind` (`CHECK`) |
+| `framing` | TEXT | NOT NULL | — | `wide`, `medium` or `close` (`CHECK`) |
+| `zone` | TEXT | NULL | — | The id of the zone of the spatial plan the view looks at, when it looks at one |
+| `description` | TEXT | NOT NULL | — | What the view shows |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `origin_project_id` | INTEGER, FK → `project.id` | NULL | — | The project whose plan made the view. `ON DELETE SET NULL` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `plan_environment_views` job that planned it. `ON DELETE SET NULL` |
+| `prompt` | TEXT | NULL | — | The written edit prompt |
+| `prompt_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_environment_view_prompt` job that wrote it. `ON DELETE SET NULL` |
+| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The view's picture, once stored. `ON DELETE SET NULL` |
+| `lab_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | The Qwen edit run that made it. `ON DELETE SET NULL` |
+| `inputs` | JSON | NULL | — | `{"project_id", "discovery_id", "master_version", "source_image_id", "plan_version"}`; NULL for a view made by hand |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE environment_view (
+    id                 INTEGER PRIMARY KEY,
+    environment_id     INTEGER NOT NULL REFERENCES library_environment(id) ON DELETE CASCADE,
+    slug               TEXT NOT NULL,
+    name               TEXT NOT NULL,
+    side               TEXT NOT NULL CHECK (side IN ('ahead', 'left', 'right', 'behind')),
+    framing            TEXT NOT NULL CHECK (framing IN ('wide', 'medium', 'close')),
+    zone               TEXT,
+    description        TEXT NOT NULL,
+    source             TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    origin_project_id  INTEGER REFERENCES project(id) ON DELETE SET NULL,
+    job_id             INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    prompt             TEXT,
+    prompt_job_id      INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    reference_image_id INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    lab_run_id         INTEGER REFERENCES lab_run(id) ON DELETE SET NULL,
+    inputs             JSON,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (slug <> 'establishing'),
+    UNIQUE (environment_id, slug)
+);
+```
+
+### 4.53 `environment_view_plan`
+
+*Added in PHASE-052 (migration `0059`).* One row per **version of the plan of the views one environment needs in one project**: which views the environment has for the project's scenes (new ones and library ones reused) and, for every scene, which views cover each side that is behind a character and the group. It has the shape and provenance of `scene_staging` (Section 4.51). `discovery_id` is the slug `id` of the environment in the project's `environment_discovery` (not a foreign key). Written by `services/environment_views.save_plan` in the same transaction that finishes its `plan_environment_views` job, or by the user's edit. A plan is out of date when a staging row it was built from, the environment's definition or the pinned master picture changed (worked out on read). A shot reads the plan to know which views may stand behind each character.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `discovery_id` | TEXT | NOT NULL | — | The environment's slug `id` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... for this environment in this project. `UNIQUE (project_id, discovery_id, version)` |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `plan_environment_views` job. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | The artifacts read: each staging row of a scene that uses the place, and the environment's definition (Section 5, "The environment view plan") |
+| `content` | JSON | NOT NULL | — | The plan (Section 5, "The environment view plan") |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE environment_view_plan (
+    id            INTEGER PRIMARY KEY,
+    project_id    INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    discovery_id  TEXT NOT NULL,
+    version       INTEGER NOT NULL,
+    source        TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id        INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs        JSON NOT NULL,
+    content       JSON NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, discovery_id, version)
+);
+CREATE INDEX idx_environment_view_plan_project_discovery ON environment_view_plan (project_id, discovery_id);
+```
+
+### 4.54 `environment_view_state`
+
+*Added in PHASE-053 (migration `0060`).* The **picture of one view of an environment in one named state of it** (for example the stove wall at night): an edit of the view's picture in the condition the state's picture shows, with the references `[view picture, state picture]`. Like a state or a view it belongs to the library environment (through its view): creating a row adds no version and moves no pin until its picture is stored, and then the next version freezes it as `views[].states` (Section 4.32). A picture is out of date when either source picture was replaced since (`inputs.view_image_id`, `inputs.state_image_id`, worked out on read). Made by `services/look_state_images.start_view_state_record` and stored by `on_view_state_image_stored`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `view_id` | INTEGER, FK → `environment_view.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `state_id` | INTEGER, FK → `environment_state.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (view_id, state_id)` |
+| `reference_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The picture, once stored. `ON DELETE SET NULL` |
+| `lab_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | The Qwen edit run that made it. `ON DELETE SET NULL` |
+| `inputs` | JSON | NULL | — | `{"project_id", "discovery_id", "slug", "resolution_version", "view_image_id", "state_image_id", "environment_version"}` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE environment_view_state (
+    id                 INTEGER PRIMARY KEY,
+    view_id            INTEGER NOT NULL REFERENCES environment_view(id) ON DELETE CASCADE,
+    state_id           INTEGER NOT NULL REFERENCES environment_state(id) ON DELETE CASCADE,
+    reference_image_id INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    lab_run_id         INTEGER REFERENCES lab_run(id) ON DELETE SET NULL,
+    inputs             JSON,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (view_id, state_id)
+);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -2702,6 +2845,8 @@ One job per attempt. It is a lab job (`project_id` NULL), `provider='llm'`, rest
 }
 ```
 
+**The spatial plan (PHASE-050).** `spatial_plan` maps the place from the camera of its master picture, so later pictures and the staging of scenes agree on where things are: `{"master_view": "...", "sides": {"ahead": "...", "left": "...", "right": "...", "behind": "..."}, "zones": [{"id": "by_window", "name": "...", "side": "ahead", "description": "..."}]}` (from `ZONES_MIN_ITEMS` to `ZONES_MAX_ITEMS` zones with unique slug ids; `side` is one of the four sides). It is part of the definition, so a change to it is a new version like any other, and the master picture is drawn from `master_view` and `sides`. A definition made before PHASE-050 has no `spatial_plan` and must be defined again before scenes can be staged.
+
 The text limits are: `architecture` 140, `layout` 240, `walls` 130, `floor` 90, `windows` 90, `doors` 90, `furniture` 160, `color_palette` 120, `atmosphere.baseline` 300; `important_landmarks` holds from 1 to 6 items of at most 50 characters and `continuity_rules` from 1 to 4 items of at most 100. `era.kind` is `present`, `past` or `future`, and `years` (1 to 10,000) is needed for the last two (a present era that came with years is accepted with the years dropped). They are chosen so that the two profile fields written from them fit the lab's own limits (`check_definition` checks it).
 
 **The mapping into the profile** (`environment_definition_writer.to_profile`, pure: the same definition always gives the same text). It overwrites exactly these fields of `library_environment` and never `name` or `notes`:
@@ -2899,6 +3044,34 @@ A `synthesize_speech_unit` job makes one unit's speech. Its `job.input` is what 
 
 **What writes it.** `POST /api/projects/{id}/speech-audio/{scene_id}/{unit_id}/run` (one unit, also one that is made already) and `POST .../run` (Make all, which skips ready, in-progress and unavailable units). In one transaction each creates the `synthesize_speech_unit` job and the `speech_unit_audio` row (`path` NULL). `store_result` of the job then moves the WAV into `media/{project_id}/` and sets the row's `path`, `size_bytes`, `sha256`, `sample_rate` and the measured `duration_s` while finishing the job.
 
+### The scene staging (PHASE-051)
+
+`scene_staging.content` (`services/scene_staging_writer.check_answer`; code sets nothing the model could get wrong: every id is checked against the scene's characters, its events and the environment's zones):
+
+```json
+{ "placements": [ { "character_id": "arjun", "zone": "bed", "posture": "sitting up in bed", "faces": "right", "screen_side": "left", "background_side": "left" } ],
+  "axis": { "between": ["arjun", "mira"], "camera_half": "ahead", "note": "Arjun stays on the left of the screen." },
+  "group_side": "ahead",
+  "moves": [ { "after_event_id": "evt_3", "character_id": "mira", "zone": "by_window", "faces": "ahead", "screen_side": "right", "background_side": "ahead" } ] }
+```
+
+`faces` is a side (`ahead`, `left`, `right`, `behind`), a zone id or a character id. `screen_side` is `left`, `right` or `center`; `background_side` is a side and never the side the person faces. `axis.between` is the two characters of the main conversation (empty with fewer than two characters) and they keep opposite screen sides. The placements at a shot are the opening placements with every move applied whose event comes before the shot's first event. `scene_staging.inputs` is `{"project_id", "scene_id", "story_sha256", "artifacts": [story_bible, scene_definition, scene_events, environment_definition]}` as in Section 2.1.
+
+### The environment view plan (PHASE-052)
+
+`environment_view_plan.content` (`services/environment_view_planner.check_answer`):
+
+```json
+{ "views": [ { "id": "stove_wall", "name": "The stove wall", "side": "left", "framing": "medium", "zone": "by_stove", "description": "...", "reused": false, "view_id": 12 } ],
+  "scenes": [ { "scene_id": "the_warning", "by_side": { "left": ["stove_wall"], "right": ["window_wall"] }, "group": ["establishing"] } ] }
+```
+
+`views` are the views to add to the environment; `establishing` (the master picture) is implicit and may be used in `by_side` and `group`. `reused` is true for a view the library environment already had (`view_id`). For every scene that uses the place, `by_side` lists, for each background side a character of that scene has (opening placements and moves), the views that may stand behind them, and `group` the views that may stand behind a shot of the whole group. At most `MAX_VIEWS` (12) new views. A `behind` view is edited after the plan's left and right views are ready.
+
+### `job.input` and `job.output` for the PHASE-051 and PHASE-052 jobs
+
+`stage_scene` (one job per scene, `dedupe_key="scene_id"`), `plan_environment_views` (one job per environment, `dedupe_key="discovery_id"`) and `write_environment_view_prompt` (one job per view, `dedupe_key="view_id"`) belong to a project and are `provider='llm'` with the restart rule `never_rerun`. The first two use the **story model** and the third the **image-prompt model** (D-12). Like every paid call (`jobs/llm_call.py`) each makes at most two attempts, never retries a refusal, stores the model's answer on the job as it arrives and is never re-run after a restart. `input` holds what was read (the ids and versions of the artifacts, the story hash) and the exact request (`input.request`); `output` holds the attempts, the token usage and the raw answer. A successful job saves its row (`scene_staging`, `environment_view_plan`) or, for the prompt job, writes `environment_view.prompt`, and then starts the picture (`jobs/generate_lab_image.py` stores it through `_continue_environment_lab`).
+
 ### The shot plan (PHASE-020)
 
 `shot_plan.content` is the list of shot skeletons of one scene, in order. The model chooses the grouping, the types, the durations and the descriptions; **code sets the ids and `scene_id`** and checks the answer (`services/shot_planning_writer.check_answer`) before anything is stored:
@@ -2980,9 +3153,9 @@ When the job starts it resolves the story model, loads the StoryBible named by `
 ```json
 { "shot_id": "shot_2", "scene_id": "the_warning", "duration": 2.5,
   "visual_story": "Arjun freezes as an impossible footstep echoes above him.",
-  "characters": [ { "id": "arjun", "expression": "suddenly alert and frightened", "pose": "partially upright in bed", "gaze": "toward ceiling" } ],
+  "characters": [ { "id": "arjun", "expression": "suddenly alert and frightened", "pose": "partially upright in bed", "gaze": "toward ceiling", "zone": "bed", "screen_side": "left", "background_side": "left" } ],
   "environment_state": { "lighting": "dim warm bedside light", "ceiling_visible": true },
-  "composition": { "shot_size": "medium_close_up", "angle": "slightly low", "focus": "arjun" },
+  "composition": { "shot_size": "medium_close_up", "angle": "slightly low", "focus": "arjun", "view": "ceiling_view" },
   "camera": { "movement": "slow push in", "intensity": "subtle" },
   "action": { "start_state": "Arjun lying still", "primary_action": "his eyes snap upward", "end_state": "Arjun remains frozen, staring upward" },
   "continuity_start": { "arjun": "lying still in bed, eyes closed" },
@@ -2991,6 +3164,7 @@ When the job starts it resolves the story model, loads the StoryBible named by `
 ```
 
 - **Written by code.** `shot_id` and `scene_id` come from the shot plan. `duration` is the shot's length on the scene's timeline (`scene_timeline`, PHASE-021), in seconds to a thousandth. `audio_intent.dialogue` is `null` when the shot carries no line of dialogue, otherwise a list of `{unit_id, speaker_id, text}` in plan order. Narration is never put there (D-10).
+- **Staging and view (PHASE-054).** `composition.view` is the id of the view of the place behind the shot (`establishing` is the master picture), and `zone`, `screen_side` and `background_side` of each `characters` entry are where the scene's staging puts that character at the shot's first event. **Code writes `zone`, `screen_side` and `background_side`; the model picks only `composition.view`**, from the views allowed for the shot (`services/shot_staging`): a single of one character (its `focus` is that character's id and the size is not `wide` or `extreme_wide`, and it is not a rapid exchange) takes a view that covers that character's background side, and any other shot takes a view that covers the group. A view that is not allowed makes the answer unusable. A scene that was never staged is defined without them, as before; a definition made without them reads as out of date once its scene is staged, and a staged scene's shots cannot be defined until the views of its place are planned and drawn.
 - **`composition.shot_size`** is one of `extreme_close_up`, `close_up`, `medium_close_up`, `medium`, `medium_wide`, `wide`, `extreme_wide` (case, spaces and hyphens are read leniently). PHASE-024 is meant to map them to the Character Lab framings: the first three to `close_up`, `medium` and `medium_wide` to `medium`, the last two to `wide` (`shot_definition_writer.FRAMING_OF_SIZE`). **There is no music field** (Section 26).
 - **The checks** (anything below makes the answer unusable, with the same two attempts as every stage; then the job fails with the reason and nothing is stored): every character in `characters` and every key of `continuity_start` and `continuity_end` is one of the scene definition's characters, with none repeated; `characters` may be empty (a shot with nobody visible); `environment_state` has at most 12 keys of the form `lower_case_with_underscores`, and each value is short text, a number (kept as text) or true or false; every other text is one line with a size limit; `sound_events` has at most 8 entries.
 
@@ -3004,8 +3178,11 @@ When the job starts it resolves the story model, loads the StoryBible named by `
                  { "kind": "look_state_resolution", "id": 3, "version": 1 },
                  { "kind": "environment_definition", "id": 2, "version": 1, "discovery_id": "bedroom", "name": "Bedroom", "definition_sha256": "ef56..." },
                  { "kind": "character_definition", "id": 8, "version": 3, "discovery_id": "arjun", "name": "Arjun", "definition_sha256": "cd34..." } ],
-  "shot": { "id": "shot_2", "duration_seconds": 2.5 } }
+  "shot": { "id": "shot_2", "duration_seconds": 2.5, "skeleton_sha256": "ab12..." },
+  "staging": { "sha256": "77de..." } }
 ```
+
+(The `artifacts` of a definition made since PHASE-054 also hold `{ "kind": "scene_staging", "id", "version" }` and `{ "kind": "environment_view_plan", "id", "version", "discovery_id" }`. `staging.sha256` is the hash of what the shot was staged from: its placements, the axis, the group side and the views allowed behind it. The shot is out of date when it changes, so a plan of views or a staging that changed for other scenes or characters leaves it current.)
 
 **When a shot definition is current.** The newest row of a shot is out of date when, **on this read**: the scene's newest shot plan is a different row from the recorded one (the scene's shots were planned again); that plan is itself out of date (this covers the story, the StoryBible, the scene's text, definition, events and speech, and the character and environment definitions); the newest `look_state_resolution` is a different row from the recorded one; or the newest resolution is out of date or no longer made from the scene's newest definition. Each reason is shown on the shot.
 

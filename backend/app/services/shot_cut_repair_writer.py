@@ -92,7 +92,9 @@ keys, at most {shot_definition_writer.MAX_STATE_KEYS} of them, each with a short
 most {shot_definition_writer.STATE_VALUE_MAX_CHARS} characters or true or false; \
 "composition.shot_size" is exactly one of: {", ".join(shot_definition_writer.SHOT_SIZES)}, and \
 "angle" and "focus" are at most {shot_definition_writer.COMPOSITION_MAX_CHARS} characters \
-(when the focus is a character, write that character's id); "camera.movement" and \
+(when the focus is a character, write that character's id); "composition.view" is one "id" \
+from the shot's "staging" views whose "allowed_for" has the focus character's id (a single of \
+one character) or "group" (a shot of several characters or a wide shot); "camera.movement" and \
 "camera.intensity" are at most {shot_definition_writer.CAMERA_MAX_CHARS} characters; "action" \
 has "start_state", "primary_action" and "end_state", each one sentence of at most \
 {shot_definition_writer.ACTION_MAX_CHARS} characters; "continuity_start" and "continuity_end" \
@@ -102,6 +104,11 @@ are keyed by the id of a character who is visible in the shot, each at most \
 "sound_events" lists at most {shot_definition_writer.MAX_SOUND_EVENTS} distinct sounds of at \
 most {shot_definition_writer.SOUND_EVENT_MAX_CHARS} characters, with no spoken words, narration \
 or music.
+- Each shot under SHOTS has "staging": where each character stands in that shot (zone, side of \
+the screen, what is behind them) and the "views" that may stand behind it. Never change where \
+a character stands or which side of the screen they are on: the repair changes poses, gazes, \
+actions and states only; keep the shot's "composition.view" unless the shot is a single and \
+its view is no longer allowed.
 - At least one editable shot must change.
 - Do not write a shot's duration or its dialogue: they are filled in for you.
 
@@ -125,8 +132,9 @@ def build_request(
 
     `scene` is `{index, id, title, description}`; `cut` is `{id, before, after, before_state,
     after_state, problem, editable_shots, frozen}`; `shots` has, for each shot on the sides of
-    the cut in order, `{shot, events, speech, specification}` (the skeleton with its length and
-    place, the events and speech it shows, and its newest specification); `characters` and
+    the cut in order, `{shot, events, speech, specification, staging}` (the skeleton with its
+    length and place, the events and speech it shows, its newest specification, and where
+    its characters stand with the views allowed behind it); `characters` and
     `environment` are as for `shot_definition_writer.build_request`.
     """
     parts = [
@@ -167,7 +175,8 @@ def check_answer(
     the first problem found.
 
     `editable` is the shots the repair may change, in order, each `{shot_id, duration,
-    dialogue}` (what code knows and writes itself). Every editable shot must be answered exactly
+    dialogue, exchange, staging}` (what code knows and writes itself; `staging` is
+    `shot_staging.for_shot` and may be missing). Every editable shot must be answered exactly
     once, no other shot may appear, and at least one must change. The result has one entry per
     editable shot, in order: `{shot_id, content}`, where `content` is the new specification
     (checked by `shot_definition_writer.check_answer`) or None when the shot stays as it is.
@@ -211,6 +220,8 @@ def check_answer(
                 duration=float(shot["duration"]),
                 scene_character_ids=scene_character_ids,
                 dialogue=shot["dialogue"],
+                exchange=shot.get("exchange") is True,
+                staging=shot.get("staging"),
             )
         except ValueError as exc:
             raise ValueError(f'Shot "{shot_id}": {exc}') from exc

@@ -12,6 +12,8 @@ A version holds:
   held it. A lab edit carries it forward unchanged;
 - the pictures of the environment's **states** (PHASE-017, `states`): `[{slug, state_id,
   reference_image_id}]` for the states that have a picture;
+- the pictures of the environment's **views** (PHASE-052, `views`): `[{slug, view_id,
+  reference_image_id, states}]` for the views that have a picture;
 - for a version the pipeline made, its provenance (D-3): `job_id` and `inputs`. A version made
   by hand has neither.
 
@@ -46,7 +48,13 @@ from typing import Any, Final, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import EnvironmentState, LibraryEnvironment, LibraryEnvironmentVersion
+from app.db.models import (
+    EnvironmentState,
+    EnvironmentView,
+    EnvironmentViewState,
+    LibraryEnvironment,
+    LibraryEnvironmentVersion,
+)
 
 # The profile columns a version freezes, in the order the form shows them.
 PROFILE_FIELDS: Final[tuple[str, ...]] = (
@@ -60,7 +68,7 @@ PROFILE_FIELDS: Final[tuple[str, ...]] = (
 )
 
 # What a version changed compared with the one before it. `created` is the first version.
-Change = Literal["created", "profile", "definition", "states"]
+Change = Literal["created", "profile", "definition", "states", "views"]
 
 # Who made the change: a person in the lab, or the pipeline from the model's text.
 Source = Literal["ai", "manual"]
@@ -122,11 +130,58 @@ async def _states_part(
     ]
 
 
+async def _views_part(
+    session: AsyncSession, environment: LibraryEnvironment
+) -> list[dict[str, Any]]:
+    """The pictures of the environment's views (PHASE-052) a version freezes, sorted by slug,
+    each with the pictures of the view in the environment's states (PHASE-053): `states` is
+    `[{slug, state_id, reference_image_id}]` sorted by slug. A view with no picture yet is not
+    in it, and neither is a view-state picture that does not exist yet.
+    """
+    statement = (
+        select(EnvironmentView)
+        .where(EnvironmentView.environment_id == environment.id)
+        .where(EnvironmentView.reference_image_id.is_not(None))
+        .order_by(EnvironmentView.slug)
+        .execution_options(populate_existing=True)
+    )
+    views = list((await session.execute(statement)).scalars().all())
+    if not views:
+        return []
+    pictures = await session.execute(
+        select(EnvironmentViewState, EnvironmentState.slug)
+        .join(EnvironmentState, EnvironmentState.id == EnvironmentViewState.state_id)
+        .where(EnvironmentViewState.view_id.in_([view.id for view in views]))
+        .where(EnvironmentViewState.reference_image_id.is_not(None))
+        .order_by(EnvironmentState.slug)
+        .execution_options(populate_existing=True)
+    )
+    by_view: dict[int, list[dict[str, Any]]] = {}
+    for record, state_slug in pictures.all():
+        by_view.setdefault(record.view_id, []).append(
+            {
+                "slug": state_slug,
+                "state_id": record.state_id,
+                "reference_image_id": record.reference_image_id,
+            }
+        )
+    return [
+        {
+            "slug": view.slug,
+            "view_id": view.id,
+            "reference_image_id": view.reference_image_id,
+            "states": by_view.get(view.id, []),
+        }
+        for view in views
+    ]
+
+
 def _same(
     version: LibraryEnvironmentVersion,
     profile: dict[str, Any],
     definition: dict[str, Any] | None,
     states: list[dict[str, Any]],
+    views: list[dict[str, Any]],
     inputs: dict[str, Any] | None,
 ) -> bool:
     """Whether the version already holds what the environment freezes. A run that states its
@@ -136,6 +191,7 @@ def _same(
         version.profile == profile
         and version.definition == definition
         and (version.states or []) == states
+        and (version.views or []) == views
         and (inputs is None or version.inputs == inputs)
     )
 
@@ -161,7 +217,8 @@ async def record_version_if_changed(
     together with that job's `job_id` and the `inputs` the definition was built from (D-3).
     With `inputs`, the same content built from other inputs is a new version too.
 
-    The version also freezes the pictures of the environment's states (PHASE-017). A new version
+    The version also freezes the pictures of the environment's states (PHASE-017) and views
+    (PHASE-052). A new version
     starts with no canonical picture, because the picture was made for the old text; only a
     version written because a state's picture arrived passes `carry_picture`, and then, when
     the profile and the definition are the newest version's own, the canonical picture is
@@ -180,10 +237,11 @@ async def record_version_if_changed(
     profile = profile_of(environment)
     definition = environment.definition
     states = await _states_part(session, environment)
+    views = await _views_part(session, environment)
     if (
         not new_picture
         and newest is not None
-        and _same(newest, profile, definition, states, inputs)
+        and _same(newest, profile, definition, states, views, inputs)
     ):
         return None
     same_text = newest is not None and newest.profile == profile and newest.definition == definition
@@ -201,6 +259,7 @@ async def record_version_if_changed(
         profile=profile,
         definition=definition,
         states=states,
+        views=views,
         reference_image_id=carried_picture,
         job_id=job_id,
         inputs=inputs,
@@ -225,6 +284,8 @@ def changes_between(
         changes.append("definition")
     if (previous.states or []) != (current.states or []):
         changes.append("states")
+    if (previous.views or []) != (current.views or []):
+        changes.append("views")
     return changes
 
 

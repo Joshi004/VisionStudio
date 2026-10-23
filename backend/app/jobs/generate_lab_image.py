@@ -21,7 +21,9 @@ chooses the master by itself) or a take's own picture (`character_takes.on_image
 picture made for the one candidate of an environment's picture the story pipeline made
 (`environment_references.on_candidate_image_stored`, PHASE-013) becomes that environment
 version's canonical picture by itself, and a picture made for an environment state
-(`look_state_images.on_state_image_stored`, PHASE-017) becomes that state's picture. A plain
+(`look_state_images.on_state_image_stored`, PHASE-017) becomes that state's picture, and one made
+for a view of an environment (`environment_views.on_view_image_stored`, PHASE-052) becomes that
+view's picture. A plain
 Image lab run is none of these and all are no-ops for it.
 """
 
@@ -45,6 +47,7 @@ from app.services import (
     character_looks,
     character_takes,
     environment_references,
+    environment_views,
     frame_images,
     image_lab,
     look_state_images,
@@ -255,5 +258,10 @@ class GenerateLabImageHandler(RemoteImageHandler):
             await environment_references.on_candidate_image_stored(run_id)
             # The picture of a new environment state (PHASE-017) is an edit of the canonical one.
             await look_state_images.on_state_image_stored(run_id)
+            # The picture of a view of the environment (PHASE-052) is an edit of the master.
+            if await environment_views.on_view_image_stored(run_id):
+                dispatcher.nudge()
+            # A view in a state (PHASE-053) is an edit of the view's picture.
+            await look_state_images.on_view_state_image_stored(run_id)
         except Exception:
             _logger.exception("job %d: the environment picture could not be attached", job_id)

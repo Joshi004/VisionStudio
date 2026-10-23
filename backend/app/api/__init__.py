@@ -14,6 +14,7 @@ from app.api import (
     environment_definitions,
     environment_lab,
     environment_links,
+    environment_views,
     generation_requests,
     gpu,
     health,
@@ -26,6 +27,7 @@ from app.api import (
     projects,
     scene_definitions,
     scene_events,
+    scene_staging,
     scenes,
     settings,
     shot_continuity,
@@ -67,8 +69,10 @@ api_router.include_router(character_lab.router, tags=["character-lab"])
 api_router.include_router(environment_lab.router, tags=["environment-lab"])
 api_router.include_router(environment_links.router, tags=["environment-links"])
 api_router.include_router(environment_definitions.router, tags=["environment-definitions"])
+api_router.include_router(environment_views.router, tags=["environment-views"])
 api_router.include_router(scene_definitions.router, tags=["scene-definitions"])
 api_router.include_router(scene_events.router, tags=["scene-events"])
+api_router.include_router(scene_staging.router, tags=["scene-staging"])
 api_router.include_router(look_state_resolution.router, tags=["look-state-resolution"])
 api_router.include_router(look_state_images.router, tags=["look-state-images"])
 api_router.include_router(speech_units.router, tags=["speech-units"])

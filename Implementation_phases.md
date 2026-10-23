@@ -300,6 +300,11 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 | PHASE-033 | LLM reference selection | M7 | 024 | In Progress |
 | PHASE-048 | Reuse library characters and environments in the story pipeline | M7 | 005, 008, 013, 030 | In Progress |
 | PHASE-049 | Speech mode: narration and dialogue, no dialogue, or no narration | M7 | 011, 015, 020, 030 | In Progress |
+| PHASE-050 | Spatial plan in the environment definition | M7 | 013, 012 | In Progress |
+| PHASE-051 | Scene Staging stage | M7 | 014, 015, 050 | In Progress |
+| PHASE-052 | Environment views: plan, prompts and pictures | M7 | 017, 050, 051 | In Progress |
+| PHASE-053 | Views in each environment state | M7 | 017, 052 | In Progress |
+| PHASE-054 | Shots use the staging and the views | M7 | 022, 024, 051, 052, 053 | In Progress |
 | PHASE-034 | Background music layer (supplied track) | M8 | 028 | Not Started |
 | PHASE-035 | Music Planner | M8 | 034 | Not Started |
 | PHASE-037 | Editing of story-structure and scene artifacts | M9 | 028 | In Progress |
@@ -2370,6 +2375,188 @@ flowchart TD
 
 ---
 
+### PHASE-050 — Spatial plan in the environment definition
+
+**Status:** In Progress (code written 2026-10-24; waiting for the owner's run with the real models) · **Milestone:** M7 · **Vision:** §13, §46
+
+**Objective.** Give every environment a written map of the place (what is ahead of, to the left of, to the right of and behind the master picture's camera, and the zones people can stand in), so every later picture and shot is written from one description of the space.
+
+**Current state.** The definition (PHASE-013) has a one-line `layout`, the look of its surfaces and landmarks, but no statement of what is on each side of the master picture. The master picture (PHASE-012) is one empty wide view.
+
+**Scope.**
+- `spatial_plan` in the definition: `master_view`, `sides` (`ahead`, `left`, `right`, `behind`) and 2 to 8 `zones` (`id`, `name`, `side`, `description`). Code checks the shape and sets the zone ids to a slug pattern.
+- A reused place that keeps its picture (`keep_picture`) is shown that picture's prompt, and its `master_view`, `ahead`, `left` and `right` must match it.
+- The master picture prompt is written from the plan (environment sheet profile version 2).
+- The plan is shown with the definition.
+
+**Out of scope.** Pictures of the other sides (PHASE-052); where characters stand (PHASE-051).
+
+**Dependencies.** PHASE-012, PHASE-013.
+
+**Expected outcome.** An environment definition that says what is on every side of the place, and a master picture drawn from it.
+
+**Verification criteria.**
+- A definition without a valid `spatial_plan` is refused with a readable reason; a stored definition without one still reads.
+- The master prompt of a place with a plan names the `master_view` and what is ahead.
+- Standard checks (§3.5).
+
+**Observable improvements.** The definition shows a map of the place.
+
+**Completion checklist.**
+- [x] Writer, check and instructions
+- [x] Master prompt profile version 2
+- [x] Definition API and view
+- [x] Standard checks (§3.5)
+- [ ] Owner's run with the real models
+
+**Completion notes.** _(fill in after the owner's run)_
+
+---
+
+### PHASE-051 — Scene Staging stage
+
+**Status:** In Progress (code written 2026-10-24; waiting for the owner's run with the real models) · **Milestone:** M7 · **Vision:** §16, §46
+
+**Objective.** Decide once per scene where each visible character stands, which way each faces, on which side of the screen each appears and what is behind each of them, so two speakers in one room stop appearing in front of the same wall.
+
+**Current state.** A scene definition has a free-text `continuity_start` and `continuity_end` per character and a shot has free `pose` and `gaze`. Nothing records a position, a screen side or a background.
+
+**Scope.**
+- New project artifact `scene_staging` (one immutable row per run per scene) and job type `stage_scene` (story model, `never_rerun`).
+- Content: `placements` per visible character (`zone`, `posture`, `faces`, `screen_side`, `background_side`), an `axis` (the two characters of the main conversation, and the camera half), a `group_side`, and `moves` keyed to event ids.
+- Code checks that every visible character has one placement, zones and sides exist in the environment's plan, moves follow the events in order, the axis characters are on opposite screen sides, and a character's background is not the side they face.
+- Run, run all, state, manual edit, staleness, a pipeline step and a panel.
+
+**Out of scope.** The pictures (PHASE-052); using the staging in a shot (PHASE-054).
+
+**Dependencies.** PHASE-014, PHASE-015, PHASE-050.
+
+**Expected outcome.** A stored, checked, editable staging for every scene.
+
+**Verification criteria.**
+- A staging with an unknown zone, a missing character or axis characters on the same screen side is refused.
+- A scene definition, events or environment change marks the staging out of date.
+- Standard checks (§3.5).
+
+**Observable improvements.** A page that says who stands where in each scene.
+
+**Completion checklist.**
+- [x] Migration `0058`, table, job type
+- [x] Writer, service, job, API
+- [x] Panel
+- [x] Pipeline step and staleness
+- [x] Standard checks (§3.5)
+- [ ] Owner's run with the real models
+
+**Completion notes.** _(fill in after the owner's run)_
+
+---
+
+### PHASE-052 — Environment views: plan, prompts and pictures
+
+**Status:** In Progress (code written 2026-10-24; waiting for the owner's run with the real models) · **Milestone:** M7 · **Vision:** §14, §46
+
+**Objective.** Give an environment several camera-direction pictures (views), each an edit of its master picture, chosen from what the stagings of the scenes that use the place need.
+
+**Current state.** An environment version has one canonical picture and one picture per state (PHASE-017).
+
+**Scope.**
+- Library table `environment_view` (a view belongs to the library environment, like a state) and project table `environment_view_plan`; `library_environment_version.views` freezes the pictures.
+- Job `plan_environment_views` (story model) plans the views and maps each staged background to a view; job `write_environment_view_prompt` (image prompt model) writes each view's edit prompt; each view is a Qwen edit of the master picture (a `behind` view also gets the finished `left` and `right` views).
+- A pipeline step, a lab section and a project panel.
+
+**Out of scope.** Views in states (PHASE-053); using views in shots (PHASE-054).
+
+**Dependencies.** PHASE-017, PHASE-050, PHASE-051.
+
+**Expected outcome.** Each environment has the views its scenes need, each stored with its picture.
+
+**Verification criteria.**
+- A plan that leaves a staged side with no view, or has more than 12 views, is refused.
+- A replaced master picture marks the view pictures out of date.
+- Standard checks (§3.5).
+
+**Observable improvements.** The environment shows several views.
+
+**Completion checklist.**
+- [x] Migration `0059`, tables, job types
+- [x] Planner, prompt writer, service, jobs, API
+- [x] Lab section and project panel
+- [x] Pipeline step and staleness
+- [x] Standard checks (§3.5)
+- [ ] Owner's run with the real models
+
+**Completion notes.** _(fill in after the owner's run)_
+
+---
+
+### PHASE-053 — Views in each environment state
+
+**Status:** In Progress (code written 2026-10-24; waiting for the owner's run with the real models) · **Milestone:** M7 · **Vision:** §14, §46
+
+**Objective.** Make the picture of each view in each state a scene needs (for example "night, toward the window").
+
+**Scope.**
+- Table `environment_view_state` (migration `0060`); the look and state step also makes one record for each (view, state) pair that a scene needs, as a Qwen edit of the view picture and the state's master picture, from a fixed template.
+- The records are shown in the look and state pictures panel.
+
+**Out of scope.** Using the pictures in shots (PHASE-054).
+
+**Dependencies.** PHASE-017, PHASE-052.
+
+**Expected outcome.** Every view a scene uses exists in the scene's state.
+
+**Verification criteria.** A (view, state) pair that a scene needs appears as a record and gets a picture; a new view picture marks it out of date. Standard checks (§3.5).
+
+**Observable improvements.** Night scenes get night views.
+
+**Completion checklist.**
+- [x] Migration `0060`, table
+- [x] Start, store and staleness
+- [x] Panel
+- [x] Standard checks (§3.5)
+- [ ] Owner's run with the real models
+
+**Completion notes.** _(fill in after the owner's run)_
+
+---
+
+### PHASE-054 — Shots use the staging and the views
+
+**Status:** In Progress (code written 2026-10-24; waiting for the owner's run with the real models) · **Milestone:** M7 · **Vision:** §26, §28, §46
+
+**Objective.** Make every shot use the view behind its subject and keep each character on the same screen side, with shot and reverse shot.
+
+**Scope.**
+- The shot definition reads the staging at the shot and the allowed views; `composition.view` must be one of the allowed ones, and code copies `zone` and `screen_side` into each character.
+- The repair and planning requests read the staging.
+- The reference catalog holds the view pictures and view-state pictures, and selection takes the shot's view picture in the resolved state (fallback to the view's default picture, then the master). The model-made selection refuses an environment picture that is not the shot's view.
+- The H3 prompt restates the view and the screen sides. The panels show them.
+- Shot definitions go out of date when the staging or the view plan changes.
+
+**Out of scope.** Editing the camera path inside a shot.
+
+**Dependencies.** PHASE-022, PHASE-024, PHASE-051, PHASE-052, PHASE-053.
+
+**Expected outcome.** In a conversation, each speaker stands before their own background and keeps their screen side.
+
+**Verification criteria.** A shot definition with a view that is not allowed is refused; the manifest of a shot holds its view's picture; a scene without staging reads as before. Standard checks (§3.5).
+
+**Observable improvements.** Speakers stop swapping places.
+
+**Completion checklist.**
+- [x] Shot definition inputs, answer and checks
+- [x] Repair and planning inputs
+- [x] Catalog, selection, model-made selection
+- [x] H3 prompt
+- [x] Panels and staleness
+- [x] Standard checks (§3.5)
+- [ ] Owner's run with the real models
+
+**Completion notes.** _(fill in after the owner's run)_
+
+---
+
 ### M8 — Music
 
 ---
@@ -3133,3 +3320,4 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-22 | PHASE-041 | In Progress | Planned with the owner: **one pause per review point** (once all of its steps are complete; steps that need them wait for the review), **a rejected target is made again and the run waits at the same point once more**, and **a list with links to the stage panels** as the review view. Code complete: migration `0055` (`project.review_points`), `services/review_points.py`, the run's review pause, held steps and re-read after Continue, rejected targets (`continue_run`, `plan_step`, `replace_picture` for an environment), `GET` and `POST .../continue` changes, the **Review points** checkboxes and `ReviewPointPanel`, `DATABASE_STRUCTURE.md`. Verified on a throwaway database with the stages faked (80 checks) and the real adapters read on a fresh project; waiting for the owner's run on the rebuilt app. |
 | 2026-10-23 | PHASE-042 | In Progress | Planned with the owner: **an adopted lab version counts as defined and keeps the project's own provenance** (a lab version has no `inputs`, so a moved pin would have turned the entry into "not defined"), and **adopting only moves the pins** (the user presses Regenerate out-of-date per project). Code complete: migration `0056` (`provenance_version` on both link tables), `services/library_adoption.py`, the lab's `POST .../adopt` and the project's `PUT .../version` for characters and environments, `complete`, `preselected` and `blocked_reason` in the lab's project lists, the **Adopt** dialog and the version selects, `DATABASE_STRUCTURE.md`. Verified on a throwaway database (58 checks); the end-to-end Arjun example with real models and the owner's run on the rebuilt app are still open. |
 | 2026-10-23 | PHASE-043 | In Progress | Code complete: the guide confirmed the reference-mode multi-shot form (Step 0); `rapid_exchange` on a shot plan (checked, editable), `exchange.cuts` on the generation request, a per-cut prompt compiler where code writes the `[Shot n] At <cue>` tags, and the UI. No migration. The owner's lab check V6b and one real exchange shot on the rebuilt app are still open (see the Completion notes). |
+| 2026-10-24 | **PHASE-050 to PHASE-054 added: environment views and scene staging (M7):** a spatial plan in the environment definition, a Scene Staging stage, camera-direction views of an environment made by editing its master picture, views in each state, and shots that pick the view behind their subject. Depends on 012, 013, 014, 015, 017, 022 and 024. | Owner: two speakers in one room always stood in front of the same wall, because a place had one picture. |

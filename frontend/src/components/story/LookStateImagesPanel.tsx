@@ -18,6 +18,7 @@ import {
   useMakeAllLookStateImages,
   useMakeLookImages,
   useMakeStateImage,
+  useMakeViewStateImage,
   useRedoLookAngle,
   type LookStateImageItem,
 } from "../../api/lookStateImages";
@@ -59,6 +60,17 @@ function buttonLabel(item: LookStateImageItem): string {
   return item.status === "failed" ? "Retry" : "Make pictures";
 }
 
+const KIND_LABELS: Record<LookStateImageItem["kind"], string> = {
+  look: "Look",
+  state: "State",
+  view_state: "View",
+};
+const KIND_COLORS: Record<LookStateImageItem["kind"], string> = {
+  look: "grape",
+  state: "teal",
+  view_state: "cyan",
+};
+
 type ItemRowProps = {
   item: LookStateImageItem;
   busy: boolean;
@@ -84,11 +96,11 @@ function ItemRow({ item, busy, onMake, onRedo, redoingAngle }: ItemRowProps) {
       <Group align="flex-start" wrap="nowrap" gap="sm">
         <Badge
           variant="outline"
-          color={item.kind === "look" ? "grape" : "teal"}
+          color={KIND_COLORS[item.kind]}
           miw={70}
           style={{ flexShrink: 0, textTransform: "none" }}
         >
-          {item.kind === "look" ? "Look" : "State"}
+          {KIND_LABELS[item.kind]}
         </Badge>
         <Stack gap={4} style={{ flexGrow: 1 }}>
           <Group gap="xs">
@@ -199,9 +211,11 @@ export function LookStateImagesPanel({ projectId }: LookStateImagesPanelProps) {
   const makeAll = useMakeAllLookStateImages(projectId);
   const makeLook = useMakeLookImages(projectId);
   const makeState = useMakeStateImage(projectId);
+  const makeViewState = useMakeViewStateImage(projectId);
   const redo = useRedoLookAngle(projectId);
 
-  const busy = makeAll.isPending || makeLook.isPending || makeState.isPending;
+  const busy =
+    makeAll.isPending || makeLook.isPending || makeState.isPending || makeViewState.isPending;
   const items = data?.items ?? [];
   const allCount = items.filter((item) => item.can_run).length;
   const skipped = makeAll.data?.skipped ?? [];
@@ -214,8 +228,8 @@ export function LookStateImagesPanel({ projectId }: LookStateImagesPanelProps) {
             <Title order={4}>New looks and states: pictures</Title>
             <Text size="sm" c="dimmed">
               Draws each new outfit and each new condition (such as night) by editing the
-              canonical picture, so the face and the room stay the same. Only the new ones are
-              made, once each.
+              canonical picture, so the face and the room stay the same, and each view of a room in each
+              condition a scene needs. Only the new ones are made, once each.
             </Text>
           </Stack>
           <Button
@@ -241,6 +255,11 @@ export function LookStateImagesPanel({ projectId }: LookStateImagesPanelProps) {
         {makeLook.isError && (
           <Alert color="red" title="Could not start the pictures">
             {describeError(makeLook.error)}
+          </Alert>
+        )}
+        {makeViewState.isError && (
+          <Alert color="red" title="Could not start the picture">
+            {describeError(makeViewState.error)}
           </Alert>
         )}
         {makeState.isError && (
@@ -278,12 +297,18 @@ export function LookStateImagesPanel({ projectId }: LookStateImagesPanelProps) {
 
         {items.map((item) => (
           <ItemRow
-            key={`${item.kind}-${item.id}`}
+            key={`${item.kind}-${item.id}-${item.view_id ?? 0}-${item.state_id ?? 0}`}
             item={item}
             busy={busy}
-            onMake={() =>
-              item.kind === "look" ? makeLook.mutate(item.id) : makeState.mutate(item.id)
-            }
+            onMake={() => {
+              if (item.kind === "look") {
+                makeLook.mutate(item.id);
+              } else if (item.kind === "view_state" && item.view_id !== null && item.state_id !== null) {
+                makeViewState.mutate({ viewId: item.view_id, stateId: item.state_id });
+              } else {
+                makeState.mutate(item.id);
+              }
+            }}
             onRedo={(lookId, angle) => redo.mutate({ lookId, angle })}
             redoingAngle={redo.isPending ? (redo.variables?.angle ?? null) : null}
           />

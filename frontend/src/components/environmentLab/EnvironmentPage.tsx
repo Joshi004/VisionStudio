@@ -18,6 +18,7 @@ import { useEditEnvironment, useLibraryEnvironment } from "../../api/environment
 import { describeError } from "../../api/errors";
 import { EnvironmentDefinitionView } from "./EnvironmentDefinitionView";
 import { EnvironmentStates } from "./EnvironmentStates";
+import { EnvironmentViews } from "./EnvironmentViews";
 import { EnvironmentUsedByProjects } from "./EnvironmentUsedByProjects";
 import { EnvironmentVersionHistory } from "./EnvironmentVersionHistory";
 import { eraText } from "./environmentLabView";
@@ -179,6 +180,8 @@ export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPa
               <DefinitionSection definition={data.definition} />
 
               <EnvironmentStates environmentId={data.id} />
+
+              <EnvironmentViews environmentId={data.id} />
 
               <EnvironmentUsedByProjects environmentId={data.id} name={data.name} />
 

@@ -557,7 +557,13 @@ General rules:
 character or of the place: use a label or a description.
 """
         + shot_rule
-        + """- Plain, concrete, present-tense English prose. Concrete verbs and physical cues; \
+        + """- When ENVIRONMENT has a "view", the shot is framed in front of that part of the \
+place: its "description" says what is seen behind the people and its "side" says where it is, \
+from the camera of the master picture. Set the shot in front of it and never describe another \
+part of the place. When a character of the SHOT DEFINITION has a "screen_side" ("left", \
+"right" or "center"), that character is on that side of the frame: keep it and restate it \
+where the composition is restated.
+- Plain, concrete, present-tense English prose. Concrete verbs and physical cues; \
 show feeling through the body (eyes, head, shoulders, hands, breath), never through a label \
 such as "sad". No quality tags and no mood words (such as cinematic or beautiful) on their \
 own, no plot summary, and no text, signs or captions in the scene.

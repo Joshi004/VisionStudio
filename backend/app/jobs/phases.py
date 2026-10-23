@@ -165,6 +165,16 @@ SAVING_SCENE_DEFINITION: Final = "saving the scene definition"
 # `extract_events` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_SCENE_EVENTS: Final = "saving the scene events"
 
+# --- Running: scene staging (PHASE-051) --------------------------------------------------
+# `stage_scene` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_SCENE_STAGING: Final = "saving the scene staging"
+
+# --- Running: environment views (PHASE-052) ----------------------------------------------
+# `plan_environment_views` and `write_environment_view_prompt` also use PREPARING_PROMPT and
+# `asking_model` from above.
+SAVING_VIEW_PLAN: Final = "saving the view plan"
+SAVING_VIEW_PROMPT: Final = "saving the view prompt"
+
 # --- Running: look and environment-state resolution (PHASE-016) --------------------------
 # `resolve_looks_states` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_RESOLUTION: Final = "saving the resolved looks and states"

@@ -87,7 +87,13 @@ class _Input:
     def editable(self) -> list[dict[str, Any]]:
         """The shots the repair may change, as `check_answer` reads them."""
         return [
-            {"shot_id": shot["shot_id"], "duration": shot["duration"], "dialogue": shot["dialogue"]}
+            {
+                "shot_id": shot["shot_id"],
+                "duration": shot["duration"],
+                "dialogue": shot["dialogue"],
+                "exchange": shot["shot"].get("rapid_exchange") is True,
+                "staging": shot.get("staging"),
+            }
             for shot in self.shots
             if shot["shot_id"] in self.cut["editable_shots"]
         ]
@@ -109,6 +115,7 @@ def _valid_shot(shot: Any) -> bool:
         and isinstance(shot.get("specification"), dict)
         and isinstance(shot.get("read_definition_id"), int)
         and isinstance(shot.get("inputs"), dict)
+        and (shot.get("staging") is None or isinstance(shot.get("staging"), dict))
     )
 
 
@@ -228,6 +235,7 @@ class RepairShotCutHandler(JobHandler):
                     "events": shot["events"],
                     "speech": shot["speech"],
                     "specification": shot["specification"],
+                    "staging": shot.get("staging"),
                 }
                 for shot in read.shots
             ],

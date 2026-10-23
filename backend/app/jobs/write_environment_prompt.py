@@ -96,6 +96,13 @@ class WriteEnvironmentPromptHandler(JobHandler):
                 else None
             )
             version_profile = dict(version.profile) if version is not None else None
+            # The spatial plan is part of the definition frozen on the version (PHASE-050);
+            # an attempt with no version reads the environment's own definition.
+            spatial = writer.spatial_text(
+                version.definition
+                if version is not None
+                else (environment.definition if environment is not None else None)
+            )
             target = await llm_target.resolve(session, IMAGE_PROMPT_MODEL_KEY)
             await session.commit()
 
@@ -110,7 +117,9 @@ class WriteEnvironmentPromptHandler(JobHandler):
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
         profile = ACTIVE_ENVIRONMENT_SHEET_PROFILE
-        body = writer.build_request(writer.prompt_inputs(card), model=target.model, profile=profile)
+        body = writer.build_request(
+            writer.prompt_inputs(card, spatial), model=target.model, profile=profile
+        )
         job_input.update(
             profile={"id": profile.id, "version": profile.version},
             instructions_sha256=llm_call.instructions_sha256(body),

@@ -1,10 +1,15 @@
 import { Badge, Group, Stack, Table, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 
-import type { ShotDefinitionContent } from "../../api/shotDefinitions";
+import type {
+  ShotDefinitionContent,
+  ShotStaging,
+} from "../../api/shotDefinitions";
 
 type ShotDefinitionViewProps = {
   definition: ShotDefinitionContent;
+  /** The shot's staging and views, to name the view behind the shot; null when not staged. */
+  staging?: ShotStaging | null;
   /** The story's characters by id, so a character is shown by name. */
   characterNames: Record<string, string>;
 };
@@ -56,6 +61,7 @@ function sizeLabel(size: string): string {
  */
 export function ShotDefinitionView({
   definition,
+  staging = null,
   characterNames,
 }: ShotDefinitionViewProps) {
   const nameOf = (id: string) => characterNames[id] ?? id;
@@ -63,6 +69,13 @@ export function ShotDefinitionView({
   const continuityStart = Object.entries(definition.continuity_start);
   const continuityEnd = Object.entries(definition.continuity_end);
   const environment = Object.entries(definition.environment_state);
+  const view = staging?.views.find((item) => item.id === composition.view);
+  const viewText =
+    composition.view == null
+      ? "Not set (defined before views existed)"
+      : view !== undefined
+        ? `${view.name} (${view.side}): ${view.description}`
+        : composition.view;
 
   return (
     <Stack gap="sm">
@@ -92,6 +105,7 @@ export function ShotDefinitionView({
                 <Table.Th>Expression</Table.Th>
                 <Table.Th>Pose</Table.Th>
                 <Table.Th>Gaze</Table.Th>
+                <Table.Th>Stands</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -101,6 +115,11 @@ export function ShotDefinitionView({
                   <Table.Td>{character.expression}</Table.Td>
                   <Table.Td>{character.pose}</Table.Td>
                   <Table.Td>{character.gaze}</Table.Td>
+                  <Table.Td>
+                    {character.zone == null
+                      ? "-"
+                      : `${character.zone}, ${character.screen_side ?? "?"} of the screen, ${character.background_side ?? "?"} behind`}
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
@@ -113,6 +132,7 @@ export function ShotDefinitionView({
           rows={[
             ["Shot size", sizeLabel(composition.shot_size)],
             ["Angle", composition.angle],
+            ["View behind the shot", viewText],
             [
               "Focus",
               characterNames[composition.focus] ?? composition.focus,

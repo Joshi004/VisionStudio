@@ -37,6 +37,9 @@ METHOD_MANUAL: Final = "manual"
 
 # The `view` of an environment's picture. A character's picture has its angle as the view.
 ENVIRONMENT_VIEW: Final = "environment"
+# The id of the master picture as a view of the place (`shot_staging.ESTABLISHING`): its catalog
+# `view` is `ENVIRONMENT_VIEW`. Every other view of the place has its own slug as the `view`.
+ESTABLISHING_VIEW: Final = "establishing"
 # The `variant` of the canonical picture of a character or an environment.
 DEFAULT_VARIANT: Final = "default"
 
@@ -159,6 +162,28 @@ def ordered(character_ids: list[str], focus: str | None) -> list[str]:
     return [focus, *(item for item in character_ids if item != focus)]
 
 
+def environment_view(content: dict[str, Any]) -> str:
+    """The catalog `view` of the environment picture the shot is framed in front of: the master
+    picture's for `establishing` or for a specification made before views existed (PHASE-054).
+    """
+    view = (content.get("composition") or {}).get("view")
+    if not isinstance(view, str) or view in ("", ESTABLISHING_VIEW):
+        return ENVIRONMENT_VIEW
+    return view
+
+
+def environment_candidates(
+    content: dict[str, Any], catalog: list[CatalogPicture]
+) -> list[CatalogPicture]:
+    """The environment pictures this shot may use: those of its view (the view's own and its
+    pictures in the places' states), or the master picture's when the view has none yet.
+    """
+    pictures = [picture for picture in catalog if picture.kind == "environment"]
+    wanted = environment_view(content)
+    mine = [picture for picture in pictures if picture.view == wanted]
+    return mine or [picture for picture in pictures if picture.view == ENVIRONMENT_VIEW]
+
+
 def _pick(candidates: list[CatalogPicture]) -> tuple[CatalogPicture, bool] | None:
     """The resolved picture when there is one, else the default one (a fallback), else None."""
     for picture in candidates:
@@ -201,8 +226,7 @@ def select(content: dict[str, Any], catalog: list[CatalogPicture]) -> Selection:
             else:
                 chosen.append(found)
 
-    environment = [picture for picture in catalog if picture.kind == "environment"]
-    found_environment = _pick(environment)
+    found_environment = _pick(environment_candidates(content, catalog))
     if found_environment is None:
         missing.append("the picture of the environment")
 
@@ -215,6 +239,17 @@ def select(content: dict[str, Any], catalog: list[CatalogPicture]) -> Selection:
     assert found_environment is not None
 
     notes: list[str] = []
+    wanted_view = environment_view(content)
+    if found_environment[0].view != wanted_view:
+        notes.append(
+            f"The picture of the view '{wanted_view}' does not exist: the master picture of the "
+            "place is used."
+        )
+    elif found_environment[1]:
+        notes.append(
+            f"The view '{wanted_view}' has no picture in the state the scene uses: its default "
+            "picture is used."
+        )
     room = H3_MAX_REFERENCE_IMAGES - 1  # the environment always stays
     if len(chosen) > room:
         dropped = len(chosen) - room

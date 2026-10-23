@@ -82,10 +82,39 @@ class EnvironmentEraOut(BaseModel):
     setting: str | None
 
 
+SpatialSide = Literal["ahead", "left", "right", "behind"]
+
+
+class EnvironmentSidesOut(BaseModel):
+    ahead: str
+    left: str
+    right: str
+    behind: str
+
+
+class EnvironmentZoneOut(BaseModel):
+    id: str
+    name: str
+    side: SpatialSide
+    description: str
+
+
+class EnvironmentSpatialPlanOut(BaseModel):
+    """What is on every side of the master picture's camera, and where people can stand
+    (PHASE-050).
+    """
+
+    master_view: str
+    sides: EnvironmentSidesOut
+    zones: list[EnvironmentZoneOut]
+
+
 class EnvironmentDefinitionOut(BaseModel):
     id: str
     architecture: str
     layout: str
+    # None for a definition written before PHASE-050.
+    spatial_plan: EnvironmentSpatialPlanOut | None = None
     visual_identity: EnvironmentVisualIdentityOut
     important_landmarks: list[str]
     atmosphere: EnvironmentAtmosphereOut

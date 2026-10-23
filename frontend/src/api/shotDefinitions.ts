@@ -15,6 +15,7 @@ export type ShotDefinitionEntry =
   components["schemas"]["ShotDefinitionEntryOut"];
 export type ShotDefinitionContent =
   components["schemas"]["ShotDefinitionContentOut"];
+export type ShotStaging = components["schemas"]["ShotStagingOut"];
 export type ShotDefinitionsRun =
   components["schemas"]["ShotDefinitionsRunManyOut"];
 export type ShotDefinitionInput = components["schemas"]["ShotDefinitionIn"];

@@ -15,12 +15,15 @@ import {
 import type {
   ShotDefinitionContent,
   ShotDefinitionInput,
+  ShotStaging,
 } from "../../api/shotDefinitions";
 import { EditorActions, StringListInput } from "./editorParts";
 
 type ShotDefinitionEditorProps = {
   /** The shot's newest specification; the form starts from it. */
   initial: ShotDefinitionContent;
+  /** The views that may stand behind this shot; null when the scene is not staged. */
+  staging: ShotStaging | null;
   /** The ids of the scene's characters: only these can be on screen or tracked. */
   sceneCharacterIds: string[];
   /** The story's characters by id, so a character is shown by name. */
@@ -78,6 +81,7 @@ type Draft = {
   shotSize: string;
   angle: string;
   focus: string;
+  view: string;
   movement: string;
   intensity: string;
   startState: string;
@@ -99,6 +103,7 @@ function toDraft(definition: ShotDefinitionContent): Draft {
     shotSize: definition.composition.shot_size,
     angle: definition.composition.angle,
     focus: definition.composition.focus,
+    view: definition.composition.view ?? "",
     movement: definition.camera.movement,
     intensity: definition.camera.intensity,
     startState: definition.action.start_state,
@@ -139,6 +144,7 @@ function toInput(draft: Draft): ShotDefinitionInput {
       shot_size: draft.shotSize,
       angle: draft.angle.trim(),
       focus: draft.focus.trim(),
+      view: draft.view === "" ? null : draft.view,
     },
     camera: {
       movement: draft.movement.trim(),
@@ -160,8 +166,21 @@ function toInput(draft: Draft): ShotDefinitionInput {
   };
 }
 
+/**
+ * The views that may stand behind the shot: a single of one character (the focus is that
+ * character's id and the shot is not a wide one) takes the views allowed for that character; any
+ * other shot takes the views allowed for the group. The server decides in the end.
+ */
+function allowedViews(draft: Draft, staging: ShotStaging) {
+  const single =
+    !draft.shotSize.includes("wide") &&
+    draft.characters.some((character) => character.id === draft.focus.trim());
+  const key = single ? draft.focus.trim() : "group";
+  return staging.views.filter((view) => view.allowed_for.includes(key));
+}
+
 /** Whether every field the server needs has words. The server checks the rest. */
-function isComplete(draft: Draft): boolean {
+function isComplete(draft: Draft, staging: ShotStaging | null): boolean {
   const required = [
     draft.visualStory,
     draft.angle,
@@ -176,6 +195,7 @@ function isComplete(draft: Draft): boolean {
   ];
   const keys = draft.environment.map((row) => row.key.trim());
   return (
+    (staging === null || draft.view !== "") &&
     required.every((text) => text.trim() !== "") &&
     keys.every((key) => STATE_KEY.test(key)) &&
     new Set(keys).size === keys.length &&
@@ -226,6 +246,7 @@ function TextField({ label, value, maxLength, onChange }: TextFieldProps) {
  */
 export function ShotDefinitionEditor({
   initial,
+  staging,
   sceneCharacterIds,
   characterNames,
   saving,
@@ -386,6 +407,20 @@ export function ShotDefinitionEditor({
           maxLength={LIMIT.composition}
           onChange={(value) => change({ focus: value })}
         />
+        {staging !== null && (
+          <Select
+            label="View behind the shot"
+            description="A single shot of one character takes a view that covers that character's background; a shot of the group takes a group view."
+            size="xs"
+            data={allowedViews(draft, staging).map((view) => ({
+              value: view.id,
+              label: `${view.name} (${view.side})`,
+            }))}
+            value={draft.view === "" ? null : draft.view}
+            onChange={(value) => change({ view: value ?? "" })}
+            w={360}
+          />
+        )}
         <TextField
           label="Camera movement"
           value={draft.movement}
@@ -560,7 +595,7 @@ export function ShotDefinitionEditor({
         saving={saving}
         error={error}
         errorTitle="Could not save the shot definition"
-        canSave={isComplete(draft)}
+        canSave={isComplete(draft, staging)}
         onSave={() => onSave(toInput(draft))}
         onCancel={onCancel}
       />

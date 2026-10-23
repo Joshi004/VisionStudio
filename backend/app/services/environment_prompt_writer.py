@@ -21,15 +21,48 @@ from app.services.image_prompt_writer import MAX_TOKENS, REASONING_EFFORT
 _TASK: Final = "Write the image prompt for this environment's reference picture."
 
 
-def prompt_inputs(card: str) -> dict[str, Any]:
-    """What the model is told: the environment card, as one plain dict (the user message is
-    rendered from it alone).
+def spatial_text(definition: dict[str, Any] | None) -> str | None:
+    """The part of a definition's spatial plan the master picture is drawn from (PHASE-050), as
+    plain lines: where the camera stands and what fills the back of the frame and its two
+    edges. What is behind the camera is left out, because the picture never shows it. None when
+    the definition has no plan (a definition written before PHASE-050, or none at all).
     """
-    return {"card": card}
+    plan = definition.get("spatial_plan") if isinstance(definition, dict) else None
+    if not isinstance(plan, dict):
+        return None
+    sides = plan.get("sides")
+    master_view = plan.get("master_view")
+    if not isinstance(sides, dict) or not isinstance(master_view, str):
+        return None
+    lines = [f"Camera: {master_view}"]
+    for key, label in (
+        ("ahead", "Ahead, filling the back of the frame"),
+        ("left", "At the left edge of the frame"),
+        ("right", "At the right edge of the frame"),
+    ):
+        text = sides.get(key)
+        if isinstance(text, str) and text:
+            lines.append(f"{label}: {text}")
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
+def prompt_inputs(card: str, spatial: str | None = None) -> dict[str, Any]:
+    """What the model is told: the environment card and, when the definition has a spatial plan,
+    the lines `spatial_text` gives, as one plain dict (the user message is rendered from it
+    alone).
+    """
+    inputs: dict[str, Any] = {"card": card}
+    if spatial:
+        inputs["spatial"] = spatial
+    return inputs
 
 
 def _render_inputs(inputs: dict[str, Any]) -> str:
-    return f"Environment card:\n{inputs['card']}"
+    text = f"Environment card:\n{inputs['card']}"
+    spatial = inputs.get("spatial")
+    if isinstance(spatial, str) and spatial:
+        text += f"\n\nSpatial plan of the picture:\n{spatial}"
+    return text
 
 
 def _system_prompt(profile: ImagePromptProfile) -> str:
@@ -47,6 +80,9 @@ def _system_prompt(profile: ImagePromptProfile) -> str:
             "- There is no author's style for this picture, so rule 7 below always applies "
             "as 'none given' (a natural, realistic look), unless the description itself "
             "describes a stylised look (a cartoon, a painting).",
+            "- A spatial plan may follow the card. It says where the camera stands and what "
+            "is ahead of it and at the left and right edges of the frame: the picture must "
+            "show exactly that.",
             "- Never write the environment's name in the prompt.",
             "",
             profile.prompt_rules,

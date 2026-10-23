@@ -153,6 +153,11 @@ class DefineEnvironmentHandler(JobHandler):
                 if environment is not None
                 else None
             )
+            picture_prompt = (
+                await environment_definitions.current_picture_prompt(session, environment)
+                if environment is not None and read is not None and read.keep_picture
+                else None
+            )
             bible_content = bible.content if bible is not None else None
             await session.commit()
 
@@ -179,6 +184,7 @@ class DefineEnvironmentHandler(JobHandler):
             today_year=date.today().year,
             model=target.model,
             keep_picture=read.keep_picture,
+            current_picture_prompt=picture_prompt,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

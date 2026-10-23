@@ -2491,3 +2491,15 @@ Once the intermediate artifacts are reliable and stored correctly, they drive sp
 Characters and environments are shared with the Character Lab, so assets can be created and refined in either place. Review points and staleness handling let a user step in only where they want to and regenerate only what has actually changed.
 
 That structured planning layer is what will turn Vision Studio from a collection of generation workflows into an actual automated filmmaking system.
+
+---
+
+## 46. Spatial plans, staging and environment views
+
+A place has more than one side. The environment definition carries a **spatial plan**: what is ahead of, to the left of, to the right of and behind the master picture's camera (the master picture is the `ahead` view), and the zones people can stand in.
+
+**Scene Staging** (one call per scene, after events) decides where each visible character stands, which way they face, which side of the screen they appear on and which side of the place is behind them, plus an axis for the main conversation, a group background and moves keyed to events. Code checks it against the plan.
+
+**Environment views** are camera-direction pictures of one place. A view planner reads the stagings of the scenes that use the place and chooses the views (at most 12); each view's edit prompt is written by a model and the picture is an edit of the master picture. A view in a state is an edit of the view picture and the state's master picture. Views belong to the library environment, like states.
+
+**Shots** choose a view from the ones the staging allows for their focus (a single shot of a speaker uses that speaker's background, a two-shot or wide uses the group background), and code copies each character's screen side, so shot and reverse shot keep the 180-degree rule. Reference selection takes the shot's view picture.

@@ -30,6 +30,7 @@ are saved by `services/environment_definitions.py`.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Final
 
 from app.services import discovery_writer, environment_library
@@ -58,6 +59,18 @@ LANDMARKS_MAX_ITEMS: Final = 6
 LANDMARK_MAX_CHARS: Final = 50
 RULES_MAX_ITEMS: Final = 4
 RULE_MAX_CHARS: Final = 100
+# The spatial plan (PHASE-050): what is on every side of the master picture's camera, and the
+# zones where people can stand. `ahead` is what the master picture shows at the back of its
+# frame, `left` and `right` are the sides of the place, and `behind` is never in the master.
+SPATIAL_SIDES: Final[tuple[str, ...]] = ("ahead", "left", "right", "behind")
+MASTER_VIEW_MAX_CHARS: Final = 220
+SIDE_MAX_CHARS: Final = 240
+ZONES_MIN_ITEMS: Final = 2
+ZONES_MAX_ITEMS: Final = 8
+ZONE_NAME_MAX_CHARS: Final = 40
+ZONE_DESCRIPTION_MAX_CHARS: Final = 140
+# A zone's id: a short lower-case slug. Code makes it from the model's id (or name).
+ZONE_ID_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # The prompt states the limits above, but the check accepts this much more: the model often
 # misses a stated length by a few characters, and that should not fail the definition.
 LIMIT_SLACK: Final = 1.25
@@ -78,6 +91,11 @@ _ANSWER_FORM: Final = json.dumps(
     {
         "architecture": "...",
         "layout": "...",
+        "spatial_plan": {
+            "master_view": "...",
+            "sides": {side: "..." for side in SPATIAL_SIDES},
+            "zones": [{"id": "by_window", "name": "...", "side": "ahead", "description": "..."}],
+        },
         "visual_identity": {key: "..." for key in _VISUAL_IDENTITY_FIELDS},
         "important_landmarks": ["...", "..."],
         "atmosphere": {"baseline": "..."},
@@ -132,6 +150,23 @@ message), "past" or "future". For "past" and "future", "years" is the whole numb
 before or after today's year, from {environment_library.MIN_ERA_YEARS} to \
 {environment_library.MAX_ERA_YEARS}, and "setting" is a short text of what that time looks like \
 (for example "1920s Bombay"), or null. For "present", "years" and "setting" are null.
+- "spatial_plan" is the map of the place that every later picture is drawn from. The first \
+picture of the place is an empty wide view taken from one spot, looking one way. "master_view" \
+says where that camera stands and what it looks at, at most {MASTER_VIEW_MAX_CHARS} characters. \
+"sides" says what is on each side of that camera, so that a picture taken after turning the \
+camera can be drawn: "ahead" is what the master view shows at the back of its frame, "left" \
+and "right" are what is on the camera's left and right, and "behind" is what is behind the \
+camera, which the master view never shows. Each side is one concrete description, at most \
+{SIDE_MAX_CHARS} characters, naming the walls, openings, furniture or landmarks that are \
+there. A place with no walls (a street, a market, a ground) uses the same four sides: what \
+stretches ahead, to the left, to the right and behind. The sides must agree with "layout", \
+"visual_identity" and "important_landmarks": a window that the visual identity mentions is on \
+one of the sides. "zones" is from {ZONES_MIN_ITEMS} to {ZONES_MAX_ITEMS} places where a person \
+can stand or sit, each with a short lower-case "id" (letters, digits and underscores), a \
+"name" of at most {ZONE_NAME_MAX_CHARS} characters, the "side" it is on (one of ahead, left, \
+right, behind) and a "description" of at most {ZONE_DESCRIPTION_MAX_CHARS} characters saying \
+what is behind a person who stands there, when seen from the middle of the place. Spread the \
+zones over different sides, so that two people in the place can have different backgrounds.
 - Every other field is one plain sentence or phrase on one line, with at most this many \
 characters: "architecture" ({ARCHITECTURE_MAX_CHARS}), "layout" ({LAYOUT_MAX_CHARS}), \
 "atmosphere.baseline" ({BASELINE_MAX_CHARS}) and
@@ -150,6 +185,15 @@ the CURRENT PROFILE is fixed. Copy its architecture, layout, visual identity and
 exactly as it states them, and write only what it does not state. Never change something it \
 states, even when the story would suit another detail better. Adapt only the "atmosphere", the \
 "continuity_rules" and the "era" to this story."""
+
+# Added as well when the picture's own prompt is given (PHASE-050): the spatial plan must agree
+# with a picture that is made already.
+_KEEP_PICTURE_PLAN_RULE: Final = """
+The CURRENT PICTURE is the prompt the place's existing picture was made from, and that picture \
+is the "master view". In "spatial_plan", "master_view", "ahead", "left" and "right" must \
+describe what the CURRENT PICTURE shows (the back of its frame, and its left and right edges); \
+invent only "behind" and the zones that the picture does not show, and keep them consistent \
+with it."""
 
 
 def scenes_for_prompt(scenes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -180,12 +224,15 @@ def build_request(
     today_year: int,
     model: str,
     keep_picture: bool = False,
+    current_picture_prompt: str | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
 
     With `keep_picture` (an environment reused from the library), the instructions say that the
-    current profile is fixed. It only has an effect when there is a `current_profile`.
+    current profile is fixed. It only has an effect when there is a `current_profile`. With
+    `current_picture_prompt` as well (the prompt the kept picture was made from), the model is
+    shown it and its spatial plan must agree with it (PHASE-050).
 
     `entry` is the environment to define, `others` the rest of the story's environments (each
     `{id, name, description}`), `scenes` the story's scenes as `scenes_for_prompt` gives them,
@@ -201,11 +248,17 @@ def build_request(
     ]
     if current_profile:
         parts.append("CURRENT PROFILE:\n" + current_profile)
+    keeping = keep_picture and bool(current_profile)
+    keeping_view = keeping and bool(current_picture_prompt)
+    if keeping_view:
+        parts.append("CURRENT PICTURE:\n" + (current_picture_prompt or ""))
     parts.append(f"TODAY'S YEAR: {today_year}")
     parts.append("STORY:\n" + story_text)
-    instructions = (
-        _INSTRUCTIONS + _KEEP_PICTURE_RULE if keep_picture and current_profile else _INSTRUCTIONS
-    )
+    instructions = _INSTRUCTIONS
+    if keeping:
+        instructions += _KEEP_PICTURE_RULE
+    if keeping_view:
+        instructions += _KEEP_PICTURE_PLAN_RULE
     return {
         "model": model,
         "messages": [
@@ -330,6 +383,68 @@ def _check_era(raw: dict[str, Any]) -> dict[str, Any]:
     return {"kind": kind, "years": years, "setting": setting}
 
 
+def _zone_id(raw_id: object, name: str) -> str:
+    """A zone's id as a slug: the model's id (or, without one, the name) in lower case, with
+    every run of other characters turned into one underscore. Raises ValueError when no valid
+    slug can be made.
+    """
+    source = raw_id if isinstance(raw_id, str) and raw_id.strip() else name
+    slug = re.sub(r"[^a-z0-9]+", "_", source.lower()).strip("_")[:40].strip("_")
+    if not ZONE_ID_PATTERN.match(slug):
+        raise ValueError(f'The zone "{name}" of the model\'s answer had no usable id.')
+    return slug
+
+
+def _check_zone(raw: object, position: int) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        raise ValueError(f'Zone {position} of the "spatial_plan.zones" was not an object.')
+    path = f"spatial_plan.zones[{position}]"
+    name = _text(raw, "name", f"{path}.name", ZONE_NAME_MAX_CHARS)
+    side_value = raw.get("side")
+    side = side_value.strip().lower() if isinstance(side_value, str) else None
+    if side not in SPATIAL_SIDES:
+        raise ValueError(
+            f'The "{path}.side" of the model\'s answer was not one of {", ".join(SPATIAL_SIDES)}.'
+        )
+    return {
+        "id": _zone_id(raw.get("id"), name),
+        "name": name,
+        "side": side,
+        "description": _text(raw, "description", f"{path}.description", ZONE_DESCRIPTION_MAX_CHARS),
+    }
+
+
+def check_spatial_plan(answer: dict[str, Any]) -> dict[str, Any]:
+    """The `spatial_plan` of the answer, checked and cleaned (PHASE-050): the master view, the
+    four sides and from `ZONES_MIN_ITEMS` to `ZONES_MAX_ITEMS` zones with unique slug ids.
+    Raises ValueError, with a message fit for the user, for the first problem found.
+    """
+    plan = _object(answer, "spatial_plan", "spatial_plan")
+    sides = _object(plan, "sides", "spatial_plan.sides")
+    raw_zones = plan.get("zones")
+    if not isinstance(raw_zones, list):
+        raise ValueError('The "spatial_plan.zones" of the model\'s answer was missing or no list.')
+    if not ZONES_MIN_ITEMS <= len(raw_zones) <= ZONES_MAX_ITEMS:
+        raise ValueError(
+            f'The "spatial_plan.zones" of the model\'s answer must have from {ZONES_MIN_ITEMS} '
+            f"to {ZONES_MAX_ITEMS} zones."
+        )
+    zones = [_check_zone(raw, position) for position, raw in enumerate(raw_zones, start=1)]
+    ids = [zone["id"] for zone in zones]
+    if len(set(ids)) != len(ids):
+        raise ValueError('Two zones of the "spatial_plan.zones" had the same id.')
+    return {
+        "master_view": _text(
+            plan, "master_view", "spatial_plan.master_view", MASTER_VIEW_MAX_CHARS
+        ),
+        "sides": {
+            side: _text(sides, side, f"spatial_plan.sides.{side}", SIDE_MAX_CHARS)
+            for side in SPATIAL_SIDES
+        },
+        "zones": zones,
+    }
+
+
 def check_definition(answer: Any, discovery_id: str) -> dict[str, Any]:
     """The answer checked and cleaned, as the definition that is stored. Raises ValueError, with
     a message fit for the user, for the first problem found.
@@ -345,6 +460,7 @@ def check_definition(answer: Any, discovery_id: str) -> dict[str, Any]:
         "id": discovery_id,
         "architecture": _text(answer, "architecture", "architecture", ARCHITECTURE_MAX_CHARS),
         "layout": _text(answer, "layout", "layout", LAYOUT_MAX_CHARS),
+        "spatial_plan": check_spatial_plan(answer),
         "visual_identity": {
             key: _text(visual, key, f"visual_identity.{key}", limit)
             for key, limit in _VISUAL_IDENTITY_FIELDS.items()

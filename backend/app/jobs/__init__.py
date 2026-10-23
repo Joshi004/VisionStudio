@@ -56,16 +56,19 @@ def register_handlers() -> None:
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
     from app.jobs.generate_shot import GenerateShotHandler
     from app.jobs.lab_voice import LabVoiceHandler
+    from app.jobs.plan_environment_views import PlanEnvironmentViewsHandler
     from app.jobs.plan_shots import PlanShotsHandler
     from app.jobs.render_story import RenderStoryHandler
     from app.jobs.repair_shot_cut import RepairShotCutHandler
     from app.jobs.resolve_looks_states import ResolveLooksStatesHandler
     from app.jobs.select_shot_references import SelectShotReferencesHandler
+    from app.jobs.stage_scene import StageSceneHandler
     from app.jobs.story_pipeline import StoryPipelineHandler
     from app.jobs.synthesize_speech_unit import SynthesizeSpeechUnitHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
+    from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
     from app.jobs.write_lab_music_prompt import WriteLabMusicPromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
@@ -102,3 +105,6 @@ def register_handlers() -> None:
     handlers.register(StoryPipelineHandler())
     handlers.register(CheckTakeDialogueHandler())
     handlers.register(SelectShotReferencesHandler())
+    handlers.register(StageSceneHandler())
+    handlers.register(PlanEnvironmentViewsHandler())
+    handlers.register(WriteEnvironmentViewPromptHandler())

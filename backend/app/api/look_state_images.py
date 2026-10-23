@@ -51,7 +51,7 @@ _INVALID = {
     }
 }
 
-Kind = Literal["look", "state"]
+Kind = Literal["look", "state", "view_state"]
 Status = Literal["unavailable", "none", "in_progress", "failed", "ready"]
 Stage = Literal["drawing", "making_master", "making_angles"]
 
@@ -86,6 +86,10 @@ class LookStateImageItemOut(BaseModel):
     blocked_reason: str | None
     # Why the pictures of a `ready` item are out of date (PHASE-039); empty when they are not.
     reasons: list[str]
+    # A view in a state (PHASE-053) only: the library view and state it is made for. Its `id`
+    # is 0 until its record exists.
+    view_id: int | None
+    state_id: int | None
 
 
 class LookStateImagesOut(BaseModel):
@@ -106,6 +110,7 @@ class LookStateSkippedOut(BaseModel):
 class LookStateRunAllOut(BaseModel):
     look_ids: list[int]
     state_ids: list[int]
+    view_state_ids: list[int]
     skipped: list[LookStateSkippedOut]
 
 
@@ -115,6 +120,10 @@ class LookRunOut(BaseModel):
 
 class StateRunOut(BaseModel):
     state_id: int
+
+
+class ViewStateRunOut(BaseModel):
+    view_state_id: int
 
 
 async def _item_out(session: SessionDep, item: ImageItem) -> LookStateImageItemOut:
@@ -144,6 +153,8 @@ async def _item_out(session: SessionDep, item: ImageItem) -> LookStateImageItemO
         can_run=item.can_run,
         blocked_reason=item.blocked_reason,
         reasons=item.reasons,
+        view_id=item.view_id,
+        state_id=item.state_id,
     )
 
 
@@ -181,11 +192,12 @@ async def run_all(project_id: int, session: SessionDep) -> LookStateRunAllOut:
         started = await look_state_images.start_all(session, project)
     except look_state_images.LookStateImageError as exc:
         raise _refused(exc) from exc
-    if started.look_ids or started.state_ids:
+    if started.look_ids or started.state_ids or started.view_state_ids:
         dispatcher.nudge()
     return LookStateRunAllOut(
         look_ids=started.look_ids,
         state_ids=started.state_ids,
+        view_state_ids=started.view_state_ids,
         skipped=[
             LookStateSkippedOut(
                 kind=item.kind, id=item.record_id, name=item.name, reason=item.reason
@@ -231,3 +243,27 @@ async def run_state(project_id: int, record_id: RecordId, session: SessionDep) -
     if created:
         dispatcher.nudge()
     return StateRunOut(state_id=state_id)
+
+
+@router.post(
+    "/projects/{project_id}/look-state-images/view-states/{view_id}/{state_id}/run",
+    response_model=ViewStateRunOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def run_view_state(
+    project_id: int, view_id: RecordId, state_id: RecordId, session: SessionDep
+) -> ViewStateRunOut:
+    """Starts the picture of one view in one state (PHASE-053). If it is being made already,
+    nothing new starts.
+    """
+    project = await load_project(session, project_id)
+    try:
+        record_id, created = await look_state_images.start_view_state_record(
+            session, project, view_id, state_id
+        )
+    except look_state_images.LookStateImageError as exc:
+        raise _refused(exc) from exc
+    if created:
+        dispatcher.nudge()
+    return ViewStateRunOut(view_state_id=record_id)

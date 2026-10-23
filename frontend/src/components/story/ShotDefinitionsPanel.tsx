@@ -236,6 +236,7 @@ function ShotRow({
         <Paper withBorder p="md" radius="sm">
           <ShotDefinitionEditor
             initial={entry.definition}
+            staging={entry.staging ?? null}
             sceneCharacterIds={sceneCharacterIds}
             characterNames={characterNames}
             saving={saving}
@@ -256,6 +257,7 @@ function ShotRow({
           >
             <ShotDefinitionView
               definition={entry.definition}
+              staging={entry.staging ?? null}
               characterNames={characterNames}
             />
           </ArtifactViewer>

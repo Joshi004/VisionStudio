@@ -816,6 +816,25 @@ async def current_profile_card(
     return environment_library.environment_card(environment)
 
 
+async def current_picture_prompt(
+    session: AsyncSession, environment: LibraryEnvironment
+) -> str | None:
+    """The prompt the environment's newest version's canonical picture was made from, or None
+    when it has no picture or the picture was uploaded (PHASE-050). A reused place that keeps
+    its picture shows this to the definition, so its spatial plan agrees with the picture.
+    """
+    newest = await environment_versions.latest_version(session, environment.id)
+    if newest is None or newest.reference_image_id is None:
+        return None
+    image = await session.get(LabImage, newest.reference_image_id)
+    if image is None or image.run_id is None:
+        return None
+    run = await session.get(LabRun, image.run_id)
+    if run is None or not run.prompt:
+        return None
+    return run.prompt
+
+
 # --- Saving a definition ------------------------------------------------------------------
 
 
