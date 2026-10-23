@@ -28,6 +28,8 @@ const PIECE_LABEL: Record<string, string> = {
 };
 
 const SUBJECT_PREFIX = "subject_";
+/** A rapid exchange has one piece for each of its shots: `shot_1`, `shot_2`, ... */
+const SHOT_PREFIX = "shot_";
 
 /** The pieces in the order the prompt reads: style, the subjects, summary, shot, soundscape. */
 function orderedKeys(pieces: Record<string, string>): string[] {
@@ -39,11 +41,19 @@ function orderedKeys(pieces: Record<string, string>): string[] {
         Number(a.slice(SUBJECT_PREFIX.length)) -
         Number(b.slice(SUBJECT_PREFIX.length)),
     );
+  const shots = keys
+    .filter((key) => key.startsWith(SHOT_PREFIX))
+    .sort(
+      (a, b) =>
+        Number(a.slice(SHOT_PREFIX.length)) -
+        Number(b.slice(SHOT_PREFIX.length)),
+    );
   const known = [
     "style",
     ...subjects,
     "summary",
     "shot",
+    ...shots,
     "soundscape",
     "integrated_multimodal_description",
     "overall_soundscape",
@@ -55,6 +65,9 @@ function orderedKeys(pieces: Record<string, string>): string[] {
 function pieceLabel(key: string): string {
   if (key.startsWith(SUBJECT_PREFIX)) {
     return `Subject ${key.slice(SUBJECT_PREFIX.length)}`;
+  }
+  if (key.startsWith(SHOT_PREFIX)) {
+    return `Shot ${key.slice(SHOT_PREFIX.length)}`;
   }
   return PIECE_LABEL[key] ?? key;
 }

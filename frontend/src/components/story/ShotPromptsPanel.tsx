@@ -127,6 +127,18 @@ function ShotRow({
               {FORMAT_LABELS[prompt.format] ?? prompt.format}: {prompt.endpoint}
             </Text>
           )}
+          {prompt !== null && prompt.cuts.length > 0 && (
+            <Text size="xs" c="dimmed">
+              Rapid exchange:{" "}
+              {prompt.cuts
+                .map(
+                  (cut) =>
+                    `Shot ${cut.shot} at ${cut.cue} (${cut.audio_label}, ${cut.speaker})`,
+                )
+                .join("; ")}
+              .
+            </Text>
+          )}
           {!entry.can_run && entry.blocked_reason !== null && (
             <Text size="xs" c="dimmed">
               {entry.blocked_reason}

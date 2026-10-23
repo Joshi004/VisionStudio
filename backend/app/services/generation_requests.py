@@ -378,6 +378,19 @@ def continues_from(plan_content: Any, shot_id: str) -> str | None:
     return None
 
 
+def exchange_of(plan_content: Any, shot_id: str) -> bool:
+    """Whether a shot plan's content marks `shot_id` as a rapid exchange (PHASE-043). Plans made
+    before this phase have no such field and read as False.
+    """
+    shots = plan_content.get("shots") if isinstance(plan_content, dict) else None
+    if not isinstance(shots, list):
+        return False
+    return any(
+        isinstance(shot, dict) and shot.get("id") == shot_id and shot.get("rapid_exchange") is True
+        for shot in shots
+    )
+
+
 def _plan_inputs(
     ctx: _Context, scene_id: str, entry: shot_references.ShotEntry
 ) -> tuple[generation_planner.GenerationPlan, list[dict[str, Any]]]:
@@ -447,6 +460,7 @@ def _plan_inputs(
             dialogue=dialogue,
             visible_character_ids=visible,
             continues_from=continues_from(plan_entry.row.content, shot_id),
+            exchange=exchange_of(plan_entry.row.content, shot_id),
         )
     except generation_planner.GenerationPlanError as exc:
         raise GenerationRequestsError(str(exc)) from exc

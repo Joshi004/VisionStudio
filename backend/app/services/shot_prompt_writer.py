@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from app.providers import video_generator
@@ -93,6 +93,8 @@ SUMMARY: Final = "summary"
 SHOT: Final = "shot"
 SOUNDSCAPE: Final = "soundscape"
 SUBJECT_PREFIX: Final = "subject_"
+# A rapid exchange (PHASE-043) has one piece for each of its shots: `shot_1`, `shot_2`, ...
+SHOT_PREFIX: Final = "shot_"
 # The pieces for the generate format are the lab's own names.
 DESCRIPTION: Final = lab_prompt_writer.H3_DESCRIPTION
 GENERATE_SOUNDSCAPE: Final = lab_prompt_writer.H3_SOUNDSCAPE
@@ -105,6 +107,9 @@ _LABEL = re.compile(r"<(Picture|Subject|Audio|Video|Image)\s+(\d+)>", re.IGNOREC
 _SHOT_TAG = re.compile(r"\[Shot\s+(\d+)\]", re.IGNORECASE)
 _SPOKEN = re.compile(r"<d>\s*\[[^\]\n]+\]\s*(.*?)\s*</d>", re.DOTALL)
 _ANY_SPOKEN = re.compile(r"<d>", re.IGNORECASE)
+# The time the app writes in front of a later shot of a rapid exchange: "At 00:03.680,".
+_LEADING_TIME = re.compile(r"^At\s+\d{2}:\d{2}\.\d{3}\s*,?\s*", re.IGNORECASE)
+_LEADING_SHOT_TAG = re.compile(r"^\[Shot\s*\d+\]\s*", re.IGNORECASE)
 _SPOKEN_BLOCK = re.compile(r"<d>.*?</d>", re.DOTALL | re.IGNORECASE)
 _MUSIC_WORDS = re.compile(r"\b(?:music|score|soundtrack|melody|melodies)\b", re.IGNORECASE)
 _NAME_STOPWORDS: Final = frozenset({"the", "old", "young", "mrs", "mr", "dr", "and", "of"})
@@ -182,6 +187,21 @@ class Speaker:
 
 
 @dataclass(frozen=True)
+class Cut:
+    """One internal shot of a rapid exchange (PHASE-043): shot `number` starts at `start_s`
+    seconds into the clip and carries the line of `speaker`, and nothing else is spoken in it.
+    """
+
+    number: int
+    speaker: Speaker
+    start_s: float
+
+    @property
+    def cue(self) -> str:
+        return format_cue(self.start_s)
+
+
+@dataclass(frozen=True)
 class Layout:
     """What the prompt may name: the route, the pictures, the subjects and the audios."""
 
@@ -197,13 +217,22 @@ class Layout:
     anchor_use: str | None = None
     anchor_from: str | None = None
     anchor_picture: int | None = None
+    # PHASE-043: the internal shots of a rapid exchange, one for each line, in order. Empty for
+    # every other shot.
+    cuts: list[Cut] = field(default_factory=list)
+
+    @property
+    def exchange(self) -> bool:
+        return bool(self.cuts)
 
     def subject_for_speaker(self, speaker: Speaker) -> Subject | None:
         return next((item for item in self.subjects if item.number == speaker.subject), None)
 
     def as_dict(self) -> dict[str, Any]:
-        """The layout as stored on the prompt (`content.subjects` and `content.speakers`)."""
-        return {
+        """The layout as stored on the prompt (`content.subjects` and `content.speakers`, and
+        `content.cuts` for a rapid exchange).
+        """
+        stored: dict[str, Any] = {
             "subjects": [
                 {
                     "label": f"Subject {subject.number}",
@@ -231,6 +260,19 @@ class Layout:
                 for speaker in self.speakers
             ],
         }
+        if self.exchange:
+            stored["cuts"] = [
+                {
+                    "shot": cut.number,
+                    "cue": cut.cue,
+                    "audio_label": f"Audio {cut.speaker.audio_number}",
+                    "speaker": cut.speaker.speaker,
+                    "subject_label": f"Subject {cut.speaker.subject}",
+                    "text": cut.speaker.text,
+                }
+                for cut in self.cuts
+            ]
+        return stored
 
     def for_model(self) -> dict[str, Any]:
         """The labels as the model is shown them (by id, not by name)."""
@@ -276,6 +318,22 @@ class Layout:
                     f"<Picture {self.anchor_picture}>" if self.anchor_picture is not None else None
                 ),
             }
+        if self.exchange:
+            labels["exchange"] = [
+                {
+                    "shot": cut.number,
+                    "speaker": cut.speaker.speaker,
+                    "subject": f"<Subject {cut.speaker.subject}>",
+                    "audio": cut.speaker.audio_label,
+                    "words": cut.speaker.text,
+                    # Shot 1 starts the clip, so its line carries its own time. Every later shot
+                    # starts at its line, and the app writes that time in front of the shot.
+                    "you_write_the_time": cut.number == 1,
+                    "line_starts": f"At {cut.speaker.cue}",
+                    "shot_starts_at": cut.cue,
+                }
+                for cut in self.cuts
+            ]
         return labels
 
 
@@ -403,6 +461,7 @@ def layout(request: dict[str, Any]) -> Layout:
                 start_s=float(start),
             )
         )
+    cuts = _read_cuts(request.get("exchange"), route, anchor_use, speakers)
     return Layout(
         format=FORMAT_REFERENCE if route == _ROUTE_REFERENCE else FORMAT_GENERATE,
         endpoint=endpoint,
@@ -414,14 +473,66 @@ def layout(request: dict[str, Any]) -> Layout:
         anchor_use=anchor_use,
         anchor_from=anchor_from,
         anchor_picture=anchor_picture,
+        cuts=cuts,
     )
+
+
+def _read_cuts(
+    exchange: Any, route: str, anchor_use: str | None, speakers: list[Speaker]
+) -> list[Cut]:
+    """The internal shots of a rapid exchange from the request's `exchange` (PHASE-043): one cut
+    for each line, in order, every speaker visible, and no continuity anchor. An empty list when
+    the request has no `exchange`. Raises ShotPromptError.
+    """
+    if exchange is None:
+        return []
+    raw = exchange.get("cuts") if isinstance(exchange, dict) else None
+    if (
+        route != _ROUTE_REFERENCE
+        or anchor_use is not None
+        or not isinstance(raw, list)
+        or len(raw) != len(speakers)
+        or len(speakers) < 2
+    ):
+        raise ShotPromptError("The generation request of this shot cannot be read.")
+    cuts: list[Cut] = []
+    for position, (entry, speaker) in enumerate(zip(raw, speakers, strict=True), start=1):
+        start = entry.get("at_s") if isinstance(entry, dict) else None
+        if (
+            not isinstance(entry, dict)
+            or entry.get("shot") != position
+            or entry.get("audio") != speaker.audio_number
+            or isinstance(start, bool)
+            or not isinstance(start, int | float)
+            or (cuts and start <= cuts[-1].start_s)
+            or not speaker.visible
+            or speaker.subject is None
+        ):
+            raise ShotPromptError("The generation request of this shot cannot be read.")
+        cuts.append(Cut(number=position, speaker=speaker, start_s=float(start)))
+    return cuts
 
 
 # --- The request --------------------------------------------------------------------------
 
 
-_COMMON_RULES: Final = (
-    """\
+# The rule about how many shots the clip has. A rapid exchange (PHASE-043) swaps it for
+# `_EXCHANGE_SHOT_RULE`.
+_ONE_SHOT_RULE: Final = (
+    "- The clip is one shot, [Shot 1], with no cut and no cut time. It lasts "
+    '"shot_seconds" seconds: everything in it must be possible in that time.\n'
+)
+_EXCHANGE_SHOT_RULE: Final = (
+    "- The clip is a rapid exchange: it cuts between the two speakers, one shot for each line, "
+    'as LABELS "exchange" lists. The app writes every [Shot n] tag and every cut time. The '
+    'whole clip lasts "shot_seconds" seconds: everything in it must be possible in that time.\n'
+)
+
+
+def _common_rules(shot_rule: str) -> str:
+    """The rules every format shares, with the rule about the clip's shots given."""
+    return (
+        """\
 You are the prompt compiler of a studio that turns written stories into short films. Everything \
 about one shot has been decided already: what it shows, how it is framed and moves, what is heard, \
 and which reference pictures and audios are sent with it. You turn that structured intent into \
@@ -444,12 +555,12 @@ General rules:
 - Use only the labels listed under LABELS, written exactly as given, and never another one (no \
 <Video 1>, no <Image 1>, no label with a number that is not listed). Never write the name of a \
 character or of the place: use a label or a description.
-- The clip is one shot, [Shot 1], with no cut and no cut time. It lasts "shot_seconds" seconds: \
-everything in it must be possible in that time.
-- Plain, concrete, present-tense English prose. Concrete verbs and physical cues; show feeling \
-through the body (eyes, head, shoulders, hands, breath), never through a label such as "sad". No \
-quality tags and no mood words (such as cinematic or beautiful) on their own, no plot summary, \
-and no text, signs or captions in the scene.
+"""
+        + shot_rule
+        + """- Plain, concrete, present-tense English prose. Concrete verbs and physical cues; \
+show feeling through the body (eyes, head, shoulders, hands, breath), never through a label \
+such as "sad". No quality tags and no mood words (such as cinematic or beautiful) on their \
+own, no plot summary, and no text, signs or captions in the scene.
 - Camera: natural English with a move type, an amplitude and a speed ("The camera pushes in \
 with small amplitude at slow speed toward her face."). Move types: zoom in, zoom out, push in, \
 pull out, pan left, pan right, truck left, truck right, tilt up, tilt down, pedestal up, \
@@ -459,9 +570,12 @@ and non-verbal human sounds (breath, cloth, footsteps, a chair): no speech and n
 score and no song, not even a hint of one.
 
 """
-    + user_feedback.INSTRUCTION
-    + "\n"
-)
+        + user_feedback.INSTRUCTION
+        + "\n"
+    )
+
+
+_COMMON_RULES: Final = _common_rules(_ONE_SHOT_RULE)
 
 _REFERENCE_RULES: Final = """\
 
@@ -539,7 +653,52 @@ angle and no new place. Write the anchor's <Picture N> label only to say that th
 from it.
 """
 
+_EXCHANGE_RULES: Final = """\
+
+Format: rapid exchange, reference mode. The clip is a quick back-and-forth between two characters, \
+cut into one shot for each line of dialogue. LABELS lists the "subjects" (the two speakers and the \
+place, with the pictures that show them), the "audios" (the recorded speech of each line, in \
+order) and the "exchange": one entry for each shot, with who speaks in it, their audio and exact \
+words. Give these JSON strings, without the field's name inside them:
+- "style": one or two sentences before the shots: the visual style, the light and the colour \
+palette, read from the StoryBible and the shot definition.
+- "subject_N", for each subject in LABELS ("subject_1", "subject_2", ...): a noun phrase that \
+completes "<Subject N> is ...". For a character: age and gender, hair, face, build, clothes and \
+anything worn or carried, taken from that character's definition and the look given for the \
+scene, found by its "id" in CHARACTERS. For the place: what it looks like, its layout, key \
+objects, light and state, taken from ENVIRONMENT and the shot's environment state. No label, no \
+name and no closing full stop in it.
+- "summary": one sentence on the target video: who talks to whom, where, with the labels of the \
+subjects. No task tag.
+- "shot_N", for each entry of "exchange" ("shot_1", "shot_2", ...): the whole of that one shot, \
+and nothing that belongs to another. Both speakers and the place are on screen in every shot (the \
+speaker in the main frame, the other as a listener at its edge, for example over the shoulder), \
+so the faces, hair and clothes stay exactly as in the pictures. Start the first shot by restating \
+the composition the pictures give (shot size, angle, where each speaker sits, the place and the \
+light), as a two-shot. Later shots name the new framing in a few words ("the camera cuts to a \
+medium close-up of <Subject 2> ..."). Then the action in order, from the "start_state" through \
+the "primary_action" to the "end_state" of the SHOT DEFINITION, spread over the shots, with \
+expression, pose and gaze, and the camera in natural English with a move type, an amplitude and a \
+speed. "style" and all the shots together are 350 to 500 words. Use the labels of the subjects \
+(<Subject N>) for the people and the place, and <Picture N> only to say what a picture shows.
+- Speech. Every shot holds exactly one line of speech, its own, and no other. It is one sentence \
+with the speaker id from the entry's "speaker", the audio label of the entry and the words: \
+"<Subject 1> (S1) says, in the speech copied from <Audio 1>, <d>[English] the words</d>". The \
+words inside <d> are exactly the entry's "words", with nothing added, changed or translated, and \
+[English] names the language of the words, in English. The lips move with each word and close \
+when the line ends. Never write the words or the audio label of another shot's line. The first \
+time a voice is heard, say who it is (age, gender, pitch, timbre, pace), from the character's \
+definition. Timing: when the entry's "you_write_the_time" is true, start the sentence with its \
+"line_starts", exactly as written ("At 00:00.500, ..."). When it is false, the app writes the \
+time of the cut in front of the shot, so write no time in that shot and let it read on from \
+"At 00:03.680, " (for example "the camera cuts to a medium close-up of <Subject 2> (S2), who \
+says, in the speech copied from <Audio 2>, <d>...</d>").
+- "soundscape": one to four sentences of ambience and physical sounds, from the shot \
+definition's "ambient" and "sound_events". No speech, no music.
+"""
+
 REFERENCE_INSTRUCTIONS: Final = _COMMON_RULES + _REFERENCE_RULES
+EXCHANGE_INSTRUCTIONS: Final = _common_rules(_EXCHANGE_SHOT_RULE) + _EXCHANGE_RULES
 GENERATE_INSTRUCTIONS: Final = _COMMON_RULES + _GENERATE_RULES
 
 
@@ -552,7 +711,13 @@ def answer_form(shot_layout: Layout) -> dict[str, str]:
     form = {STYLE: "..."}
     for subject in shot_layout.subjects:
         form[f"{SUBJECT_PREFIX}{subject.number}"] = "..."
-    form.update({SUMMARY: "...", SHOT: "...", SOUNDSCAPE: "..."})
+    form[SUMMARY] = "..."
+    if shot_layout.exchange:
+        for cut in shot_layout.cuts:
+            form[f"{SHOT_PREFIX}{cut.number}"] = "..."
+    else:
+        form[SHOT] = "..."
+    form[SOUNDSCAPE] = "..."
     return form
 
 
@@ -608,9 +773,12 @@ def build_request(
             if isinstance(entry, dict) and "id" in entry
         }
     shown = [character for character in characters if character.get("id") in wanted]
-    instructions = (
-        GENERATE_INSTRUCTIONS if shot_layout.format == FORMAT_GENERATE else REFERENCE_INSTRUCTIONS
-    )
+    if shot_layout.format == FORMAT_GENERATE:
+        instructions = GENERATE_INSTRUCTIONS
+    elif shot_layout.exchange:
+        instructions = EXCHANGE_INSTRUCTIONS
+    else:
+        instructions = REFERENCE_INSTRUCTIONS
     if shot_layout.anchor_use == ANCHOR_FIRST_FRAME:
         instructions += _FIRST_FRAME_RULES
     elif shot_layout.anchor_use == ANCHOR_REFERENCE:
@@ -691,15 +859,36 @@ def _reference_pieces(answer: dict[str, Any], shot_layout: Layout) -> dict[str, 
         if subject.kind == _ENVIRONMENT:
             text = re.sub(r"^the place where it happens\s*:?\s*", "", text, flags=re.IGNORECASE)
         pieces[key] = text.rstrip(". ")
-    pieces[SHOT] = re.sub(r"^\[Shot\s*1\]\s*", "", pieces[SHOT], flags=re.IGNORECASE)
+    if shot_layout.exchange:
+        for cut in shot_layout.cuts:
+            # The app writes the tag and the cut time of every shot, never the model.
+            key = f"{SHOT_PREFIX}{cut.number}"
+            text = _LEADING_SHOT_TAG.sub("", pieces[key], count=1)
+            pieces[key] = _LEADING_TIME.sub("", text, count=1) if cut.number > 1 else text
+    else:
+        pieces[SHOT] = _LEADING_SHOT_TAG.sub("", pieces[SHOT], count=1)
     pieces[SUMMARY] = re.sub(r"^\[(?!Shot)[^\]]*\]\s*", "", pieces[SUMMARY])
     return pieces
+
+
+def _exchange_shot_texts(pieces: dict[str, str], shot_layout: Layout) -> list[str]:
+    """The text of each shot of a rapid exchange, as it is sent after its `[Shot n]` tag. Every
+    shot after the first starts with the time of its cut, written here and never by the model.
+    """
+    texts: list[str] = []
+    for cut in shot_layout.cuts:
+        text = pieces[f"{SHOT_PREFIX}{cut.number}"]
+        texts.append(text if cut.number == 1 else f"At {cut.cue}, {text}")
+    return texts
 
 
 def _assemble_reference(pieces: dict[str, str], shot_layout: Layout) -> str:
     """The six sections of MiniMax's reference format, in order, from the model's pieces."""
     definitions: list[str] = []
     retention: list[str] = []
+    # The shots each subject appears in: all of them in a rapid exchange, where both speakers and
+    # the place are on screen throughout.
+    appears = ", ".join(f"[Shot {cut.number}]" for cut in shot_layout.cuts) or "[Shot 1]"
     for subject in shot_layout.subjects:
         text = pieces[f"{SUBJECT_PREFIX}{subject.number}"]
         shown = _label_list([f"<Picture {number}>" for number in subject.pictures])
@@ -708,13 +897,13 @@ def _assemble_reference(pieces: dict[str, str], shot_layout: Layout) -> str:
                 f"{subject.label} is the place where it happens: {text}, shown in {shown}."
             )
             retention.append(
-                f"{subject.label} (appears in [Shot 1]): partially_preserved - the place, its "
+                f"{subject.label} (appears in {appears}): partially_preserved - the place, its "
                 "layout, light and mood."
             )
         else:
             definitions.append(f"{subject.label} is {text}, shown in {shown}.")
             retention.append(
-                f"{subject.label} (appears in [Shot 1]): fully_preserved - the character's "
+                f"{subject.label} (appears in {appears}): fully_preserved - the character's "
                 "identity, face, hair, build and clothing defined above are retained."
             )
     if shot_layout.anchor_picture is not None:
@@ -741,12 +930,18 @@ def _assemble_reference(pieces: dict[str, str], shot_layout: Layout) -> str:
         if shot_layout.speakers
         else [NOBODY_SPEAKS]
     )
-    shot = " ".join([pieces[SHOT], *extra])
+    if shot_layout.exchange:
+        detailed = "\n".join(
+            f"[Shot {number}] {text}"
+            for number, text in enumerate(_exchange_shot_texts(pieces, shot_layout), start=1)
+        )
+    else:
+        detailed = f"[Shot 1] {' '.join([pieces[SHOT], *extra])}"
     sections = [
         "subject_definitions:\n" + "\n".join(definitions),
         f"summary:\n{tag} {pieces[SUMMARY]}",
         "retention_analysis:\n" + "\n".join(retention),
-        f"detailed_description:\n{pieces[STYLE]}\n[Shot 1] {shot}",
+        f"detailed_description:\n{pieces[STYLE]}\n{detailed}",
         f"overall_soundscape:\n{pieces[SOUNDSCAPE]}",
         f"non_diegetic_music:\n{NO_MUSIC}",
     ]
@@ -810,8 +1005,15 @@ def _check_labels(text: str, shot_layout: Layout) -> None:
 
 def _check_speech(shot_text: str, shot_layout: Layout) -> None:
     """The shot must hold each line's exact words inside <d>, its audio and its start time."""
+    _check_lines(shot_text, shot_layout.speakers)
+
+
+def _check_lines(shot_text: str, speakers: list[Speaker]) -> None:
+    """The text of one shot must hold exactly the lines of `speakers`: each one's words inside
+    <d>, its audio label and its start time, and no other line. Raises ValueError.
+    """
     spoken = [_one_line(found) for found in _SPOKEN.findall(shot_text)]
-    lines = [speaker.text for speaker in shot_layout.speakers]
+    lines = [speaker.text for speaker in speakers]
     if not lines:
         if _ANY_SPOKEN.search(shot_text):
             raise ValueError("The shot has a <d> tag, but nobody speaks in this clip.")
@@ -822,7 +1024,7 @@ def _check_speech(shot_text: str, shot_layout: Layout) -> None:
             f"{len(lines)} {'line' if len(lines) == 1 else 'lines'} of speech. Each line is "
             "written once, as <d>[Language] the words</d>."
         )
-    for speaker in shot_layout.speakers:
+    for speaker in speakers:
         if speaker.text not in spoken:
             raise ValueError(
                 f"The exact words of {speaker.audio_label} were not found inside "
@@ -836,6 +1038,28 @@ def _check_speech(shot_text: str, shot_layout: Layout) -> None:
                 f"The shot does not give the start time 'At {speaker.cue}' of "
                 f"{speaker.audio_label}."
             )
+
+
+def _check_exchange_speech(pieces: dict[str, str], shot_layout: Layout) -> None:
+    """Each shot of a rapid exchange holds exactly its own line (words, audio label and time) and
+    no other, and no piece outside the shots has speech. Raises ValueError.
+    """
+    shot_keys = {f"{SHOT_PREFIX}{cut.number}" for cut in shot_layout.cuts}
+    for key, value in pieces.items():
+        if key not in shot_keys and _ANY_SPOKEN.search(value):
+            raise ValueError(f'The "{key}" has a <d> tag. Speech belongs in the shots only.')
+    texts = _exchange_shot_texts(pieces, shot_layout)
+    for cut, text in zip(shot_layout.cuts, texts, strict=True):
+        try:
+            _check_lines(text, [cut.speaker])
+        except ValueError as exc:
+            raise ValueError(f"Shot {cut.number}: {exc}") from exc
+        for other in shot_layout.speakers:
+            if other is not cut.speaker and other.audio_label in text:
+                raise ValueError(
+                    f"Shot {cut.number} names {other.audio_label}, which belongs to another "
+                    "shot. Each shot has its own line only."
+                )
 
 
 def _name_warnings(model_text: str, shot_layout: Layout) -> list[str]:
@@ -870,10 +1094,11 @@ def check_answer(answer: Any, shot_layout: Layout) -> dict[str, Any]:
     message fit for the user, for the first problem found.
 
     Refused: a piece that is missing or not text, a label that is not sent with the clip, a
-    second shot, a <d> tag outside the shot or in a shot nobody speaks in, a line whose exact
-    words, audio or start time are missing from the shot, a prompt longer than the video lab's
-    limit, and music that is not disabled. Warnings never block: a length off the guide, a name
-    or a word about music.
+    second shot (a rapid exchange, PHASE-043, has one piece for each of its shots, and a line in
+    any shot but its own), a <d> tag outside the shot or in a shot nobody speaks in, a line
+    whose exact words, audio or start time are missing from the shot, a prompt longer than the
+    video lab's limit, and music that is not disabled. Warnings never block: a length off the
+    guide, a name or a word about music.
     """
     if not isinstance(answer, dict):
         raise ValueError("The pieces of the prompt were not a JSON object.")
@@ -884,13 +1109,21 @@ def check_answer(answer: Any, shot_layout: Layout) -> dict[str, Any]:
         raise ValueError("There was no text for: " + ", ".join(f'"{key}"' for key in missing) + ".")
 
     model_text = "\n".join(pieces.values())
-    if any(match != "1" for match in _SHOT_TAG.findall(model_text)):
-        raise ValueError("The prompt has a second shot. One shot was asked for.")
-    shot_key = SHOT if reference else DESCRIPTION
-    for key, value in pieces.items():
-        if key != shot_key and _ANY_SPOKEN.search(value):
-            raise ValueError(f'The "{key}" has a <d> tag. Speech belongs in the shot only.')
-    _check_speech(pieces[shot_key], shot_layout)
+    if shot_layout.exchange:
+        if _SHOT_TAG.search(model_text):
+            raise ValueError(
+                "The prompt has a [Shot n] tag inside a piece. The app writes the tags: give "
+                "one piece for each shot."
+            )
+        _check_exchange_speech(pieces, shot_layout)
+    else:
+        if any(match != "1" for match in _SHOT_TAG.findall(model_text)):
+            raise ValueError("The prompt has a second shot. One shot was asked for.")
+        shot_key = SHOT if reference else DESCRIPTION
+        for key, value in pieces.items():
+            if key != shot_key and _ANY_SPOKEN.search(value):
+                raise ValueError(f'The "{key}" has a <d> tag. Speech belongs in the shot only.')
+        _check_speech(pieces[shot_key], shot_layout)
 
     prompt = _assemble_reference(pieces, shot_layout) if reference else _assemble_generate(pieces)
     if shot_layout.anchor_use == ANCHOR_FIRST_FRAME:

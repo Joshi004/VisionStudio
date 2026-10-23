@@ -182,6 +182,7 @@ class DefineShotHandler(JobHandler):
                 duration=read.duration,
                 scene_character_ids=read.scene_character_ids,
                 dialogue=read.dialogue,
+                exchange=read.shot.get("rapid_exchange") is True,
             )
         except ValueError as exc:
             return str(exc), None

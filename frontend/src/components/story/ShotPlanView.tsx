@@ -74,6 +74,16 @@ export function ShotPlanView({
                   Continues previous shot
                 </Badge>
               )}
+              {shot.rapid_exchange && (
+                <Badge
+                  variant="light"
+                  color="grape"
+                  style={{ flexShrink: 0 }}
+                  title="One shot with a quick back-and-forth between two characters: the clip cuts at each line"
+                >
+                  Rapid exchange
+                </Badge>
+              )}
               <Text size="sm" style={{ wordBreak: "break-word" }}>
                 {shot.description}
               </Text>

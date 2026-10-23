@@ -72,6 +72,9 @@ class ShotOut(BaseModel):
     # PHASE-032: the shot carries straight on from the shot before it, with no cut. Plans made
     # before this phase have no such field and read as False.
     continues_previous: bool = False
+    # PHASE-043: the shot is a quick back-and-forth between two characters, with a cut at each
+    # line. Plans made before this phase have no such field and read as False.
+    rapid_exchange: bool = False
     description: str
 
 
@@ -256,6 +259,7 @@ class ShotEditIn(BaseModel):
     type: ShotType
     target_duration: float
     continues_previous: bool = False
+    rapid_exchange: bool = False
     description: str = Field(max_length=2000)
 
 

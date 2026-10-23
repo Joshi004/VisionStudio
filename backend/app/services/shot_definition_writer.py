@@ -169,6 +169,11 @@ separately, and music is added to the whole film later.
 - When SPEECH lists a line of dialogue, the shot must make sense of it: its speaker is shown \
 speaking, or is stated to be unseen. Narration is heard over the shot and is not spoken by \
 anyone in it.
+- When the SHOT has "rapid_exchange" set to true, it is a quick back-and-forth between two \
+characters inside one shot, and the video cuts between them as each speaks. Both speakers are \
+VISIBLE, so both get an entry in "characters". "composition" is the opening two-shot that shows \
+both of them, and "primary_action" covers the whole exchange: who speaks first, and how the \
+other reacts and answers.
 
 {user_feedback.INSTRUCTION}
 
@@ -407,9 +412,14 @@ def check_answer(
     duration: float,
     scene_character_ids: Collection[str],
     dialogue: list[dict[str, str]],
+    exchange: bool = False,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the specification that is stored. Raises ValueError,
     with a message fit for the user, for the first problem found.
+
+    `exchange` is true for a rapid exchange (PHASE-043): every speaker of the shot's dialogue
+    must then be one of the visible `characters`, because each speaks to the camera in a cut of
+    their own and needs a reference picture.
 
     `shot_id`, `scene_id`, `duration` and `audio_intent.dialogue` are set here from what code
     knows and are never read from the model. `scene_character_ids` are the ids of the scene's
@@ -424,13 +434,22 @@ def check_answer(
     camera = _object(answer, "camera", "camera")
     action = _object(answer, "action", "action")
     audio = _object(answer, "audio_intent", "audio_intent")
+    characters = _characters(answer, scene_character_ids)
+    if exchange:
+        shown = {character["id"] for character in characters}
+        missing = sorted({line["speaker_id"] for line in dialogue} - shown)
+        if missing:
+            raise ValueError(
+                "This shot is a rapid exchange, so every speaker must be visible, but "
+                f'"characters" has no entry for: {", ".join(missing)}.'
+            )
 
     return {
         "shot_id": shot_id,
         "scene_id": scene_id,
         "duration": round(duration, _DURATION_DECIMALS),
         "visual_story": _text(answer, "visual_story", "visual_story", VISUAL_STORY_MAX_CHARS),
-        "characters": _characters(answer, scene_character_ids),
+        "characters": characters,
         "environment_state": _environment_state(answer),
         "composition": {
             "shot_size": _shot_size(composition),

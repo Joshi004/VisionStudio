@@ -27,6 +27,11 @@ The rules:
   changed already lasts a `17n + 5` length (`services/h3_lengths`), so it asks for exactly its
   length; an older plan asks for a little more, and the render trims the clip to the exact length.
 - **Size:** MiniMax H3's own size for the project's orientation (`H3_SIZES`).
+- **Rapid exchange (PHASE-043):** a shot the plan marks as an exchange has two or three lines
+  from exactly two speakers who take turns, each visible with a character picture, on the
+  reference route and with no continuity anchor. The request then records one internal cut per
+  line (`exchange.cuts`): the first at 0, each later one at the start of its line. The prompt
+  compiler writes one `[Shot n]` for each cut.
 
 Nothing here chooses a seed or a partition: those are decided when the request is sent.
 """
@@ -40,6 +45,7 @@ from app.providers import video_generator
 from app.services import video_models
 from app.services.duration_policy import DurationPolicy, DurationPolicyError, shot_num_frames
 from app.services.frame_counts import H3_FPS
+from app.services.shot_planning_writer import EXCHANGE_MAX_LINES, EXCHANGE_MIN_LINES
 
 Route = Literal["reference", "text", "first_frame"]
 
@@ -54,6 +60,8 @@ ANCHOR_REFERENCE: Final = "reference"
 # The `kind` of the picture slot that stands for the anchor on the reference route. Its
 # `lab_image_id` is None: the frame does not exist until the previous shot has a take.
 ANCHOR_PICTURE_KIND: Final = "anchor"
+# The `kind` of a manifest picture that shows a character (the other kind is `environment`).
+CHARACTER_PICTURE_KIND: Final = "character"
 # How every dialogue audio is used: the model copies its spoken layer, and the rest of the clip
 # is made by the model.
 AUDIO_MARKER: Final = "partially_copy"
@@ -105,6 +113,9 @@ class GenerationPlan:
     # `first_frame` or `reference` and `picture_order` is the anchor's `<Picture n>` (reference
     # use only). None for every other shot.
     anchor: dict[str, Any] | None = None
+    # PHASE-043: set for a rapid exchange, `{cuts: [{shot, audio, speaker_id, at_s}]}`, one cut
+    # for each line, in order. None for every other shot.
+    exchange: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The `content` of a stored generation request."""
@@ -126,6 +137,7 @@ class GenerationPlan:
             "audios": self.audios,
             "notes": self.notes,
             "anchor": self.anchor,
+            "exchange": self.exchange,
         }
 
 
@@ -164,6 +176,63 @@ def _check_audio(line: DialogueInput, target_s: float) -> float:
     return seconds
 
 
+def _exchange_cuts(
+    route: Route,
+    anchor: dict[str, Any] | None,
+    pictures: list[dict[str, Any]],
+    audios: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The internal cuts of a rapid exchange (PHASE-043), one for each line. Raises
+    GenerationPlanError when the shot cannot be one.
+    """
+    if route != ROUTE_REFERENCE:
+        raise GenerationPlanError(
+            "A rapid exchange is made from reference pictures and the lines of its two speakers."
+        )
+    if anchor is not None:
+        raise GenerationPlanError(
+            "A rapid exchange cannot continue the shot before it. Plan the shots of this scene "
+            "again."
+        )
+    if not EXCHANGE_MIN_LINES <= len(audios) <= EXCHANGE_MAX_LINES:
+        raise GenerationPlanError(
+            f"A rapid exchange has {EXCHANGE_MIN_LINES} to {EXCHANGE_MAX_LINES} lines of "
+            f"dialogue; this shot has {len(audios)}."
+        )
+    speakers = [audio["speaker_id"] for audio in audios]
+    if len(set(speakers)) != 2 or any(a == b for a, b in zip(speakers, speakers[1:], strict=False)):
+        raise GenerationPlanError(
+            "A rapid exchange needs exactly two speakers who take turns. Plan the shots of this "
+            "scene again."
+        )
+    shown = {
+        picture["subject_id"] for picture in pictures if picture["kind"] == CHARACTER_PICTURE_KIND
+    }
+    for audio in audios:
+        if not audio["speaker_visible"] or audio["speaker_id"] not in shown:
+            raise GenerationPlanError(
+                f"The speaker of the line '{audio['unit_id']}' needs to be visible with a "
+                "reference picture in a rapid exchange. Choose the shot's references again."
+            )
+    cuts: list[dict[str, Any]] = []
+    for number, audio in enumerate(audios, start=1):
+        at_s = 0.0 if number == 1 else audio["starts_in_shot_seconds"]
+        if cuts and at_s <= cuts[-1]["at_s"]:
+            raise GenerationPlanError(
+                f"The line '{audio['unit_id']}' does not start after the line before it, so the "
+                "exchange cannot be cut at each line."
+            )
+        cuts.append(
+            {
+                "shot": number,
+                "audio": audio["order"],
+                "speaker_id": audio["speaker_id"],
+                "at_s": at_s,
+            }
+        )
+    return {"cuts": cuts}
+
+
 def plan(
     *,
     scene_id: str,
@@ -175,11 +244,13 @@ def plan(
     dialogue: list[DialogueInput],
     visible_character_ids: list[str],
     continues_from: str | None = None,
+    exchange: bool = False,
 ) -> GenerationPlan:
     """The generation request of one shot. `pictures` are the manifest's `references` (each has
     `order`, `lab_image_id`, `kind`, `subject_id`, `subject_name`, `view` and `variant`) and
     `dialogue` the lines the shot carries, both in the order they are sent. `continues_from` is
-    the id of the shot before it when this is a continuity shot (PHASE-032). Raises
+    the id of the shot before it when this is a continuity shot (PHASE-032); `exchange` is true
+    when the shot plan marks the shot as a rapid exchange (PHASE-043). Raises
     GenerationPlanError.
     """
     sizes = video_generator.H3_SIZES.get(orientation)
@@ -294,6 +365,13 @@ def plan(
             }
         )
 
+    exchange_content = _exchange_cuts(route, anchor, planned_pictures, audios) if exchange else None
+    if exchange_content is not None:
+        notes.append(
+            f"A rapid exchange: the clip cuts at each of its {len(audios)} lines, one internal "
+            "shot for each."
+        )
+
     return GenerationPlan(
         shot_id=shot_id,
         scene_id=scene_id,
@@ -314,4 +392,5 @@ def plan(
         audios=audios,
         notes=notes,
         anchor=anchor,
+        exchange=exchange_content,
     )

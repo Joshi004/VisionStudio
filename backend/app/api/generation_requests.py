@@ -107,6 +107,23 @@ class RequestAnchorOut(BaseModel):
     picture_order: int | None
 
 
+class RequestCutOut(BaseModel):
+    """PHASE-043: one internal shot of a rapid exchange. Shot `shot` starts `at_s` seconds into
+    the clip and carries the line of `<Audio audio>`, spoken by `speaker_id`.
+    """
+
+    shot: int
+    audio: int
+    speaker_id: str
+    at_s: float
+
+
+class RequestExchangeOut(BaseModel):
+    """PHASE-043: the clip cuts between two speakers, one shot for each line."""
+
+    cuts: list[RequestCutOut]
+
+
 class GenerationRequestOut(BaseModel):
     model: str
     route: Route
@@ -125,6 +142,8 @@ class GenerationRequestOut(BaseModel):
     audios: list[RequestAudioOut]
     notes: list[str]
     anchor: RequestAnchorOut | None = None
+    # Requests planned before PHASE-043 have no `exchange`.
+    exchange: RequestExchangeOut | None = None
 
 
 class GenerationRequestVersionOut(BaseModel):
@@ -258,6 +277,11 @@ def _request_out(content: dict[str, Any], urls: _Urls) -> GenerationRequestOut:
         # Requests planned before PHASE-032 have no `anchor`.
         anchor=(
             RequestAnchorOut(**content["anchor"]) if content.get("anchor") is not None else None
+        ),
+        exchange=(
+            RequestExchangeOut.model_validate(content["exchange"])
+            if content.get("exchange") is not None
+            else None
         ),
     )
 

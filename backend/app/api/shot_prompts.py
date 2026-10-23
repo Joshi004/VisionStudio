@@ -91,6 +91,18 @@ class PromptSpeakerOut(BaseModel):
     text: str
 
 
+class PromptCutOut(BaseModel):
+    """PHASE-043: one internal shot of a rapid exchange, `[Shot n]` of the prompt."""
+
+    shot: int
+    # Where the shot starts inside the clip, as the prompt writes it (`00:03.680`).
+    cue: str
+    audio_label: str
+    speaker: str
+    subject_label: str
+    text: str
+
+
 class ShotPromptContentOut(BaseModel):
     format: PromptFormat
     endpoint: str
@@ -101,6 +113,8 @@ class ShotPromptContentOut(BaseModel):
     pieces: dict[str, str] = {}
     subjects: list[PromptSubjectOut]
     speakers: list[PromptSpeakerOut]
+    # The internal shots of a rapid exchange, in order. Empty for every other shot.
+    cuts: list[PromptCutOut] = []
     # What is off in the prompt. None of it blocks.
     warnings: list[str]
     word_count: int

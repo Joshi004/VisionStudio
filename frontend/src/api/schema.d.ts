@@ -4809,6 +4809,7 @@ export interface components {
             /** Notes */
             notes: string[];
             anchor?: components["schemas"]["RequestAnchorOut"] | null;
+            exchange?: components["schemas"]["RequestExchangeOut"] | null;
         };
         /**
          * GenerationRequestVersionOut
@@ -6471,6 +6472,24 @@ export interface components {
             /** Review Points */
             review_points?: ("story_structure" | "images" | "scenes" | "shot_plans" | "shots")[] | null;
         };
+        /**
+         * PromptCutOut
+         * @description PHASE-043: one internal shot of a rapid exchange, `[Shot n]` of the prompt.
+         */
+        PromptCutOut: {
+            /** Shot */
+            shot: number;
+            /** Cue */
+            cue: string;
+            /** Audio Label */
+            audio_label: string;
+            /** Speaker */
+            speaker: string;
+            /** Subject Label */
+            subject_label: string;
+            /** Text */
+            text: string;
+        };
         /** PromptDraftCreate */
         PromptDraftCreate: {
             /** Idea */
@@ -6815,6 +6834,29 @@ export interface components {
             starts_in_shot_seconds: number;
             /** Marker */
             marker: string;
+        };
+        /**
+         * RequestCutOut
+         * @description PHASE-043: one internal shot of a rapid exchange. Shot `shot` starts `at_s` seconds into
+         *     the clip and carries the line of `<Audio audio>`, spoken by `speaker_id`.
+         */
+        RequestCutOut: {
+            /** Shot */
+            shot: number;
+            /** Audio */
+            audio: number;
+            /** Speaker Id */
+            speaker_id: string;
+            /** At S */
+            at_s: number;
+        };
+        /**
+         * RequestExchangeOut
+         * @description PHASE-043: the clip cuts between two speakers, one shot for each line.
+         */
+        RequestExchangeOut: {
+            /** Cuts */
+            cuts: components["schemas"]["RequestCutOut"][];
         };
         /**
          * RequestPictureOut
@@ -7934,6 +7976,11 @@ export interface components {
              * @default false
              */
             continues_previous: boolean;
+            /**
+             * Rapid Exchange
+             * @default false
+             */
+            rapid_exchange: boolean;
             /** Description */
             description: string;
         };
@@ -7962,6 +8009,11 @@ export interface components {
              * @default false
              */
             continues_previous: boolean;
+            /**
+             * Rapid Exchange
+             * @default false
+             */
+            rapid_exchange: boolean;
             /** Description */
             description: string;
         };
@@ -8111,6 +8163,11 @@ export interface components {
             subjects: components["schemas"]["PromptSubjectOut"][];
             /** Speakers */
             speakers: components["schemas"]["PromptSpeakerOut"][];
+            /**
+             * Cuts
+             * @default []
+             */
+            cuts: components["schemas"]["PromptCutOut"][];
             /** Warnings */
             warnings: string[];
             /** Word Count */

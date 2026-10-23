@@ -322,7 +322,7 @@ def _skeleton(shot: dict[str, Any], duration: float) -> dict[str, Any]:
     """A shot's skeleton as the model reads it: the plan's fields, with the length from the
     timeline in place of the planner's target.
     """
-    return {
+    skeleton: dict[str, Any] = {
         "id": shot["id"],
         "type": shot["type"],
         "description": shot["description"],
@@ -331,6 +331,11 @@ def _skeleton(shot: dict[str, Any], duration: float) -> dict[str, Any]:
         "duration_seconds": duration,
         "continues_previous": shot.get("continues_previous") is True,
     }
+    if shot.get("rapid_exchange") is True:
+        # PHASE-043. Written only when true, so the skeleton (and its hash, which says whether
+        # a definition is out of date) of every other shot is exactly what it was before.
+        skeleton["rapid_exchange"] = True
+    return skeleton
 
 
 def _durations(timeline: scene_timeline.SceneTimeline) -> dict[str, tuple[float, float]]:

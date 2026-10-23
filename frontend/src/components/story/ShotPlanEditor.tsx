@@ -38,6 +38,7 @@ type ShotDraft = {
   type: Shot["type"];
   targetDuration: number | string;
   continuesPrevious: boolean;
+  rapidExchange: boolean;
   description: string;
   eventIds: string[];
   unitIds: string[];
@@ -49,6 +50,7 @@ function toDraft(shot: Shot): ShotDraft {
     type: shot.type,
     targetDuration: shot.target_duration,
     continuesPrevious: shot.continues_previous,
+    rapidExchange: shot.rapid_exchange,
     description: shot.description,
     eventIds: shot.source_event_ids,
     unitIds: shot.speech_unit_ids,
@@ -115,6 +117,7 @@ export function ShotPlanEditor({
         type: shot.type,
         target_duration: Number(shot.targetDuration),
         continues_previous: shot.continuesPrevious,
+        rapid_exchange: shot.rapidExchange,
         description: shot.description.trim(),
         source_event_ids: shot.eventIds,
         speech_unit_ids: shot.unitIds,
@@ -171,6 +174,25 @@ export function ShotPlanEditor({
                 onChange={(event) =>
                   change(index, {
                     continuesPrevious: event.currentTarget.checked,
+                    // A shot is a continuation or an exchange, never both.
+                    rapidExchange: event.currentTarget.checked
+                      ? false
+                      : shot.rapidExchange,
+                  })
+                }
+              />
+              <Checkbox
+                label="Rapid exchange (cut at each line)"
+                size="xs"
+                description="Two or three lines from two speakers who take turns"
+                disabled={shot.unitIds.length < 2 || shot.unitIds.length > 3}
+                checked={shot.rapidExchange}
+                onChange={(event) =>
+                  change(index, {
+                    rapidExchange: event.currentTarget.checked,
+                    continuesPrevious: event.currentTarget.checked
+                      ? false
+                      : shot.continuesPrevious,
                   })
                 }
               />

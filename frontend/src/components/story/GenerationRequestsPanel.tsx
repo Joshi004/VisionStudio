@@ -215,6 +215,18 @@ function ShotRow({ entry, busy, onPlan }: ShotRowProps) {
               .
             </Text>
           )}
+          {request?.exchange != null && (
+            <Text size="xs" c="dimmed">
+              Rapid exchange, cut at each line:{" "}
+              {request.exchange.cuts
+                .map(
+                  (cut) =>
+                    `Shot ${cut.shot} at ${seconds(cut.at_s)} (Audio ${cut.audio}, ${cut.speaker_id})`,
+                )
+                .join("; ")}
+              .
+            </Text>
+          )}
           {!entry.can_run && entry.blocked_reason !== null && (
             <Text size="xs" c="dimmed">
               {entry.blocked_reason}

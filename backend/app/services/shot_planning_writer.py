@@ -53,6 +53,10 @@ REASONING_EFFORT: Final = "high"
 
 SHOT_TYPES: Final = ("establishing", "action", "reaction", "dialogue", "insert", "transition")
 MAX_SHOTS: Final = 60
+# PHASE-043: a rapid exchange carries two or three lines of dialogue from exactly two speakers
+# who take turns. Three is the most audios the video model takes as references.
+EXCHANGE_MIN_LINES: Final = 2
+EXCHANGE_MAX_LINES: Final = 3
 DESCRIPTION_MAX_CHARS: Final = 300
 # Durations are kept to a tenth of a second.
 _DURATION_DECIMALS: Final = 1
@@ -68,6 +72,7 @@ _ANSWER_FORM: Final = json.dumps(
                 "type": "one of the allowed types",
                 "target_duration": 2.5,
                 "continues_previous": False,
+                "rapid_exchange": False,
                 "description": "one plain sentence",
             }
         ]
@@ -97,6 +102,13 @@ end of the shot before it with no cut: the camera keeps rolling, the same place 
 people, and the action carries straight over. Use false for a normal cut, a change of angle, \
 a change of place, a jump in time and for the first shot of the scene. Most shots are false; \
 a shot that continues the previous one starts exactly where that one ends, so use it sparingly.
+- "rapid_exchange": true or false. True only for a quick back-and-forth between two characters \
+inside ONE shot, where the video then cuts between them as each speaks. It needs "speech_unit_ids" \
+to list two or three lines of dialogue (no narration) from exactly two different speakers who \
+take turns (A then B, or A then B then A), and "continues_previous" must be false. Use false for \
+almost every shot, including a shot with a single line. Most dialogue is better as a sequence of \
+short dialogue shots; use a rapid exchange only where the scene needs the lines to answer each \
+other without a pause.
 - "description": one plain sentence in English, at most {DESCRIPTION_MAX_CHARS} characters, of \
 what the audience sees. Give no camera movement, lens or framing detail beyond what the sentence \
 needs; a later step decides those.
@@ -272,6 +284,13 @@ def _continues_previous(shot: dict[str, Any], position: int) -> bool:
     return position > 1 and shot.get("continues_previous") is True
 
 
+def _rapid_exchange(shot: dict[str, Any]) -> bool:
+    """Whether the shot is a rapid exchange (PHASE-043). A missing or unusable value reads as
+    False; `_check_exchanges` judges the shots that say True.
+    """
+    return shot.get("rapid_exchange") is True
+
+
 def _ids(shot: dict[str, Any], key: str, position: int, known: set[str], *, what: str) -> list[str]:
     """A list of ids of the shot, each known and none repeated. `what` names the kind of id."""
     value = shot.get(key)
@@ -384,6 +403,44 @@ def _check_speech_placement(
                 )
 
 
+def _check_exchanges(shots: list[dict[str, Any]], units: list[dict[str, Any]]) -> None:
+    """Checks every shot marked as a rapid exchange (PHASE-043): it is not also a continuity
+    shot, and it carries two or three lines of dialogue (no narration) from exactly two speakers
+    who take turns. Raises ValueError.
+    """
+    by_id = {unit["id"]: unit for unit in units}
+    for position, shot in enumerate(shots, start=1):
+        if not shot["rapid_exchange"]:
+            continue
+        if shot["continues_previous"]:
+            raise ValueError(
+                f"Shot {position} is a rapid exchange and also continues the shot before it. "
+                "Use one or the other."
+            )
+        lines = [by_id[unit_id] for unit_id in shot["speech_unit_ids"]]
+        if any(line["kind"] != "dialogue" for line in lines):
+            raise ValueError(
+                f"Shot {position} is a rapid exchange but carries narration. It may carry "
+                "dialogue only."
+            )
+        if not EXCHANGE_MIN_LINES <= len(lines) <= EXCHANGE_MAX_LINES:
+            raise ValueError(
+                f"Shot {position} is a rapid exchange with {len(lines)} lines of dialogue. It "
+                f"needs {EXCHANGE_MIN_LINES} to {EXCHANGE_MAX_LINES}."
+            )
+        speakers = [line.get("speaker_id") for line in lines]
+        if len(set(speakers)) != 2:
+            raise ValueError(
+                f"Shot {position} is a rapid exchange but its lines come from "
+                f"{len(set(speakers))} speaker(s). It needs exactly two."
+            )
+        if any(first == second for first, second in zip(speakers, speakers[1:], strict=False)):
+            raise ValueError(
+                f"Shot {position} is a rapid exchange but the same speaker has two lines in a "
+                "row. The two speakers must take turns."
+            )
+
+
 def check_shots(
     answer: Any, events: list[dict[str, Any]], units: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -391,8 +448,8 @@ def check_shots(
     message fit for the user, for the first problem found.
 
     `events` is the scene's stored events (each has an `id`); `units` is its speech units in
-    order (each has `id`, `event_id` and `kind`). Only the fields of a shot are kept, in a fixed
-    order.
+    order (each has `id`, `event_id`, `kind` and, for dialogue, `speaker_id`). Only the fields
+    of a shot are kept, in a fixed order.
     """
     if not isinstance(answer, dict):
         raise ValueError("The shots were not a JSON object.")
@@ -432,12 +489,14 @@ def check_shots(
                 "type": kind,
                 "target_duration": _duration(entry, position),
                 "continues_previous": _continues_previous(entry, position),
+                "rapid_exchange": _rapid_exchange(entry),
                 "description": _description(entry, position),
             }
         )
 
     _check_event_cover(spans, len(event_ids))
     _check_speech_placement(shots, units, event_ids)
+    _check_exchanges(shots, units)
     return shots
 
 
@@ -446,9 +505,9 @@ def check_answer(
 ) -> dict[str, Any]:
     """Runs `check_shots` and returns the content that is stored: `{scene_id, shots}`, each
     shot `{id, scene_id, source_event_ids, speech_unit_ids, type, target_duration,
-    continues_previous, description}` with the id (`shot_1`, `shot_2`, ...) and the scene id set
-    here, never read from the model. Raises ValueError, with a message fit for the user, for the
-    first problem found.
+    continues_previous, rapid_exchange, description}` with the id (`shot_1`, `shot_2`, ...) and
+    the scene id set here, never read from the model. Raises ValueError, with a message fit for
+    the user, for the first problem found.
     """
     checked = check_shots(answer, events, units)
     shots = [
