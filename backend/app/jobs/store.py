@@ -36,9 +36,10 @@ NO_PROJECT_NAME = "Video lab"
 VOICE_LAB_NAME = "Voice lab"
 IMAGE_LAB_NAME = "Image lab"
 CHARACTER_LAB_NAME = "Character lab"
+MUSIC_LAB_NAME = "Music lab"
 
 # Job types that can be cancelled while they run, because the server has a cancel for them.
-REMOTE_CANCEL_TYPES = frozenset({"lab_video", "lab_image", "generate_shot"})
+REMOTE_CANCEL_TYPES = frozenset({"lab_video", "lab_image", "generate_shot", "lab_music"})
 
 # The job of one run of the whole story pipeline (PHASE-030). It does no work of its own, only
 # starts the jobs of the stages, so stopping it is always safe.
@@ -486,6 +487,8 @@ def owner_name(job: Job, project_name: str | None) -> str:
         return VOICE_LAB_NAME
     if job.type in ("write_character_look_prompt", "write_character_take_prompt"):
         return CHARACTER_LAB_NAME
+    if job.type in ("lab_music", "write_lab_music_prompt"):
+        return MUSIC_LAB_NAME
     return IMAGE_LAB_NAME if job.type == "lab_image" else NO_PROJECT_NAME
 
 

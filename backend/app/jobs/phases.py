@@ -61,6 +61,12 @@ UPLOADING_AUDIO: Final = "uploading the speech"
 # The Talking character lab's prompt writer. It also uses PREPARING_PROMPT and `asking_model`.
 CHECKING_TALK_PROMPTS: Final = "checking the voice and video prompts"
 
+# --- Running: the Music lab ------------------------------------------------------------------
+# The lab's audio uses SUBMITTING, the cluster phases and the clip phases above (the stored file
+# is audio, but the phases say "clip"). Its prompt writer also uses PREPARING_PROMPT and
+# `asking_model`.
+CHECKING_MUSIC_PROMPT: Final = "checking the music prompt"
+
 # --- Running: speech (Phase 21) ------------------------------------------------------------
 # A speech is made in one request per piece of the script. It also uses SUBMITTING and the
 # cluster phases above, with the piece named (`speech_part`) when there is more than one.

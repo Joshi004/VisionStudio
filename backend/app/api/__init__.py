@@ -21,6 +21,7 @@ from app.api import (
     jobs,
     look_state_images,
     look_state_resolution,
+    music_lab,
     project_cast,
     projects,
     scene_definitions,
@@ -61,6 +62,7 @@ api_router.include_router(jobs.router, tags=["jobs"])
 api_router.include_router(image_lab.router, tags=["image-lab"])
 api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
+api_router.include_router(music_lab.router, tags=["music-lab"])
 api_router.include_router(character_lab.router, tags=["character-lab"])
 api_router.include_router(environment_lab.router, tags=["environment-lab"])
 api_router.include_router(environment_links.router, tags=["environment-links"])

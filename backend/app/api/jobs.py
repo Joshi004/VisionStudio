@@ -59,6 +59,8 @@ JobType = Literal[
     "story_pipeline",
     "check_take_dialogue",
     "select_shot_references",
+    "lab_music",
+    "write_lab_music_prompt",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

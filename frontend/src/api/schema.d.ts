@@ -1244,6 +1244,94 @@ export interface paths {
         patch: operations["update_voice_api_voices__voice_id__patch"];
         trace?: never;
     };
+    "/api/lab/music/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Models
+         * @description The kinds of sound the lab makes, the models that make each, the fields each model takes
+         *     and its licence warning.
+         */
+        get: operations["get_models_api_lab_music_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/prompt-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Prompt Draft
+         * @description Starts the job that writes the fields of one model from a brief (a paid call to the
+         *     language model). Follow it with `GET /api/jobs/{id}`: when it has succeeded, `output.fields`
+         *     are the fields and `output.warnings` is what to look at.
+         */
+        post: operations["create_prompt_draft_api_lab_music_prompt_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description The newest runs first. Pass the last id you have as `before_id` for the next page.
+         */
+        get: operations["list_runs_api_lab_music_runs_get"];
+        put?: never;
+        /**
+         * Create Runs
+         * @description Starts one run per chosen model and seed. Each is a paid GPU job.
+         */
+        post: operations["create_runs_api_lab_music_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_lab_music_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Run
+         * @description Records the verdict and/or the note of a run. Only the fields in the body are changed.
+         */
+        patch: operations["update_run_api_lab_music_runs__run_id__patch"];
+        trace?: never;
+    };
     "/api/lab/characters": {
         parameters: {
             query?: never;
@@ -4612,6 +4700,28 @@ export interface components {
             /** Error */
             error: string | null;
         };
+        /** FieldSpecOut */
+        FieldSpecOut: {
+            /** Name */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "text" | "int" | "number" | "flag";
+            /** Required */
+            required: boolean;
+            /** Max Chars */
+            max_chars: number | null;
+            /** Minimum */
+            minimum: number | null;
+            /** Maximum */
+            maximum: number | null;
+            /** Choices */
+            choices: string[] | null;
+        };
         /** FirstFrameIn */
         FirstFrameIn: {
             /**
@@ -4888,7 +4998,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
             /**
              * Status
              * @enum {string}
@@ -4941,7 +5051,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
             /**
              * Kind
              * @enum {string}
@@ -4975,7 +5085,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
             /**
              * Status
              * @enum {string}
@@ -5060,6 +5170,87 @@ export interface components {
         LabLibraryOut: {
             /** Images */
             images: components["schemas"]["LabImageOut"][];
+        };
+        /** LabMusicRunCreate */
+        LabMusicRunCreate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "score" | "song" | "stem" | "sfx" | "ambience";
+            brief: components["schemas"]["MusicBrief"];
+            /** Models */
+            models: components["schemas"]["ModelFieldsIn"][];
+            /**
+             * Variants
+             * @default 1
+             */
+            variants: number;
+            /** Seed */
+            seed?: number | null;
+        };
+        /** LabMusicRunOut */
+        LabMusicRunOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Group Key */
+            group_key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "score" | "song" | "stem" | "sfx" | "ambience";
+            /**
+             * Model
+             * @enum {string}
+             */
+            model: "ace-step-1.5" | "yue2" | "stable-audio-3" | "stable-audio-open" | "ltx-audio";
+            /** Model Label */
+            model_label: string;
+            /** Brief */
+            brief: {
+                [key: string]: unknown;
+            };
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Prompt Job Id */
+            prompt_job_id: number | null;
+            job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Sample Rate */
+            sample_rate: number | null;
+            /** Channels */
+            channels: number | null;
+            /** Verdict */
+            verdict: ("good" | "usable" | "bad") | null;
+            /** Note */
+            note: string | null;
+        };
+        /**
+         * LabMusicRunUpdate
+         * @description Only the fields that are sent are changed; `null` clears one.
+         */
+        LabMusicRunUpdate: {
+            /** Verdict */
+            verdict?: ("good" | "usable" | "bad") | null;
+            /** Note */
+            note?: string | null;
         };
         /**
          * LabReferenceIn
@@ -5648,6 +5839,119 @@ export interface components {
             /** Audios */
             audios: number;
         };
+        /** ModelFieldsIn */
+        ModelFieldsIn: {
+            /**
+             * Model
+             * @enum {string}
+             */
+            model: "ace-step-1.5" | "yue2" | "stable-audio-3" | "stable-audio-open" | "ltx-audio";
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
+            /** Prompt Job Id */
+            prompt_job_id?: number | null;
+        };
+        /**
+         * MusicBrief
+         * @description What the author wants. Every part but `description` is optional: the ones with a story
+         *     stage named are what that stage will fill in when the story pipeline makes the music.
+         */
+        MusicBrief: {
+            /** Description */
+            description: string;
+            /** Genre */
+            genre?: string[] | null;
+            /** Tone */
+            tone?: string[] | null;
+            /** Era */
+            era?: string | null;
+            /** Mood Start */
+            mood_start?: string | null;
+            /** Mood Middle */
+            mood_middle?: string | null;
+            /** Mood End */
+            mood_end?: string | null;
+            /** Dramatic Goal */
+            dramatic_goal?: string | null;
+            /** Place */
+            place?: string | null;
+            /** Duration S */
+            duration_s?: number | null;
+            /** Under Narration */
+            under_narration?: boolean | null;
+            /** Sound Event */
+            sound_event?: string | null;
+            /** Lyrics */
+            lyrics?: string | null;
+            /** Lyrics Theme */
+            lyrics_theme?: string | null;
+            /** Language */
+            language?: string | null;
+            /** Voice Note */
+            voice_note?: string | null;
+        };
+        /** MusicCatalogOut */
+        MusicCatalogOut: {
+            /** Kinds */
+            kinds: components["schemas"]["MusicKindOut"][];
+            /** Models */
+            models: components["schemas"]["MusicModelOut"][];
+        };
+        /** MusicKindOut */
+        MusicKindOut: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "score" | "song" | "stem" | "sfx" | "ambience";
+            /** Label */
+            label: string;
+            /** Models */
+            models: ("ace-step-1.5" | "yue2" | "stable-audio-3" | "stable-audio-open" | "ltx-audio")[];
+        };
+        /** MusicModelOut */
+        MusicModelOut: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "ace-step-1.5" | "yue2" | "stable-audio-3" | "stable-audio-open" | "ltx-audio";
+            /** Label */
+            label: string;
+            /** Endpoint */
+            endpoint: string;
+            /**
+             * License Level
+             * @enum {string}
+             */
+            license_level: "open" | "community" | "non_commercial" | "unknown";
+            /** License Note */
+            license_note: string;
+            /** Min Duration S */
+            min_duration_s: number | null;
+            /** Max Duration S */
+            max_duration_s: number | null;
+            /** Extension */
+            extension: string;
+            /** Fields */
+            fields: components["schemas"]["FieldSpecOut"][];
+        };
+        /** MusicPromptDraftCreate */
+        MusicPromptDraftCreate: {
+            /**
+             * Model
+             * @enum {string}
+             */
+            model: "ace-step-1.5" | "yue2" | "stable-audio-3" | "stable-audio-open" | "ltx-audio";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "score" | "song" | "stem" | "sfx" | "ambience";
+            brief: components["schemas"]["MusicBrief"];
+        };
         /**
          * NamedLookOut
          * @description A named look of a library character, such as night clothes (PHASE-016, PHASE-017).
@@ -6039,7 +6343,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt";
             /** Running */
             running: number;
             /** Queued */
@@ -12146,6 +12450,208 @@ export interface operations {
                 };
             };
             /** @description There is no such run or voice. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_models_api_lab_music_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicCatalogOut"];
+                };
+            };
+        };
+    };
+    create_prompt_draft_api_lab_music_prompt_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicPromptDraftCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_runs_api_lab_music_runs_get: {
+        parameters: {
+            query?: {
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabMusicRunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_runs_api_lab_music_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabMusicRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabMusicRunOut"][];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_api_lab_music_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabMusicRunOut"];
+                };
+            };
+            /** @description No run has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_run_api_lab_music_runs__run_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LabMusicRunUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabMusicRunOut"];
+                };
+            };
+            /** @description No run has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -7,7 +7,9 @@ import { EnvironmentLabPanel } from "../components/environmentLab/EnvironmentLab
 import { ImageLabPanel } from "../components/lab/ImageLabPanel";
 import { LabLibraryDrawer, type LibraryActions } from "../components/lab/LabLibraryDrawer";
 import { VideoLabPanel } from "../components/lab/VideoLabPanel";
+import { MusicLabPanel } from "../components/lab/MusicLabPanel";
 import { VoiceLabPanel } from "../components/lab/VoiceLabPanel";
+import { DEFAULT_FORM as DEFAULT_MUSIC_FORM, type MusicLabFormState } from "../components/musicLab/musicLabView";
 import { DEFAULT_FORM as DEFAULT_IMAGE_FORM, type LabFormState } from "../components/imageLab/labView";
 import {
   DEFAULT_FORM as DEFAULT_VIDEO_FORM,
@@ -26,6 +28,7 @@ const TABS = [
   { value: "image", label: "Image" },
   { value: "video", label: "Video" },
   { value: "voice", label: "Voice" },
+  { value: "music", label: "Music" },
 ] as const;
 
 type LabTab = (typeof TABS)[number]["value"];
@@ -38,11 +41,11 @@ function isLabTab(value: string | undefined): value is LabTab {
 
 /**
  * One place for everything that is tried by hand and belongs to no project: the library of
- * characters (Characters), the library of environments (Environments), and the three labs it
- * is made of (Image, Video, Voice).
+ * characters (Characters), the library of environments (Environments), and the four labs it
+ * is made of (Image, Video, Voice, Music).
  *
- * The tab is in the address (`/lab/characters`), so a tab can be linked to. The Image, Video
- * and Voice forms are kept here, so changing tabs never loses what you typed, and so the
+ * The tab is in the address (`/lab/characters`), so a tab can be linked to. The Image, Video,
+ * Voice and Music forms are kept here, so changing tabs never loses what you typed, and so the
  * library can fill a form of another tab: a picture found in the library becomes a clip's first
  * frame, a speech or a clip is loaded back into its form. The Characters tab keeps nothing
  * here: a character, its looks and what was made with it live on the server, and the open
@@ -55,6 +58,7 @@ export function LabPage() {
   const [imageForm, setImageForm] = useState<LabFormState>(DEFAULT_IMAGE_FORM);
   const [videoForm, setVideoForm] = useState<VideoLabFormState>(DEFAULT_VIDEO_FORM);
   const [voiceForm, setVoiceForm] = useState<VoiceLabFormState>(DEFAULT_VOICE_FORM);
+  const [musicForm, setMusicForm] = useState<MusicLabFormState>(DEFAULT_MUSIC_FORM);
 
   if (!isLabTab(tab)) {
     return <Navigate to={`/lab/${DEFAULT_TAB}`} replace />;
@@ -96,7 +100,7 @@ export function LabPage() {
           <Text size="sm" c="dimmed" maw={760}>
             Try things by hand. Nothing here belongs to a project. Keep a library of characters
             and make pictures, speech and clips with them, keep a library of places, or try the
-            image, video and voice models on their own. The library holds every picture, voice,
+            image, video, voice and music models on their own. The library holds every picture, voice,
             speech and clip, and can send them to a tab.
           </Text>
         </Stack>
@@ -129,6 +133,9 @@ export function LabPage() {
         </Tabs.Panel>
         <Tabs.Panel value="voice" pt="md">
           <VoiceLabPanel form={voiceForm} onFormChange={setVoiceForm} />
+        </Tabs.Panel>
+        <Tabs.Panel value="music" pt="md">
+          <MusicLabPanel form={musicForm} onFormChange={setMusicForm} />
         </Tabs.Panel>
       </Tabs>
 

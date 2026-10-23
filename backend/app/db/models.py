@@ -109,7 +109,7 @@ class Job(Base):
         # check of the shots' takes, since revision 0049, and the run of the whole story
         # pipeline, since revision 0050, and the speech-recognition check of a take's
         # dialogue, since revision 0051, and the choice of a shot's reference pictures by the
-        # language model, since revision 0052.
+        # language model, since revision 0052, and the two Music lab jobs, since revision 0057.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -119,7 +119,8 @@ class Job(Base):
             "'extract_events', 'resolve_looks_states', 'synthesize_speech_unit', "
             "'plan_shots', 'define_shot', 'check_shot_continuity', 'repair_shot_cut', "
             "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes', "
-            "'story_pipeline', 'check_take_dialogue', 'select_shot_references')",
+            "'story_pipeline', 'check_take_dialogue', 'select_shot_references', "
+            "'lab_music', 'write_lab_music_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1048,6 +1049,63 @@ class LabVoiceRun(Base):
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
     inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+
+
+class LabMusicRun(Base):
+    """One piece of audio the Music lab made, or is making (revision 0057).
+
+    Like `lab_voice_run`, the job holds the status and the exact request, and this row holds
+    what the page lists and compares: the kind of sound, the model, the brief, the prompt fields
+    that were sent, the seed and, once the job has finished, the stored FLAC or WAV under
+    `media/lab/`. The runs that one click starts (several models, several seeds) share a
+    `group_key`, so the page shows them side by side. `verdict` and `note` are what a person
+    decided after listening.
+    """
+
+    __tablename__ = "lab_music_run"
+    __table_args__ = (
+        CheckConstraint("kind IN ('score', 'song', 'stem', 'sfx', 'ambience')", name="kind_valid"),
+        CheckConstraint(
+            "model IN ('ace-step-1.5', 'yue2', 'stable-audio-3', 'stable-audio-open', 'ltx-audio')",
+            name="model_valid",
+        ),
+        CheckConstraint(
+            "verdict IS NULL OR verdict IN ('good', 'usable', 'bad')", name="verdict_valid"
+        ),
+        Index("idx_lab_music_run_created", "created_at"),
+        Index("idx_lab_music_run_group", "group_key"),
+        Index("idx_lab_music_run_job", "job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    # The `lab_music` job that makes the audio.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    # The `write_lab_music_prompt` job that wrote the fields, or NULL when they were typed.
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    group_key: Mapped[str]
+    kind: Mapped[str]
+    model: Mapped[str]
+    endpoint: Mapped[str]
+    # The brief, and the prompt fields as they were sent to this model (both as the user left
+    # them). `params` is `{seed}`.
+    brief: Mapped[Any] = mapped_column(JSON)
+    fields: Mapped[Any] = mapped_column(JSON)
+    params: Mapped[Any] = mapped_column(JSON)
+    # The result, NULL until the job has finished and the audio was stored.
+    path: Mapped[str | None] = mapped_column(default=None)
+    size_bytes: Mapped[int | None] = mapped_column(default=None)
+    sha256: Mapped[str | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    sample_rate: Mapped[int | None] = mapped_column(default=None)
+    channels: Mapped[int | None] = mapped_column(default=None)
+    # What a person decided after listening: good, usable or bad. NULL until then.
+    verdict: Mapped[str | None] = mapped_column(default=None)
+    note: Mapped[str | None] = mapped_column(default=None)
 
 
 class NarratorVoice(Base):

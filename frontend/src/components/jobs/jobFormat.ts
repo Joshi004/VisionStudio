@@ -4,6 +4,8 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   lab_video: "Video lab clip",
   write_lab_video_prompt: "Video lab prompt",
   lab_voice: "Voice lab speech",
+  lab_music: "Music lab sound",
+  write_lab_music_prompt: "Music lab prompt",
   lab_image: "Image lab image",
   write_character_look_prompt: "Character look prompt",
   write_character_take_prompt: "Character take prompts",
@@ -44,6 +46,9 @@ export function labPathFor(type: JobSummary["type"]): string {
       return "/lab/image";
     case "lab_voice":
       return "/lab/voice";
+    case "lab_music":
+    case "write_lab_music_prompt":
+      return "/lab/music";
     case "write_character_look_prompt":
     case "write_character_take_prompt":
       return "/lab/characters";
