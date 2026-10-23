@@ -151,11 +151,66 @@ async function fetchUsage(environmentId: number) {
   return data;
 }
 
-/** The story projects that use a library environment, with the version each pins. Read-only. */
+/** The story projects that use a library environment, with the version each pins and whether
+ * each can adopt the newest version (PHASE-042). */
 export function useEnvironmentProjects(environmentId: number | null) {
   return useQuery({
     queryKey: usageKey(environmentId),
     queryFn: () => fetchUsage(environmentId as number),
     enabled: environmentId !== null,
+  });
+}
+
+/**
+ * Adopting moves pins, which makes what depends on them out of date, so everything under the
+ * projects' key (their links, definitions and out-of-date overview) and the environment
+ * library's queries are marked old.
+ */
+function refreshAfterAdopt(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: PROJECTS_KEY }),
+    queryClient.invalidateQueries({ queryKey: ENVIRONMENT_LAB_KEY }),
+  ]);
+}
+
+/** Moves one project's pin for one entry to another version of its environment (PHASE-042). */
+export function useSetEnvironmentVersion(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { discoveryId: string; version: number }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/environment-links/{discovery_id}/version",
+        {
+          params: { path: { project_id: projectId, discovery_id: input.discoveryId } },
+          body: { version: input.version },
+        },
+      );
+      if (!data) {
+        throw failure(error, response.status, "The version was not changed");
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterAdopt(queryClient),
+  });
+}
+
+/** Moves the pins of the chosen projects to one version of the environment, all or none. */
+export function useAdoptEnvironmentVersion(environmentId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { version: number; projectIds: number[] }) => {
+      const { data, error, response } = await api.POST(
+        "/api/lab/environments/{environment_id}/adopt",
+        {
+          params: { path: { environment_id: environmentId } },
+          body: { version: input.version, project_ids: input.projectIds },
+        },
+      );
+      if (!data) {
+        throw failure(error, response.status, "The version was not adopted");
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterAdopt(queryClient),
   });
 }

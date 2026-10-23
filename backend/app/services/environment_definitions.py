@@ -79,6 +79,7 @@ from app.services import (
     environment_references,
     environment_versions,
     image_lab,
+    library_adoption,
     project_cast,
     story_bible,
 )
@@ -511,11 +512,16 @@ async def replace_picture(
             "project uses. Move the project to it first."
         )
 
+    # A version adopted from the lab has no `inputs` of its own: the new version carries the
+    # ones that stand for the project's definition (PHASE-042), so it needs no provenance link.
+    inputs = await library_adoption.effective_inputs(session, "environment", info.link, pinned)
     version = await environment_versions.record_version_if_changed(
-        session, info.environment, source="ai", inputs=pinned.inputs, new_picture=True
+        session, info.environment, source="ai", inputs=inputs, new_picture=True
     )
     assert version is not None  # `new_picture` always adds a version
     info.link.pinned_version = version.version
+    if inputs is not None:
+        info.link.provenance_version = None
     info.link.updated_at = utcnow()
     try:
         attempt = await environment_references.start_reference(
@@ -731,7 +737,11 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
             pinned = await environment_versions.get_version(
                 session, entry.info.link.environment_id, entry.info.link.pinned_version
             )
-            inputs = pinned.inputs if pinned is not None else None
+            # The pinned version's own `inputs`, or, for a version the project adopted from the
+            # lab (PHASE-042), those of the version that stands for the project's definition.
+            inputs = await library_adoption.effective_inputs(
+                session, "environment", entry.info.link, pinned
+            )
             if (
                 _reuse(entry, modes) == "as_is"
                 and pinned is not None
@@ -742,13 +752,13 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
                 version = pinned
                 status = "defined"
             # Otherwise only a definition written for this entry in this project counts: a
-            # pinned version made by hand in the lab, or defined for another project, does not.
+            # pinned version defined for another project, or made by hand in the lab and not
+            # adopted over this project's own definition, does not.
             elif (
                 pinned is not None
                 and pinned.definition is not None
-                and isinstance(inputs, dict)
-                and inputs.get("project_id") == project.id
-                and inputs.get("discovery_id") == item["id"]
+                and inputs is not None
+                and library_adoption.names_project(inputs, project.id, item["id"])
             ):
                 version = pinned
                 reasons = _out_of_date_reasons(
@@ -864,6 +874,9 @@ async def save_definition(
     assert version is not None  # an environment with a definition always has a version
 
     link.pinned_version = version.version
+    # The new version carries this project's own `inputs`, so an adopted version's provenance
+    # (PHASE-042) is no longer needed.
+    link.provenance_version = None
     link.updated_at = utcnow()
     await session.flush()
     _logger.info(

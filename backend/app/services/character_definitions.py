@@ -64,6 +64,7 @@ from app.services import (
     character_relations,
     character_versions,
     discovery,
+    library_adoption,
     project_cast,
     story_bible,
 )
@@ -490,7 +491,11 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
             pinned = await _pinned_version(
                 session, entry.info.link.character_id, entry.info.link.pinned_version
             )
-            inputs = pinned.inputs if pinned is not None else None
+            # The pinned version's own `inputs`, or, for a version the project adopted from the
+            # lab (PHASE-042), those of the version that stands for the project's definition.
+            inputs = await library_adoption.effective_inputs(
+                session, "character", entry.info.link, pinned
+            )
             if (
                 _reuse(entry, modes) == "as_is"
                 and pinned is not None
@@ -501,13 +506,13 @@ async def state(session: AsyncSession, project: Project) -> DefinitionsState:
                 version = pinned
                 status = "defined"
             # Otherwise only a definition written for this entry in this project counts: a
-            # pinned version made by hand in the lab, or defined for another project, does not.
+            # pinned version defined for another project, or made by hand in the lab and not
+            # adopted over this project's own definition, does not.
             elif (
                 pinned is not None
                 and pinned.definition is not None
-                and isinstance(inputs, dict)
-                and inputs.get("project_id") == project.id
-                and inputs.get("discovery_id") == item["id"]
+                and inputs is not None
+                and library_adoption.names_project(inputs, project.id, item["id"])
             ):
                 version = pinned
                 reasons = _out_of_date_reasons(
@@ -591,6 +596,9 @@ async def save_definition(
     assert version is not None  # a character with a definition always has a version
 
     link.pinned_version = version.version
+    # The new version carries this project's own `inputs`, so an adopted version's provenance
+    # (PHASE-042) is no longer needed.
+    link.provenance_version = None
     link.updated_at = utcnow()
     await session.flush()
     _logger.info(

@@ -150,11 +150,66 @@ async function fetchUsage(characterId: number) {
   return data;
 }
 
-/** The story projects that use a library character, with the version each pins. Read-only. */
+/** The story projects that use a library character, with the version each pins and whether each
+ * can adopt the newest version (PHASE-042). */
 export function useCharacterProjects(characterId: number | null) {
   return useQuery({
     queryKey: usageKey(characterId),
     queryFn: () => fetchUsage(characterId as number),
     enabled: characterId !== null,
+  });
+}
+
+/**
+ * Adopting moves pins, which makes what depends on them out of date, so everything under the
+ * projects' key (their links, definitions and out-of-date overview) and the Character lab's
+ * queries are marked old.
+ */
+function refreshAfterAdopt(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: PROJECTS_KEY }),
+    queryClient.invalidateQueries({ queryKey: CHARACTER_LAB_KEY }),
+  ]);
+}
+
+/** Moves one project's pin for one entry to another version of its character (PHASE-042). */
+export function useSetCharacterVersion(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { discoveryId: string; version: number }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/character-links/{discovery_id}/version",
+        {
+          params: { path: { project_id: projectId, discovery_id: input.discoveryId } },
+          body: { version: input.version },
+        },
+      );
+      if (!data) {
+        throw failure(error, response.status, "The version was not changed");
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterAdopt(queryClient),
+  });
+}
+
+/** Moves the pins of the chosen projects to one version of the character, all or none. */
+export function useAdoptCharacterVersion(characterId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { version: number; projectIds: number[] }) => {
+      const { data, error, response } = await api.POST(
+        "/api/lab/characters/{character_id}/adopt",
+        {
+          params: { path: { character_id: characterId } },
+          body: { version: input.version, project_ids: input.projectIds },
+        },
+      );
+      if (!data) {
+        throw failure(error, response.status, "The version was not adopted");
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterAdopt(queryClient),
   });
 }

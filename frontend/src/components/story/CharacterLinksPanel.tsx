@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Anchor,
@@ -20,10 +20,11 @@ import {
   useCreateLink,
   useLinkAll,
   useMapLink,
+  useSetCharacterVersion,
   useUnlink,
   type LinkedCharacter,
 } from "../../api/characterLinks";
-import { useLibraryCharacters } from "../../api/characterLab";
+import { useCharacterVersions, useLibraryCharacters } from "../../api/characterLab";
 import { describeError } from "../../api/errors";
 import { CAST_MODE_LABELS, useProjectCast, type CastMode } from "../../api/projectCast";
 
@@ -35,18 +36,65 @@ function labPath(characterId: number): string {
   return `/lab/characters?character=${characterId}`;
 }
 
+/**
+ * Chooses which version of the character the project pins (PHASE-042), newer or older. The
+ * versions are loaded when the list is opened. Only the pin moves: what depends on the
+ * character goes out of date, and **Regenerate out-of-date** rebuilds it.
+ */
+function VersionPicker({
+  characterId,
+  pinned,
+  disabled,
+  onChange,
+}: {
+  characterId: number;
+  pinned: number;
+  disabled: boolean;
+  onChange: (version: number) => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const versions = useCharacterVersions(opened ? characterId : null);
+  const options = (versions.data ?? []).map((version) => {
+    const changes = version.changes.filter((change) => change !== "created").join(", ");
+    const who = version.source === "ai" ? "pipeline" : "edited in the lab";
+    return {
+      value: String(version.version),
+      label: `v${version.version}: ${who}${changes ? ` (${changes})` : ""}`,
+    };
+  });
+  return (
+    <Select
+      aria-label="Change the version this project uses"
+      size="xs"
+      w={230}
+      allowDeselect={false}
+      data={options.length > 0 ? options : [{ value: String(pinned), label: `v${pinned}` }]}
+      value={String(pinned)}
+      disabled={disabled}
+      onDropdownOpen={() => setOpened(true)}
+      onChange={(value) => {
+        if (value !== null && Number(value) !== pinned) {
+          onChange(Number(value));
+        }
+      }}
+    />
+  );
+}
+
 /** Where a linked entry points: the library character, the version pinned, and what is newer. */
 function LinkedLine({
   link,
   castMode,
   disabled,
   onUnlink,
+  onChangeVersion,
 }: {
   link: LinkedCharacter;
   // The mode of the cast member the entry is linked to, or undefined when it is not in the cast.
   castMode: CastMode | undefined;
   disabled: boolean;
   onUnlink: () => void;
+  onChangeVersion: (version: number) => void;
 }) {
   return (
     <Group gap="xs">
@@ -82,6 +130,12 @@ function LinkedLine({
           archived
         </Badge>
       )}
+      <VersionPicker
+        characterId={link.character_id}
+        pinned={link.pinned_version}
+        disabled={disabled}
+        onChange={onChangeVersion}
+      />
       <Button
         size="compact-xs"
         variant="subtle"
@@ -101,7 +155,7 @@ function LinkedLine({
  * one of its versions. An entry can be **created** in the lab from the discovery (name and
  * one-line description), or **mapped** to a character that already exists, which lets a
  * character be reused across projects. A pin never moves because of a lab edit: the lab having
- * a newer version is only shown.
+ * a newer version is only shown, and the version picker (or **Adopt** in the lab) moves it.
  */
 export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
   const { data, isLoading, isError, error } = useCharacterLinks(projectId);
@@ -110,6 +164,7 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
   const create = useCreateLink(projectId);
   const map = useMapLink(projectId);
   const unlink = useUnlink(projectId);
+  const setVersion = useSetCharacterVersion(projectId);
   const cast = useProjectCast(projectId);
 
   // The picker lists the whole library, so the pages are loaded one after the other.
@@ -128,8 +183,13 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
   );
 
   // One change at a time: every button waits for the one before it.
-  const busy = linkAll.isPending || create.isPending || map.isPending || unlink.isPending;
-  const failed = [linkAll, create, map, unlink].find((mutation) => mutation.isError);
+  const busy =
+    linkAll.isPending ||
+    create.isPending ||
+    map.isPending ||
+    unlink.isPending ||
+    setVersion.isPending;
+  const failed = [linkAll, create, map, unlink, setVersion].find((mutation) => mutation.isError);
 
   const entries = data?.entries ?? [];
   const orphaned = data?.orphaned ?? [];
@@ -160,7 +220,7 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
             <Title order={4}>Library links</Title>
             <Text size="sm" c="dimmed">
               Each character is backed by a Character Lab character, and the project pins one
-              version of it. A change made in the lab never moves the pin.
+              version of it. A change made in the lab never moves the pin: choose a version here to move it.
             </Text>
           </Stack>
           <Button
@@ -226,6 +286,9 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
                   castMode={castModes.get(entry.link.character_id)}
                   disabled={busy}
                   onUnlink={() => unlink.mutate(entry.id)}
+                  onChangeVersion={(version) =>
+                    setVersion.mutate({ discoveryId: entry.id, version })
+                  }
                 />
               ) : (
                 <Group gap="xs">
@@ -291,6 +354,9 @@ export function CharacterLinksPanel({ projectId }: CharacterLinksPanelProps) {
                     castMode={castModes.get(link.character_id)}
                     disabled={busy}
                     onUnlink={() => unlink.mutate(link.discovery_id)}
+                    onChangeVersion={(version) =>
+                      setVersion.mutate({ discoveryId: link.discovery_id, version })
+                    }
                   />
                 </Group>
               ))}

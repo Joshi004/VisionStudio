@@ -340,6 +340,7 @@ async def _map_one(
     else:
         existing.character_id = character_id
         existing.pinned_version = version.version
+        existing.provenance_version = None  # a different character: nothing carries over
         existing.how = "mapped"
         existing.discovery_version = newest.version
         existing.updated_at = utcnow()

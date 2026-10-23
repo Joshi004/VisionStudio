@@ -1467,6 +1467,9 @@ class ProjectCharacterLink(Base):
         ForeignKey("library_character.id", ondelete="CASCADE")
     )
     pinned_version: Mapped[int]
+    # The version whose `inputs` stand for this project's own definition, set when the project
+    # adopted a version made by hand (PHASE-042). NULL: the pinned version's own `inputs` count.
+    provenance_version: Mapped[int | None] = mapped_column(default=None)
     how: Mapped[str]
     discovery_version: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
@@ -1562,6 +1565,8 @@ class ProjectEnvironmentLink(Base):
         ForeignKey("library_environment.id", ondelete="CASCADE")
     )
     pinned_version: Mapped[int]
+    # As on `ProjectCharacterLink` (PHASE-042).
+    provenance_version: Mapped[int | None] = mapped_column(default=None)
     how: Mapped[str]
     discovery_version: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)

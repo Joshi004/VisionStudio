@@ -25,9 +25,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
+from app.api.library_adoption import VersionIn, refused
 from app.api.projects import load_project
 from app.db.session import SessionDep
-from app.services import environment_links
+from app.services import environment_links, library_adoption
 from app.services.environment_links import LinkInfo
 
 router = APIRouter()
@@ -200,6 +201,28 @@ async def map_link(
         await environment_links.map_to_existing(session, project, discovery_id, body.environment_id)
     except environment_links.EnvironmentLinkError as exc:
         raise _refused(exc) from exc
+    return await _state_out(session, project.id)
+
+
+@router.put(
+    "/projects/{project_id}/environment-links/{discovery_id}/version",
+    response_model=EnvironmentLinksOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def adopt_version(
+    project_id: int, discovery_id: DiscoveryId, body: VersionIn, session: SessionDep
+) -> EnvironmentLinksOut:
+    """Moves the project's pin for this entry to another version of its library environment,
+    newer or older (PHASE-042). The version needs a picture. Nothing is made again: what
+    depends on the environment goes out of date, and "Regenerate out-of-date" rebuilds it.
+    """
+    project = await load_project(session, project_id)
+    try:
+        await library_adoption.adopt_one(
+            session, "environment", project.id, discovery_id, body.version
+        )
+    except library_adoption.AdoptionError as exc:
+        raise refused(exc) from exc
     return await _state_out(session, project.id)
 
 

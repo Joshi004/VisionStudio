@@ -3,8 +3,9 @@
 A `library_environment` is a reusable place: a profile and one canonical reference picture per
 version. It belongs to no project. A story project links each discovered environment to one and
 pins a version of it (`/api/projects/{id}/environment-links`, PHASE-013); `GET /{id}/projects`
-lists the projects that use an environment, read-only, and an environment the pipeline made for
-a project carries its `origin` and the `definition` the Environment Definition stage wrote.
+lists the projects that use an environment, `POST /{id}/adopt` moves the pins of chosen
+projects to a version of it (PHASE-042), and an environment the pipeline made for a project
+carries its `origin` and the `definition` the Environment Definition stage wrote.
 
 - Every change of the profile adds an immutable version (`environment_versions`);
   `GET /{id}/versions` lists them, newest first, read-only. Each version has its own canonical
@@ -34,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.environment_definitions import EnvironmentDefinitionOut
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobSummary, job_summary
+from app.api.library_adoption import AdoptIn
 from app.db.models import (
     EnvironmentReference,
     EnvironmentState,
@@ -53,6 +55,7 @@ from app.services import (
     environment_references,
     environment_versions,
     image_lab,
+    library_adoption,
 )
 from app.services.environment_library import EnvironmentLibraryError
 from app.services.environment_references import EnvironmentReferenceError
@@ -508,6 +511,32 @@ class EnvironmentUsageOut(BaseModel):
     # does not move because of a lab edit.
     newest_version: int | None
     newer_version_available: bool
+    # PHASE-042: the project has a rendered final video, so it is "complete".
+    complete: bool
+    # Ticked by default in the adoption dialog: not complete, behind, and able to adopt.
+    preselected: bool
+    # Why the project cannot adopt the newest version now (for example it has no picture), or
+    # None.
+    blocked_reason: str | None
+
+
+async def _usage_out(session: AsyncSession, environment_id: int) -> list[EnvironmentUsageOut]:
+    candidates = await library_adoption.candidates(session, "environment", environment_id)
+    return [
+        EnvironmentUsageOut(
+            project_id=candidate.link.project_id,
+            project_name=candidate.project_name,
+            discovery_id=candidate.link.discovery_id,
+            how=typing_cast(Literal["created", "mapped"], candidate.link.how),
+            pinned_version=candidate.link.pinned_version,
+            newest_version=candidate.newest_version,
+            newer_version_available=candidate.newer_version_available,
+            complete=candidate.complete,
+            preselected=candidate.preselected,
+            blocked_reason=candidate.blocked_reason,
+        )
+        for candidate in candidates
+    ]
 
 
 @router.get(
@@ -518,24 +547,36 @@ class EnvironmentUsageOut(BaseModel):
 async def list_environment_projects(
     environment_id: EnvironmentId, session: SessionDep
 ) -> list[EnvironmentUsageOut]:
-    """The story projects that use this environment, each with the version it pins.
-    Read-only: a project's link is changed from the project.
+    """The story projects that use this environment, each with the version it pins, whether
+    it is complete (it has a final render) and whether it can adopt the newest version now.
     """
     if await environment_library.get_environment(session, environment_id) is None:
         raise _missing(f"There is no environment {environment_id}.")
-    usages = await environment_links.used_by(session, environment_id)
-    return [
-        EnvironmentUsageOut(
-            project_id=usage.link.project_id,
-            project_name=usage.project_name,
-            discovery_id=usage.link.discovery_id,
-            how=typing_cast(Literal["created", "mapped"], usage.link.how),
-            pinned_version=usage.link.pinned_version,
-            newest_version=usage.newest_version,
-            newer_version_available=usage.newer_version_available,
+    return await _usage_out(session, environment_id)
+
+
+@router.post(
+    "/lab/environments/{environment_id}/adopt",
+    response_model=list[EnvironmentUsageOut],
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def adopt_environment_version(
+    environment_id: EnvironmentId, body: AdoptIn, session: SessionDep
+) -> list[EnvironmentUsageOut]:
+    """Moves the pins of the chosen projects to one version of this environment (PHASE-042),
+    all or none. The version needs a picture. Nothing is made again: what depends on the
+    environment goes out of date in each project, and that project's "Regenerate out-of-date"
+    rebuilds it. Answers with the updated list of projects.
+    """
+    if await environment_library.get_environment(session, environment_id) is None:
+        raise _missing(f"There is no environment {environment_id}.")
+    try:
+        await library_adoption.adopt_many(
+            session, "environment", environment_id, body.version, body.project_ids
         )
-        for usage in usages
-    ]
+    except library_adoption.AdoptionError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return await _usage_out(session, environment_id)
 
 
 # --- An environment's reference pictures -------------------------------------------------------

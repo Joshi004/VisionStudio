@@ -4,8 +4,8 @@ A `library_character` is a reusable character: a profile, a set of white-backdro
 pictures (a "look"), and an optional voice. It belongs to no project. A story project links
 its discovered characters to library characters and pins a version of each
 (`/api/projects/{id}/character-links`, PHASE-008); `GET /{id}/projects` lists the projects that
-use a character, read-only, and a character the pipeline made for a project carries its
-`origin`.
+use a character, `POST /{id}/adopt` moves the pins of chosen projects to a version of it
+(PHASE-042), and a character the pipeline made for a project carries its `origin`.
 
 - `POST /looks` starts a new look: a language model writes the master prompt, then four
   candidate pictures are made to choose from (`POST /looks/{id}/master`). `POST
@@ -44,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.character_definitions import CharacterDefinitionOut
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobSummary, job_summary
+from app.api.library_adoption import AdoptIn
 from app.api.video_lab import (
     AudioInputIn,
     AudioInputOut,
@@ -69,11 +70,11 @@ from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.services import (
     character_library,
-    character_links,
     character_looks,
     character_takes,
     character_versions,
     image_lab,
+    library_adoption,
 )
 from app.services.character_looks import CharacterLookError
 from app.services.character_takes import CharacterTakeError
@@ -754,6 +755,31 @@ class CharacterUsageOut(BaseModel):
     # does not move because of a lab edit.
     newest_version: int | None
     newer_version_available: bool
+    # PHASE-042: the project has a rendered final video, so it is "complete".
+    complete: bool
+    # Ticked by default in the adoption dialog: not complete, behind, and able to adopt.
+    preselected: bool
+    # Why the project cannot adopt the newest version now, or None.
+    blocked_reason: str | None
+
+
+async def _usage_out(session: AsyncSession, character_id: int) -> list[CharacterUsageOut]:
+    candidates = await library_adoption.candidates(session, "character", character_id)
+    return [
+        CharacterUsageOut(
+            project_id=candidate.link.project_id,
+            project_name=candidate.project_name,
+            discovery_id=candidate.link.discovery_id,
+            how=typing_cast(Literal["created", "mapped"], candidate.link.how),
+            pinned_version=candidate.link.pinned_version,
+            newest_version=candidate.newest_version,
+            newer_version_available=candidate.newer_version_available,
+            complete=candidate.complete,
+            preselected=candidate.preselected,
+            blocked_reason=candidate.blocked_reason,
+        )
+        for candidate in candidates
+    ]
 
 
 @router.get(
@@ -764,24 +790,36 @@ class CharacterUsageOut(BaseModel):
 async def list_character_projects(
     character_id: CharacterId, session: SessionDep
 ) -> list[CharacterUsageOut]:
-    """The story projects that use this character, each with the version it pins. Read-only:
-    a project's link is changed from the project.
+    """The story projects that use this character, each with the version it pins, whether it
+    is complete (it has a final render) and whether it can adopt the newest version now.
     """
     if await character_library.get_character(session, character_id) is None:
         raise _missing(f"There is no character {character_id}.")
-    usages = await character_links.used_by(session, character_id)
-    return [
-        CharacterUsageOut(
-            project_id=usage.link.project_id,
-            project_name=usage.project_name,
-            discovery_id=usage.link.discovery_id,
-            how=typing_cast(Literal["created", "mapped"], usage.link.how),
-            pinned_version=usage.link.pinned_version,
-            newest_version=usage.newest_version,
-            newer_version_available=usage.newer_version_available,
+    return await _usage_out(session, character_id)
+
+
+@router.post(
+    "/lab/characters/{character_id}/adopt",
+    response_model=list[CharacterUsageOut],
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def adopt_character_version(
+    character_id: CharacterId, body: AdoptIn, session: SessionDep
+) -> list[CharacterUsageOut]:
+    """Moves the pins of the chosen projects to one version of this character (PHASE-042), all
+    or none. Nothing is made again: what depends on the character goes out of date in each
+    project, and that project's "Regenerate out-of-date" rebuilds it. Answers with the updated
+    list of projects.
+    """
+    if await character_library.get_character(session, character_id) is None:
+        raise _missing(f"There is no character {character_id}.")
+    try:
+        await library_adoption.adopt_many(
+            session, "character", character_id, body.version, body.project_ids
         )
-        for usage in usages
-    ]
+    except library_adoption.AdoptionError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return await _usage_out(session, character_id)
 
 
 # --- A character's look -------------------------------------------------------------------

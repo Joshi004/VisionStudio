@@ -323,6 +323,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/character-links/{discovery_id}/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Adopt Version
+         * @description Moves the project's pin for this entry to another version of its library character,
+         *     newer or older (PHASE-042). Nothing is made again: what depends on the character goes out
+         *     of date, and "Regenerate out-of-date" rebuilds it.
+         */
+        put: operations["adopt_version_api_projects__project_id__character_links__discovery_id__version_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/character-relations": {
         parameters: {
             query?: never;
@@ -1339,12 +1361,35 @@ export interface paths {
         };
         /**
          * List Character Projects
-         * @description The story projects that use this character, each with the version it pins. Read-only:
-         *     a project's link is changed from the project.
+         * @description The story projects that use this character, each with the version it pins, whether it
+         *     is complete (it has a final render) and whether it can adopt the newest version now.
          */
         get: operations["list_character_projects_api_lab_characters__character_id__projects_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt Character Version
+         * @description Moves the pins of the chosen projects to one version of this character (PHASE-042), all
+         *     or none. Nothing is made again: what depends on the character goes out of date in each
+         *     project, and that project's "Regenerate out-of-date" rebuilds it. Answers with the updated
+         *     list of projects.
+         */
+        post: operations["adopt_character_version_api_lab_characters__character_id__adopt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1742,12 +1787,35 @@ export interface paths {
         };
         /**
          * List Environment Projects
-         * @description The story projects that use this environment, each with the version it pins.
-         *     Read-only: a project's link is changed from the project.
+         * @description The story projects that use this environment, each with the version it pins, whether
+         *     it is complete (it has a final render) and whether it can adopt the newest version now.
          */
         get: operations["list_environment_projects_api_lab_environments__environment_id__projects_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/environments/{environment_id}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt Environment Version
+         * @description Moves the pins of the chosen projects to one version of this environment (PHASE-042),
+         *     all or none. The version needs a picture. Nothing is made again: what depends on the
+         *     environment goes out of date in each project, and that project's "Regenerate out-of-date"
+         *     rebuilds it. Answers with the updated list of projects.
+         */
+        post: operations["adopt_environment_version_api_lab_environments__environment_id__adopt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1879,6 +1947,28 @@ export interface paths {
          * @description Removes the link. The library environment stays in the Character Lab.
          */
         delete: operations["delete_link_api_projects__project_id__environment_links__discovery_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/environment-links/{discovery_id}/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Adopt Version
+         * @description Moves the project's pin for this entry to another version of its library environment,
+         *     newer or older (PHASE-042). The version needs a picture. Nothing is made again: what
+         *     depends on the environment goes out of date, and "Regenerate out-of-date" rebuilds it.
+         */
+        put: operations["adopt_version_api_projects__project_id__environment_links__discovery_id__version_put"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3269,6 +3359,16 @@ export interface components {
             /** Shot Id */
             shot_id?: string | null;
         };
+        /**
+         * AdoptIn
+         * @description Move these projects' pins to this version of the library item.
+         */
+        AdoptIn: {
+            /** Version */
+            version: number;
+            /** Project Ids */
+            project_ids: number[];
+        };
         /** ApproveRequest */
         ApproveRequest: {
             /** Expected */
@@ -3634,6 +3734,12 @@ export interface components {
             newest_version: number | null;
             /** Newer Version Available */
             newer_version_available: boolean;
+            /** Complete */
+            complete: boolean;
+            /** Preselected */
+            preselected: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
         };
         /** CharacterVersionOut */
         CharacterVersionOut: {
@@ -4422,6 +4528,12 @@ export interface components {
             newest_version: number | null;
             /** Newer Version Available */
             newer_version_available: boolean;
+            /** Complete */
+            complete: boolean;
+            /** Preselected */
+            preselected: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
         };
         /** EnvironmentVersionOut */
         EnvironmentVersionOut: {
@@ -9087,6 +9199,14 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VersionIn
+         * @description The version one project's pin should move to.
+         */
+        VersionIn: {
+            /** Version */
+            version: number;
+        };
+        /**
          * VersionProfileOut
          * @description The profile as a version froze it.
          */
@@ -10120,6 +10240,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_version_api_projects__project_id__character_links__discovery_id__version_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered character or library character, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -12290,6 +12455,50 @@ export interface operations {
             };
         };
     };
+    adopt_character_version_api_lab_characters__character_id__adopt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdoptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CharacterUsageOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_looks_api_lab_characters__character_id__looks_get: {
         parameters: {
             query?: never;
@@ -13218,6 +13427,50 @@ export interface operations {
             };
         };
     };
+    adopt_environment_version_api_lab_environments__environment_id__adopt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdoptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentUsageOut"][];
+                };
+            };
+            /** @description No environment has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_references_api_lab_environments__environment_id__references_get: {
         parameters: {
             query?: never;
@@ -13543,6 +13796,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_version_api_projects__project_id__environment_links__discovery_id__version_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                discovery_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentLinksOut"];
+                };
+            };
+            /** @description No such project or link. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description There is no such discovered environment or library environment, or the link breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

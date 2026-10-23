@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Anchor,
@@ -15,12 +15,13 @@ import {
 } from "@mantine/core";
 import { Link } from "react-router";
 
-import { useLibraryEnvironments } from "../../api/environmentLab";
+import { useEnvironmentVersions, useLibraryEnvironments } from "../../api/environmentLab";
 import {
   useCreateEnvironmentLink,
   useEnvironmentLinks,
   useLinkAllEnvironments,
   useMapEnvironmentLink,
+  useSetEnvironmentVersion,
   useUnlinkEnvironment,
   type LinkedEnvironment,
 } from "../../api/environmentLinks";
@@ -35,18 +36,69 @@ function labPath(environmentId: number): string {
   return `/lab/environments?environment=${environmentId}`;
 }
 
+/**
+ * Chooses which version of the environment the project pins (PHASE-042), newer or older. The
+ * versions are loaded when the list is opened. A version with no picture cannot be chosen. Only
+ * the pin moves: what depends on the environment goes out of date, and **Regenerate
+ * out-of-date** rebuilds it.
+ */
+function VersionPicker({
+  environmentId,
+  pinned,
+  disabled,
+  onChange,
+}: {
+  environmentId: number;
+  pinned: number;
+  disabled: boolean;
+  onChange: (version: number) => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const versions = useEnvironmentVersions(opened ? environmentId : null);
+  const options = (versions.data ?? []).map((version) => {
+    const changes = version.changes.filter((change) => change !== "created").join(", ");
+    const who = version.source === "ai" ? "pipeline" : "edited in the lab";
+    return {
+      value: String(version.version),
+      label: `v${version.version}: ${who}${changes ? ` (${changes})` : ""}${
+        version.image === null ? ", no picture" : ""
+      }`,
+      disabled: version.image === null && version.version !== pinned,
+    };
+  });
+  return (
+    <Select
+      aria-label="Change the version this project uses"
+      size="xs"
+      w={260}
+      allowDeselect={false}
+      data={options.length > 0 ? options : [{ value: String(pinned), label: `v${pinned}` }]}
+      value={String(pinned)}
+      disabled={disabled}
+      onDropdownOpen={() => setOpened(true)}
+      onChange={(value) => {
+        if (value !== null && Number(value) !== pinned) {
+          onChange(Number(value));
+        }
+      }}
+    />
+  );
+}
+
 /** Where a linked entry points: the library environment, the version pinned, and what is newer. */
 function LinkedLine({
   link,
   castMode,
   disabled,
   onUnlink,
+  onChangeVersion,
 }: {
   link: LinkedEnvironment;
   // The mode of the cast member the entry is linked to, or undefined when it is not in the cast.
   castMode: CastMode | undefined;
   disabled: boolean;
   onUnlink: () => void;
+  onChangeVersion: (version: number) => void;
 }) {
   return (
     <Group gap="xs">
@@ -72,7 +124,7 @@ function LinkedLine({
         <Badge
           variant="light"
           color="yellow"
-          title="The Character Lab has a newer version. The project keeps the pinned one until you define the environment again."
+          title="The Character Lab has a newer version. The project keeps the pinned one until you adopt it."
         >
           newer version available (v{link.newest_version})
         </Badge>
@@ -82,6 +134,12 @@ function LinkedLine({
           archived
         </Badge>
       )}
+      <VersionPicker
+        environmentId={link.environment_id}
+        pinned={link.pinned_version}
+        disabled={disabled}
+        onChange={onChangeVersion}
+      />
       <Button
         size="compact-xs"
         variant="subtle"
@@ -101,7 +159,7 @@ function LinkedLine({
  * to one of its versions. An entry can be **created** in the lab from the discovery (name and
  * one-line description), or **mapped** to an environment that already exists, which lets a place
  * be reused across projects. A pin never moves because of a lab edit: the lab having a newer
- * version is only shown.
+ * version is only shown, and the version picker (or **Adopt** in the lab) moves it.
  */
 export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps) {
   const { data, isLoading, isError, error } = useEnvironmentLinks(projectId);
@@ -110,6 +168,7 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
   const create = useCreateEnvironmentLink(projectId);
   const map = useMapEnvironmentLink(projectId);
   const unlink = useUnlinkEnvironment(projectId);
+  const setVersion = useSetEnvironmentVersion(projectId);
   const cast = useProjectCast(projectId);
 
   // The picker lists the whole library, so the pages are loaded one after the other.
@@ -128,8 +187,13 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
   );
 
   // One change at a time: every button waits for the one before it.
-  const busy = linkAll.isPending || create.isPending || map.isPending || unlink.isPending;
-  const failed = [linkAll, create, map, unlink].find((mutation) => mutation.isError);
+  const busy =
+    linkAll.isPending ||
+    create.isPending ||
+    map.isPending ||
+    unlink.isPending ||
+    setVersion.isPending;
+  const failed = [linkAll, create, map, unlink, setVersion].find((mutation) => mutation.isError);
 
   const entries = data?.entries ?? [];
   const orphaned = data?.orphaned ?? [];
@@ -160,7 +224,7 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
             <Title order={4}>Environment library links</Title>
             <Text size="sm" c="dimmed">
               Each environment is backed by a Character Lab environment, and the project pins one
-              version of it. A change made in the lab never moves the pin.
+              version of it. A change made in the lab never moves the pin: choose a version here to move it.
             </Text>
           </Stack>
           <Button
@@ -226,6 +290,9 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
                   castMode={castModes.get(entry.link.environment_id)}
                   disabled={busy}
                   onUnlink={() => unlink.mutate(entry.id)}
+                  onChangeVersion={(version) =>
+                    setVersion.mutate({ discoveryId: entry.id, version })
+                  }
                 />
               ) : (
                 <Group gap="xs">
@@ -291,6 +358,9 @@ export function EnvironmentLinksPanel({ projectId }: EnvironmentLinksPanelProps)
                     castMode={castModes.get(link.environment_id)}
                     disabled={busy}
                     onUnlink={() => unlink.mutate(link.discovery_id)}
+                    onChangeVersion={(version) =>
+                      setVersion.mutate({ discoveryId: link.discovery_id, version })
+                    }
                   />
                 </Group>
               ))}

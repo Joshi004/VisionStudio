@@ -64,6 +64,7 @@ from app.services import (
     environment_references,
     environment_versions,
     image_lab,
+    library_adoption,
     look_state_resolution,
 )
 from app.services import image_models as image_models_service
@@ -726,13 +727,18 @@ async def _pin_state(session: AsyncSession, record: EnvironmentState) -> int | N
         return None
     # The version records the same `inputs` as the one the project pinned, so the Environment
     # Definition stage still reads that definition as built from this story.
+    # (A version the project adopted from the lab has none of its own: the link's provenance
+    # supplies them, PHASE-042, and the new version then carries them.)
+    inputs = await library_adoption.effective_inputs(session, "environment", link, newest)
     version = await environment_versions.record_version_if_changed(
         session,
         environment,
         source="ai",
-        inputs=newest.inputs if isinstance(newest.inputs, dict) else None,
+        inputs=inputs,
         carry_picture=True,
     )
     link.pinned_version = (version if version is not None else newest).version
+    if inputs is not None:
+        link.provenance_version = None
     link.updated_at = utcnow()
     return link.pinned_version

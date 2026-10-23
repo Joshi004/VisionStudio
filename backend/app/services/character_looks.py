@@ -78,6 +78,7 @@ from app.services import (
     character_versions,
     frame_images,
     image_lab,
+    library_adoption,
 )
 from app.services import image_models as image_models_service
 from app.services.frame_images import FrameRejected
@@ -774,7 +775,9 @@ async def pin_new_version(
         LibraryCharacterVersion.version == link.pinned_version,
     )
     pinned = (await session.execute(pinned_statement)).scalars().first()
-    inputs = pinned.inputs if pinned is not None and isinstance(pinned.inputs, dict) else None
+    # A version adopted from the lab (PHASE-042) has no `inputs`: the project's own provenance
+    # comes from the link, and the new version carries it.
+    inputs = await library_adoption.effective_inputs(session, "character", link, pinned)
     version = await character_versions.record_version_if_changed(
         session, character, source="ai", job_id=job_id, inputs=inputs
     )
@@ -783,6 +786,8 @@ async def pin_new_version(
     if version is None:
         return None
     link.pinned_version = version.version
+    if inputs is not None:
+        link.provenance_version = None
     link.updated_at = utcnow()
     return version.version
 

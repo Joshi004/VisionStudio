@@ -124,6 +124,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-041 review points, 2026-10-22):** migration `0055`. **A project saves the places the pipeline should stop and wait.** (1) **One new column, `project.review_points`** (Section 4.1): a JSON list of review point keys, NOT NULL, default `'[]'` (every project made before this phase has none, so nothing about it changes). The keys are `story_structure`, `images`, `scenes`, `shot_plans` and `shots` (`services/review_points.py`), stored in the order of the pipeline without repeats; `PATCH /api/projects/{id}` takes the whole list and refuses an unknown key. (2) **No new table, no new job type.** A `story_pipeline` run copies the list into `job.input.review_points` when it starts, so changing the setting does not change a run that is going. The run's `job.output` gains `review_at`, `reviewed`, `rejected` and `recheck` (Section 5). Approving and rejecting store nothing else: a rejected target is made again by its stage's own start function, so the rows are the ones the stage's own button would have made, and the artifacts are identical whether or not a review point is enabled. See Section 5, "`job.input` and `job.output` for a `story_pipeline` job".
 
+**Update (PHASE-042 adopting library versions, 2026-10-23):** migration `0056`. **A project can move its pin to another version of a library character or environment.** (1) **One new nullable column on each link table, `provenance_version`** (`project_character_link` Section 4.28, `project_environment_link` Section 4.35): a plain number (not a foreign key, like `pinned_version`), NULL for every existing link, so nothing about them changes. It is the version of the same library item whose `inputs` still stand for the project's own definition. It is set only when a project **adopts** a version made by hand in the lab, which has no `inputs` (D-3), so the Character and Environment Definition stages can keep reading the project's definition as built from its story, and a changed story still marks it out of date. (2) **No new table, no new job type.** Adopting is a synchronous write of `pinned_version` and `provenance_version` (`services/library_adoption.py`); what depends on the pin goes out of date by the PHASE-039 rules and is made again by the user with "Regenerate out-of-date" (PHASE-040). (3) "A project is complete" (Q-9) is **read, not stored**: a project is complete when at least one `story_render` row exists for it.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -1494,11 +1496,12 @@ The code builds the snapshot of the character as it is now and compares it with 
 | `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
 | `discovery_id` | TEXT | NOT NULL | — | The discovered character's slug `id` (`^[a-z][a-z0-9_]*$`, at most 48 characters) |
 | `character_id` | INTEGER, FK → `library_character.id` | NOT NULL | — | The library character that backs it. `ON DELETE CASCADE` (a character is never deleted, only archived) |
-| `pinned_version` | INTEGER | NOT NULL | — | The `library_character_version.version` the project uses. A plain number, found by `(character_id, pinned_version)`, as `character_take.character_version` is. **Never changed by a lab edit.** A mapping to a different character sets it to that character's newest version; moving it to a newer version of the same character is adoption (PHASE-042) |
+| `pinned_version` | INTEGER | NOT NULL | — | The `library_character_version.version` the project uses. A plain number, found by `(character_id, pinned_version)`, as `character_take.character_version` is. **Never changed by a lab edit.** A mapping to a different character sets it to that character's newest version; moving it to another version of the same character is adoption (PHASE-042, `POST /api/lab/characters/{id}/adopt` for several projects, `PUT /api/projects/{id}/character-links/{discovery_id}/version` for one) |
 | `how` | TEXT | NOT NULL | — | `created`: the pipeline made the library character from the discovery entry (`library_character.origin_*` name this project). `mapped`: the user chose an existing character (`CHECK`) |
+| `provenance_version` | INTEGER | NULL | — | PHASE-042 (migration `0056`). A plain number. The `library_character_version.version` whose `inputs` stand for this project's own definition of the entry, set when the project adopts a version that has no `inputs` of its own (one made by hand in the lab). NULL: the pinned version's own `inputs` are used. Read by `library_adoption.effective_inputs`; cleared when a stage writes a new version that carries the project's `inputs`, and when the entry is mapped to another character |
 | `discovery_version` | INTEGER | NOT NULL | — | The version of the discovered list (`character_discovery.version`) the link was made from. Provenance only |
 | `created_at` | DATETIME | NOT NULL | now | |
-| `updated_at` | DATETIME | NOT NULL | now | Set by code when an entry is mapped to another character |
+| `updated_at` | DATETIME | NOT NULL | now | Set by code when an entry is mapped to another character or its pin moves |
 
 ```sql
 CREATE TABLE project_character_link (
@@ -1511,6 +1514,7 @@ CREATE TABLE project_character_link (
     discovery_version INTEGER NOT NULL,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    provenance_version INTEGER,
     CONSTRAINT uq_project_character_link_discovery UNIQUE (project_id, discovery_id),
     CONSTRAINT uq_project_character_link_character UNIQUE (project_id, character_id)
 );
@@ -1519,7 +1523,9 @@ CREATE INDEX idx_project_character_link_character ON project_character_link (cha
 
 `UNIQUE (project_id, discovery_id)`: a discovered character is linked once. `UNIQUE (project_id, character_id)`: a project uses a library character for one discovered character only, so "Young Arjun" and "Arjun" stay two characters (D-14: a relation between them is kept on the project, Section 4.29, never on the library character). The two unique keys are named explicitly because both would otherwise get the name `uq_project_character_link_project_id`.
 
-**"A newer version is available"** is worked out on every read (`character_links.LinkInfo.newer_version_available`): the character's newest `library_character_version.version` is higher than `pinned_version`. It is information only and is never stored (Section 2.1). "Used by projects" in the lab is the same table read from the other side (`GET /api/lab/characters/{id}/projects`, `character_links.used_by`).
+**"A newer version is available"** is worked out on every read (`character_links.LinkInfo.newer_version_available`): the character's newest `library_character_version.version` is higher than `pinned_version`. It is information only and is never stored (Section 2.1). "Used by projects" in the lab is the same table read from the other side (`GET /api/lab/characters/{id}/projects`, `library_adoption.candidates`, which adds whether each project is complete, that is, has a `story_render` row, and whether it can adopt the newest version now).
+
+**Adopting (PHASE-042).** `library_adoption.adopt_many` (several projects, all or none) and `adopt_one` (one entry) set `pinned_version` to the chosen version, which may be older or newer, and set `provenance_version`: NULL when the chosen version's own `inputs` name this project and entry; otherwise the previous pin's version when its `inputs` name them; otherwise the value it already had. An adoption is refused when the version does not exist, when the project has a `queued` or `running` job, or (environments) when the version has no picture. Nothing is made again.
 
 ---
 
@@ -1763,8 +1769,9 @@ The candidates are also in the Image lab's history, as any run is. Choosing one 
 | `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
 | `discovery_id` | TEXT | NOT NULL | — | The discovered environment's slug `id` (`^[a-z][a-z0-9_]*$`, at most 48 characters) |
 | `environment_id` | INTEGER, FK → `library_environment.id` | NOT NULL | — | The library environment that backs it. `ON DELETE CASCADE` (an environment is never deleted, only archived) |
-| `pinned_version` | INTEGER | NOT NULL | — | The `library_environment_version.version` the project uses. A plain number, found by `(environment_id, pinned_version)`. **Never changed by a lab edit.** It moves only when the pipeline writes a new version for this project (the definition is saved) and when the entry is mapped to another environment (which pins that environment's newest version) |
+| `pinned_version` | INTEGER | NOT NULL | — | The `library_environment_version.version` the project uses. A plain number, found by `(environment_id, pinned_version)`. **Never changed by a lab edit.** It moves when the pipeline writes a new version for this project (the definition is saved), when the entry is mapped to another environment (which pins that environment's newest version), and when the project adopts a version (PHASE-042; the version needs a picture) |
 | `how` | TEXT | NOT NULL | — | `created`: the pipeline made the library environment from the discovery entry (`library_environment.origin_*` name this project). `mapped`: the user chose an existing environment (`CHECK`) |
+| `provenance_version` | INTEGER | NULL | — | PHASE-042 (migration `0056`). The environment twin of `project_character_link.provenance_version`: the `library_environment_version.version` whose `inputs` stand for this project's own definition, set when the project adopts a version made by hand in the lab. NULL: the pinned version's own `inputs` are used |
 | `discovery_version` | INTEGER | NOT NULL | — | The version of the discovered list (`environment_discovery.version`) the link was made from. Provenance only |
 | `created_at` | DATETIME | NOT NULL | now | |
 | `updated_at` | DATETIME | NOT NULL | now | Set by code when an entry is mapped to another environment or its pin moves |
@@ -1780,6 +1787,7 @@ CREATE TABLE project_environment_link (
     discovery_version INTEGER NOT NULL,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    provenance_version INTEGER,
     CONSTRAINT uq_project_environment_link_discovery UNIQUE (project_id, discovery_id),
     CONSTRAINT uq_project_environment_link_environment UNIQUE (project_id, environment_id)
 );

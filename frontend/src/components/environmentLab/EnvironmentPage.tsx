@@ -180,7 +180,7 @@ export function EnvironmentPage({ environmentId, onBack, onEdit }: EnvironmentPa
 
               <EnvironmentStates environmentId={data.id} />
 
-              <EnvironmentUsedByProjects environmentId={data.id} />
+              <EnvironmentUsedByProjects environmentId={data.id} name={data.name} />
 
               <EnvironmentVersionHistory environmentId={data.id} />
             </Stack>

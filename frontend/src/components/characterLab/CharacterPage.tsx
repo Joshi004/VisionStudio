@@ -287,7 +287,7 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
 
               <NamedLooks characterId={data.id} />
 
-              <UsedByProjects characterId={data.id} />
+              <UsedByProjects characterId={data.id} name={data.name} />
 
               <VersionHistory characterId={data.id} />
             </Stack>

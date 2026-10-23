@@ -9,6 +9,8 @@ to Character Lab library characters and pinned to a version of each (PHASE-008).
 - `POST .../{discovery_id}/create` makes one library character from one entry and pins it.
 - `PUT .../{discovery_id}` links the entry to an existing library character and pins its newest
   version.
+- `PUT .../{discovery_id}/version` moves the pin to another version of the linked character
+  (PHASE-042, `api/library_adoption.py`).
 - `DELETE .../{discovery_id}` removes a link. The library character stays in the lab.
 
 Every action is a database write that is done before the answer, so none of them is a job. The
@@ -25,9 +27,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
+from app.api.library_adoption import VersionIn, refused
 from app.api.projects import load_project
 from app.db.session import SessionDep
-from app.services import character_links
+from app.services import character_links, library_adoption
 from app.services.character_links import LinkInfo
 
 router = APIRouter()
@@ -196,6 +199,28 @@ async def map_link(
         await character_links.map_to_existing(session, project, discovery_id, body.character_id)
     except character_links.CharacterLinkError as exc:
         raise _refused(exc) from exc
+    return await _state_out(session, project.id)
+
+
+@router.put(
+    "/projects/{project_id}/character-links/{discovery_id}/version",
+    response_model=CharacterLinksOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def adopt_version(
+    project_id: int, discovery_id: DiscoveryId, body: VersionIn, session: SessionDep
+) -> CharacterLinksOut:
+    """Moves the project's pin for this entry to another version of its library character,
+    newer or older (PHASE-042). Nothing is made again: what depends on the character goes out
+    of date, and "Regenerate out-of-date" rebuilds it.
+    """
+    project = await load_project(session, project_id)
+    try:
+        await library_adoption.adopt_one(
+            session, "character", project.id, discovery_id, body.version
+        )
+    except library_adoption.AdoptionError as exc:
+        raise refused(exc) from exc
     return await _state_out(session, project.id)
 
 

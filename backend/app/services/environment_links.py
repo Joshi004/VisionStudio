@@ -351,6 +351,7 @@ async def _map_one(
     else:
         existing.environment_id = environment_id
         existing.pinned_version = version.version
+        existing.provenance_version = None  # a different environment: nothing carries over
         existing.how = "mapped"
         existing.discovery_version = newest.version
         existing.updated_at = utcnow()

@@ -1,22 +1,49 @@
-import { Alert, Anchor, Badge, Group, Loader, Stack, Text } from "@mantine/core";
+import { useState } from "react";
+import { Alert, Anchor, Badge, Button, Group, Loader, Stack, Text } from "@mantine/core";
 import { Link } from "react-router";
 
-import { useCharacterProjects } from "../../api/characterLinks";
+import { useAdoptCharacterVersion, useCharacterProjects } from "../../api/characterLinks";
 import { describeError } from "../../api/errors";
+import { AdoptVersionDialog } from "./AdoptVersionDialog";
 
 /**
- * The story projects that use one character, each with the version it pins, read-only. A
- * project's link is changed from the project: a pin never moves because of an edit made here,
- * so a project can be several versions behind. That is shown, and nothing more.
+ * The story projects that use one character, each with the version it pins. A pin never moves
+ * because of an edit made here, so a project can be several versions behind. **Adopt** lets the
+ * user choose which projects move to the newest version (PHASE-042): projects without a final
+ * video are ticked by default, and only the pins move.
  */
-export function UsedByProjects({ characterId }: { characterId: number }) {
+export function UsedByProjects({ characterId, name }: { characterId: number; name: string }) {
   const usage = useCharacterProjects(characterId);
+  const adopt = useAdoptCharacterVersion(characterId);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const projects = usage.data ?? [];
+  const newest = projects.find((project) => project.newest_version !== null)?.newest_version;
+  const anyBehind = projects.some((project) => project.newer_version_available);
 
   return (
     <Stack gap="xs">
-      <Text size="sm" fw={600}>
-        Used by projects
-      </Text>
+      <Group justify="space-between">
+        <Text size="sm" fw={600}>
+          Used by projects
+        </Text>
+        {anyBehind && newest != null && (
+          <Button size="compact-xs" variant="light" onClick={() => setDialogOpen(true)}>
+            Adopt v{newest}...
+          </Button>
+        )}
+      </Group>
+      {newest != null && (
+        <AdoptVersionDialog
+          opened={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          what="character"
+          name={name}
+          newestVersion={newest}
+          projects={projects}
+          onAdopt={(projectIds) => adopt.mutateAsync({ version: newest, projectIds })}
+        />
+      )}
       {usage.isLoading && <Loader size="xs" />}
       {usage.isError && (
         <Alert color="red" p="xs" title="Could not load the projects">
