@@ -1749,6 +1749,33 @@ Sound effects / ambience  → H3, per shot
 Background music          → Music Planner, continuous
 ```
 
+### Working decision: which models make music and sound effects (recorded 23 Oct 2026)
+
+**Decision (from the project owner, refined the same day):** audio comes from three sources, and the later two are additions, not replacements.
+
+1. **H3 keeps the sounds built into each shot.** These are mostly tied to that one shot (the footsteps, door or voice reaction seen on screen), and they are used as H3 returns them.
+2. **Stable Audio adds extra sound effects (SFX) on top.** Two kinds go to it: an additional effect a shot needs that H3 did not make, and any effect or ambience that spans several shots (for example a room tone or rain that runs across a whole scene), because H3 works one shot at a time.
+3. **ACE-Step adds the background music** on top, as the continuous layer in the Music Planner above.
+
+Which Stable Audio model (3 or Open) is not decided. We will pick it later, after the trial listening and after checking current online sources for which one fits our use.
+
+**Status: a working decision for planning, not yet confirmed.** It rests on the GPU server's and the models' own documentation. The 84 Music Lab trial runs (temporary folder `music_lab_trials/`, cases A to H) have been triggered, but nobody has listened to them yet. Those listening notes can confirm or change this.
+
+What the documentation says that supports it:
+
+- ACE-Step 1.5 makes songs and instrumentals from 10 s to 600 s, with exact `bpm`, `keyscale`, `time_signature` and `duration`. Its code is MIT, and its authors state that the generated music may be used commercially.
+- Stable Audio 3 (up to 380 s on the server, 285 s in the lab today) and Stable Audio Open (up to 47 s) are documented for sound effects, foley, loops and ambience, with no vocals.
+- Both ACE-Step and Stable Audio 3 have time-window editing endpoints on the GPU server (ACE-Step `repaint`, Stable Audio 3 `inpaint`). The Music Lab does not call them yet.
+
+Open points to settle before this goes into the pipeline:
+
+0. **First, find out what H3 really produces.** Plan this with the model itself: look at the audio H3 returns for real shots and note which sounds it adds on its own (effects, ambience, anything musical) and how much depends on the shot. That decides which effects we still need from Stable Audio. This has not been done.
+1. **Which Stable Audio.** Stable Audio 3 and Stable Audio Open are both candidates for SFX. The trials (groups E and F) run both, plus LTX audio, on the same prompts. Open: choose one, or use Open for short effects and 3 for longer ones. To be settled later, with a check of current online sources.
+2. **Overlap with what H3 already made.** §4, §26 and §34 above stay as they are: H3 still makes the shot's own sounds. The added layers must not double them (the same knock twice, or two room tones at once). Open: how the Planner knows what H3 already covered in a shot, and how an added effect is told apart from one H3 made. Also open: how an effect that spans shots is timed and cross-faded at the cuts.
+3. **Timing of effects.** SFX are short separate clips, so each could be placed at the time of its event on the final timeline. This is only an idea. It needs the trial results on whether the effects come out as asked (case E: counts, order, length).
+4. **Licence.** Stable Audio models use the Stability AI Community License: free below USD 1M annual revenue, a separate licence above. The server does not enforce it.
+5. **Music Lab ordering.** `services/music_models.py` lists Stable Audio 3 before ACE-Step for scores ("best first"). That ordering is only a default for the lab's page and does not follow this decision. It has not been changed.
+
 ---
 
 ## 35. Call structure

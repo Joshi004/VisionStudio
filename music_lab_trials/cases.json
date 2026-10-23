@@ -1,0 +1,548 @@
+{
+  "defaults": { "seed": 1717 },
+  "stories": {
+    "FL": { "genre": ["science documentary"], "tone": ["wonder", "awe"], "era": "present day" },
+    "6F": { "genre": ["explainer", "tech"], "tone": ["curious", "playful"], "era": "present day" },
+    "ARJUN": {
+      "genre": ["supernatural horror", "psychological thriller"],
+      "tone": ["oppressive", "uncanny", "escalating dread"],
+      "era": "present day"
+    },
+    "E03": { "genre": ["comedy", "educational"], "tone": ["playful", "deadpan", "light-hearted"], "era": "present day" }
+  },
+  "cases": [
+    {
+      "id": "A1", "group": "A", "story": "6F", "kind": "score",
+      "title": "6Fingers, 30 s curious playful score under narration",
+      "brief": {
+        "description": "6Fingers: a 30 second curious, playful underscore for a short tech explainer about why AI draws six fingers.",
+        "mood_start": "curious", "mood_end": "playful", "duration_s": 30, "under_narration": true
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Electronic, Genre: Playful Explainer, Instruments: Soft Marimba, Pizzicato Strings, Light Synth Pluck, Subtle Sub Bass. A curious, playful, light-hearted underscore at about 100 BPM for a short tech explainer. A gentle marimba pattern and sparse pizzicato notes keep a steady, quiet pulse, with an occasional soft synth pluck like a small question mark. Low energy, no lead melody, leaving the middle frequencies open for a spoken voice. Clean, modern, close production.",
+          "duration": 30 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "playful curious tech explainer underscore, soft marimba, pizzicato strings, light synth plucks, subtle bass, sparse and steady, quiet dynamics, no lead melody, clean modern production, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 100, "keyscale": "C major", "time_signature": "4", "duration": 30 } }
+      ]
+    },
+    {
+      "id": "A2", "group": "A", "story": "FL", "kind": "score",
+      "title": "First Light, 60 s wonder rising to awe under narration",
+      "brief": {
+        "description": "The First Light: a 60 second cosmic underscore that begins as quiet mysterious wonder and rises to awe, for a narrated explainer about the oldest light in the universe.",
+        "mood_start": "mysterious wonder", "mood_end": "awe", "duration_s": 60, "under_narration": true
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic, Genre: Ambient, Instruments: Warm Synth Pad, Soft Piano, Celesta, Low Strings. A slow cosmic underscore at about 66 BPM that begins as a quiet, mysterious hum and gradually opens into a feeling of awe. Sustained pads breathe underneath, a few sparse piano notes and celesta sparkles appear like distant stars, and low strings slowly swell toward a wide, luminous ending. Soft dynamics throughout, no prominent melody in the mid range so a narrator can speak over it. Spacious, wide stereo, gentle reverb.",
+          "duration": 60 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "slow cosmic ambient cinematic underscore, warm synth pads, sparse piano, celesta sparkles, low strings swelling gently, mysterious wonder rising to awe, spacious wide reverb, soft dynamics, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 66, "keyscale": "D major", "time_signature": "4", "duration": 60 } }
+      ]
+    },
+    {
+      "id": "A4", "group": "A", "story": "ARJUN", "kind": "score",
+      "title": "Arjun whole story, 180 s escalating dread",
+      "brief": {
+        "description": "Arjun and the seventh floor: one 3 minute piece for the whole story. It starts almost normal, dread escalates steadily, and the last minute turns hollow and tragic rather than loud.",
+        "mood_start": "dry and ordinary", "mood_middle": "escalating dread", "mood_end": "hollow and tragic",
+        "duration_s": 180, "under_narration": false
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Metallic Textures. A slow, oppressive horror underscore at about 55 BPM lasting three minutes. It starts almost normal, with a quiet muted piano and a thin drone, then dread slowly escalates: the drone deepens, bowed strings creak and rise, metallic textures scrape, and a heavy sub-bass pulse enters near the middle. The final minute turns tragic and hollow rather than loud, with a fading piano note. Cold, dry, claustrophobic production, low energy.",
+          "duration": 180 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "slow oppressive horror underscore, low drone, sparse muted piano, bowed strings, sub bass pulse, metallic textures, dread escalating then fading into tragic emptiness, cold dry claustrophobic production, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 55, "keyscale": "A minor", "time_signature": "4", "duration": 180 } }
+      ]
+    },
+
+    {
+      "id": "B1", "group": "B", "story": "FL", "kind": "score",
+      "title": "First Light, 60 s timestamp cues",
+      "brief": {
+        "description": "The First Light, 60 s with exact cues. 0:00-0:15 dense hot rumble. 0:15-0:24 rising tension. 0:24 sudden bright swell. 0:24-0:48 calm travelling pad. 0:48-1:00 resolve, then fade.",
+        "mood_start": "dense and hot", "mood_middle": "tension then bright release", "mood_end": "resolved",
+        "duration_s": 60, "under_narration": false
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic, Genre: Ambient, Instruments: Sub Bass, Low Drone, Synth Pad, Strings, Bells. A 60 second cinematic piece that follows this exact timeline. 0:00 to 0:15: a dense, hot, rumbling low drone with heavy sub bass, dark and crowded. 0:15 to 0:24: tension rises steadily with swelling strings and a rising pitch. At 0:24 exactly: a sudden bright swell and a burst of bells and light as the sound opens up. 0:24 to 0:48: a calm, open, travelling synth pad with gentle bells, serene and spacious. 0:48 to 1:00: the music resolves into a soft major chord and slowly fades to silence at 1:00.",
+          "duration": 60 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "cinematic ambient instrumental that moves from dense hot rumble, to rising tension, to a sudden bright swell, then calm travelling pads and a fading resolution, sub bass, strings, bells, synth pads, no vocals",
+          "lyrics": "[Intro - dense hot rumble]\n\n[Build - rising tension]\n\n[Swell - sudden bright burst]\n\n[Interlude - calm travelling pad]\n\n[Outro - resolve and fade]",
+          "instrumental": true, "vocal_language": "unknown",
+          "bpm": 120, "keyscale": "A minor", "time_signature": "4", "duration": 60 } }
+      ]
+    },
+    {
+      "id": "B2", "group": "B", "story": "ARJUN", "kind": "score",
+      "title": "Arjun, The Voice scene, 36 s cues matched to the narration",
+      "brief": {
+        "description": "Arjun, scene 'The Voice' (36 s of narration). 0:00-0:08 near silence. 0:08 one heavy hit. 0:08-0:20 a pulse that builds. 0:20 cold string stab. 0:20-0:30 dissonant swell. 0:30-0:33 exactly three sharp hits. 0:33-0:36 cut to silence.",
+        "mood_start": "tense watchful silence", "mood_middle": "cold dread", "mood_end": "frozen fear",
+        "duration_s": 36, "under_narration": false
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Horror Cinematic, Genre: Dark Ambient, Instruments: Sub Bass, Low Drone, Strings, Percussion Hits. A 36 second horror cue that follows this exact timeline. 0:00 to 0:08: near silence, only a faint cold room tone. At 0:08 exactly: one single heavy low hit. 0:08 to 0:20: a slow low pulse that builds in volume. At 0:20 exactly: a cold, sharp string stab. 0:20 to 0:30: a dissonant, swelling string drone. 0:30 to 0:33: exactly three sharp, separate percussive hits. 0:33 to 0:36: abrupt cut to complete silence.",
+          "duration": 36 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "horror cue: near silence, one heavy low hit, building low pulse, cold string stab, dissonant swelling strings, three sharp hits, then abrupt silence, instrumental, no vocals, dark cold dry",
+          "lyrics": "[Intro - near silence]\n\n[Hit - one heavy low hit]\n\n[Build - slow building pulse]\n\n[Stab - cold string stab]\n\n[Swell - dissonant strings]\n\n[Hits - three sharp hits]\n\n[Outro - cut to silence]",
+          "instrumental": true, "vocal_language": "unknown",
+          "bpm": 60, "keyscale": "F# minor", "time_signature": "4", "duration": 36 } }
+      ]
+    },
+    {
+      "id": "B3a", "group": "B", "story": "E03", "kind": "ambience",
+      "title": "Odd length 23.5 s soft rain (ambience models)",
+      "brief": {
+        "description": "Length test: soft steady rain for exactly 23.5 seconds. Look at how long each file really is.",
+        "duration_s": 23.5
+      },
+      "shared": {
+        "text": "Soft steady rain falling on a window and a rooftop, with a faint distant rumble, quiet and constant.",
+        "duration": 23.5
+      },
+      "models": ["ltx-audio", "stable-audio-open", "stable-audio-3"]
+    },
+    {
+      "id": "B3b", "group": "B", "story": "E03", "kind": "score",
+      "title": "Odd length 23.5 s soft rainy-day piano (score models)",
+      "brief": {
+        "description": "Length test: a soft, slow, reflective piano piece for exactly 23.5 seconds, with a clear ending. Look at how long each file really is.",
+        "duration_s": 23.5
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Ambient, Genre: Neo-Classical, Instruments: Soft Piano, Warm Pad. A soft, slow, reflective piano piece at about 60 BPM with a warm pad, like a quiet rainy afternoon. Low energy, gentle, with a clear ending.",
+          "duration": 23.5 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "soft slow reflective solo piano with a warm pad, quiet rainy afternoon, gentle, low energy, clear ending, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 60, "keyscale": "C major", "time_signature": "4", "duration": 23.5 } }
+      ]
+    },
+    {
+      "id": "B4a", "group": "B", "story": "ARJUN", "kind": "ambience",
+      "title": "Max length: SAO 47 s and LTX 60 s",
+      "brief": {
+        "description": "Maximum length test: an empty hall at night. Stable Audio Open runs 47 s, LTX audio runs 60 s. Check coherence near the end.",
+        "duration_s": 60
+      },
+      "shared": {
+        "text": "A vast empty hall at night with a slowly evolving low wind, distant dripping water and faint creaks of old timber, gradually becoming more tense.",
+        "durations": { "stable-audio-open": 47, "ltx-audio": 60 }
+      },
+      "models": ["ltx-audio", "stable-audio-open"]
+    },
+    {
+      "id": "B4b", "group": "B", "story": "FL", "kind": "score",
+      "title": "Max length: Stable Audio 3 at 285 s",
+      "brief": {
+        "description": "Maximum length test: a 285 s slow evolving cinematic ambient piece on Stable Audio 3. Check for loops, drift, silence padding and the ending.",
+        "duration_s": 285
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Ambient, Genre: Cinematic, Instruments: Warm Pad, Soft Piano, Strings, Low Drone. A very long, slow, evolving cinematic ambient piece at about 60 BPM, close to four and a half minutes, that changes gradually through calm, wonder, tension and a gentle resolution without repeating a short loop. Spacious, soft dynamics, warm and wide.",
+          "duration": 285 } }
+      ]
+    },
+
+    {
+      "id": "C1", "group": "C", "story": "ARJUN", "kind": "score",
+      "title": "Arjun scenes 5 to 8 as ONE 129 s piece with several emotions",
+      "brief": {
+        "description": "Arjun scenes 5-8 as one 129 s piece. 0:00-0:36 tense, cold dread, frozen fear. 0:36-1:04 methodical, then shaken. 1:04-1:51 dread, terror, childlike menace, blackout cut at 1:51. 1:51-2:09 shock, grief, quiet tragedy.",
+        "mood_start": "tense and watchful", "mood_middle": "terror and menace", "mood_end": "quiet tragic horror",
+        "duration_s": 129, "under_narration": false
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. A 129 second horror piece at about 55 BPM that follows this exact timeline. 0:00 to 0:36: tense and watchful, becoming cold dread, ending in frozen fear with held strings. 0:36 to 1:04: methodical and quiet with a slow piano figure, ending in shaken disbelief. 1:04 to 1:51: sleepless dread, then rising terror with sub bass and strings, then a faint childlike music box that turns menacing, ending in a sudden total cut to silence at 1:51. 1:51 to 2:09: shock, then grief, then quiet tragic horror with a soft held drone and a single piano note, fading at 2:09.",
+          "duration": 129 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "dark ambient horror underscore, low drone, sparse piano, bowed strings, sub bass, faint music box, tense dread rising to terror, a sudden silence, then grief and quiet tragic horror, cold dry production, instrumental, no vocals",
+          "lyrics": "[Intro - tense and watchful]\n\n[Verse - cold dread]\n\n[Bridge - frozen fear]\n\n[Interlude - methodical piano]\n\n[Build - shaken disbelief]\n\n[Verse 2 - rising terror]\n\n[Chorus - childlike music box]\n\n[Break - sudden silence]\n\n[Outro - grief and quiet tragedy]",
+          "instrumental": true, "vocal_language": "unknown",
+          "bpm": 55, "keyscale": "A minor", "time_signature": "4", "duration": 129 } }
+      ]
+    },
+    {
+      "id": "C2a", "group": "C", "story": "ARJUN", "kind": "score",
+      "title": "Arjun scene 5 'The Voice' as its own 36 s audio",
+      "brief": {
+        "description": "Arjun scene 5 'The Voice' as a separate 36 s audio. Palette for all four scenes: low drone, sparse muted piano, bowed strings, sub bass, a faint music box.",
+        "mood_start": "tense, watchful silence", "mood_middle": "cold dread as the voice uses his mother's tone", "mood_end": "frozen fear",
+        "duration_s": 36
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. A 36 second horror cue at about 55 BPM. It starts as a tense, watchful near silence with a thin drone, becomes cold dread as a faint music box and soft bowed strings appear like a distant familiar voice, and ends in frozen fear with held strings and unanswered darkness.",
+          "duration": 36 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, tense watchful silence, cold dread, ending in frozen fear, cold dry production, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 55, "keyscale": "A minor", "time_signature": "4", "duration": 36 } }
+      ]
+    },
+    {
+      "id": "C2b", "group": "C", "story": "ARJUN", "kind": "score",
+      "title": "Arjun scene 6 'The Records' as its own 28 s audio",
+      "brief": {
+        "description": "Arjun scene 6 'The Records' as a separate 28 s audio. Same palette: low drone, sparse muted piano, bowed strings, sub bass, a faint music box.",
+        "mood_start": "wary and methodical", "mood_middle": "cold dread as the document names his mother", "mood_end": "shaken disbelief",
+        "duration_s": 28
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. A 28 second horror cue at about 55 BPM. It starts wary and methodical with a slow, quiet piano figure over a thin drone, turns to cold dread as bowed strings creep in, and ends in shaken disbelief with an unsettled, unresolved held chord.",
+          "duration": 28 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, wary methodical start, cold dread, ending in shaken disbelief, cold dry production, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 55, "keyscale": "A minor", "time_signature": "4", "duration": 28 } }
+      ]
+    },
+    {
+      "id": "C2c", "group": "C", "story": "ARJUN", "kind": "score",
+      "title": "Arjun scene 7 'The Staircase' as its own 47 s audio",
+      "brief": {
+        "description": "Arjun scene 7 'The Staircase' as a separate 47 s audio. Same palette: low drone, sparse muted piano, bowed strings, sub bass, a faint music box.",
+        "mood_start": "sleepless dread and cold curiosity", "mood_middle": "warning and rising terror", "mood_end": "sudden childlike menace and blackout",
+        "duration_s": 47
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. A 47 second horror cue at about 55 BPM. It starts with sleepless dread and a thin drone, grows into rising terror with sub bass and bowed strings, then a faint childlike music box turns menacing, and the cue ends with a sudden total cut to silence.",
+          "duration": 47 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, sleepless dread, rising terror, childlike menace, ending in a sudden cut to silence, cold dry production, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 55, "keyscale": "A minor", "time_signature": "4", "duration": 47 } }
+      ]
+    },
+    {
+      "id": "C2d", "group": "C", "story": "ARJUN", "kind": "score",
+      "title": "Arjun scene 8 'The Final Truth' as its own 18 s audio",
+      "brief": {
+        "description": "Arjun scene 8 'The Final Truth' as a separate 18 s audio. Same palette: low drone, sparse muted piano, bowed strings, sub bass, a faint music box.",
+        "mood_start": "disoriented, cold shock", "mood_middle": "grief and denial", "mood_end": "quiet tragic horror, resigned dread",
+        "duration_s": 18
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. An 18 second horror cue at about 55 BPM. It starts with disoriented cold shock, moves to grief with a slow mournful piano, and ends in quiet tragic horror with a soft held drone, a single piano note and a faint music box fading out.",
+          "duration": 18 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, cold shock, grief, ending in quiet tragic horror and a fade, cold dry production, instrumental, no vocals",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 55, "keyscale": "A minor", "time_signature": "4", "duration": 18 } }
+      ]
+    },
+    {
+      "id": "C3", "group": "C", "story": "E03", "kind": "score",
+      "title": "English03, 40 s with three emotions",
+      "brief": {
+        "description": "English03 grammar lesson, 40 s with three emotions. 0:00-0:14 cozy and silly. 0:14-0:30 mock-classroom tension. 0:30-0:40 comic deflation.",
+        "mood_start": "cozy and silly", "mood_middle": "mock-classroom tension", "mood_end": "comic deflation",
+        "duration_s": 40, "under_narration": false
+      },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Comedy, Genre: Quirky Pop, Instruments: Pizzicato Strings, Marimba, Clarinet, Tuba, Wood Block, Slide Whistle. A 40 second playful sitcom cue at about 110 BPM with three clear parts. 0:00 to 0:14: cozy and silly, a relaxed bouncy marimba and pizzicato groove. 0:14 to 0:30: mock-classroom tension, a stern, deadpan clarinet and tuba march with a comic suspense sting. 0:30 to 0:40: comic deflation, a sad slide whistle and a descending wah-wah, ending with a small, dry final note.",
+          "duration": 40 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "playful sitcom comedy cue, pizzicato strings, marimba, clarinet, tuba, wood block, slide whistle, cozy and silly then mock-serious classroom tension then a sad comic deflation, instrumental, no vocals",
+          "lyrics": "[Intro - cozy and silly]\n\n[Verse - bouncy marimba groove]\n\n[Bridge - mock tension march]\n\n[Outro - comic deflation]",
+          "instrumental": true, "vocal_language": "unknown",
+          "bpm": 110, "keyscale": "C major", "time_signature": "4", "duration": 40 } }
+      ]
+    },
+
+    {
+      "id": "D1", "group": "D", "story": "E03", "kind": "song",
+      "title": "English03 jingle, about 35 s, lyrics given",
+      "brief": {
+        "description": "English03: a playful 35 second jingle about 'fewer' and 'less', ending on the joke 'fewer chips, less happiness'.",
+        "mood_start": "playful", "mood_end": "cheeky", "duration_s": 35,
+        "language": "English", "voice_note": "bright, cheeky female voice",
+        "lyrics": "[Verse]\nCount them up, one, two, three\nChips and cars and friends and me\nIf you can count them, say it right\nFewer chips, that's the rule tonight\n\n[Chorus]\nFewer chips, fewer chips\nLess happiness, less happiness\nWater, sugar, patience too\nLess is what you say, it's true"
+      },
+      "models": [
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "playful quirky pop jingle, bouncy ukulele, handclaps, light drums, upbeat cheeky female vocal, bright and catchy, short comedic sing-along",
+          "lyrics": "[Verse]\nCount them up, one, two, three\nChips and cars and friends and me\nIf you can count them, say it right\nFewer chips, that's the rule tonight\n\n[Chorus - playful]\nFewer chips, fewer chips\nLess happiness, less happiness\nWater, sugar, patience too\nLess is what you say, it's true",
+          "instrumental": false, "vocal_language": "en",
+          "bpm": 110, "keyscale": "C major", "time_signature": "4", "duration": 35 } },
+        { "model": "yue2", "fields": {
+          "style": "English, playful quirky pop jingle, bouncy ukulele, handclaps, light drums, cheeky female vocal, bright catchy sing-along, 110 BPM",
+          "lyrics": "[Verse]\nCount them up, one, two, three\nChips and cars and friends and me\nIf you can count them, say it right\nFewer chips, that's the rule tonight\n\n[Chorus]\nFewer chips, fewer chips\nLess happiness, less happiness\nWater, sugar, patience too\nLess is what you say, it's true" } }
+      ]
+    },
+    {
+      "id": "D2", "group": "D", "story": "ARJUN", "kind": "song",
+      "title": "Arjun, the mother's lullaby in English",
+      "brief": {
+        "description": "Arjun: the lullaby his mother Meera sings. Slow, haunting, tender but unsettling, sung softly by a woman.",
+        "mood_start": "tender", "mood_end": "unsettling", "language": "English",
+        "voice_note": "soft, breathy, intimate female voice",
+        "lyrics": "[Verse 1]\nHush now, little one, the stairs are asleep\nThe fire's gone quiet, the shadows are deep\nClose up your eyes and don't look at the door\nYou've been here before, love, you've been here before\n\n[Chorus]\nSleep, sleep, don't remember\nSleep, sleep, till the ember\nTwenty years and the building will call\nSleep, my darling, forget it all\n\n[Verse 2]\nCount the soft footsteps over your head\nOne, two, three, now back to your bed\nMother is here and she's holding your hand\nDon't open the door, don't you understand\n\n[Outro]\nHush now, hush now, hush now"
+      },
+      "models": [
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "slow haunting lullaby, music box and soft detuned piano, breathy intimate female vocal, eerie, tender but unsettling, sparse, dark, cold reverb",
+          "lyrics": "[Verse 1]\nHush now, little one, the stairs are asleep\nThe fire's gone quiet, the shadows are deep\nClose up your eyes and don't look at the door\nYou've been here before, love, you've been here before\n\n[Chorus - soft]\nSleep, sleep, don't remember\nSleep, sleep, till the ember\nTwenty years and the building will call\nSleep, my darling, forget it all\n\n[Verse 2]\nCount the soft footsteps over your head\nOne, two, three, now back to your bed\nMother is here and she's holding your hand\nDon't open the door, don't you understand\n\n[Outro]\nHush now, hush now, hush now",
+          "instrumental": false, "vocal_language": "en",
+          "bpm": 60, "keyscale": "A minor", "time_signature": "3", "duration": null } },
+        { "model": "yue2", "fields": {
+          "style": "English, slow haunting lullaby, music box, soft piano, breathy intimate female vocal, eerie and tender, sparse, 60 BPM",
+          "lyrics": "[Verse]\nHush now, little one, the stairs are asleep\nThe fire's gone quiet, the shadows are deep\nClose up your eyes and don't look at the door\nYou've been here before, love, you've been here before\n\n[Chorus]\nSleep, sleep, don't remember\nSleep, sleep, till the ember\nTwenty years and the building will call\nSleep, my darling, forget it all\n\n[Verse]\nCount the soft footsteps over your head\nOne, two, three, now back to your bed\nMother is here and she's holding your hand\nDon't open the door, don't you understand\n\n[Outro]\nHush now, hush now, hush now" } }
+      ]
+    },
+    {
+      "id": "D3", "group": "D", "story": "ARJUN", "kind": "song",
+      "title": "Arjun, the lullaby in Hindi (ACE only)",
+      "brief": {
+        "description": "Arjun: the same lullaby sung in Hindi by his mother. Slow, haunting, tender but unsettling. The Hindi lyrics were drafted by the assistant, so check the wording as well as the pronunciation.",
+        "mood_start": "tender", "mood_end": "unsettling", "language": "Hindi",
+        "voice_note": "soft, breathy, intimate female voice",
+        "lyrics": "[Verse 1]\nसो जा मेरे लाल, रात बहुत गहरी है\nसीढ़ियाँ ऊपर की, चुपचाप ठहरी हैं\nआँखें तू बंद कर ले, दरवाज़ा मत खोलना\nमाँ यहीं बैठी है, डरकर मत बोलना\n\n[Chorus - soft]\nसो जा, सो जा, भूल जा सब\nरात ढलेगी, आएगी सुबह कब\n\n[Outro]\nसो जा, सो जा"
+      },
+      "models": [
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "slow haunting Hindi lullaby, music box and soft detuned piano, breathy intimate female vocal, eerie, tender but unsettling, sparse, dark, cold reverb",
+          "lyrics": "[Verse 1]\nसो जा मेरे लाल, रात बहुत गहरी है\nसीढ़ियाँ ऊपर की, चुपचाप ठहरी हैं\nआँखें तू बंद कर ले, दरवाज़ा मत खोलना\nमाँ यहीं बैठी है, डरकर मत बोलना\n\n[Chorus - soft]\nसो जा, सो जा, भूल जा सब\nरात ढलेगी, आएगी सुबह कब\n\n[Outro]\nसो जा, सो जा",
+          "instrumental": false, "vocal_language": "hi",
+          "bpm": 60, "keyscale": "A minor", "time_signature": "3", "duration": null } }
+      ]
+    },
+    {
+      "id": "D4a", "group": "D", "story": "FL", "kind": "song",
+      "title": "First Light anthem, ACE with tempo, key and length fixed",
+      "brief": {
+        "description": "The First Light anthem, ACE with 84 BPM, D major, 4/4 and 75 s fixed. A quiet verse, then a soaring chorus.",
+        "mood_start": "quiet and reflective", "mood_end": "soaring awe", "duration_s": 75,
+        "language": "English", "voice_note": "emotive female voice",
+        "lyrics": "[Verse]\nBefore the stars had learned to burn\nThe whole sky was a fire\nA light that could not find its way\nKept falling in the wire\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light\n\n[Verse 2]\nThe galaxies were born and grew\nThe planets learned to turn\nAnd still you crossed the empty dark\nFor us to see and learn\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light"
+      },
+      "models": [
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "cinematic indie pop anthem, quiet reflective piano and soft pads in the verse growing into a soaring chorus with full strings, driving drums and big layered vocals, emotive female lead vocal, uplifting cosmic wonder and awe",
+          "lyrics": "[Verse]\nBefore the stars had learned to burn\nThe whole sky was a fire\nA light that could not find its way\nKept falling in the wire\n\n[Chorus - soaring]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light\n\n[Verse 2]\nThe galaxies were born and grew\nThe planets learned to turn\nAnd still you crossed the empty dark\nFor us to see and learn\n\n[Chorus - soaring]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light",
+          "instrumental": false, "vocal_language": "en",
+          "bpm": 84, "keyscale": "D major", "time_signature": "4", "duration": 75 } }
+      ]
+    },
+    {
+      "id": "D4b", "group": "D", "story": "FL", "kind": "song",
+      "title": "First Light anthem, ACE plans tempo, key and length itself",
+      "brief": {
+        "description": "The First Light anthem, ACE with nothing fixed (its planner chooses tempo, key and length). A quiet verse, then a soaring chorus.",
+        "mood_start": "quiet and reflective", "mood_end": "soaring awe",
+        "language": "English", "voice_note": "emotive female voice",
+        "lyrics": "[Verse]\nBefore the stars had learned to burn\nThe whole sky was a fire\nA light that could not find its way\nKept falling in the wire\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light\n\n[Verse 2]\nThe galaxies were born and grew\nThe planets learned to turn\nAnd still you crossed the empty dark\nFor us to see and learn\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light"
+      },
+      "models": [
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "cinematic indie pop anthem, quiet reflective piano and soft pads in the verse growing into a soaring chorus with full strings, driving drums and big layered vocals, emotive female lead vocal, uplifting cosmic wonder and awe",
+          "lyrics": "[Verse]\nBefore the stars had learned to burn\nThe whole sky was a fire\nA light that could not find its way\nKept falling in the wire\n\n[Chorus - soaring]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light\n\n[Verse 2]\nThe galaxies were born and grew\nThe planets learned to turn\nAnd still you crossed the empty dark\nFor us to see and learn\n\n[Chorus - soaring]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light",
+          "instrumental": false, "vocal_language": "en",
+          "bpm": null, "keyscale": "", "time_signature": "", "duration": null } }
+      ]
+    },
+    {
+      "id": "D4c", "group": "D", "story": "FL", "kind": "song",
+      "title": "First Light anthem, YuE2 with 84 BPM in the style",
+      "brief": {
+        "description": "The First Light anthem, YuE2 with '84 BPM' written in the style line (it has no tempo field). A quiet verse, then a soaring chorus.",
+        "mood_start": "quiet and reflective", "mood_end": "soaring awe",
+        "language": "English", "voice_note": "emotive female voice",
+        "lyrics": "[Verse]\nBefore the stars had learned to burn\nThe whole sky was a fire\nA light that could not find its way\nKept falling in the wire\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light\n\n[Verse]\nThe galaxies were born and grew\nThe planets learned to turn\nAnd still you crossed the empty dark\nFor us to see and learn\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light"
+      },
+      "models": [
+        { "model": "yue2", "fields": {
+          "style": "English, cinematic indie pop anthem, quiet reflective piano verse growing into a soaring chorus, strings and big drums, emotive female lead vocal, wonder and awe, 84 BPM",
+          "lyrics": "[Verse]\nBefore the stars had learned to burn\nThe whole sky was a fire\nA light that could not find its way\nKept falling in the wire\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light\n\n[Verse]\nThe galaxies were born and grew\nThe planets learned to turn\nAnd still you crossed the empty dark\nFor us to see and learn\n\n[Chorus]\nOh, travel on, ancient light\nThirteen billion years in flight\nYou carry the first dawn to me\nThe oldest light, the oldest light" } }
+      ]
+    },
+    {
+      "id": "D5", "group": "D", "story": "6F", "kind": "song",
+      "title": "6Fingers counting song, 30 s",
+      "brief": {
+        "description": "6Fingers: a cheeky 30 second counting song, 'one, two, three, four, five... six?', that ends on the joke about AI drawing a sixth finger.",
+        "mood_start": "bouncy", "mood_end": "cheeky twist", "duration_s": 30,
+        "language": "English", "voice_note": "bright, playful voice",
+        "lyrics": "[Verse]\nOne, two, three, four, five\nCount the fingers, hands alive\n\n[Chorus]\nWait, what's this, a sixth one there?\nSix, six, six, it's everywhere\nAI only guesses hands\nIt never counts, it just expands"
+      },
+      "models": [
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "cheeky educational kids-pop counting song, bouncy piano, handclaps, bright playful vocal, comedic twist at the end",
+          "lyrics": "[Verse]\nOne, two, three, four, five\nCount the fingers, hands alive\n\n[Chorus - playful]\nWait, what's this, a sixth one there?\nSix, six, six, it's everywhere\nAI only guesses hands\nIt never counts, it just expands",
+          "instrumental": false, "vocal_language": "en",
+          "bpm": 120, "keyscale": "G major", "time_signature": "4", "duration": 30 } },
+        { "model": "yue2", "fields": {
+          "style": "English, cheeky educational kids pop counting song, bouncy piano, handclaps, bright playful vocal, comedic twist at the end, 120 BPM",
+          "lyrics": "[Verse]\nOne, two, three, four, five\nCount the fingers, hands alive\n\n[Chorus]\nWait, what's this, a sixth one there?\nSix, six, six, it's everywhere\nAI only guesses hands\nIt never counts, it just expands" } }
+      ]
+    },
+
+    {
+      "id": "E1", "group": "E", "story": "ARJUN", "kind": "sfx",
+      "title": "Footsteps on the ceiling: thump, pause, thump, pause, three quick",
+      "brief": { "description": "Arjun: footsteps on the ceiling above his bed. One thump, a pause, another thump, a pause, then three quick thumps in a row. 8 s.", "place": "a bedroom, sound coming from the ceiling", "duration_s": 8 },
+      "shared": { "text": "Heavy footsteps thumping on a wooden ceiling above a quiet bedroom: one thump, a pause, another thump, a pause, then three quick thumps in a row, dull and muffled, with a faint creak of boards.", "duration": 8 },
+      "models": ["stable-audio-open", "stable-audio-3", "ltx-audio"]
+    },
+    {
+      "id": "E2", "group": "E", "story": "ARJUN", "kind": "sfx",
+      "title": "Exactly three knocks, 4 s (also the smoke test)",
+      "brief": { "description": "Arjun: exactly three slow knocks on wood right above his head. 4 s. Count the knocks.", "place": "a bedroom, right above the bed", "duration_s": 4 },
+      "shared": { "text": "Exactly three slow, heavy knocks on a wooden surface, evenly spaced with silence between them, dull and close.", "duration": 4 },
+      "models": ["stable-audio-open", "stable-audio-3", "ltx-audio"]
+    },
+    {
+      "id": "E3", "group": "E", "story": "ARJUN", "kind": "sfx",
+      "title": "Heavy object dragged across the ceiling, 6 s",
+      "brief": { "description": "Arjun: something heavy being dragged across the ceiling above the bedroom. 6 s.", "place": "a bedroom, sound coming from the ceiling", "duration_s": 6 },
+      "shared": { "text": "A heavy object dragged slowly across a wooden ceiling above, a long rough scraping drag with a low rumble.", "duration": 6 },
+      "models": ["stable-audio-open", "stable-audio-3", "ltx-audio"]
+    },
+    {
+      "id": "E4", "group": "E", "story": "ARJUN", "kind": "sfx",
+      "title": "Phone rings twice, then static, 8 s",
+      "brief": { "description": "Arjun: a phone rings twice, he answers, then there is only static hiss. 8 s. Check the order.", "duration_s": 8 },
+      "shared": { "text": "A phone rings twice with a classic ring tone, then the call connects to a long burst of crackling static hiss.", "negative": "Low quality, music, speech, voices.", "duration": 8 },
+      "models": ["stable-audio-open", "stable-audio-3", "ltx-audio"]
+    },
+    {
+      "id": "E5", "group": "E", "story": "E03", "kind": "sfx",
+      "title": "Comic 'dun dun' sting, 3 s",
+      "brief": { "description": "English03: a cartoon comic 'dun dun' sting when Pooja freezes. 3 s.", "duration_s": 3 },
+      "shared": { "text": "A cartoon comic sting: two short, low, dramatic 'dun dun' orchestral hits, then a brief silence.", "negative": "Low quality, speech, voices, noise.", "duration": 3 },
+      "models": ["stable-audio-open", "stable-audio-3", "ltx-audio"]
+    },
+    {
+      "id": "E6", "group": "E", "story": "E03", "kind": "sfx",
+      "title": "Squeaky marker, then a loud chip crunch, 5 s",
+      "brief": { "description": "English03: a squeaky marker writing on a whiteboard, then a loud chip crunch. 5 s. Check the order.", "place": "a living room", "duration_s": 5 },
+      "shared": { "text": "A squeaky marker writing big letters on a whiteboard, then a loud crunch of someone biting a potato chip.", "duration": 5 },
+      "models": ["stable-audio-open", "stable-audio-3", "ltx-audio"]
+    },
+
+    {
+      "id": "F1", "group": "F", "story": "ARJUN", "kind": "ambience",
+      "title": "Arjun's bedroom at 2:17 AM, 20 s, under narration",
+      "brief": { "description": "Arjun's bedroom at 2:17 AM. Cold, uneasy room tone. 20 s, to sit under a narration.", "place": "a bare apartment bedroom at night", "mood_start": "uneasy", "duration_s": 20, "under_narration": true },
+      "shared": { "text": "A silent bedroom at 2:17 AM: a very faint low room tone, a distant hum of the city through a thin window, an occasional soft creak of old wood and the muted tick of a wall clock, cold and uneasy.", "duration": 20 },
+      "models": ["ltx-audio", "stable-audio-open", "stable-audio-3"]
+    },
+    {
+      "id": "F2", "group": "F", "story": "E03", "kind": "ambience",
+      "title": "English03 sunny living room, 20 s",
+      "brief": { "description": "English03: a sunny living room in the late morning. Cheerful and calm. 20 s.", "place": "a bright living room", "mood_start": "cheerful", "duration_s": 20 },
+      "shared": { "text": "A sunny living room in the late morning: soft warm room tone, birds chirping outside an open window, a faint distant street murmur, a clock ticking gently, cheerful and calm.", "duration": 20 },
+      "models": ["ltx-audio", "stable-audio-open", "stable-audio-3"]
+    },
+    {
+      "id": "F3", "group": "F", "story": "ARJUN", "kind": "ambience",
+      "title": "Burning building outside the window, growing over 30 s",
+      "brief": { "description": "Arjun: a burning building seen from the window, the sound growing over 30 s. Check whether it changes over time.", "place": "outside a bedroom window", "mood_start": "distant", "mood_end": "overwhelming", "duration_s": 30 },
+      "shared": { "text": "A burning building heard from a bedroom window: a distant low fire roar that slowly grows louder and closer, crackling timber, glass popping, far-off sirens and shouting rising over thirty seconds.", "duration": 30 },
+      "models": ["ltx-audio", "stable-audio-open", "stable-audio-3"]
+    },
+    {
+      "id": "F4", "group": "F", "story": "FL", "kind": "ambience",
+      "title": "First Light, abstract deep-space hum, 30 s",
+      "brief": { "description": "The First Light: an abstract deep-space atmosphere, not literal. 30 s. Check that it feels abstract.", "mood_start": "vast and empty", "duration_s": 30 },
+      "shared": { "text": "An abstract deep-space atmosphere: a slow, very low evolving hum with faint shimmering high overtones, wide and empty, with no recognisable earthly sounds.", "duration": 30 },
+      "models": ["ltx-audio", "stable-audio-open", "stable-audio-3"]
+    },
+
+    {
+      "id": "G1", "group": "G", "story": "ARJUN", "kind": "stem",
+      "title": "Arjun, solo music-box lullaby motif, 20 s",
+      "brief": { "description": "Arjun: a solo music box playing a slow, simple, haunting lullaby motif. 20 s. One instrument only.", "duration_s": 20 },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Instrument, Instruments: Music Box. A solo music box playing a slow, simple, haunting lullaby motif in a minor key at about 60 BPM, slightly detuned and fragile, alone with nothing else, no backing, no drums, no pads.",
+          "duration": 20 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "solo music box playing a slow simple haunting lullaby motif, minor key, slightly detuned, fragile, nothing else, instrumental, no vocals, no drums, no backing",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 60, "keyscale": "A minor", "time_signature": "3", "duration": 20 } }
+      ]
+    },
+    {
+      "id": "G2", "group": "G", "story": "FL", "kind": "stem",
+      "title": "First Light, solo piano of wonder, 30 s",
+      "brief": { "description": "The First Light: a solo piano playing a gentle, wondering melody. 30 s. One instrument only.", "mood_start": "wonder", "duration_s": 30 },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Instrument, Instruments: Piano. A solo grand piano playing a gentle, wondering, slowly rising melody at about 70 BPM in a major key, soft and spacious, alone with nothing else, no strings, no drums, no pads.",
+          "duration": 30 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "solo grand piano playing a gentle wondering slowly rising melody, major key, soft and spacious, nothing else, instrumental, no vocals, no drums, no strings, no backing",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 70, "keyscale": "D major", "time_signature": "4", "duration": 30 } }
+      ]
+    },
+    {
+      "id": "G3", "group": "G", "story": "E03", "kind": "stem",
+      "title": "English03, solo pizzicato strings, sneaky, 15 s",
+      "brief": { "description": "English03: solo pizzicato strings playing a sneaky, tiptoeing figure. 15 s. One instrument only.", "mood_start": "sneaky", "duration_s": 15 },
+      "models": [
+        { "model": "stable-audio-3", "fields": {
+          "prompt": "TrackType: Instrument, Instruments: Pizzicato Strings. Solo pizzicato strings playing a sneaky, tiptoeing comic figure at about 120 BPM in a minor key, light and staccato, alone with nothing else, no drums, no bass, no pads.",
+          "duration": 15 } },
+        { "model": "ace-step-1.5", "fields": {
+          "caption": "solo pizzicato strings playing a sneaky tiptoeing comic figure, minor key, light and staccato, nothing else, instrumental, no vocals, no drums, no backing",
+          "lyrics": "[Instrumental]", "instrumental": true, "vocal_language": "unknown",
+          "bpm": 120, "keyscale": "C minor", "time_signature": "4", "duration": 15 } }
+      ]
+    },
+
+    {
+      "id": "H1a", "group": "H", "story": "FL", "kind": "score",
+      "title": "Seeds: the A2 fields on Stable Audio 3, three takes (seeds 1718 to 1720)",
+      "brief_from": "A2",
+      "models": [{ "model": "stable-audio-3", "fields_from": "A2" }],
+      "seed": 1718, "variants": 3
+    },
+    {
+      "id": "H1b", "group": "H", "story": "FL", "kind": "score",
+      "title": "Repeat: B1 on Stable Audio 3 again with seed 1717 (should match the first B1 run)",
+      "brief_from": "B1",
+      "models": [{ "model": "stable-audio-3", "fields_from": "B1" }],
+      "seed": 1717
+    },
+    {
+      "id": "H2", "group": "H", "story": "FL", "kind": "score",
+      "title": "AI prompt writer drafts the A2 brief (compare with hand-written A2)",
+      "brief_from": "A2",
+      "draft": true,
+      "models": [{ "model": "stable-audio-3" }, { "model": "ace-step-1.5" }]
+    },
+    {
+      "id": "H3", "group": "H", "story": "ARJUN", "kind": "song",
+      "title": "AI prompt writer writes the lullaby lyrics from a theme (compare with D2)",
+      "brief_from": "D2",
+      "brief_patch": {
+        "lyrics": null,
+        "lyrics_theme": "A mother softly sings her son to sleep, begging him not to open the door, and hiding that he died in a fire twenty years ago. Tender on the surface, unsettling underneath."
+      },
+      "draft": true,
+      "models": [{ "model": "ace-step-1.5" }, { "model": "yue2" }]
+    }
+  ]
+}

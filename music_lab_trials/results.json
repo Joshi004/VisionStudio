@@ -1,0 +1,1237 @@
+{
+  "E2": {
+    "title": "Exactly three knocks, 4 s (also the smoke test)",
+    "triggered_at": "2026-10-23T13:43:56+00:00",
+    "group_key": "55adb9caf8d499af",
+    "runs": [
+      {
+        "id": 4,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3067,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 4.0,
+        "url": "/media/lab/9b9e1ccc216249f8a4589448d34b1264.flac"
+      },
+      {
+        "id": 5,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3068,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 4.0,
+        "url": "/media/lab/9a2f8901fa9645c18b9ba6bd84fae1cd.flac"
+      },
+      {
+        "id": 6,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3069,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 4.01,
+        "url": "/media/lab/becd1eb793e44c1c9b7af787143b837b.wav"
+      }
+    ],
+    "drafts": {},
+    "earlier_attempts": [
+      {
+        "group_key": "47b4378ba79414bc",
+        "runs": [
+          {
+            "id": 1,
+            "model": "stable-audio-open",
+            "seed": 1717,
+            "job_id": 3064,
+            "status": "failed",
+            "error": "The GPU server reported an error: The model worker failed to start 3 times in a row. Last log lines:\nLoading Stable Audio Open 1.0 from /home/naresh/vision-data/weights/stable_audio_open/model\nTraceback (most recent call last):\n  File \"/home/naresh/vision-models/models/stable_audio_open/runner/worker.py\", line 63, in <module>\n    sys.exit(main())\n  File \"/home/naresh/vision-models/models/stable_audio_open/runner/worker.py\", line 42, in main\n    pipe = run_generate.load_pipeline(worker_args.model_dir)\n  File \"/home/naresh/vision-models/models/stable_audio_open/runner/run_generate.py\", line 105, in load_pipeline\n    config = json.loads((model_dir / \"model\" / \"model_config.json\").read_text())\n  File \"/home/naresh/.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"/home/naresh/.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nFileNotFoundError: [Errno 2] No such file or directory: '/home/naresh/vision-data/weights/stable_audio_open/model/model_config.json'",
+            "duration_s": null,
+            "url": null
+          },
+          {
+            "id": 2,
+            "model": "stable-audio-3",
+            "seed": 1717,
+            "job_id": 3065,
+            "status": "failed",
+            "error": "The GPU server reported an error: The model worker failed to start 3 times in a row. Last log lines:\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/naresh/vision-data/envs/stable_audio3/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py\", line 89, in _inner_fn\n    return fn(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"/home/naresh/vision-data/envs/stable_audio3/lib/python3.12/site-packages/huggingface_hub/utils/_http.py\", line 276, in _inner\n    return fn(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"/home/naresh/vision-data/envs/stable_audio3/lib/python3.12/site-packages/huggingface_hub/file_download.py\", line 1047, in hf_hub_download\n    return _hf_hub_download_to_cache_dir(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/naresh/vision-data/envs/stable_audio3/lib/python3.12/site-packages/huggingface_hub/file_download.py\", line 1194, in _hf_hub_download_to_cache_dir\n    _raise_on_head_call_error(head_call_error, force_download, local_files_only)\n  File \"/home/naresh/vision-data/envs/stable_audio3/lib/python3.12/site-packages/huggingface_hub/file_download.py\", line 1961, in _raise_on_head_call_error\n    raise LocalEntryNotFoundError(\nhuggingface_hub.errors.LocalEntryNotFoundError: An error happened while trying to locate the file on the Hub and we cannot find the requested files in the local cache. Please check your connection and try again or make sure your Internet connection is on.",
+            "duration_s": null,
+            "url": null
+          },
+          {
+            "id": 3,
+            "model": "ltx-audio",
+            "seed": 1717,
+            "job_id": 3066,
+            "status": "succeeded",
+            "error": null,
+            "duration_s": 4.01,
+            "url": "/media/lab/752f1ed7a4c3441f868d1abacd5e1ecb.wav"
+          }
+        ]
+      }
+    ]
+  },
+  "A1": {
+    "title": "6Fingers, 30 s curious playful score under narration",
+    "triggered_at": "2026-10-23T13:48:33+00:00",
+    "group_key": "1e198e1bf6d966a5",
+    "runs": [
+      {
+        "id": 7,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3070,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/3ae10c11634d49f6b3619ba9d0dcbe77.flac"
+      },
+      {
+        "id": 8,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3071,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/59e52dd2c21d448fbbd376e38c97160c.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "A2": {
+    "title": "First Light, 60 s wonder rising to awe under narration",
+    "triggered_at": "2026-10-23T13:48:33+00:00",
+    "group_key": "46c7f6f06ef73389",
+    "runs": [
+      {
+        "id": 9,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3072,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/50edf8dbfab34db09e45f88bcad353a2.flac"
+      },
+      {
+        "id": 10,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3073,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/fcdac5e73f424d3a9f219723d5d44e65.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "A4": {
+    "title": "Arjun whole story, 180 s escalating dread",
+    "triggered_at": "2026-10-23T13:48:33+00:00",
+    "group_key": "21726df46157d2bc",
+    "runs": [
+      {
+        "id": 11,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3074,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 180.0,
+        "url": "/media/lab/5369a18afe0441f1946ebcf1424fc8ba.flac"
+      },
+      {
+        "id": 12,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3075,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 180.0,
+        "url": "/media/lab/e17830cd86ef48bd9d705c7921001472.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "B1": {
+    "title": "First Light, 60 s timestamp cues",
+    "triggered_at": "2026-10-23T13:54:08+00:00",
+    "group_key": "460a2ef9f1350175",
+    "runs": [
+      {
+        "id": 13,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3076,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/17edbd43a4534e9ebcea5bc458a697c6.flac"
+      },
+      {
+        "id": 14,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3077,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/5275c5bd1219466ea093dce2edf5dd17.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "B2": {
+    "title": "Arjun, The Voice scene, 36 s cues matched to the narration",
+    "triggered_at": "2026-10-23T13:54:08+00:00",
+    "group_key": "dc3b421e7110ced1",
+    "runs": [
+      {
+        "id": 15,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3078,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 36.0,
+        "url": "/media/lab/a63ad0d926634ebd8098517bf073bad7.flac"
+      },
+      {
+        "id": 16,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3079,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 36.0,
+        "url": "/media/lab/d8f305043bfa4fc88cbc92fc146cbd03.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "B3a": {
+    "title": "Odd length 23.5 s soft rain (ambience models)",
+    "triggered_at": "2026-10-23T13:54:08+00:00",
+    "group_key": "eb1e53a03ed2294d",
+    "runs": [
+      {
+        "id": 17,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3080,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 23.33,
+        "url": "/media/lab/25a2f1a466ad4c1fa2f2d66f0d5e542a.wav"
+      },
+      {
+        "id": 18,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3081,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 23.5,
+        "url": "/media/lab/f80556efc1cd47bf8202ec007a109ebf.flac"
+      },
+      {
+        "id": 19,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3082,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 23.5,
+        "url": "/media/lab/e7d8e1010df54334b822cc1a347a62c6.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "B3b": {
+    "title": "Odd length 23.5 s soft rainy-day piano (score models)",
+    "triggered_at": "2026-10-23T13:54:08+00:00",
+    "group_key": "292cfc0f603f4933",
+    "runs": [
+      {
+        "id": 20,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3083,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 23.5,
+        "url": "/media/lab/20d34b610c074456a4cdf91d28f42ea9.flac"
+      },
+      {
+        "id": 21,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3084,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 23.48,
+        "url": "/media/lab/857d3fe5b6644c7694fa9e51a6c67ac1.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "B4a": {
+    "title": "Max length: SAO 47 s and LTX 60 s",
+    "triggered_at": "2026-10-23T13:54:08+00:00",
+    "group_key": "5fd6a9f5508d1783",
+    "runs": [
+      {
+        "id": 22,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3085,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.01,
+        "url": "/media/lab/b88bc079ced94b29ae2186ead03af5a5.wav"
+      },
+      {
+        "id": 23,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3086,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 47.0,
+        "url": "/media/lab/35a2e1df77774dc083227f39d9f5a50a.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "B4b": {
+    "title": "Max length: Stable Audio 3 at 285 s",
+    "triggered_at": "2026-10-23T13:54:08+00:00",
+    "group_key": "24150e76e52f5b2f",
+    "runs": [
+      {
+        "id": 24,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3087,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 285.0,
+        "url": "/media/lab/d6a54379bcbe477884d57aee54b767a1.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "C1": {
+    "title": "Arjun scenes 5 to 8 as ONE 129 s piece with several emotions",
+    "triggered_at": "2026-10-23T14:01:54+00:00",
+    "group_key": "53e47c9547e1edba",
+    "runs": [
+      {
+        "id": 25,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3088,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 129.0,
+        "url": "/media/lab/fc2613ef54c34de3b4e4f0f574ba6b01.flac"
+      },
+      {
+        "id": 26,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3089,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 129.0,
+        "url": "/media/lab/e57598a57e894812a0c35c84d43a8d34.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "C2a": {
+    "title": "Arjun scene 5 'The Voice' as its own 36 s audio",
+    "triggered_at": "2026-10-23T14:01:54+00:00",
+    "group_key": "c7ee17db135ac803",
+    "runs": [
+      {
+        "id": 27,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3090,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 36.0,
+        "url": "/media/lab/9c3ff4e074ab4a11b8437d6d4aa79898.flac"
+      },
+      {
+        "id": 28,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3091,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 36.0,
+        "url": "/media/lab/b74e66581388454a922572ed0d64b3a7.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "C2b": {
+    "title": "Arjun scene 6 'The Records' as its own 28 s audio",
+    "triggered_at": "2026-10-23T14:01:54+00:00",
+    "group_key": "5c2e9bf2670141e5",
+    "runs": [
+      {
+        "id": 29,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3092,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 28.0,
+        "url": "/media/lab/6790f8e28c06434e959b86d98456a313.flac"
+      },
+      {
+        "id": 30,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3093,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 28.0,
+        "url": "/media/lab/a75d3772b2d44b46beb8393cfd1db59d.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "C2c": {
+    "title": "Arjun scene 7 'The Staircase' as its own 47 s audio",
+    "triggered_at": "2026-10-23T14:01:54+00:00",
+    "group_key": "b009df9591822547",
+    "runs": [
+      {
+        "id": 31,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3094,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 47.0,
+        "url": "/media/lab/a1750bf1803646e8b16377d0ce297695.flac"
+      },
+      {
+        "id": 32,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3095,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 47.0,
+        "url": "/media/lab/649ddac320f844c7bb2606952119f828.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "C2d": {
+    "title": "Arjun scene 8 'The Final Truth' as its own 18 s audio",
+    "triggered_at": "2026-10-23T14:01:54+00:00",
+    "group_key": "a3e9801974d43047",
+    "runs": [
+      {
+        "id": 33,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3096,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 18.0,
+        "url": "/media/lab/9a2550295f18484a81e0d2bf6eb1b593.flac"
+      },
+      {
+        "id": 34,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3097,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 18.0,
+        "url": "/media/lab/a2d29784a20f4734b8593312ea73832c.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "C3": {
+    "title": "English03, 40 s with three emotions",
+    "triggered_at": "2026-10-23T14:01:54+00:00",
+    "group_key": "791353a7c7e39368",
+    "runs": [
+      {
+        "id": 35,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3098,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 40.0,
+        "url": "/media/lab/5defb69a5eee461e8cf96be531e2a4f3.flac"
+      },
+      {
+        "id": 36,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3099,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 40.0,
+        "url": "/media/lab/4f63cea5808b40acb0e7aeff6acaddc6.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "D1": {
+    "title": "English03 jingle, about 35 s, lyrics given",
+    "triggered_at": "2026-10-23T14:03:07+00:00",
+    "group_key": "b24eeb43c734b9fa",
+    "runs": [
+      {
+        "id": 37,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3100,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 35.0,
+        "url": "/media/lab/fa4f7eb6a8974286a981641511a06123.flac"
+      },
+      {
+        "id": 38,
+        "model": "yue2",
+        "seed": 1717,
+        "job_id": 3101,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 21.318667,
+        "url": "/media/lab/e2b6b414888744189e41a1402c49a968.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "D2": {
+    "title": "Arjun, the mother's lullaby in English",
+    "triggered_at": "2026-10-23T14:03:07+00:00",
+    "group_key": "7ae8d2341f9901a3",
+    "runs": [
+      {
+        "id": 39,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3102,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 95.0,
+        "url": "/media/lab/14e2e11f07ae4c03963dbab9f39d06da.flac"
+      },
+      {
+        "id": 40,
+        "model": "yue2",
+        "seed": 1717,
+        "job_id": 3103,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 115.838667,
+        "url": "/media/lab/8a44f6f6b0a24c9f94d535dcb9d64d0f.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "D3": {
+    "title": "Arjun, the lullaby in Hindi (ACE only)",
+    "triggered_at": "2026-10-23T14:03:07+00:00",
+    "group_key": "7a6ffe0c4b96ce20",
+    "runs": [
+      {
+        "id": 41,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3104,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 80.0,
+        "url": "/media/lab/6f1348c7c91c4b72aea870026376ed4f.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "D4a": {
+    "title": "First Light anthem, ACE with tempo, key and length fixed",
+    "triggered_at": "2026-10-23T14:03:07+00:00",
+    "group_key": "2870b2ce7b9d15aa",
+    "runs": [
+      {
+        "id": 42,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3105,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 75.0,
+        "url": "/media/lab/e93eb1924cfe44fa8f576b5eec269598.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "D4b": {
+    "title": "First Light anthem, ACE plans tempo, key and length itself",
+    "triggered_at": "2026-10-23T14:03:07+00:00",
+    "group_key": "b1d2bee52958c69e",
+    "runs": [
+      {
+        "id": 43,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3106,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 170.0,
+        "url": "/media/lab/72d73dfffee14005bd27e4d887c0c8b1.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "D4c": {
+    "title": "First Light anthem, YuE2 with 84 BPM in the style",
+    "triggered_at": "2026-10-23T14:03:07+00:00",
+    "group_key": "7fc9f6992c1fb5b0",
+    "runs": [
+      {
+        "id": 44,
+        "model": "yue2",
+        "seed": 1717,
+        "job_id": 3107,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 133.598667,
+        "url": "/media/lab/3b753ec64e754188968f7b062095ab62.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "D5": {
+    "title": "6Fingers counting song, 30 s",
+    "triggered_at": "2026-10-23T14:03:07+00:00",
+    "group_key": "eaf72f97d78f9212",
+    "runs": [
+      {
+        "id": 45,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3108,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/e3435043b812492380f8ae44ec38b758.flac"
+      },
+      {
+        "id": 46,
+        "model": "yue2",
+        "seed": 1717,
+        "job_id": 3109,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 27.518667,
+        "url": "/media/lab/9ed6f529c8124e7f96d583f9b30a2e29.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "E1": {
+    "title": "Footsteps on the ceiling: thump, pause, thump, pause, three quick",
+    "triggered_at": "2026-10-23T14:05:41+00:00",
+    "group_key": "633164bdae61790e",
+    "runs": [
+      {
+        "id": 47,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3110,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 8.0,
+        "url": "/media/lab/f7bb4311e51144c88cc48b16cb01204b.flac"
+      },
+      {
+        "id": 48,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3111,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 8.0,
+        "url": "/media/lab/fad3cdbfd8d94e70b21f70ff3791e011.flac"
+      },
+      {
+        "id": 49,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3112,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 8.01,
+        "url": "/media/lab/6c7c57f7d8204cd3930853ce47265a02.wav"
+      }
+    ],
+    "drafts": {}
+  },
+  "E3": {
+    "title": "Heavy object dragged across the ceiling, 6 s",
+    "triggered_at": "2026-10-23T14:05:41+00:00",
+    "group_key": "a177ce177becd583",
+    "runs": [
+      {
+        "id": 50,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3113,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 6.0,
+        "url": "/media/lab/fa5621a88def42f9823f1c0753e2552c.flac"
+      },
+      {
+        "id": 51,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3114,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 6.0,
+        "url": "/media/lab/4ba7d7449e744c518ab31f85198c1753.flac"
+      },
+      {
+        "id": 52,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3115,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 6.01,
+        "url": "/media/lab/3b75407602ed42b28d8604ce7fd37352.wav"
+      }
+    ],
+    "drafts": {}
+  },
+  "E4": {
+    "title": "Phone rings twice, then static, 8 s",
+    "triggered_at": "2026-10-23T14:05:41+00:00",
+    "group_key": "ccc1c7ba2c01ea74",
+    "runs": [
+      {
+        "id": 53,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3116,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 8.0,
+        "url": "/media/lab/76b2086185ea43158100e5dd42ed3154.flac"
+      },
+      {
+        "id": 54,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3117,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 8.0,
+        "url": "/media/lab/c0a2835aaf064609adbab7c182189289.flac"
+      },
+      {
+        "id": 55,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3118,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 8.01,
+        "url": "/media/lab/e1f13148a81c49cba7588ac9c814d0ef.wav"
+      }
+    ],
+    "drafts": {}
+  },
+  "E5": {
+    "title": "Comic 'dun dun' sting, 3 s",
+    "triggered_at": "2026-10-23T14:05:41+00:00",
+    "group_key": "432b107379dc9df0",
+    "runs": [
+      {
+        "id": 56,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3119,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 3.0,
+        "url": "/media/lab/09302a1f9a8741eba128964fd3708474.flac"
+      },
+      {
+        "id": 57,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3120,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 3.0,
+        "url": "/media/lab/6bc97d141902428888cce595ab8234b5.flac"
+      },
+      {
+        "id": 58,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3121,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 3.01,
+        "url": "/media/lab/444a2c0c495b49e5905e62f941e0ebc4.wav"
+      }
+    ],
+    "drafts": {}
+  },
+  "E6": {
+    "title": "Squeaky marker, then a loud chip crunch, 5 s",
+    "triggered_at": "2026-10-23T14:05:41+00:00",
+    "group_key": "a381d3315dff580a",
+    "runs": [
+      {
+        "id": 59,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3122,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 5.0,
+        "url": "/media/lab/4fa95fcaae084ec5a16bed6f62373cd4.flac"
+      },
+      {
+        "id": 60,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3123,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 5.0,
+        "url": "/media/lab/f4713983a7d6423699ab0e91bfb7aa12.flac"
+      },
+      {
+        "id": 61,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3124,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 5.01,
+        "url": "/media/lab/8bead955bfd348f39000f17c43a7cf16.wav"
+      }
+    ],
+    "drafts": {}
+  },
+  "F1": {
+    "title": "Arjun's bedroom at 2:17 AM, 20 s, under narration",
+    "triggered_at": "2026-10-23T14:13:28+00:00",
+    "group_key": "66c5a742c22b2223",
+    "runs": [
+      {
+        "id": 62,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3125,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.01,
+        "url": "/media/lab/51a2e9089ddf4f3e878bb32c3fe3e108.wav"
+      },
+      {
+        "id": 63,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3126,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.0,
+        "url": "/media/lab/6c3fea306f234102b10a096814f4d138.flac"
+      },
+      {
+        "id": 64,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3127,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.0,
+        "url": "/media/lab/c4f9367b96674a7497169fd4235620e3.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "F2": {
+    "title": "English03 sunny living room, 20 s",
+    "triggered_at": "2026-10-23T14:13:28+00:00",
+    "group_key": "586185139cb6f58e",
+    "runs": [
+      {
+        "id": 65,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3128,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.01,
+        "url": "/media/lab/64b63d369af64023b42391ec51638a6f.wav"
+      },
+      {
+        "id": 66,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3129,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.0,
+        "url": "/media/lab/e3f0f4821b2946ca85b24c3603a98def.flac"
+      },
+      {
+        "id": 67,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3130,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.0,
+        "url": "/media/lab/6d4477575286441b98a0e6c9d2eb50ea.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "F3": {
+    "title": "Burning building outside the window, growing over 30 s",
+    "triggered_at": "2026-10-23T14:13:29+00:00",
+    "group_key": "2002611c86d2fc58",
+    "runs": [
+      {
+        "id": 68,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3131,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.01,
+        "url": "/media/lab/b48c2812754f402994726f4e59f7a352.wav"
+      },
+      {
+        "id": 69,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3132,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/15ded5ac8c064a82acb9fbb3ec081949.flac"
+      },
+      {
+        "id": 70,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3133,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/735ec4b743a24ecaba5449e783919420.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "F4": {
+    "title": "First Light, abstract deep-space hum, 30 s",
+    "triggered_at": "2026-10-23T14:13:29+00:00",
+    "group_key": "e3eed9584fe8dac0",
+    "runs": [
+      {
+        "id": 71,
+        "model": "ltx-audio",
+        "seed": 1717,
+        "job_id": 3134,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.01,
+        "url": "/media/lab/037c2c43050f452886879ef5afb084c3.wav"
+      },
+      {
+        "id": 72,
+        "model": "stable-audio-open",
+        "seed": 1717,
+        "job_id": 3135,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/acc7dd0274cc4c2c8c6da2a42068b6f4.flac"
+      },
+      {
+        "id": 73,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3136,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/a5a82b010d40468f85e9f3f8cbac52d2.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "G1": {
+    "title": "Arjun, solo music-box lullaby motif, 20 s",
+    "triggered_at": "2026-10-23T14:20:54+00:00",
+    "group_key": "1e3dfa320b5ad4ea",
+    "runs": [
+      {
+        "id": 74,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3137,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.0,
+        "url": "/media/lab/3e3ae94758504ad692b91f40da43891c.flac"
+      },
+      {
+        "id": 75,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3138,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 20.0,
+        "url": "/media/lab/d3c50591089c44e387cbb182d6bd9414.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "G2": {
+    "title": "First Light, solo piano of wonder, 30 s",
+    "triggered_at": "2026-10-23T14:20:54+00:00",
+    "group_key": "55eb053ee99af8ab",
+    "runs": [
+      {
+        "id": 76,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3139,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/4a4c44b87853489c9580d47fb0e1fce4.flac"
+      },
+      {
+        "id": 77,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3140,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 30.0,
+        "url": "/media/lab/d03f765e8e654baf8b6e25c7f385a31b.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "G3": {
+    "title": "English03, solo pizzicato strings, sneaky, 15 s",
+    "triggered_at": "2026-10-23T14:20:54+00:00",
+    "group_key": "fabd4d8c604056aa",
+    "runs": [
+      {
+        "id": 78,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3141,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 15.0,
+        "url": "/media/lab/115144567b8e450d91f69b651847cfc5.flac"
+      },
+      {
+        "id": 79,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3142,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 15.0,
+        "url": "/media/lab/c4691ec9a7ae4386a82c33b9f211a840.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "H1a": {
+    "title": "Seeds: the A2 fields on Stable Audio 3, three takes (seeds 1718 to 1720)",
+    "triggered_at": "2026-10-23T14:24:48+00:00",
+    "group_key": "9c9dd9c5f66cee4c",
+    "runs": [
+      {
+        "id": 80,
+        "model": "stable-audio-3",
+        "seed": 1718,
+        "job_id": 3143,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/129b6e3fdef4423d863908db05d9c759.flac"
+      },
+      {
+        "id": 81,
+        "model": "stable-audio-3",
+        "seed": 1719,
+        "job_id": 3144,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/8c5b6ef5b6d64019bcdc3811b7516f0f.flac"
+      },
+      {
+        "id": 82,
+        "model": "stable-audio-3",
+        "seed": 1720,
+        "job_id": 3145,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/7bee886746004eb189eafbfcb8d1e86c.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "H1b": {
+    "title": "Repeat: B1 on Stable Audio 3 again with seed 1717 (should match the first B1 run)",
+    "triggered_at": "2026-10-23T14:24:48+00:00",
+    "group_key": "97cdb7d0aaaedd54",
+    "runs": [
+      {
+        "id": 83,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3146,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/2197b39d2ba04b9183120fe4d9cbd677.flac"
+      }
+    ],
+    "drafts": {}
+  },
+  "H2": {
+    "title": "AI prompt writer drafts the A2 brief (compare with hand-written A2)",
+    "triggered_at": "2026-10-23T14:25:00+00:00",
+    "group_key": "9e0087a4b5418304",
+    "runs": [
+      {
+        "id": 84,
+        "model": "stable-audio-3",
+        "seed": 1717,
+        "job_id": 3149,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/3ccc19bc83624513a15bef017a8fa1f8.flac"
+      },
+      {
+        "id": 85,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3150,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 60.0,
+        "url": "/media/lab/95706845754a4006b76a488f4ee9adad.flac"
+      }
+    ],
+    "drafts": {
+      "stable-audio-3": {
+        "prompt_job_id": 3147,
+        "warnings": [],
+        "fields": {
+          "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Ambient, Genre: Cinematic, Genre: Space Ambient, Instruments: Warm Synth Pad, Shimmering Drone, Soft Piano, Deep Sub Bass, Slow Swelling Strings, Gentle Cymbal Swell. A quiet cosmic underscore at about 70 BPM, made to sit under narration. It opens with a soft, mysterious synth pad and a low sub bass drone, sparse and weightless, with a few delicate high piano notes glinting like distant starlight. Over the first half it stays sparse and steady, low energy, with all the movement in the highs and lows, keeping the middle frequencies clear for a voice. In the final third a slow swelling of airy strings and a gentle cymbal wash rises beneath the pad, the harmony opening upward into a broad, glowing chord that carries quiet awe. It never becomes busy: no drum beat, no prominent lead melody, dynamics always soft, ending on a wide, luminous sustained chord that fades. Production is wide and cinematic, deep reverb, crisp airy highs, warm low end, everything smooth and spacious.",
+          "duration": 60.0
+        }
+      },
+      "ace-step-1.5": {
+        "prompt_job_id": 3148,
+        "warnings": [],
+        "fields": {
+          "caption": "instrumental, no vocals, sparse cosmic ambient underscore for narration, slow warm evolving synth pads, deep sub bass swells, airy shimmering textures and a distant soft choir-like drone, gentle steady pulse, minimal piano notes, wide cinematic space, soft dynamics, low and high frequencies only, mysterious wonder building to awe, modern documentary production, no busy lead melody",
+          "lyrics": "[Instrumental]",
+          "instrumental": true,
+          "vocal_language": "unknown",
+          "bpm": 62,
+          "keyscale": "D minor",
+          "time_signature": "4",
+          "duration": 60.0
+        }
+      }
+    }
+  },
+  "H3": {
+    "title": "AI prompt writer writes the lullaby lyrics from a theme (compare with D2)",
+    "triggered_at": "2026-10-23T14:25:12+00:00",
+    "group_key": "01a501f3e88e079b",
+    "runs": [
+      {
+        "id": 86,
+        "model": "ace-step-1.5",
+        "seed": 1717,
+        "job_id": 3153,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 195.0,
+        "url": "/media/lab/90daf721f0394bfc92947f7fa1402dea.flac"
+      },
+      {
+        "id": 87,
+        "model": "yue2",
+        "seed": 1717,
+        "job_id": 3154,
+        "status": "succeeded",
+        "error": null,
+        "duration_s": 184.958667,
+        "url": "/media/lab/8c55e119a0cb480cbaaa57f8466cb368.flac"
+      }
+    ],
+    "drafts": {
+      "ace-step-1.5": {
+        "prompt_job_id": 3151,
+        "warnings": [],
+        "fields": {
+          "caption": "haunting soft lullaby, dark ambient folk horror, tender female vocal sung softly in a breathy intimate whisper, close mic murmur, sparse detuned music box, low sustained drone, ghostly reverb, unsettling lullaby melody, oppressive hushed atmosphere",
+          "lyrics": "[Verse 1]\nHush now, my darling, close your eyes\nThe night is long and cold\nI'll stay beside you while you sleep\nJust do as you are told\n\n[Chorus]\nSleep, my love, the fire's gone out\nSleep, and don't you fear\nWhatever knocks, whatever calls\nDon't open the door, dear\n\n[Verse 2]\nThe smoke has settled long ago\nThe ashes swept away\nYou've been so tired for twenty years\nIt's harder every day\n\n[Chorus]\nSleep, my love, the fire's gone out\nSleep, and don't you fear\nWhatever knocks, whatever calls\nDon't open the door, dear\n\n[Bridge]\nThey're knocking soft upon the wall\nThey say you're on the floor\nBut mothers know their little boys\nYou're mine forevermore\n\n[Outro]\nHush now, the door is holding still\nYou never made a sound\nSleep, my love, you're not out there\nYou're safe beneath the ground",
+          "instrumental": false,
+          "vocal_language": "en",
+          "bpm": 58,
+          "keyscale": "D minor",
+          "time_signature": "3",
+          "duration": null
+        }
+      },
+      "yue2": {
+        "prompt_job_id": 3152,
+        "warnings": [],
+        "fields": {
+          "style": "English, dark ambient lullaby, slow music box, soft felt piano, low drone strings, distant wind chimes, breathy intimate female voice, whispered close-mic delivery, tender yet eerie, 58 BPM",
+          "lyrics": "[Intro]\nHush now, hush now\n\n[Verse]\nClose your eyes, my only one\nThe moon is watching through the hall\nI'll keep the lamp on till it's done\nThe shadows never hurt you at all\n\n[Chorus]\nSleep, my darling, sleep, my darling\nDon't you open up that door\nSleep, my darling, sleep, my darling\nMomma loves you evermore\n\n[Verse]\nI brush the ash from off your hair\nI warm the milk upon the flame\nThe smoke has settled everywhere\nBut you were never meant to blame\n\n[Chorus]\nSleep, my darling, sleep, my darling\nDon't you open up that door\nSleep, my darling, sleep, my darling\nMomma loves you evermore\n\n[Bridge]\nTwenty winters on the stair\nThe house still smells of burning pine\nI set your plate, I comb your hair\nYou cannot leave this room of mine\n\n[Verse]\nThe firemen they called my name\nI told them you were fast asleep\nThey took the frame, they took the flame\nBut no one heard you when you screamed\n\n[Chorus]\nSleep, my darling, sleep, my darling\nDon't you open up that door\nSleep, my darling, sleep, my darling\nMomma loves you evermore\n\n[Outro]\nHush now, hush now\nMomma's keeping you forever more"
+        }
+      }
+    }
+  }
+}
