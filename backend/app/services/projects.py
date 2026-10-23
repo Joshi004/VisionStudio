@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Project
+from app.services import review_points
 
 LANDSCAPE = "landscape"
 PORTRAIT = "portrait"
@@ -63,7 +64,8 @@ ORIENTATION_DEFAULTS: Final[Mapping[str, OrientationDefaults]] = {
     PORTRAIT: OrientationDefaults(gen_width=1088, gen_height=1920, out_width=1080, out_height=1920),
 }
 
-# What a PATCH may change. The orientation, the speech mode and the id are not here.
+# What a PATCH may change. The orientation, the speech mode and the id are not here. The review
+# points (PHASE-041) are a list, checked by `_prepare_review_points`.
 _FIELD_LABELS: Final[Mapping[str, str]] = {
     "name": "Name",
     "gen_width": "Generation width",
@@ -72,6 +74,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "out_height": "Output height",
     "fps": "Frame rate",
     "script_text": "Story",
+    "review_points": "Review points",
 }
 _NULLABLE_FIELDS: Final = frozenset(("script_text",))
 
@@ -172,6 +175,7 @@ async def create_project(
         out_height=sizes.out_height,
         fps=DEFAULT_FPS,
         speech_mode=speech_mode,
+        review_points=[],
     )
     validate_project(project)
     session.add(project)
@@ -221,4 +225,16 @@ def _prepare_value(field: str, value: object) -> object:
         return _normalise_name(str(value))
     if field == "script_text":
         return _normalise_script(value if isinstance(value, str) else None)
+    if field == "review_points":
+        return _prepare_review_points(value)
     return value
+
+
+def _prepare_review_points(value: object) -> list[str]:
+    """The review points to store: known keys, in the order of the pipeline, without repeats."""
+    if not isinstance(value, list) or not all(isinstance(key, str) for key in value):
+        raise ProjectValidationError("Review points must be a list of names.")
+    unknown = review_points.unknown_keys(value)
+    if unknown:
+        raise ProjectValidationError(f"There is no review point {unknown[0]!r}.")
+    return review_points.normalize(value)

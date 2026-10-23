@@ -29,8 +29,8 @@ The run's state lives in `job.output` (see `new_output`); there is no table of i
 from __future__ import annotations
 
 import copy
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any, Final, Literal
 
 from sqlalchemy import select
@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, Project
 from app.jobs import phases, store
+from app.services import review_points as review_rules
 
 JOB_TYPE: Final = store.PIPELINE_RUN_TYPE
 # What a run makes: everything that is not up to date, or only what exists and is out of date
@@ -146,6 +147,21 @@ def _check_graph() -> None:
 _check_graph()
 
 
+def _check_review_points() -> None:
+    """Every step a review point names exists, and no step is in two review points."""
+    seen: set[str] = set()
+    for point in review_rules.REVIEW_POINTS:
+        for key in point.steps:
+            if key not in STEP_KEYS:
+                raise ValueError(f"review point {point.key} names the unknown step {key}")
+            if key in seen:
+                raise ValueError(f"step {key} is in two review points")
+            seen.add(key)
+
+
+_check_review_points()
+
+
 # --- What the user chose when starting ------------------------------------------------------
 
 
@@ -159,17 +175,24 @@ class RunOptions:
     confirm_overwrite: bool = False
     # What the run makes (PHASE-040).
     scope: Scope = SCOPE_ALL
+    # The keys of the project's review points that the run stops at (PHASE-041). Copied from the
+    # project when the run starts, so changing the settings does not change a run that is going.
+    review_points: frozenset[str] = frozenset()
 
     @classmethod
     def from_input(cls, value: object) -> RunOptions:
         data: dict[str, Any] = value if isinstance(value, dict) else {}
         keys = data.get("pause_after")
+        points = data.get("review_points")
         return cls(
             pause_after=frozenset(
                 key for key in (keys if isinstance(keys, list) else []) if key in STEP_KEYS
             ),
             confirm_overwrite=data.get("confirm_overwrite") is True,
             scope=SCOPE_OUT_OF_DATE if data.get("scope") == SCOPE_OUT_OF_DATE else SCOPE_ALL,
+            review_points=frozenset(
+                review_rules.normalize(points if isinstance(points, list) else [])
+            ),
         )
 
 
@@ -207,6 +230,10 @@ class Target:
     # The stage already has something for this target that is not usable (a shot whose clips
     # all failed). It is not a missing target, so the `out_of_date` scope does not add it.
     existing: bool = False
+    # The user rejected this target at a review point (PHASE-041): it is done, and is made
+    # again. Set by `plan_step`, never by an adapter. The stage's start function is then given
+    # consent to replace it, because rejecting it is what asks for that.
+    redo: bool = False
 
 
 @dataclass(frozen=True)
@@ -300,7 +327,7 @@ def in_scope(
     """
     if options.scope == SCOPE_ALL:
         return True
-    if target.stale or target.active or target.settling:
+    if target.stale or target.active or target.settling or target.redo:
         return True
     return made_upstream and not target.existing and target.group in groups
 
@@ -312,6 +339,7 @@ def plan_step(
     errors: Mapping[str, str],
     options: RunOptions,
     made_upstream: bool = False,
+    rejected: Collection[str] = (),
 ) -> StepPlan:
     """What to do now about a step. Pure.
 
@@ -323,8 +351,19 @@ def plan_step(
 
     `made_upstream` is whether the run has made work in a step this one needs (scope
     `out_of_date` only).
+
+    `rejected` holds the keys of the targets the user rejected at a review point (PHASE-041).
+    Such a target is not done until it has been made again: while nothing was started for it
+    (`tries` is 0), while work is in progress for it, and while its newest job failed.
     """
-    pending = [target for target in view.targets if not target.done]
+    pending: list[Target] = []
+    for target in view.targets:
+        if not target.done:
+            pending.append(target)
+        elif target.key in rejected and (
+            target.active or not tries.get(target.key, 0) or target.last_error is not None
+        ):
+            pending.append(replace(target, done=False, redo=True))
     # The groups that already have an output (a done or an out-of-date target, or one that is
     # being worked on): what "the same scene already has shots" is judged by.
     groups = {
@@ -437,6 +476,15 @@ def new_output() -> dict[str, Any]:
         "paused_at": None,
         # The steps the user has already pressed Continue after.
         "continued": [],
+        # The review point the run waits at (PHASE-041), or None.
+        "review_at": None,
+        # The review points the user has already passed (approved, or nothing was made in them).
+        "reviewed": [],
+        # step key -> the targets the user rejected, to be made again.
+        "rejected": {},
+        # True after Continue: the next look reads the steps that were complete again, so what
+        # was edited during the pause is seen.
+        "recheck": False,
     }
 
 
@@ -457,11 +505,23 @@ def read_output(value: object) -> dict[str, Any]:
         for key in STEP_KEYS:
             if not isinstance(output[name].get(key), dict):
                 output[name][key] = {}
-    for name in ("job_ids", "problems", "warnings", "continued"):
+    for name in ("job_ids", "problems", "warnings", "continued", "reviewed"):
         if not isinstance(output.get(name), list):
             output[name] = []
-    if not isinstance(output.get("paused_at"), str):
-        output["paused_at"] = None
+    for name in ("paused_at", "review_at"):
+        if not isinstance(output.get(name), str):
+            output[name] = None
+    rejected = output.get("rejected")
+    output["rejected"] = (
+        {
+            key: [target for target in targets if isinstance(target, str)]
+            for key, targets in rejected.items()
+            if key in STEP_KEYS and isinstance(targets, list)
+        }
+        if isinstance(rejected, dict)
+        else {}
+    )
+    output["recheck"] = output.get("recheck") is True
     return output
 
 
@@ -584,25 +644,51 @@ async def start_run(
             "pause_after": [key for key in STEP_KEYS if key in set(pause_after)],
             "confirm_overwrite": confirm_overwrite,
             "scope": scope,
+            # The project's review points as they are now (PHASE-041).
+            "review_points": review_rules.normalize(
+                project.review_points if isinstance(project.review_points, list) else []
+            ),
         },
     )
     return job, created
 
 
-async def continue_run(session: AsyncSession, project: Project) -> Job:
+async def continue_run(
+    session: AsyncSession,
+    project: Project,
+    rejected: Mapping[str, Sequence[str]] | None = None,
+) -> Job:
     """Lets a paused run go on, and commits. Raises StoryPipelineError when the project has no
     run, or its run is not paused.
+
+    `rejected` (PHASE-041) maps a step key to the targets the user rejected at a review point.
+    Only a run waiting at a review point takes it, and only for the steps of that point; whether
+    each target exists is checked by the caller. A rejected target gets its tries back and is
+    made again, and the run waits at the same review point once more. With nothing rejected the
+    review point counts as passed.
+
+    Every Continue makes the run read the steps that were complete again, so what the user
+    edited while it waited is seen.
     """
     run = await active_run(session, project.id)
     if run is None:
         raise StoryPipelineError("There is no run going on for this project.")
     output = read_output(run.output)
     paused = output["paused_at"]
-    if paused is None:
+    review = output["review_at"]
+    if paused is None and review is None:
         raise StoryPipelineError("The run is not paused.")
-    if paused not in output["continued"]:
-        output["continued"].append(paused)
-    output["paused_at"] = None
+    wanted = {step: list(dict.fromkeys(keys)) for step, keys in (rejected or {}).items() if keys}
+    if wanted and review is None:
+        raise StoryPipelineError("The run is paused, not at a review point: nothing to reject.")
+    if paused is not None:
+        if paused not in output["continued"]:
+            output["continued"].append(paused)
+        output["paused_at"] = None
+    if review is not None:
+        _leave_review(output, review, wanted)
+        output["review_at"] = None
+    output["recheck"] = True
     if not await store.save_progress(
         session,
         run.id,
@@ -613,6 +699,30 @@ async def continue_run(session: AsyncSession, project: Project) -> Job:
         raise StoryPipelineError("The run is no longer going.")
     await session.commit()
     return run
+
+
+def _leave_review(output: dict[str, Any], review: str, rejected: Mapping[str, list[str]]) -> None:
+    """Records the user's answer at a review point in the run's output (changes it in place)."""
+    point = review_rules.POINTS_BY_KEY.get(review)
+    steps = point.steps if point is not None else ()
+    foreign = [step for step in rejected if step not in steps]
+    if foreign:
+        raise StoryPipelineError(
+            f"The step {foreign[0]!r} is not part of this review point, so nothing in it can be "
+            "rejected."
+        )
+    if not rejected:
+        if review not in output["reviewed"]:
+            output["reviewed"].append(review)
+        return
+    # The point stays unreviewed: the run waits here again once the targets are made again.
+    for step, keys in rejected.items():
+        known = output["rejected"].setdefault(step, [])
+        known.extend(key for key in keys if key not in known)
+        for key in keys:
+            output["tries"][step].pop(key, None)
+            output["errors"][step].pop(key, None)
+        output["steps"][step]["status"] = "running"
 
 
 async def cancel_queued_children(session: AsyncSession, run: Job) -> int:

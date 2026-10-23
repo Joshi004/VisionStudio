@@ -25,10 +25,13 @@ import {
   useStoryPipeline,
   type PipelineScope,
   type PipelineStepProgress,
+  type ReviewPointKey,
 } from "../../api/storyPipeline";
+import { useProject, useUpdateProject } from "../../api/projects";
 import { useStaleness } from "../../api/staleness";
 import { formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { ReviewPointPanel } from "./ReviewPointPanel";
 
 type StoryPipelinePanelProps = {
   projectId: number;
@@ -64,7 +67,9 @@ function progressText(step: PipelineStepProgress): string {
  * One click from the story's text to the rendered video. The run goes through every stage in
  * order, makes the same jobs the stage buttons make, skips whatever is up to date, and stops
  * when nothing can go on. Before it starts the owner can tick the steps to pause after (none by
- * default) and, when it would replace something chosen or written by hand, allow that once.
+ * default), choose the project's review points (saved with the project), and, when it would
+ * replace something chosen or written by hand, allow that once. While a run waits at a review
+ * point, the review view takes the place of the plain pause.
  */
 export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
   const queryClient = useQueryClient();
@@ -72,6 +77,8 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
   const start = useStartStoryPipeline(projectId);
   const resume = useContinueStoryPipeline(projectId);
   const stop = useCancelJob();
+  const project = useProject(projectId);
+  const saveProject = useUpdateProject(projectId);
   const [pauseAfter, setPauseAfter] = useState<string[]>([]);
   const [showPauses, setShowPauses] = useState(false);
   const [allowOverwrite, setAllowOverwrite] = useState(false);
@@ -104,6 +111,17 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
         void queryClient.invalidateQueries({
           queryKey: storyPipelineKey(projectId),
         }),
+    });
+  }
+
+  const reviewPoints = project.data?.review_points ?? [];
+
+  function toggleReviewPoint(key: ReviewPointKey, ticked: boolean) {
+    // The whole list is saved; the server keeps it in the order of the pipeline.
+    saveProject.mutate({
+      review_points: ticked
+        ? [...reviewPoints, key]
+        : reviewPoints.filter((item) => item !== key),
     });
   }
 
@@ -258,6 +276,38 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
           </Stack>
         )}
 
+        {data && !active && project.data !== undefined && (
+          <Stack gap={4}>
+            <Text size="sm" fw={600}>
+              Review points
+            </Text>
+            <Text size="xs" c="dimmed">
+              Saved with this project. None is on by default. A review point
+              stops the run once, after its whole stage is made, so you can look
+              at it, edit it, or reject what you want made again. Whatever you
+              change goes through the usual out-of-date rules. A run keeps the
+              review points it started with.
+            </Text>
+            {data.review_points.map((point) => (
+              <Checkbox
+                key={point.key}
+                size="xs"
+                label={point.label}
+                checked={reviewPoints.includes(point.key)}
+                disabled={saveProject.isPending}
+                onChange={(event) =>
+                  toggleReviewPoint(point.key, event.currentTarget.checked)
+                }
+              />
+            ))}
+            {saveProject.isError && (
+              <Text size="xs" c="red.8">
+                {describeError(saveProject.error)}
+              </Text>
+            )}
+          </Stack>
+        )}
+
         {confirmations.length > 0 && !active && (
           <Alert color="yellow" title="This run would replace what you chose or wrote">
             <Stack gap={4}>
@@ -297,6 +347,14 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
               </Text>
             </Group>
 
+            {run.review_at != null && data?.review != null && (
+              <ReviewPointPanel
+                review={data.review}
+                isPending={resume.isPending}
+                onContinue={(rejected) => resume.mutate(rejected)}
+              />
+            )}
+
             {pausedLabel !== null && (
               <Alert color="blue" title={`Paused after ${pausedLabel.toLowerCase()}`}>
                 <Stack gap="xs" align="flex-start">
@@ -306,7 +364,7 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                   </Text>
                   <Button
                     size="xs"
-                    onClick={() => resume.mutate()}
+                    onClick={() => resume.mutate([])}
                     loading={resume.isPending}
                   >
                     Continue

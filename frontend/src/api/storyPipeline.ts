@@ -16,6 +16,10 @@ export type PipelineStepProgress =
 export type PipelineProblem = components["schemas"]["PipelineProblemOut"];
 export type PipelineConfirmation =
   components["schemas"]["PipelineConfirmationOut"];
+export type ReviewPoint = components["schemas"]["ReviewPointOut"];
+export type ReviewPointKey = ReviewPoint["key"];
+export type PipelineReview = components["schemas"]["ReviewOut"];
+export type RejectedTarget = components["schemas"]["RejectedTarget"];
 
 /** The pipeline query of a project, under the project's key like the stage panels'. */
 export function storyPipelineKey(projectId: number) {
@@ -49,6 +53,7 @@ function runSignature(run: PipelineRun | null | undefined): string | null {
     run.status,
     run.phase ?? "",
     run.paused_at ?? "",
+    run.review_at ?? "",
     ...run.steps.map(
       (step) => `${step.status}:${step.done}/${step.total}/${step.left_alone}`,
     ),
@@ -147,14 +152,20 @@ export function useStartStoryPipeline(projectId: number) {
   });
 }
 
-/** Lets a paused run go on. */
+/**
+ * Lets a paused run go on. At a review point, `rejected` lists the targets to make
+ * again: the run then waits at the same review point once more.
+ */
 export function useContinueStoryPipeline(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (rejected: RejectedTarget[] = []) => {
       const { data, error, response } = await api.POST(
         "/api/projects/{project_id}/story-pipeline/continue",
-        { params: { path: { project_id: projectId } } },
+        {
+          params: { path: { project_id: projectId } },
+          body: { rejected },
+        },
       );
       if (!data) {
         throw new ApiError(

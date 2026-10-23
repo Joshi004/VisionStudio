@@ -55,7 +55,8 @@ export interface paths {
         head?: never;
         /**
          * Update Project
-         * @description Changes the fields that are sent: the name, the sizes, the frame rate and the story.
+         * @description Changes the fields that are sent: the name, the sizes, the frame rate, the story and the
+         *     review points.
          */
         patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
@@ -3157,7 +3158,8 @@ export interface paths {
         put?: never;
         /**
          * Continue Story Pipeline
-         * @description Lets a paused run go on.
+         * @description Lets a paused run go on. At a review point, the targets in `rejected` are made again and
+         *     the run waits at the same review point once more; the others count as approved.
          */
         post: operations["continue_story_pipeline_api_projects__project_id__story_pipeline_continue_post"];
         delete?: never;
@@ -5782,6 +5784,11 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** PipelineContinueBody */
+        PipelineContinueBody: {
+            /** Rejected */
+            rejected?: components["schemas"]["RejectedTarget"][];
+        };
         /** PipelineProblemOut */
         PipelineProblemOut: {
             /** Step */
@@ -5843,6 +5850,10 @@ export interface components {
             pause_after: string[];
             /** Confirm Overwrite */
             confirm_overwrite: boolean;
+            /** Review Points */
+            review_points: string[];
+            /** Review At */
+            review_at: string | null;
             /**
              * Scope
              * @enum {string}
@@ -5971,6 +5982,8 @@ export interface components {
             fps: number;
             /** Script Text */
             script_text: string | null;
+            /** Review Points */
+            review_points: ("story_structure" | "images" | "scenes" | "shot_plans" | "shots")[];
             story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
@@ -6039,6 +6052,8 @@ export interface components {
             fps?: number | null;
             /** Script Text */
             script_text?: string | null;
+            /** Review Points */
+            review_points?: ("story_structure" | "images" | "scenes" | "shot_plans" | "shots")[] | null;
         };
         /** PromptDraftCreate */
         PromptDraftCreate: {
@@ -6213,6 +6228,13 @@ export interface components {
             description: string;
             /** Reason */
             reason?: string | null;
+        };
+        /** RejectedTarget */
+        RejectedTarget: {
+            /** Step */
+            step: string;
+            /** Target */
+            target: string;
         };
         /** RelationCharacterOut */
         RelationCharacterOut: {
@@ -6435,6 +6457,56 @@ export interface components {
             video_prompt?: string | null;
             /** Delivery Instruction */
             delivery_instruction?: string | null;
+        };
+        /**
+         * ReviewOut
+         * @description What the user can review while the run waits at a review point.
+         */
+        ReviewOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "story_structure" | "images" | "scenes" | "shot_plans" | "shots";
+            /** Label */
+            label: string;
+            /** Steps */
+            steps: components["schemas"]["ReviewStepOut"][];
+        };
+        /**
+         * ReviewPointOut
+         * @description A place a project can ask the pipeline to wait at, with the steps it waits for.
+         */
+        ReviewPointOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "story_structure" | "images" | "scenes" | "shot_plans" | "shots";
+            /** Label */
+            label: string;
+            /** Steps */
+            steps: string[];
+        };
+        /** ReviewStepOut */
+        ReviewStepOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Targets */
+            targets: components["schemas"]["ReviewTargetOut"][];
+        };
+        /**
+         * ReviewTargetOut
+         * @description One thing to approve or reject. A step with a single target for the project has the
+         *     step's own label.
+         */
+        ReviewTargetOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
         };
         /** RunAllOut */
         RunAllOut: {
@@ -8518,6 +8590,9 @@ export interface components {
         StoryPipelineOut: {
             /** Steps */
             steps: components["schemas"]["PipelineStepOut"][];
+            /** Review Points */
+            review_points: components["schemas"]["ReviewPointOut"][];
+            review: components["schemas"]["ReviewOut"] | null;
             run: components["schemas"]["PipelineRunOut"] | null;
             /** Can Start */
             can_start: boolean;
@@ -16120,7 +16195,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PipelineContinueBody"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -236,6 +236,13 @@ def pipeline_paused(label: str) -> str:
     return f"Paused after {label.lower()}: press Continue to go on"
 
 
+def pipeline_review(label: str) -> str:
+    """The phase of a run that waits at a review point (PHASE-041). `label` is the point's, as
+    "After shot planning".
+    """
+    return f"Waiting for your review ({label[:1].lower()}{label[1:]}): press Continue to go on"
+
+
 # --- Running: the dialogue check of a take (PHASE-031) ----------------------------------------
 # `check_take_dialogue` is a GPU job (Parakeet), so it also uses SUBMITTING and the cluster phases
 # above. Once the server has finished, the transcript is fetched and compared: the phases below

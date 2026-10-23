@@ -39,7 +39,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +48,7 @@ from app.db.models import Job, Project
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, phases, store
 from app.jobs.handlers import JobHandler
+from app.services import review_points as review_rules
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline_targets import ADAPTERS
 
@@ -87,6 +88,8 @@ class _Evaluation:
     finished: bool
     # The ticked step that has just become complete, when the run must pause after it.
     paused_after: str | None
+    # The review point whose steps are all complete now, when the run must wait for the user.
+    paused_review: str | None = None
 
 
 @dataclass
@@ -96,6 +99,53 @@ class _Outcome:
     stopped: bool = False
     # An inline step did its work: the steps after it may be ready now.
     again: bool = False
+
+
+def _needs_are_ready(
+    step: pipeline.Step,
+    complete: set[str],
+    options: pipeline.RunOptions,
+    output: dict[str, Any],
+) -> bool:
+    """Whether the steps `step` needs are complete and, for a step of a review point the user
+    has not passed yet, not held back by one (PHASE-041). A step waits for the review of the
+    steps it needs, but not for the steps of its own review point.
+    """
+    own = review_rules.point_of(step.key)
+    own_steps = set(own.steps) if own is not None else set()
+    held = {
+        key
+        for point in review_rules.REVIEW_POINTS
+        if point.key in options.review_points and point.key not in output["reviewed"]
+        for key in point.steps
+    } - own_steps
+    return all(key in complete and key not in held for key in step.needs)
+
+
+def _review_stop(
+    step_key: str,
+    complete: set[str],
+    options: pipeline.RunOptions,
+    output: dict[str, Any],
+) -> str | None:
+    """The review point to wait at now that `step_key` is complete, or None.
+
+    The point must be enabled, not passed yet, and all its steps complete. If the run made
+    nothing in them (they were all up to date) the point is passed without waiting, as a step to
+    pause after is.
+    """
+    point = review_rules.point_of(step_key)
+    if (
+        point is None
+        or point.key not in options.review_points
+        or point.key in output["reviewed"]
+        or not all(key in complete for key in point.steps)
+    ):
+        return None
+    if all(pipeline.made_no_jobs(output, key) for key in point.steps):
+        output["reviewed"].append(point.key)
+        return None
+    return point.key
 
 
 async def _load_project(session: AsyncSession, project_id: int | None) -> Project | None:
@@ -228,7 +278,8 @@ class StoryPipelineHandler(JobHandler):
         if project is None:
             await store.fail_job(session, job_id, "The project no longer exists.")
             return _Outcome(stopped=True)
-        if pipeline.read_output(run.output)["paused_at"] is not None:
+        waiting = pipeline.read_output(run.output)
+        if waiting["paused_at"] is not None or waiting["review_at"] is not None:
             await session.commit()  # waiting for Continue: nothing to read or make
             return _Outcome(stopped=True)
         result = await self._evaluate(session, run, project)
@@ -238,22 +289,36 @@ class StoryPipelineHandler(JobHandler):
     async def _evaluate(session: AsyncSession, run: Job, project: Project) -> _Evaluation:
         """Reads the database and looks at the steps in the order of `STEPS`. Writes nothing.
 
-        - A step the run has passed (`done`, `skipped`) is not looked at again.
-        - A step whose `needs` are not all complete is not reached: it makes no job yet.
+        - A step the run has passed (`done`, `skipped`) is not looked at again, except after a
+          Continue (`recheck`): then it is read once more, so what the user edited during the
+          pause is seen. A step that is no longer complete is going on again, and the steps
+          that need it wait for it.
+        - A step whose `needs` are not all complete is not reached: it makes no job yet. A step
+          that needs a step of a review point the user has not passed yet waits for the review.
         - A step that turns out complete is passed. The steps after it are looked at in this same
-          call, so the run never loses a tick. Unless it is a step to pause after: the run made
-          jobs in it and the user ticked it, so the evaluation stops there.
+          call, so the run never loses a tick. Unless it is a step to pause after, or the last
+          step of a review point: the run made jobs there and the user asked to stop, so the
+          evaluation stops there.
         """
         output = pipeline.read_output(run.output)
         options = pipeline.RunOptions.from_input(run.input)
         complete = pipeline.complete_keys(output)
+        recheck: bool = output["recheck"]
         going: list[_Going] = []
         paused_after: str | None = None
+        paused_review: str | None = None
 
         for step in pipeline.STEPS:
-            if step.key in complete:
-                continue
-            if not all(key in complete for key in step.needs):
+            was_complete = step.key in complete
+            if was_complete:
+                if not recheck:
+                    continue
+                if not all(key in complete for key in step.needs):
+                    # Something it needs is being made again: it is looked at once that is done.
+                    complete.discard(step.key)
+                    output["steps"][step.key]["status"] = "pending"
+                    continue
+            elif not _needs_are_ready(step, complete, options, output):
                 continue
             view = await ADAPTERS[step.key].evaluate(session, project, options)
             # Work this run has made in a step this one needs (scope `out_of_date` only).
@@ -265,13 +330,22 @@ class StoryPipelineHandler(JobHandler):
                 output["errors"][step.key],
                 options,
                 made_upstream,
+                output["rejected"].get(step.key, ()),
             )
             pipeline.add_warnings(output, plan.warnings)
-            if plan.complete:
+            if plan.complete and was_complete:
+                # Still complete after the Continue: only its counts are brought up to date.
+                kept = cast(pipeline.StepStatus, output["steps"][step.key]["status"])
+                pipeline.record_progress(output, step.key, plan, status=kept)
+            elif plan.complete:
                 # "Skipped": it was complete when the run got to it, so the run started nothing.
                 status = "skipped" if pipeline.made_no_jobs(output, step.key) else "done"
                 pipeline.record_progress(output, step.key, plan, status=status)
                 complete.add(step.key)
+                output["rejected"].pop(step.key, None)
+                paused_review = _review_stop(step.key, complete, options, output)
+                if paused_review is not None:
+                    break
                 if (
                     status == "done"
                     and step.key in options.pause_after
@@ -280,13 +354,16 @@ class StoryPipelineHandler(JobHandler):
                     paused_after = step.key
                     break
             else:
+                complete.discard(step.key)
                 pipeline.record_progress(output, step.key, plan, status="running")
                 going.append(_Going(step, plan))
+        else:
+            output["recheck"] = False  # every step was looked at
 
         finished = len(complete) == len(pipeline.STEPS)
         if finished:
             output["problems"] = []
-        return _Evaluation(output, going, finished, paused_after)
+        return _Evaluation(output, going, finished, paused_after, paused_review)
 
     @staticmethod
     async def _apply(
@@ -308,7 +385,16 @@ class StoryPipelineHandler(JobHandler):
         failure: str | None = None
         paused_phase: str | None = None
 
-        if result.paused_after is not None:
+        if result.paused_review is not None:
+            # Nothing more is made while the user reviews, in any step. Jobs that are running
+            # finish.
+            output["review_at"] = result.paused_review
+            paused_phase = phases.pipeline_review(
+                review_rules.POINTS_BY_KEY[result.paused_review].label
+            )
+            output["problems"] = []
+            outcome.finished = False
+        elif result.paused_after is not None:
             # Nothing more is made while paused, in any step. Jobs that are running finish.
             output["paused_at"] = result.paused_after
             paused_phase = phases.pipeline_paused(pipeline.STEP_LABELS[result.paused_after])
@@ -377,7 +463,11 @@ class StoryPipelineHandler(JobHandler):
 
         await session.commit()
         if paused_phase is not None:
-            _logger.info("job %d: pipeline run paused after '%s'", run.id, result.paused_after)
+            _logger.info(
+                "job %d: pipeline run paused after '%s'",
+                run.id,
+                result.paused_review or result.paused_after,
+            )
             outcome.stopped = True
             return outcome
         if queued_any:

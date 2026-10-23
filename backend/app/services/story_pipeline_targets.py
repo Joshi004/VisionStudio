@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,7 @@ from app.services import (
     generation_requests,
     look_state_images,
     look_state_resolution,
+    review_points,
     scene_definitions,
     scene_events,
     shot_continuity,
@@ -202,6 +203,14 @@ async def _start_each(
     return results
 
 
+def _options_for(options: RunOptions, target: Target) -> RunOptions:
+    """The options a target is started with. A target the user rejected at a review point
+    (PHASE-041) is replaced on purpose, so the stage is told it may replace what the user chose
+    or wrote there, without the run's `confirm_overwrite` being given for everything else.
+    """
+    return replace(options, confirm_overwrite=True) if target.redo else options
+
+
 def _project_start(
     call: Callable[[AsyncSession, Project, RunOptions], Awaitable[Any]],
 ) -> StartTargets:
@@ -215,7 +224,10 @@ def _project_start(
         deadline: float,
     ) -> list[Started]:
         return await _start_each(
-            session, targets, deadline, lambda _t: _ids_of(call(session, project, options))
+            session,
+            targets,
+            deadline,
+            lambda target: _ids_of(call(session, project, _options_for(options, target))),
         )
 
     return start
@@ -483,8 +495,9 @@ async def _evaluate_environment_definitions(
         block: str | None = None
         last_error: str | None = _failure(entry.job)
         if defined:
-            # The definition is there: what is missing is the picture.
-            step = "picture"
+            # The definition is there: what is missing is the picture. A picture that is ready
+            # is replaced (only when the user rejected it at a review point, PHASE-041).
+            step = "replace" if picture.status == "ready" else "picture"
             if not done and not active and not picture.can_run:
                 block = picture.blocked_reason
             last_error = picture.error or last_error
@@ -525,10 +538,17 @@ async def _start_environment_definitions(
         if what == "define":
             return await _ids_of(
                 environment_definitions.start_run(
-                    session, project, discovery_id, confirm_overwrite=options.confirm_overwrite
+                    session,
+                    project,
+                    discovery_id,
+                    confirm_overwrite=_options_for(options, target).confirm_overwrite,
                 )
             )
-        await environment_definitions.start_picture(session, project, discovery_id)
+        if what == "replace":
+            # Rejected at a review point: a new picture from the same definition (PHASE-039).
+            await environment_definitions.replace_picture(session, project, discovery_id)
+        else:
+            await environment_definitions.start_picture(session, project, discovery_id)
         return ()
 
     return await _start_each(session, targets, deadline, make)
@@ -587,7 +607,10 @@ async def _start_character_images(
         deadline,
         lambda target: _ids_of(
             character_images.start_run(
-                session, project, target.ref[0], confirm_overwrite=options.confirm_overwrite
+                session,
+                project,
+                target.ref[0],
+                confirm_overwrite=_options_for(options, target).confirm_overwrite,
             )
         ),
     )
@@ -724,7 +747,7 @@ async def _start_scene_definitions(
                 session,
                 project,
                 target.ref[0],
-                confirm_replace_manual=options.confirm_overwrite,
+                confirm_replace_manual=_options_for(options, target).confirm_overwrite,
             )
         ),
     )
@@ -773,7 +796,7 @@ async def _start_events(
                 session,
                 project,
                 target.ref[0],
-                confirm_replace_manual=options.confirm_overwrite,
+                confirm_replace_manual=_options_for(options, target).confirm_overwrite,
             )
         ),
     )
@@ -1021,7 +1044,7 @@ async def _start_shot_plans(
                 session,
                 project,
                 target.ref[0],
-                confirm_replace_manual=options.confirm_overwrite,
+                confirm_replace_manual=_options_for(options, target).confirm_overwrite,
             )
         ),
     )
@@ -1614,3 +1637,33 @@ async def confirmations(session: AsyncSession, project: Project) -> list[Confirm
             if not target.done and target.consent is not None
         )
     return found
+
+
+# --- What there is to review at a review point (PHASE-041) ----------------------------------
+
+
+@dataclass(frozen=True)
+class ReviewStep:
+    """The targets of one step of a review point that the user can approve or reject."""
+
+    step_key: str
+    step_label: str
+    # Only targets that are done: a target that is not done has nothing to look at yet.
+    targets: list[Target]
+
+
+async def review_targets(
+    session: AsyncSession, project: Project, point_key: str
+) -> list[ReviewStep]:
+    """The done targets of every step of a review point, read through the adapters. Read-only.
+    An unknown point has none.
+    """
+    point = review_points.POINTS_BY_KEY.get(point_key)
+    if point is None:
+        return []
+    options = RunOptions()
+    steps: list[ReviewStep] = []
+    for key in point.steps:
+        view = await ADAPTERS[key].evaluate(session, project, options)
+        steps.append(ReviewStep(key, STEP_LABELS[key], [t for t in view.targets if t.done]))
+    return steps

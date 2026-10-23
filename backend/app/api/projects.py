@@ -22,7 +22,9 @@ from app.api.errors import ErrorResponse
 from app.db.models import Project
 from app.db.session import SessionDep
 from app.services import projects as projects_service
+from app.services import review_points as review_points_service
 from app.services import story_length as story_length_service
+from app.services.review_points import ReviewPointKey
 
 router = APIRouter()
 
@@ -58,6 +60,8 @@ class ProjectUpdate(BaseModel):
     out_height: StrictInt | None = None
     fps: StrictInt | None = None
     script_text: StrictStr | None = None
+    # The review points the pipeline stops at (PHASE-041). The whole list is sent.
+    review_points: list[ReviewPointKey] | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -90,6 +94,8 @@ class ProjectDetail(BaseModel):
     out_height: int
     fps: int
     script_text: str | None
+    # The review points the project has enabled, in the order of the pipeline. None by default.
+    review_points: list[ReviewPointKey]
     story_length: StoryLengthOut
 
 
@@ -101,6 +107,12 @@ def _orientation(project: Project) -> Orientation:
 def _speech_mode(project: Project) -> SpeechMode:
     # The database CHECK constraint keeps this to the three allowed values.
     return cast(SpeechMode, project.speech_mode)
+
+
+def _review_points(project: Project) -> list[ReviewPointKey]:
+    # Stored normalized, but read defensively: only known keys are ever returned.
+    stored = project.review_points if isinstance(project.review_points, list) else []
+    return cast(list[ReviewPointKey], review_points_service.normalize(stored))
 
 
 async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
@@ -118,6 +130,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         out_height=project.out_height,
         fps=project.fps,
         script_text=project.script_text,
+        review_points=_review_points(project),
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,
@@ -182,7 +195,9 @@ async def get_project(project_id: int, session: SessionDep) -> ProjectDetail:
 async def update_project(
     project_id: int, body: ProjectUpdate, session: SessionDep
 ) -> ProjectDetail:
-    """Changes the fields that are sent: the name, the sizes, the frame rate and the story."""
+    """Changes the fields that are sent: the name, the sizes, the frame rate, the story and the
+    review points.
+    """
     project = await load_project(session, project_id)
     try:
         project = await projects_service.update_project(

@@ -91,36 +91,54 @@ export function ProjectPage() {
           <StoryPipelinePanel projectId={project.id} />
           <StalenessPanel projectId={project.id} />
           <StoryBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
-          <DiscoveryPanel
-            projectId={project.id}
-            kind="characters"
-            hasStory={project.script_text !== null}
-          />
+          <div id="pipeline-step-character_discovery">
+            <DiscoveryPanel
+              projectId={project.id}
+              kind="characters"
+              hasStory={project.script_text !== null}
+            />
+          </div>
           <CharacterLinksPanel projectId={project.id} />
           <CharacterRelationsPanel projectId={project.id} />
           <CharacterDefinitionsPanel projectId={project.id} />
-          <CharacterImagesPanel projectId={project.id} />
+          <div id="pipeline-step-character_images">
+            <CharacterImagesPanel projectId={project.id} />
+          </div>
           {project.speech_mode !== "no_dialogue" && <CharacterVoicesPanel projectId={project.id} />}
           {project.speech_mode !== "no_narration" && <NarratorVoicePanel projectId={project.id} />}
-          <DiscoveryPanel
-            projectId={project.id}
-            kind="environments"
-            hasStory={project.script_text !== null}
-          />
+          <div id="pipeline-step-environment_discovery">
+            <DiscoveryPanel
+              projectId={project.id}
+              kind="environments"
+              hasStory={project.script_text !== null}
+            />
+          </div>
           <EnvironmentLinksPanel projectId={project.id} />
-          <ScenesPanel projectId={project.id} hasStory={project.script_text !== null} />
-          <EnvironmentDefinitionsPanel projectId={project.id} />
-          <SceneDefinitionsPanel projectId={project.id} />
-          <SceneEventsPanel projectId={project.id} speechMode={project.speech_mode} />
+          <div id="pipeline-step-scene_discovery">
+            <ScenesPanel projectId={project.id} hasStory={project.script_text !== null} />
+          </div>
+          <div id="pipeline-step-environment_definitions">
+            <EnvironmentDefinitionsPanel projectId={project.id} />
+          </div>
+          <div id="pipeline-step-scene_definitions">
+            <SceneDefinitionsPanel projectId={project.id} />
+          </div>
+          <div id="pipeline-step-events">
+            <SceneEventsPanel projectId={project.id} speechMode={project.speech_mode} />
+          </div>
           <LooksAndStatesPanel projectId={project.id} />
           <LookStateImagesPanel projectId={project.id} />
           <SpeechUnitsPanel projectId={project.id} />
-          <ShotPlansPanel projectId={project.id} />
+          <div id="pipeline-step-shot_plans">
+            <ShotPlansPanel projectId={project.id} />
+          </div>
           <ShotDefinitionsPanel projectId={project.id} />
           <ShotReferencesPanel projectId={project.id} />
           <GenerationRequestsPanel projectId={project.id} />
           <ShotPromptsPanel projectId={project.id} />
-          <ShotTakesPanel projectId={project.id} />
+          <div id="pipeline-step-shot_generation">
+            <ShotTakesPanel projectId={project.id} />
+          </div>
           <StoryRenderPanel projectId={project.id} />
           <StageList />
         </>

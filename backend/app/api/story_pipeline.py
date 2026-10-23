@@ -10,7 +10,12 @@ one click (PHASE-030).
   exists and is out of date, and what those regenerations make necessary, PHASE-040;
   422 when nothing is out of date). A run that is already waiting or running is returned and
   no second one is made. 409 while there are targets to replace and `confirm_overwrite` is false.
-- `POST .../continue` lets a paused run go on.
+- `POST .../continue` lets a paused run go on. A run waiting at a review point (PHASE-041) takes
+  the optional body `rejected` (`{step, target}` pairs): those targets are made again and the
+  run waits at the same review point once more.
+
+The review points are the project's own setting (`PATCH /api/projects/{id}`); a run copies them
+when it starts. `GET` lists them and, while a run waits at one, what there is to review.
 
 Stopping a run is `POST /api/jobs/{id}/cancel`, which also cancels the jobs the run made that
 have not started. The answers never return ORM objects.
@@ -23,14 +28,15 @@ from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import Job
+from app.db.models import Job, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
-from app.services import staleness, story_pipeline, story_pipeline_targets
+from app.services import review_points, staleness, story_pipeline, story_pipeline_targets
 from app.services.story_pipeline import StepStatus
 
 router = APIRouter()
@@ -53,6 +59,8 @@ _UNCONFIRMED = {
 
 # How many targets the 409 names before it says "and more".
 _MAX_NAMED: int = 5
+# The most targets one answer at a review point may reject (a shot per target is the biggest).
+_MAX_REJECTED: int = 500
 
 
 class PipelineStepOut(BaseModel):
@@ -99,6 +107,10 @@ class PipelineRunOut(BaseModel):
     # What the run was started with.
     pause_after: list[str]
     confirm_overwrite: bool
+    # The review points the run was started with, and the one it waits at (None unless it is
+    # waiting for the user to press Continue).
+    review_points: list[str]
+    review_at: str | None
     # What the run makes: everything that is not up to date, or only what is out of date.
     scope: Literal["all", "out_of_date"]
     # How many jobs the run has made so far (a stage that does its work in the run adds none).
@@ -112,8 +124,43 @@ class PipelineConfirmationOut(BaseModel):
     reason: str
 
 
+class ReviewPointOut(BaseModel):
+    """A place a project can ask the pipeline to wait at, with the steps it waits for."""
+
+    key: review_points.ReviewPointKey
+    label: str
+    steps: list[str]
+
+
+class ReviewTargetOut(BaseModel):
+    """One thing to approve or reject. A step with a single target for the project has the
+    step's own label.
+    """
+
+    key: str
+    label: str
+
+
+class ReviewStepOut(BaseModel):
+    key: str
+    label: str
+    targets: list[ReviewTargetOut]
+
+
+class ReviewOut(BaseModel):
+    """What the user can review while the run waits at a review point."""
+
+    key: review_points.ReviewPointKey
+    label: str
+    steps: list[ReviewStepOut]
+
+
 class StoryPipelineOut(BaseModel):
     steps: list[PipelineStepOut]
+    # The review points a project can enable, in the order of the pipeline.
+    review_points: list[ReviewPointOut]
+    # What there is to review, while the newest run waits at a review point. None otherwise.
+    review: ReviewOut | None
     # The newest run, whatever its status. None when the project never had one.
     run: PipelineRunOut | None
     can_start: bool
@@ -144,8 +191,55 @@ class PipelineRunStartedOut(BaseModel):
     job_id: int
 
 
+class RejectedTarget(BaseModel):
+    step: Annotated[str, Field(max_length=64)]
+    target: Annotated[str, Field(max_length=200)]
+
+
+class PipelineContinueBody(BaseModel):
+    # Targets the user rejected at a review point: they are made again. None: all approved.
+    rejected: list[RejectedTarget] = Field(default_factory=list, max_length=_MAX_REJECTED)
+
+
 def _steps_out() -> list[PipelineStepOut]:
     return [PipelineStepOut(key=step.key, label=step.label) for step in story_pipeline.STEPS]
+
+
+def _review_points_out() -> list[ReviewPointOut]:
+    return [
+        ReviewPointOut(key=point.key, label=point.label, steps=list(point.steps))
+        for point in review_points.REVIEW_POINTS
+    ]
+
+
+def _review_at_of(run: Job) -> str | None:
+    """The review point a run waits at, or None."""
+    return story_pipeline.read_output(run.output)["review_at"]
+
+
+async def _review_out(
+    session: AsyncSession, project: Project, review_at: str | None
+) -> ReviewOut | None:
+    """What the user can approve or reject at the review point the run waits at."""
+    point = review_points.POINTS_BY_KEY.get(review_at) if review_at is not None else None
+    if point is None:
+        return None
+    steps = await story_pipeline_targets.review_targets(session, project, point.key)
+    return ReviewOut(
+        key=point.key,
+        label=point.label,
+        steps=[
+            ReviewStepOut(
+                key=item.step_key,
+                label=item.step_label,
+                targets=[
+                    ReviewTargetOut(key=target.key, label=target.label or item.step_label)
+                    for target in item.targets
+                ],
+            )
+            for item in steps
+        ],
+    )
 
 
 def _run_out(job: Job) -> PipelineRunOut:
@@ -176,6 +270,8 @@ def _run_out(job: Job) -> PipelineRunOut:
         paused_at=output["paused_at"] if active else None,
         pause_after=[key for key in story_pipeline.STEP_KEYS if key in options.pause_after],
         confirm_overwrite=options.confirm_overwrite,
+        review_points=review_points.normalize(options.review_points),
+        review_at=output["review_at"] if active else None,
         scope=options.scope,
         jobs_made=len(output["job_ids"]),
     )
@@ -216,8 +312,11 @@ async def get_story_pipeline(project_id: int, session: SessionDep) -> StoryPipel
     pending = (
         [] if blocked is not None else await story_pipeline_targets.confirmations(session, project)
     )
+    review_at = _review_at_of(run) if run is not None and running else None
     return StoryPipelineOut(
         steps=_steps_out(),
+        review_points=_review_points_out(),
+        review=await _review_out(session, project, review_at),
         run=_run_out(run) if run is not None else None,
         can_start=blocked is None,
         start_block=blocked,
@@ -305,12 +404,57 @@ async def run_story_pipeline(
     response_model=PipelineRunStartedOut,
     responses={**_NOT_FOUND, **_NOT_ALLOWED},
 )
-async def continue_story_pipeline(project_id: int, session: SessionDep) -> PipelineRunStartedOut:
-    """Lets a paused run go on."""
+async def continue_story_pipeline(
+    project_id: int, session: SessionDep, body: PipelineContinueBody | None = None
+) -> PipelineRunStartedOut:
+    """Lets a paused run go on. At a review point, the targets in `rejected` are made again and
+    the run waits at the same review point once more; the others count as approved.
+    """
     project = await load_project(session, project_id)
+    rejected = await _check_rejected(session, project, body.rejected if body is not None else [])
     try:
-        job = await story_pipeline.continue_run(session, project)
+        job = await story_pipeline.continue_run(session, project, rejected)
     except story_pipeline.StoryPipelineError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
     return PipelineRunStartedOut(job_id=job.id)
+
+
+async def _check_rejected(
+    session: AsyncSession, project: Project, rejected: list[RejectedTarget]
+) -> dict[str, list[str]]:
+    """The rejected targets by step, each checked against what the review point lists. 422 for
+    one that is not there, naming it.
+    """
+    if not rejected:
+        return {}
+    run = await story_pipeline.active_run(session, project.id)
+    if run is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "There is no run going on for this project."
+        )
+    review_at = _review_at_of(run)
+    if review_at is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The run is not waiting at a review point, so there is nothing to reject.",
+        )
+    listed = {
+        item.step_key: item
+        for item in await story_pipeline_targets.review_targets(session, project, review_at)
+    }
+    found: dict[str, list[str]] = {}
+    for entry in rejected:
+        item = listed.get(entry.step)
+        if item is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"The step {entry.step!r} is not part of this review point.",
+            )
+        if entry.target not in {target.key for target in item.targets}:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"{item.step_label}: there is nothing to reject for {entry.target!r}.",
+            )
+        found.setdefault(entry.step, []).append(entry.target)
+    return found

@@ -57,6 +57,9 @@ class Project(Base):
     # Chosen when the project is created and never changed: `both`, `no_dialogue` (only a
     # narrator speaks) or `no_narration` (nobody narrates).
     speech_mode: Mapped[str] = mapped_column(default="both", server_default=text("'both'"))
+    # The keys of the review points the project has enabled (`services/review_points.py`), in
+    # the order of the pipeline. A run of the story pipeline waits for the user at each one.
+    review_points: Mapped[Any] = mapped_column(JSON, default=list, server_default=text("'[]'"))
 
 
 class Asset(Base):
