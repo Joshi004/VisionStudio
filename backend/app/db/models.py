@@ -1145,6 +1145,27 @@ class LabMusicRun(Base):
     note: Mapped[str | None] = mapped_column(default=None)
 
 
+class AudioMeasurement(Base):
+    """What was measured in one audio file (MUSIC-003, `services/audio_measurements.py`).
+
+    The row belongs to the file's content, not to a table that holds the file: it is keyed by the
+    file's `sha256`, which every audio table already stores, so a lab run, a speech unit's
+    audio, an H3 take and a later music take all share it, and the same bytes are measured once.
+    `analysis_version` is `audio_analysis.ANALYSIS_VERSION` when the row was made: after the
+    analysis changes, a file is measured again and the old row is simply not read. `content` is
+    the result (its shape is in `DATABASE_STRUCTURE.md`). A stored row is never changed.
+    """
+
+    __tablename__ = "audio_measurement"
+    __table_args__ = (UniqueConstraint("sha256", "analysis_version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sha256: Mapped[str]
+    analysis_version: Mapped[int]
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
 class NarratorVoice(Base):
     """One version of a story project's narrator voice (PHASE-011). The same provenance shape as
     `StoryBible`: every derivation or choice is a new row with the next `version`, and a stored

@@ -128,6 +128,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-043 rapid exchange, 2026-10-23): no migration, no new table, no new column, no new job type.** **One shot can hold a quick back-and-forth between two characters: the clip cuts at each line.** (1) **`shot_plan.content.shots[].rapid_exchange`** (boolean): the Shot Planning model or the user sets it; a plan stored before this phase has no such key and reads as `false`. It is accepted only for a shot that carries two or three lines of dialogue (no narration) from exactly two speakers who take turns, and never together with `continues_previous`. (2) **`generation_request.content.exchange`** (`{cuts: [{shot, audio, speaker_id, at_s}]}`) is set for such a shot and absent (null) otherwise: one cut for each line in order, the first at 0 and each later one at its line's `starts_in_shot_seconds`. The route stays `reference`; both speakers must be visible with a character picture, and the shot cannot have a continuity anchor. (3) **`shot_prompt.content.pieces`** has `shot_1`, `shot_2`, ... instead of `shot`, and **`content.cuts`** (`[{shot, cue, audio_label, speaker, subject_label, text}]`) lists the internal shots; both are absent from the prompt of any other shot. The prompt's `detailed_description` holds `[Shot 1]` and then `[Shot n] At MM:SS.mmm, ...` for every later cut, written by code. (4) The skeleton that a shot definition is checked against gains `rapid_exchange: true` **only for an exchange shot**, so no other shot's definition becomes out of date. Section 5 (the shot plan, the generation request and the shot prompt) says the same where those artifacts are described.
 
+**Update (MUSIC-003 audio measurements, 2026-10-24):** migration `0062`. **What is in a sound file is measured once and stored.** One new table, `audio_measurement` (Section 4.56), keyed by the file's `sha256` and the version of the analysis (`services/audio_analysis.ANALYSIS_VERSION`): the length, leading and trailing silence, silences inside the sound, integrated loudness, a short-term loudness curve, true peak and clipping, the loudest moment, sudden sounds, quiet points, places where the sound changes character, and whether the sound ends with a decay or is cut. The key is a content hash that `lab_music_run`, `speech_unit_audio` and `shot_take` already store, so no existing table changes and a later music take needs no migration. Nothing is stored on the file's own row, and nothing about staleness is stored: a file whose bytes change has a new hash, and a changed analysis has a new version, so the old row is simply not read. `GET /api/lab/music/runs/{id}/measurements` measures a lab run the first time it is asked for. No job type is added. See Section 4.56.
+
 **Update (PHASE-055 deleting projects and library items, 2026-10-24):** migration `0061`. **Projects, library characters and library environments can be deleted.** One new table, `project_missing_library_item` (Section 4.55): when a library character or environment is deleted, each project that used it gets one row, written before the library row goes (its links and cast rows then cascade away). The row lets the project show the entry as "deleted from the library" and stops the pipeline from quietly making a new item for it; linking the entry again clears it. No column is added or changed. Foreign keys that already existed do the rest: deleting a `project` row cascades to every story artifact and job, and deleting a `library_character` or `library_environment` row cascades to its versions, looks, takes, named looks, references, states, views, links and cast rows. The stored files are deleted by code, not by the database (`services/storage.delete_media`, `delete_project_dir`): a project's folder `media/<project_id>/`, and a library item's pictures, cut-outs, speech and clips under `media/lab/` only when no remaining row uses them. The "Never deleted" notes on `library_character`, `library_environment`, `lab_run`, `voice` and the stored files are therefore no longer true; a deletion is always the user's explicit choice.
 
 **Update (PHASE-050 to PHASE-054 environment views, scene staging and shot-aware backgrounds, 2026-10-23):** migrations `0058`, `0059` and `0060`. **Two speakers in one room no longer get the same background.** A place is mapped, each scene is staged, a place gets several views, and every shot picks one. (1) **A spatial plan** (PHASE-050): `library_environment.definition` and `library_environment_version.definition` gain `spatial_plan` (`master_view`, `sides`, `zones`, Section 5); the canonical picture profile is `QWEN_IMAGE_21_ENVIRONMENT_SHEET` version 2. No column is added: it is part of the definition JSON. (2) **Scene staging** (PHASE-051, migration `0058`): new table `scene_staging` (Section 4.51), one immutable row per version of one scene's staging (where each character stands, the screen side, the background side, the axis and the moves), following Section 2.1. (3) **Environment views** (PHASE-052, migration `0059`): new tables `environment_view` (Section 4.52, a named view of a library environment, an edit of the master picture, never a version) and `environment_view_plan` (Section 4.53, one version of the views one environment needs in one project and which views cover each background side of each scene); `library_environment_version` gains `views` (JSON, default `'[]'`, Section 4.32), the pictures of the views a version froze. (4) **Views in states** (PHASE-053, migration `0060`): new table `environment_view_state` (Section 4.54), the picture of one view in one named state of the environment; the frozen `views` of a version hold them as `states`. (5) **Shots** (PHASE-054): no table or column. A shot definition's `content` gains `composition.view` (the id of the view behind the shot, or `establishing` for the master picture) and, for each entry of `characters`, `zone`, `screen_side` and `background_side`, written by code from the staging; its `inputs` gain `staging.sha256` (what the shot was staged from; the shot is out of date when it changes) and two artifacts (`scene_staging`, `environment_view_plan`). A scene that was never staged is defined as before, with none of these; a definition without them reads as out of date once its scene is staged. The reference catalog (`shot_reference_manifest`) now offers each view's picture under `view` = the view's slug, and its pictures in states under `variant` = the state's slug; the master stays `view` = `environment`. (6) `job.type` gains `stage_scene`, `plan_environment_views` and `write_environment_view_prompt`: the CHECK is rebuilt in batch mode (migrations `0058` and `0059`). All three belong to a project, are `provider='llm'` with the restart rule `never_rerun` and use the story model (D-12), except the prompt job, which uses the image-prompt model. (7) The story pipeline has two new steps, `scene_staging` and `environment_views`, and a new review point, `staging` (`services/review_points.py`, off by default; stored in `project.review_points` like the others). Nothing about staleness is stored: it is computed on read (D-3). Migration `0057` (the Music lab's `lab_music_run` table and its two job types) is not described in this document. See Sections 2.1, 4.32, 4.51 to 4.54 and 5.
@@ -2548,6 +2550,61 @@ CREATE TABLE project_missing_library_item (
     UNIQUE (project_id, kind, discovery_id)
 );
 ```
+
+### 4.56 `audio_measurement`
+
+*Added in MUSIC-003 (migration `0062`).* **What was measured in one audio file.** `services/audio_measurements.measure(session, path, sha256)` reads the row for the file's hash and the current `analysis_version`, or measures the file and writes the row. FFmpeg measures the loudness (`ebur128`, `astats`) and decodes the sound to mono samples; `services/audio_analysis` does the rest on those samples. A video file is measured on its first audio stream.
+
+The row belongs to the *content*, not to a table that holds the file: the key is the SHA-256 that `lab_music_run.sha256`, `speech_unit_audio.sha256`, `shot_take.sha256` and `asset.sha256` already hold, so the same bytes are measured once however many rows point at them. A stored row is never changed. When the analysis changes (`ANALYSIS_VERSION` is raised), files are measured again and the old rows are not read. A row whose file was deleted stays; it is small and harmless.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `sha256` | TEXT | NOT NULL | — | The hash of the file's bytes. `UNIQUE (sha256, analysis_version)` |
+| `analysis_version` | INTEGER | NOT NULL | — | `audio_analysis.ANALYSIS_VERSION` when the row was made |
+| `content` | JSON | NOT NULL | — | The result (below) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE audio_measurement (
+    id               INTEGER PRIMARY KEY,
+    sha256           TEXT NOT NULL,
+    analysis_version INTEGER NOT NULL,
+    content          JSON NOT NULL,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (sha256, analysis_version)
+);
+```
+
+**`content`.** Times are seconds from the start of the file, levels are dB relative to full scale unless a field says LUFS. Every list is in time order.
+
+```json
+{
+  "analysis_version": 1,
+  "parameters": {"sample_rate": 22050, "frame_s": 0.02, "silence_below_loud_db": 40.0, "...": "every threshold used"},
+  "sample_rate": 48000, "channels": 2, "duration_s": 36.0,
+  "leading_silence_s": 0.06, "trailing_silence_s": 1.98,
+  "silences": [{"start_s": 1.6, "end_s": 2.38}],
+  "loudness": {
+    "integrated_lufs": -14.8, "loudness_range_lu": 7.2,
+    "true_peak_dbtp": -1.0, "sample_peak_dbfs": -1.0,
+    "clipping": false, "clipped_sample_count": 0
+  },
+  "short_term_loudness": {"step_s": 0.5, "lufs": [null, null, "...", -19.3]},
+  "loudest_moment": {"time_s": 17.13, "level_db": -5.5},
+  "onsets": [{"time_s": 17.083, "strength": 3.8}],
+  "quiet_points": [{"time_s": 33.71, "level_db": -48.9}],
+  "change_points": [{"time_s": 20.2, "strength": 1.8}],
+  "ending": {"kind": "decay", "end_level_db": -48.8, "drop_db": 38.4}
+}
+```
+
+- `silences` lists only silences inside the sound. The leading and trailing ones are the two fields before it (a file that is all silence has both equal to its length). A frame is silent when it is 40 dB or more under the loud level of the file (the 95th percentile of the frame levels) and never above -70 dB; a silence is listed from 0.25 s.
+- `loudness.integrated_lufs` is null for silence or a file under 400 ms; `true_peak_dbtp` and `sample_peak_dbfs` are null for digital silence. `clipping` is true when the sample peak is -0.1 dBFS or higher, and `clipped_sample_count` is then how many samples sit at the peak.
+- `short_term_loudness.lufs[i]` is the loudness of the 3 seconds that end at `i * step_s`, so the first 6 values are null and so is silence.
+- `loudest_moment` is the middle of the loudest 100 ms (not the 3 s short-term loudness), so the crack of an effect is found where it is. Null for silence or a file under 100 ms.
+- `onsets` are the sudden sounds, good to about 50 ms; a sound already playing at the start of the file is an onset at about 0.03 s. `change_points` are where the sound changes character (the spectrum, and so the level, moves); none is reported in the first or last 2 seconds. For both, `strength` is how many standard deviations the point stands above the file's typical value. `quiet_points` are the lowest stretches of the sound between its leading and trailing silence.
+- `ending.kind` is `decay` when the last 0.5 s before the trailing silence is 6 dB or more under the loud level of the piece (the sound dies away, a real ending or a fade) and `cut` when it stops while still loud. It is null for silence. A cut in the middle of a quiet passage reads as a decay.
 
 ---
 

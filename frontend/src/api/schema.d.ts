@@ -1332,6 +1332,28 @@ export interface paths {
         patch: operations["update_run_api_lab_music_runs__run_id__patch"];
         trace?: never;
     };
+    "/api/lab/music/runs/{run_id}/measurements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Measurements
+         * @description What is in the run's audio: silences, loudness, the loudest moment, sudden sounds, quiet
+         *     points, places where the sound changes and how it ends. Measured the first time it is asked
+         *     for and stored with the file's hash, so asking again reads the stored result.
+         */
+        get: operations["get_run_measurements_api_lab_music_runs__run_id__measurements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters": {
         parameters: {
             query?: never;
@@ -3834,6 +3856,40 @@ export interface components {
             /** Id */
             id: number;
         };
+        /**
+         * AudioMeasurementOut
+         * @description What was measured in a run's audio (MUSIC-003). All times are seconds from the start.
+         */
+        AudioMeasurementOut: {
+            /** Analysis Version */
+            analysis_version: number;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /** Sample Rate */
+            sample_rate: number | null;
+            /** Channels */
+            channels: number | null;
+            /** Duration S */
+            duration_s: number;
+            /** Leading Silence S */
+            leading_silence_s: number;
+            /** Trailing Silence S */
+            trailing_silence_s: number;
+            /** Silences */
+            silences: components["schemas"]["SilenceOut"][];
+            loudness: components["schemas"]["LoudnessOut"];
+            short_term_loudness: components["schemas"]["ShortTermLoudnessOut"];
+            loudest_moment: components["schemas"]["LoudestMomentOut"] | null;
+            /** Onsets */
+            onsets: components["schemas"]["StrongPointOut"][];
+            /** Quiet Points */
+            quiet_points: components["schemas"]["QuietPointOut"][];
+            /** Change Points */
+            change_points: components["schemas"]["StrongPointOut"][];
+            ending: components["schemas"]["EndingOut"] | null;
+        };
         /** AuditionSampleOut */
         AuditionSampleOut: {
             /** Voice Run Id */
@@ -4629,6 +4685,18 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** EndingOut */
+        EndingOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "decay" | "cut";
+            /** End Level Db */
+            end_level_db: number;
+            /** Drop Db */
+            drop_db: number;
         };
         /** EnvironmentAtmosphereOut */
         EnvironmentAtmosphereOut: {
@@ -6273,6 +6341,28 @@ export interface components {
              */
             created_at: string;
         };
+        /** LoudestMomentOut */
+        LoudestMomentOut: {
+            /** Time S */
+            time_s: number;
+            /** Level Db */
+            level_db: number;
+        };
+        /** LoudnessOut */
+        LoudnessOut: {
+            /** Integrated Lufs */
+            integrated_lufs: number | null;
+            /** Loudness Range Lu */
+            loudness_range_lu: number | null;
+            /** True Peak Dbtp */
+            true_peak_dbtp: number | null;
+            /** Sample Peak Dbfs */
+            sample_peak_dbfs: number | null;
+            /** Clipping */
+            clipping: boolean;
+            /** Clipped Sample Count */
+            clipped_sample_count: number;
+        };
         /**
          * MadeFromOut
          * @description The character a same-face variant is drawn from (PHASE-047).
@@ -7203,6 +7293,13 @@ export interface components {
             pictures: string[];
             /** Views */
             views: string[];
+        };
+        /** QuietPointOut */
+        QuietPointOut: {
+            /** Time S */
+            time_s: number;
+            /** Level Db */
+            level_db: number;
         };
         /**
          * QwenLabRunRequest
@@ -8334,6 +8431,13 @@ export interface components {
             /** Secrets */
             secrets: components["schemas"]["SecretStatus"][];
         };
+        /** ShortTermLoudnessOut */
+        ShortTermLoudnessOut: {
+            /** Step S */
+            step_s: number;
+            /** Lufs */
+            lufs: (number | null)[];
+        };
         /** ShotActionIn */
         ShotActionIn: {
             /** Start State */
@@ -9294,6 +9398,13 @@ export interface components {
             /** Allowed For */
             allowed_for: string[];
         };
+        /** SilenceOut */
+        SilenceOut: {
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+        };
         /** SourceApprovalOut */
         SourceApprovalOut: {
             /** Name */
@@ -10067,6 +10178,17 @@ export interface components {
         StorytellingStyleIn: {
             /** Narration */
             narration: string;
+        };
+        /**
+         * StrongPointOut
+         * @description A sudden sound or a change of character. `strength` is how many standard deviations the
+         *     point stands above the file's typical value, so 3 is clear and 10 is unmistakable.
+         */
+        StrongPointOut: {
+            /** Time S */
+            time_s: number;
+            /** Strength */
+            strength: number;
         };
         /** TagGroupOut */
         TagGroupOut: {
@@ -13659,6 +13781,55 @@ export interface operations {
                 };
             };
             /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_measurements_api_lab_music_runs__run_id__measurements_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioMeasurementOut"];
+                };
+            };
+            /** @description No run has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run has no audio yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The audio could not be measured. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -258,7 +258,7 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 
 - Completed: PHASE-001 (2026-10-20; owner confirmed the generations), PHASE-002 (2026-10-20), PHASE-046 (2026-10-20; owner verified every lab and the Character lab), PHASE-003 (2026-10-20), PHASE-011 (2026-10-20; owner ran the voices and verified them)
 - In progress: PHASE-004 (code complete 2026-10-20; the owner's S2 run on the rebuilt app and the GLM-5.3 limits from Bitdeer are still open), PHASE-005 (code complete 2026-10-20; the owner's S2 run is still open), PHASE-006 (code complete 2026-10-20; the owner's S2 run is still open), PHASE-007 (code complete 2026-10-20; the owner's run on the rebuilt app is still open), PHASE-008 (code complete 2026-10-20; the owner's run on the rebuilt app is still open), PHASE-009 (code complete 2026-10-20; the owner's S2 run with a real model is still open), PHASE-010 (code complete 2026-10-20; the owner's S2 run with the real image model is still open), PHASE-047 (code complete 2026-10-20; the owner's S2 run with the real image model is still open), PHASE-012 (code complete 2026-10-20; the owner's run with the real models on the rebuilt app is still open), PHASE-013 (code complete 2026-10-21; the owner's S2 run with the real language and image models is still open), PHASE-014 (code complete 2026-10-21; the owner's S2 run with a real model is still open), PHASE-015 (code complete 2026-10-21; the owner's S1 and S2 run with a real model is still open), PHASE-016 (code complete 2026-10-21; the owner's S2 run with a real model is still open), PHASE-017 (code complete 2026-10-21; the owner's S2 run with the real image model is still open), PHASE-018 (code complete 2026-10-21; the owner's S1 and S2 planning on the rebuilt app is still open), PHASE-019 (code complete 2026-10-21; the owner's S1 speech run with the real GPU is still open), PHASE-020 (code complete 2026-10-21; the owner's S1 and S2 shot planning with a real model is still open), PHASE-021 (code complete 2026-10-21; the owner's S1 timeline and a re-plan with a real model are still open), PHASE-022 (code complete 2026-10-21; the owner's S1 shot definitions with a real model are still open), PHASE-023 (code complete 2026-10-21; the owner's S1 continuity check with a real model is still open), PHASE-024 (code complete 2026-10-21; the owner's S1 reference manifests on the rebuilt app are still open), PHASE-025 (code complete 2026-10-21; the owner's S1 generation requests on the rebuilt app are still open), PHASE-026 (code complete 2026-10-22; the owner's S1 prompts with the real language model on the rebuilt app are still open), PHASE-027 (code complete 2026-10-22; the owner's S1 shot generation with the real GPU server on the rebuilt app is still open), PHASE-028 (code complete 2026-10-22; the owner's S1 render on the rebuilt app, and so milestone M6, is still open), PHASE-029 (code complete 2026-10-22; the owner's S1 run with the real GPU server on the rebuilt app is still open), PHASE-030 (code complete 2026-10-22; the owner's S2 run with the real models and GPU server on the rebuilt app is still open), PHASE-031 (code complete 2026-10-22; the owner's S1 run with the real GPU server on the rebuilt app is still open), PHASE-032 (code complete 2026-10-22; the owner's S1 run of a continuous scene with the real GPU server on the rebuilt app is still open), PHASE-033 (code complete 2026-10-22; the owner's S1 run with the real story model on the rebuilt app is still open), PHASE-037 (code complete 2026-10-22; the owner's run of the editors on the rebuilt app is still open), PHASE-039 (code complete 2026-10-22; the owner's run of the staleness overview, Accept as is and Replace picture on the rebuilt app is still open), PHASE-048 (code complete 2026-10-22; the owner's run with the real story model on the rebuilt app is still open), PHASE-049 (code complete 2026-10-22; the owner's run of one story in each mode with the real story model on the rebuilt app is still open), PHASE-043 (code complete 2026-10-23; the owner's lab check V6b and one real exchange shot on the rebuilt app are still open)
-- Deferred: PHASE-036 (music generation, after PHASE-045)
+- Dropped (2026-10-24): PHASE-034, PHASE-035 and PHASE-036, replaced by `Music_implementation_phases.md`. Music is tracked there.
 - Current milestone: M1 (M0 is complete)
 
 | ID | Title | Milestone | Hard dependencies | Status |
@@ -306,8 +306,8 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 | PHASE-053 | Views in each environment state | M7 | 017, 052 | In Progress |
 | PHASE-054 | Shots use the staging and the views | M7 | 022, 024, 051, 052, 053 | In Progress |
 | PHASE-055 | Delete projects, characters and environments | M7 | 008, 013, 039, 048 | In Progress |
-| PHASE-034 | Background music layer (supplied track) | M8 | 028 | Not Started |
-| PHASE-035 | Music Planner | M8 | 034 | Not Started |
+| PHASE-034 | Background music layer (supplied track) | M8 | 028 | Dropped (see `Music_implementation_phases.md`) |
+| PHASE-035 | Music Planner | M8 | 034 | Dropped (see `Music_implementation_phases.md`) |
 | PHASE-037 | Editing of story-structure and scene artifacts | M9 | 028 | In Progress |
 | PHASE-038 | Editing of directing and generation artifacts | M9 | 028 | In Progress |
 | PHASE-039 | Staleness across story artifacts | M9 | 028 | In Progress |
@@ -317,7 +317,7 @@ Status values: **Not Started**, **In Progress**, **Blocked**, **Completed**, **D
 | PHASE-043 | Rapid back-and-forth exchange route (reserved) | M10 | 001 (V6 positive), 027 | In Progress |
 | PHASE-044 | Motion reference videos (optional) | M10 | 027, Q-17 decision | Blocked (needs decision) |
 | PHASE-045 | Advanced quality checks (investigation) | M10 | 029, Q-18 | Blocked (needs a model) |
-| PHASE-036 | Music generation | Deferred | 035, a music provider (Q-8) | Deferred (after PHASE-045) |
+| PHASE-036 | Music generation | Deferred | 035, a music provider (Q-8) | Dropped (see `Music_implementation_phases.md`) |
 
 ### 4.1 Dependency graph (hard dependencies, transitive edges omitted)
 
@@ -2597,7 +2597,7 @@ flowchart TD
 
 ### PHASE-034 — Background music layer (supplied track)
 
-**Status:** Not Started · **Milestone:** M8 · **Vision:** §33, §34
+**Status:** Dropped: replaced by `Music_implementation_phases.md` (MUSIC-001 to MUSIC-016), 2026-10-24. · **Milestone:** M8 · **Vision:** §33, §34
 
 **Objective.** Add the continuous background-music layer to the story render, using a track the user supplies, lowered under narration and dialogue.
 
@@ -2631,7 +2631,7 @@ flowchart TD
 
 ### PHASE-035 — Music Planner
 
-**Status:** Not Started · **Milestone:** M8 · **Vision:** §34
+**Status:** Dropped: replaced by `Music_implementation_phases.md` (MUSIC-008 and MUSIC-009), 2026-10-24. · **Milestone:** M8 · **Vision:** §34
 
 **Objective.** Plan the music for the whole story from its emotional arc: cues that span shots and scenes, rather than one per shot.
 
@@ -3074,7 +3074,7 @@ flowchart TD
 
 ### PHASE-036 — Music generation
 
-**Status:** Deferred (after PHASE-045; decided 2026-10-20) · **Milestone:** Deferred · **Vision:** §34
+**Status:** Dropped: replaced by `Music_implementation_phases.md` (MUSIC-010 to MUSIC-012), 2026-10-24. Was: Deferred (after PHASE-045; decided 2026-10-20). · **Milestone:** Deferred · **Vision:** §34
 
 **Objective.** Generate the planned music cues as audio and use them in the story render.
 
@@ -3356,3 +3356,4 @@ The GPU server's own typical run time for this pipeline was 1361 s (median of 7 
 | 2026-10-23 | PHASE-043 | In Progress | Code complete: the guide confirmed the reference-mode multi-shot form (Step 0); `rapid_exchange` on a shot plan (checked, editable), `exchange.cuts` on the generation request, a per-cut prompt compiler where code writes the `[Shot n] At <cue>` tags, and the UI. No migration. The owner's lab check V6b and one real exchange shot on the rebuilt app are still open (see the Completion notes). |
 | 2026-10-24 | **PHASE-050 to PHASE-054 added: environment views and scene staging (M7):** a spatial plan in the environment definition, a Scene Staging stage, camera-direction views of an environment made by editing its master picture, views in each state, and shots that pick the view behind their subject. Depends on 012, 013, 014, 015, 017, 022 and 024. | Owner: two speakers in one room always stood in front of the same wall, because a place had one picture. |
 | 2026-10-24 | **PHASE-055 added: delete projects, characters and environments (M7):** a delete dialog for a project that offers its characters and environments (all ticked), delete on a library character or environment, and a "deleted from the library" flag in the projects that used it, with "Create again" or "Use an existing". Depends on 008, 013, 039 and 048. | Owner: wanted to remove projects and library items without breaking other projects. |
+| 2026-10-24 | **PHASE-034, PHASE-035 and PHASE-036 dropped (M8):** music is now planned in `Music_implementation_phases.md` (MUSIC-001 to MUSIC-016): a Music Bible, themes, a plan with critics, cue generation with takes, exact placement, and a render with music, ambience and final loudness. The phases keep their ids and sections. | Owner: the supplied-track, single-planner and deferred-generation design was too thin for production-grade music. |

@@ -422,6 +422,158 @@ async def measure_loudness(
     return loudness
 
 
+@dataclass(frozen=True)
+class LoudnessScan:
+    """What one pass of FFmpeg's EBU R128 scanner and `astats` measured in a file (MUSIC-003)."""
+
+    # None when the file is silent (at or below -70 LUFS) or too short to measure.
+    integrated_lufs: float | None
+    loudness_range_lu: float | None
+    # None when the file is digital silence.
+    true_peak_dbtp: float | None
+    sample_peak_dbfs: float | None
+    # How many samples sit at the highest level the file reaches. Only clipping when that level
+    # is at full scale, so the caller reads it together with `sample_peak_dbfs`.
+    peak_sample_count: int
+    # (time_s, LUFS) every 0.1 s. The value at a time is the loudness of the 3 seconds that end
+    # there, so it is None for the first 3 seconds (the window is not full) and for silence.
+    short_term: list[tuple[float, float | None]]
+
+
+_SCAN_TIMEOUT_S = 300.0
+# `ebur128` prints this level while its 3 s window is not full or the sound is silent.
+_SHORT_TERM_FLOOR_LUFS = -120.0
+_FRAME_TIME = re.compile(r"pts_time:(\S+)")
+_SHORT_TERM = re.compile(r"lavfi\.r128\.S=(\S+)")
+_SCAN_INTEGRATED = re.compile(r"Integrated loudness:\s*\n\s*I:\s+(\S+)\s+LUFS")
+_SCAN_RANGE = re.compile(r"Loudness range:\s*\n\s*LRA:\s+(\S+)\s+LU")
+_SCAN_TRUE_PEAK = re.compile(r"True peak:\s*\n\s*Peak:\s+(\S+)\s+dBFS")
+_STATS_PEAK_LEVEL = re.compile(r"Peak level dB:\s+(\S+)")
+_STATS_PEAK_COUNT = re.compile(r"Peak count:\s+(\S+)")
+
+
+def _last_number(pattern: re.Pattern[str], text: str) -> float | None:
+    """The number after the last match of `pattern`. "-inf" and anything unreadable give None."""
+    matches = pattern.findall(text)
+    return _number(matches[-1]) if matches else None
+
+
+async def scan_loudness(path: Path, *, timeout_s: float = _SCAN_TIMEOUT_S) -> LoudnessScan | None:
+    """Measures a file's first audio stream in one FFmpeg run: integrated loudness, loudness
+    range, true peak, the short-term loudness over time, the sample peak and how many samples
+    reach it. Nothing is written (`-f null`).
+
+    Returns None when the file has no sound stream, FFmpeg cannot run, or it prints something
+    unusable. Never raises.
+    """
+    filters = (
+        "ebur128=peak=true:metadata=1,"
+        "ametadata=mode=print:key=lavfi.r128.S:file=-,"
+        "astats=measure_perchannel=none:measure_overall=Peak_level+Peak_count"
+    )
+    args = [
+        "-hide_banner",
+        "-nostdin",
+        "-nostats",
+        "-loglevel",
+        "info",
+        "-i",
+        file_input(path),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-af",
+        filters,
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not scan loudness: %s", exc)
+        return None
+    log = result.stderr.decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        _logger.info("ffmpeg scan exit code %s: %s", result.returncode, log[-_STDERR_LOG_CHARS:])
+        return None
+    # The summary is only printed when the scanner ran to the end.
+    if _SCAN_INTEGRATED.search(log) is None:
+        return None
+
+    integrated = _last_number(_SCAN_INTEGRATED, log)
+    if integrated is not None and integrated <= _SILENCE_LUFS:
+        integrated = None
+    count = _last_number(_STATS_PEAK_COUNT, log)
+    return LoudnessScan(
+        integrated_lufs=integrated,
+        loudness_range_lu=_last_number(_SCAN_RANGE, log),
+        true_peak_dbtp=_last_number(_SCAN_TRUE_PEAK, log),
+        sample_peak_dbfs=_last_number(_STATS_PEAK_LEVEL, log),
+        peak_sample_count=int(round(count)) if count is not None else 0,
+        short_term=_parse_short_term(result.stdout.decode("utf-8", errors="replace")),
+    )
+
+
+def _parse_short_term(text: str) -> list[tuple[float, float | None]]:
+    """The (time, LUFS) pairs `ametadata` printed: a line with the frame's time, then one with
+    the value."""
+    curve: list[tuple[float, float | None]] = []
+    time_s: float | None = None
+    for line in text.splitlines():
+        time_match = _FRAME_TIME.search(line)
+        if time_match is not None:
+            time_s = _number(time_match.group(1))
+            continue
+        value_match = _SHORT_TERM.search(line)
+        if value_match is not None and time_s is not None:
+            value = _number(value_match.group(1))
+            if value is not None and value <= _SHORT_TERM_FLOOR_LUFS:
+                value = None
+            curve.append((time_s, value))
+            time_s = None
+    return curve
+
+
+async def decode_mono_float(
+    path: Path, sample_rate: int, *, max_seconds: float, timeout_s: float = 300.0
+) -> bytes | None:
+    """The first audio stream of a file as raw mono 32-bit float samples (little-endian) at
+    `sample_rate`, read from FFmpeg's output. At most `max_seconds` are decoded, so the answer
+    cannot grow without limit. Returns None when the file has no sound stream, FFmpeg cannot run,
+    or it fails. Never raises.
+    """
+    args = [
+        "-v",
+        "error",
+        "-nostdin",
+        "-t",
+        f"{max_seconds:.3f}",
+        "-i",
+        file_input(path),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-f",
+        "f32le",
+        "-",
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not decode audio: %s", exc)
+        return None
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")[:_STDERR_LOG_CHARS]
+        _logger.info("ffmpeg decode exit code %s: %s", result.returncode, stderr.strip())
+        return None
+    return result.stdout
+
+
 async def tool_version(tool: Tool) -> str | None:
     """Returns the tool's version string (e.g. "7.1.5-0+deb13u1").
 

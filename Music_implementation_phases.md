@@ -80,13 +80,17 @@ All of it must run **automatically** by default, like the rest of the pipeline, 
 - **Story render** (PHASE-028): narration as its own sample-exact layer (`render_commands.narration_track_args`), shot audio moved toward -16 LUFS and ducked by 12 dB under narration (`story_render_plan.duck_windows`, `render_commands.duck_volume_filter`), mixed with `amix normalize=0` and `alimiter=limit=0.97`. The timeline is frozen on the job (`TIMELINE_VERSION = 1`). **There is no music layer and no final loudness normalization**, only a sample-peak limiter.
 - **Timing sources**: speech units have measured TTS lengths (PHASE-019). Shot plans (PHASE-020/021) give every shot's start and end, its `source_event_ids` and its `speech_unit_ids`. The scene timeline (`services/scene_timeline.py`) and the story render plan turn these into story seconds and frames. Scene definitions carry `mood.start/middle/end` (PHASE-014). Events carry `sound_event`, `pause` and off-screen dialogue (PHASE-015). Shot definitions say who is in each shot (PHASE-022).
 - **Orchestration** (PHASE-030): a step graph in `services/story_pipeline.py` with one `Adapter` per step in `services/story_pipeline_targets.py`. Per-run "Pause after…" pauses for any step. Saved review points (PHASE-041, `services/review_points.py`). Staleness computed on read (PHASE-039).
-- **H3 audio**: H3 keeps its own per-shot sounds and is told not to make a score (D-10). PHASE-001 V4 found no score in a quiet scene. A tense scene has not been checked.
+- **H3 audio**: H3 keeps its own per-shot sounds and is told not to make a score (D-10). PHASE-001 V4 found no score in a quiet scene. The owner's survey (MUSIC-002) found that H3 sound, and even background music, works well inside a shot, but not across shots (MD-24). Whether D-10 should change is open (QM-15).
 - **Backend libraries**: no audio-analysis library is installed (no numpy, scipy or librosa). FFmpeg (`services/ffmpeg.py`, including `measure_loudness`) is the only audio tool.
 - **GPU pool**: music jobs count in the shared GPU pool (`jobs/pools.py`, slots), where each H3 clip holds 4 GPUs.
 
 ### 2.2 What round 1 told us so far
 
-The owner listened to group B (timing): **the models do not follow timestamps.** The mood does shift roughly where it was asked, but not clearly, and a requested bang at 34 s did not happen. The music model can follow a broad order of moods, but every precise moment has to come from somewhere else. The other groups have not been heard yet (MUSIC-001).
+The owner listened to all 84 runs (MUSIC-001, completed 2026-10-24; verdicts in Appendix B):
+
+- **The models do not follow timestamps** (group B). The mood does shift roughly where it was asked, but not clearly, and a requested bang at 34 s did not happen. The music model can follow a broad order of moods, but every precise moment has to come from somewhere else.
+- **ACE-Step 1.5 is the music model** and **Stable Audio 3 is the model for sound effects and ambience.**
+- **H3 makes good sound and good background music, but only inside one shot** (MUSIC-002). Continuous sound or music across shots does not work from H3. See MD-24 for the routing this gives.
 
 ### 2.3 Gaps
 
@@ -121,7 +125,7 @@ These were decided with the owner on 2026-10-23, unless marked **(re-evaluation)
 | MD-6 | **The music character.** The Bible names a main theme and a few themes for characters, places or ideas that matter. Each theme gets a canonical recording, and its emotional versions (grief, fear, anger, tenderness…) are made from that recording, not from text alone. The method (ACE-Step `cover` or Stable Audio 3 `transform`) is chosen from round-2 results. | 006, 007, 009 |
 | MD-7 | **The model decides how music starts and ends** (fade, hard start on a cut or hit, rising out of the ambience, hard stop, musical ending, crossfade, through silence, sting), with a one-line reason. **The join between two cues is decided once, at level 1, for the boundary**, so two neighbours never disagree. | 008, 009, 011 |
 | MD-8 | **The music model is trusted for broad structure only** (from round-1 group B, §2.2). Prompts ask for a broad order of moods, never timestamps. Exact moments come from placement (§4.6) and from separate hit sounds placed by code. | 009, 010, 011 |
-| MD-9 | **Who makes which sound:** H3 keeps each shot's own sounds (D-10, unchanged). **ACE-Step 1.5** makes the score and the themes. **Stable Audio 3** makes ambience beds and longer or evolving effects. **Stable Audio Open** is the candidate for short effects (confirmed or changed by MUSIC-001). YuE2 and LTX audio stay in the lab only. | 001, 007, 009, 010 |
+| MD-9 | **Who makes which sound (confirmed by the owner after listening to round 1, 2026-10-24):** **ACE-Step 1.5** makes the score, the themes and songs. **Stable Audio 3** makes sound effects and ambience that H3 does not make (MD-24). **Stable Audio Open, LTX audio and YuE2 are not used in the pipeline** (they stay in the lab). H3 keeps each shot's own sounds (D-10, see MD-24 for what that now includes). | 001, 007, 009, 010 |
 | MD-10 | **The owner is the only judge of sound.** GLM-5.3 takes no audio, and no model is trusted to listen. Automatic runs pick the first take that passes the technical checks (as D-5 does for pictures). GLM may also rank takes from measured facts written as text (§4.8). | 010 |
 | MD-11 | **Fully automatic by default; review is optional.** Music gets steps in the same pipeline and optional review points, exactly as `Path_ahead.md` §40 and PHASE-041 describe. The outputs are identical whether or not anyone pauses. The owner can read the plan as text and pick audio at those pauses. | 006–014 |
 | MD-12 | **A fallback ladder** when code cannot find a good point: widen the window, switch to a gentler technique, cover the moment, ask GLM to choose among the real candidates code found, then flag it to the owner (§4.7). | 011 |
@@ -129,13 +133,14 @@ These were decided with the owner on 2026-10-23, unless marked **(re-evaluation)
 | MD-14 | **Singing characters are to be decided** (owner, 2026-10-23). The owner's direction is that H3 must make the picture for lip sync. Whether H3 also invents the song, or is given a sung recording as it is given dialogue, is open. | 016 |
 | MD-15 | **Music heard inside the scene** (a radio, a speaker, a TV) comes from ACE-Step and belongs to the scene's sound, not the score. | 015 |
 | MD-16 | **The Music Lab gets editing** (`repaint`, `cover`, `inpaint`, `transform`), with results on the lab page and ratings, so trials and later the pipeline share one implementation. | 004 |
-| MD-17 | **(re-evaluation) Ambience ownership is decided at render time first.** Telling H3 not to make ambience would change the compiled H3 prompts (PHASE-026). That makes every shot's prompt out of date, and each clip costs 10 to 20 minutes on 4 GPUs (R-1). So the first version keeps H3's own ambience and only lowers it under a Stable Audio bed when the plan says so. Changing the H3 prompt is decided only after the H3 audio survey (MUSIC-002), and if adopted it must be planned **before** prompt compilation. | 002, 008, 012 |
+| MD-17 | **(re-evaluation) Ambience ownership is decided at render time first.** Telling H3 not to make ambience would change the compiled H3 prompts (PHASE-026). That makes every shot's prompt out of date, and each clip costs 10 to 20 minutes on 4 GPUs (R-1). So the first version keeps H3's own ambience and only lowers it under a Stable Audio bed when the plan says so. The H3 survey (MUSIC-002, done) found no reason to change the H3 prompt for ambience, so this stands. Whether H3's own *music* inside a shot needs handling is a separate open question (QM-15). | 008, 012 |
 | MD-18 | **(re-evaluation) Dependencies on `Implementation_phases.md`.** A dependency on a PHASE-0xx counts as met when that phase is **code complete** (In Progress with "code complete", or Completed). Most of those phases are only waiting for the owner's runs, and music phases only read their tables. A music phase's own verification still needs real data from those stages. | All |
 | MD-19 | **(re-evaluation) Final loudness normalization is added to the render.** Adding music makes the overall level less predictable, and the render today only limits sample peaks. The finished mix is brought to one integrated loudness with a true-peak ceiling. The targets are settings, and **Planning decides** the starting values (streaming platforms commonly use about -14 LUFS integrated and -1 dBTP). | 012 |
 | MD-20 | **(re-evaluation) Hearing music in context.** Takes judged on their own are misleading: a cue that sounds empty alone may be right under a voice. The take review offers an audio-only preview of the scene: narration, shot audio and the candidate cue, mixed with the render's own rules. | 012 |
 | MD-21 | **(re-evaluation) Music and ambience can be switched off per project**, and the render works without them. Stories in every speech mode (PHASE-049: narration and dialogue, no dialogue, no narration) are planned the same way. Ducking simply has fewer spans. | 008, 012 |
 | MD-22 | **(re-evaluation) Every model decision is stored** (directions, choice and reasons, plan, critiques, cue detail, prompts, seeds, fallback choices), with provenance (D-3), so a run can be inspected and repeated, and a cue the owner likes can be **locked** so nothing regenerates it. | All |
 | MD-23 | **(re-evaluation) Feedback loop.** When the owner rejects a take with a note ("too busy under the voice"), GLM rewrites that cue's prompt using the note before the next take. | 010 |
+| MD-24 | **Who makes a sound depends on how far it reaches (owner, 2026-10-24, from listening to round 1 and to H3's shot audio).** H3 makes good sound, and even good background music, **inside one shot**. Asking for sound or music that runs continuously across several shots does not work, because each shot is generated on its own. So: (a) a sound that stays inside one shot is **H3's**, asked for through the shot's own sound events; (b) a sound that spans shots (rain, wind, room tone) is **Stable Audio 3's** (ambience bed); (c) a sound that depends heavily on exact timing, such as thunder on a flash, is **H3's too**, so it must be asked for in the shot itself; (d) music that runs across shots is **ACE-Step's** continuous score. Consequence for the plan: a sound of kind (a) or (c) can only be made by H3 if it is asked for **before the shot's prompt is compiled**, which affects the order of steps (QM-16). | 002, 008, 009, 012 |
 
 Conventions inherited from `Implementation_phases.md` without change: provenance and out-of-date computed on read (D-3), JSON answers validated by code (D-7), no automated tests (D-11), GLM-5.3 for every story language-model job (D-12), stories up to about 10 minutes (D-13), and everything in §3.4 and §3.5 (migrations, `DATABASE_STRUCTURE.md`, job handlers, prompts as pure functions in `services/`, `npm run gen:api`, standard checks).
 
@@ -149,8 +154,8 @@ This section is what every phase builds on. Final names of tables, fields and se
 
 ```text
 Narration      TTS, sample-exact, unchanged (PHASE-028)
-Shot audio     H3, per shot: dialogue, sync sounds, its own ambience (D-10)
-Ambience       Stable Audio beds that span shots, and off-screen point sounds   (new)
+Shot audio     H3, per shot: dialogue, sync sounds, time-critical sounds (thunder), its own ambience (D-10, MD-24)
+Ambience       Stable Audio 3 beds that span shots, and off-screen point sounds that no shot carries   (new)
 Score          ACE-Step cues, continuous where planned, silent where planned    (new)
 Hits           short Stable Audio impacts, risers, stings, placed by code       (new)
 Source music   ACE-Step music heard inside the scene (radio, speaker)            (new, MUSIC-015)
@@ -305,16 +310,16 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 
 **Progress snapshot** (update when a phase changes status):
 
-- Completed: none
-- In progress: none
-- Ready: MUSIC-001, MUSIC-002, MUSIC-003
+- Completed: MUSIC-001 (2026-10-24), MUSIC-002 (2026-10-24)
+- In progress: MUSIC-003 (code complete 2026-10-24; the owner's check of the change points and loudest moments of round-1 runs 13 to 16 by ear is still open)
+- Ready: MUSIC-004 (it only needs MUSIC-003's code, which is complete)
 - Deferred: MUSIC-016 (singing characters, until the owner decides)
 
 | ID | Title | Milestone | Hard dependencies | Status |
 |---|---|---|---|---|
-| MUSIC-001 | Listen to round 1 and record the model choices (manual) | MM0 | — | Not Started |
-| MUSIC-002 | Survey what sound H3 adds (manual) | MM0 | PHASE-027 (real takes exist) | Not Started |
-| MUSIC-003 | Audio measurements | MM0 | — | Not Started |
+| MUSIC-001 | Listen to round 1 and record the model choices (manual) | MM0 | — | Completed |
+| MUSIC-002 | Survey what sound H3 adds (manual) | MM0 | PHASE-027 (real takes exist) | Completed |
+| MUSIC-003 | Audio measurements | MM0 | — | In Progress (code complete) |
 | MUSIC-004 | Editing in the Music Lab | MM0 | 003 | Not Started |
 | MUSIC-005 | Round-2 trials (manual) | MM0 | 004 (001 recommended) | Not Started |
 | MUSIC-006 | Music Bible: four directions, a choice, the Bible | MM1 | 001; PHASE-014, PHASE-015, PHASE-030 | Not Started |
@@ -390,7 +395,7 @@ flowchart TD
 
 ### MUSIC-001 — Listen to round 1 and record the model choices (manual)
 
-**Status:** Not Started · **Milestone:** MM0 · **Vision:** `Path_ahead.md` §34 ("Working decision", open points 1 and 5)
+**Status:** Completed (2026-10-24) · **Milestone:** MM0 · **Vision:** `Path_ahead.md` §34 ("Working decision", open points 1 and 5)
 
 **Objective.** Turn the 84 round-1 runs into recorded decisions: which model makes which kind of sound, how far timing and length are followed, and whether one long piece or several per-scene pieces work better.
 
@@ -423,19 +428,25 @@ flowchart TD
 **Observable improvements.** Later phases choose models from evidence, not from documentation.
 
 **Completion checklist.**
-- [ ] Owner listened and rated (groups A, C to H; B already heard)
-- [ ] Appendix B filled with conclusions and run ids
-- [ ] MD-9 confirmed or changed (Appendix E row if changed)
-- [ ] `KIND_MODELS` order updated
-- [ ] PHASE-034/035/036 marked Dropped; `Path_ahead.md` §34 points here
+- [x] Owner listened and rated (all 84 runs have a verdict, except two untouched Stable Audio effect runs, 1 and 2)
+- [x] Appendix B filled with conclusions and run ids
+- [x] MD-9 confirmed or changed (changed: Stable Audio Open is out; Appendix E row)
+- [x] `KIND_MODELS` order updated
+- [x] PHASE-034/035/036 marked Dropped; `Path_ahead.md` §34 points here
 
-**Completion notes.** _(fill in)_
+**Completion notes.**
+
+- **How it was recorded.** The owner listened and saved a verdict (good, usable or bad) on every run card, then told the agent the conclusions in chat. **No run card has a written note**, and `music_lab_trials/TRACKER.md` was not filled in. The agent cannot listen to audio, so every conclusion in Appendix B is the owner's, with the verdict counts read from the `lab_music_run` table (read-only) as evidence.
+- **Decisions.** MD-9 confirmed and narrowed (ACE-Step 1.5 for music, Stable Audio 3 for effects and ambience, nothing else in the pipeline). MD-24 added from the same listening.
+- **Not answered by the owner, so left open (not guessed):** one long piece against per-scene pieces (QM-2), whether endings at odd lengths are clean, whether long pieces loop, seed repeatability, and the prompt writer against hand-written prompts. The verdicts for those cases are in Appendix B. MUSIC-005 and the first real cue runs will show most of them.
+- **Code change.** `services/music_models.KIND_MODELS`: score and stem now list ACE-Step 1.5 first, and effects and ambience list Stable Audio 3 first (the lab's "best first" order; nothing else reads it).
+- **Documents changed.** `Implementation_phases.md`: PHASE-034, PHASE-035 and PHASE-036 marked "Dropped" (status lines, §4 table, snapshot, Appendix D). `Path_ahead.md` §34: an update block and open point 5.
 
 ---
 
 ### MUSIC-002 — Survey what sound H3 adds (manual)
 
-**Status:** Not Started · **Milestone:** MM0 · **Vision:** `Path_ahead.md` §34 open point 0 and point 2
+**Status:** Completed (2026-10-24, on the owner's by-ear findings) · **Milestone:** MM0 · **Vision:** `Path_ahead.md` §34 open point 0 and point 2
 
 **Objective.** Learn what H3 actually puts in a shot's audio: which effects, how much ambience, whether it ever adds music in tense scenes. That decides how much ambience and how many hits we add, and whether MD-17 changes.
 
@@ -465,17 +476,21 @@ flowchart TD
 **Observable improvements.** The ambience and hit plan is based on real H3 behaviour.
 
 **Completion checklist.**
-- [ ] Shots surveyed by ear and measured
-- [ ] Appendix B second table filled
-- [ ] MD-17 confirmed or changed
+- [x] Shots surveyed by ear (the owner's findings; see the notes on what was not done)
+- [x] Appendix B findings recorded (the per-shot table was not filled; see the notes)
+- [x] MD-17 confirmed (it stands), and MD-24 added
 
-**Completion notes.** _(fill in)_
+**Completion notes.**
+
+- **Findings (owner, 2026-10-24).** H3 makes good sound and good background music **inside a shot**, mostly without problems. When we tried to make music or sound **continuous across shots** through H3, it did not work well (each shot is generated on its own). So a sound that stays inside one shot can be left to H3, and a sound that spans shots must come from elsewhere. For sounds that span shots, such as rain, **Stable Audio 3** is used. For sounds that depend heavily on exact timing, such as thunder, **H3 itself** is used, so they are requested in the shot.
+- **What was not done.** The phase asked for at least eight surveyed shots, including a tense one, a per-shot table and FFmpeg measurements. The owner gave the conclusion by ear without a per-shot table, and the phase was marked complete on that. Appendix B's per-shot table stays empty. The one risk this leaves is QM-15: whether H3's own in-shot music clashes with the ACE-Step score.
+- **Consequences recorded.** MD-24 (routing by how far a sound reaches); MD-17 stands; new open questions QM-15 and QM-16 (below); MUSIC-008 and MUSIC-009 are updated to note the ordering problem for sounds that H3 must make.
 
 ---
 
 ### MUSIC-003 — Audio measurements
 
-**Status:** Not Started · **Milestone:** MM0 · **Vision:** this document §4.6, §4.8
+**Status:** In Progress (code complete 2026-10-24; waiting for the owner to confirm by ear the change points and loudest moments of round-1 runs 13 to 16) · **Milestone:** MM0 · **Vision:** this document §4.6, §4.8
 
 **Objective.** One pure, reusable way to measure a sound file, used by the lab cards, the take checks, the placement and the take ranking.
 
@@ -512,12 +527,30 @@ flowchart TD
 **Observable improvements.** Audio stops being a black box to code.
 
 **Completion checklist.**
-- [ ] Measurement service and its stored results
-- [ ] Speech-gap detection
-- [ ] Checked against round-1 runs and a TTS file
-- [ ] Docs; standard checks
+- [x] Measurement service and its stored results
+- [x] Speech-gap detection
+- [ ] Checked against round-1 runs and a TTS file (the TTS file, the effects and a video clip are checked; the owner's ears on runs 13 to 16 are still open)
+- [x] Docs; standard checks
 
-**Completion notes.** _(fill in)_
+**Completion notes.**
+
+- **Not marked Completed, and why.** The first Verification criterion asks that the change points and loudest moments of runs 13 to 16 agree with what the owner heard, within about a second. The agent cannot listen, and the times the owner heard were never written down (Appendix B holds verdicts only). The measurements for those four runs are listed below for the owner to confirm, mark off or correct. If the owner's times differ, the thresholds in `audio_analysis.py` are tuned and `ANALYSIS_VERSION` is raised. Until then MUSIC-004 can use the service (the other results are checked), but treat `change_points` as unconfirmed (RM-8).
+- **How "Planning decides" was settled.** FFmpeg for decoding and loudness, numpy for the shape of the sound. No librosa, scipy or madmom. numpy 2.5.4 was already installed through `rembg`; it is now a direct dependency (`backend/pyproject.toml`, `uv.lock`). Thresholds are module constants in `audio_analysis.py`, not settings, and each result stores the parameters it used.
+- **Where it is stored.** New table `audio_measurement` (migration `0062`, model `AudioMeasurement`), keyed by the file's `sha256` and `analysis_version` (`UNIQUE (sha256, analysis_version)`), with the result in `content` (JSON). Because it is keyed by the content hash, it serves lab runs, speech recordings, H3 takes and later music takes without a migration. Shape: `DATABASE_STRUCTURE.md` §4.56.
+- **Modules.**
+  - `services/audio_measurements.py`: `measure(session, path, sha256)` returns the result (cached or measured and stored) and raises `MeasurementError` (message fit for the user). Files over 15 minutes are refused. A second request for the same new file reads the first one's row.
+  - `services/audio_analysis.py`: pure numpy functions, `analyse(samples)` on mono float samples at 22.05 kHz, plus `ANALYSIS_VERSION` (1), the constants and `PARAMETERS`.
+  - `services/ffmpeg.py`: `scan_loudness` (one run of `ebur128`, `ametadata` and `astats`: LUFS, loudness range, true peak, sample peak, the count of samples at the peak, the short-term curve every 0.1 s) and `decode_mono_float`.
+- **Endpoint.** `GET /api/lab/music/runs/{id}/measurements` (404 no such run, 409 no audio yet, 422 the file cannot be measured). No UI and no job type; MUSIC-004 shows it on the run cards. `schema.d.ts` is regenerated.
+- **Result fields** (all times in seconds from the start): `duration_s`, `leading_silence_s`, `trailing_silence_s`, `silences[{start_s,end_s}]` (inside the sound only), `loudness{integrated_lufs, loudness_range_lu, true_peak_dbtp, sample_peak_dbfs, clipping, clipped_sample_count}`, `short_term_loudness{step_s: 0.5, lufs[]}` (the value at index i is the loudness of the 3 s ending at i × 0.5 s, so the first 6 are null), `loudest_moment{time_s, level_db}` (the loudest 100 ms), `onsets[{time_s, strength}]`, `quiet_points[{time_s, level_db}]`, `change_points[{time_s, strength}]`, `ending{kind: decay or cut, end_level_db, drop_db}`, and `parameters`. Later phases read these names. `strength` is standard deviations above the file's typical value.
+- **What was checked (agent, 2026-10-24, on stored round-1 and story files; the code was run directly and the endpoint against a throwaway database and media folder).**
+  - **TTS, two gaps found.** `speech_unit_audio` 53 (7.84 s, three sentences): silences at 1.60 to 2.38 s and 4.20 to 4.76 s, the two sentence breaks. `speech_unit_audio` 5 (10.88 s): three silences, at 4.22 to 5.10 s, 5.94 to 6.46 s and 8.12 to 8.64 s.
+  - **H3 clip.** `shot_take` 208 (an MP4): its audio stream is measured the same way (32 kHz stereo, loudness -17.1 LUFS, loudest moment 1.21 s).
+  - **Effects.** Run 5 (E2, "three slow knocks", Stable Audio 3, rated usable): sound at the very start, then onsets at 1.24, 2.30, 2.64 and 3.18 s, so the model made four or five knocks, not three; loudest moment 0.05 s (the first knock). Run 57 (E5, the "dun dun" sting, rated good): onsets at 0.06, 0.70, 1.06 and 1.44 s, loudest moment 1.49 s. The owner has not confirmed that these are where the peaks are heard.
+  - **Synthetic files.** A sine that steps from 300 to 1200 Hz at 4 s gives a change point at 4.00 s and an onset at 4.00 s. A cut sine reads `cut`, the same sine with a fade reads `decay`. A silent file and a file under one frame return empty lists, and a file without sound gives the "no sound" message.
+  - **Round-1 runs 13 to 16, for the owner to confirm.** Run 13 (Stable Audio 3, B1, 60 s): loudest 45.87 s, one change point 54.8 s, one onset 43.0 s, ends in a decay. Run 14 (ACE-Step, B1): loudest 4.19 s, change points 16.4, 19.8 and 52.1 s, many onsets from 20 to 52 s (a steady pulse), decay. Run 15 (Stable Audio 3, B2, 36 s): a silence 5.58 to 6.04 s, then loudest 6.19 s, change points 6.0, 24.0 and 27.4 s, trailing silence 4.4 s (the plan asked for silence from 33 s), decay. Run 16 (ACE-Step, B2): loudest 17.13 s with an onset at 17.08 s, change points 4.1, 20.2 and 32.2 s, decay.
+- **Limits found.** Change-point strengths on beatless score are modest (about 1.5 to 5 standard deviations), as RM-8 feared; a slow change gives a weak peak. Onsets are good to about 50 ms, and a repeating pulse gives many onsets. A quiet fade-in counts as leading silence while it stays 40 dB under the loud level (run 13: 0.98 s). A cut inside a quiet passage reads as a decay. All the thresholds are starting values.
+- **Standard checks.** `ruff check` and `ruff format --check` pass, `npm run lint` and `npm run typecheck` pass, the migration applies on a fresh database (`alembic upgrade head`), and `DATABASE_STRUCTURE.md` is updated. The running Docker app has **not** been rebuilt: it still runs the old code until the owner rebuilds it (`docker compose up --build -d`), which applies migration `0062` and installs the code. `alembic check` reports four existing `FLOAT` against `REAL` differences on other tables, none from this phase.
 
 ---
 
@@ -731,6 +764,8 @@ flowchart TD
   - hit;
   - silence (a deliberate absence).
 
+  **Routing (MD-24):** the plan marks each non-score cue with who makes it. Score is ACE-Step's. An ambience bed that spans shots is Stable Audio 3's. A sound that stays inside one shot, or depends on exact timing (thunder on a flash, a door), is **H3's**, and is recorded in the plan as a **sound request for that shot**, not as a cue we generate. **Planning decides** how a plan's H3 sound request reaches the shot (see the ordering note below). Hits that code places on a Stable Audio sound stay for moments no shot carries.
+
   Each cue has coarse anchors (§4.4), purpose, theme and emotion where relevant, intensity, start style and end style. Boundaries carry their join type (§4.5). In-scene music is a sixth kind left for MUSIC-015.
 - Level 1b: critics by lens and a reviser (§4.3), at most `critic_rounds` rounds.
 - Code validation:
@@ -744,6 +779,11 @@ flowchart TD
 - Storage: versioned per project, with the critiques, the revision and provenance (upstream: the Bible version and every scene's shot plan version and timeline).
 - A `music_plan` step and adapter. It runs when every scene has a valid timeline (MD-3).
 - A panel: the plan as text (one line per cue) over a simple time strip with scenes and narration, the critiques, **Edit** (the owner edits the text plan; edited plans are validated the same way).
+
+**Ordering problem to settle in planning (QM-16).** The plan needs shot plans (timings), but a sound that H3 must make has to be in the shot's definition and prompt, which come **after** shot plans and are compiled before clips are generated. If the plan comes later than prompt compilation, it can only ask H3 for sounds the story already names as `sound_event`s (which shot definitions already carry as `audio_intent`). The options:
+- (a) Run the plan (levels 1 and 1b) **between shot planning and shot definition**, and feed its H3 sound requests into the shot definitions as extra sound intents. This makes `shot_definitions` need `music_plan`, which changes PHASE-022's inputs, and skips cleanly when music is off.
+- (b) Keep the plan where it is, and limit H3-made sounds to what the story's own events say. Planned sounds that H3 cannot make fall back to Stable Audio 3 point sounds, placed by code.
+- (c) Both: (b) first, and (a) later if (b) loses too much.
 
 **Out of scope.** Exact points (011). Prompts (009). Review points with approve and reject (014).
 
@@ -1138,9 +1178,9 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 
 | ID | Question | Affects | Answer, or default until answered | Status |
 |---|---|---|---|---|
-| QM-1 | Best model per kind; Stable Audio 3 or Open for short effects | 001, 009, 010 | Default MD-9 | Open (MUSIC-001) |
-| QM-2 | One long piece or per-scene pieces | 001, 008 | Default: cues that follow dramatic turns, joined (§4.5) | Open (MUSIC-001) |
-| QM-3 | Does H3 add music or heavy ambience in tense scenes? Should the H3 prompt drop ambience under a bed? | 002, 012 | Default MD-17: render-time lowering only | Open (MUSIC-002) |
+| QM-1 | Best model per kind; Stable Audio 3 or Open for short effects | 001, 009, 010 | **ACE-Step 1.5 for music; Stable Audio 3 for effects and ambience; Open, LTX and YuE2 not used** (MD-9). Evidence in Appendix B. | Answered 2026-10-24 (MUSIC-001) |
+| QM-2 | One long piece or per-scene pieces | 001, 008 | Not stated by the owner. Default: cues that follow dramatic turns, joined (§4.5). Round-1 verdicts for C1 against C2 are in Appendix B (both rated mostly good). | Open (decide with the first real cues) |
+| QM-3 | Does H3 add music or heavy ambience in tense scenes? Should the H3 prompt drop ambience under a bed? | 002, 012 | H3 makes good sound and music inside a shot; it fails across shots (MD-24). MD-17 stands (no prompt change for ambience). | Answered 2026-10-24 (MUSIC-002) |
 | QM-4 | Theme variation method and strengths (ACE-Step `cover` or Stable Audio 3 `transform`) | 005, 007 | None until round 2 | Open (MUSIC-005) |
 | QM-5 | Do `model_join` and `continuation` work, and with what windows? | 005, 013 | Default: `crossfade`, `under_cover`, `through_silence`, `hard_cut` only | Open (MUSIC-005) |
 | QM-6 | How many themes per story | 006 | Main theme plus at most two others; fewer for short stories | Open (MUSIC-006 planning) |
@@ -1152,6 +1192,8 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 | QM-12 | Is GLM's choice the normal path for important anchors? | 011 | Planning decides | Open (MUSIC-011) |
 | QM-13 | Singing characters | 016 | Deferred (MD-14) | Deferred |
 | QM-14 | Is music on by default for new projects? | 006 | On | Open |
+| QM-15 | H3 can make good music inside a shot, but D-10 tells it to make none, because the continuous score is ACE-Step's. Keep suppressing H3 music (clean, one score), or allow it when a cue is confined to one shot (H3 makes that cue, no ACE-Step take needed), or leave it on and duck it under the score? | 008, 009, 012 | Default: keep D-10 (suppress H3 music). The H3 prompt is not changed by any music phase. | Open (owner) |
+| QM-16 | How does a sound that H3 must make (thunder on a flash, an in-shot effect) reach the shot's prompt, given that the plan comes after shot planning? See MUSIC-008. | 008, 009 | Default: option (b), H3 makes only the sounds the story's events already name; other planned sounds fall back to Stable Audio 3. | Open (MUSIC-008 planning) |
 
 ### 8.2 Risks
 
@@ -1183,23 +1225,38 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 
 ## Appendix B — Round-1 listening log (filled by MUSIC-001)
 
-**Conclusions** (copied from `music_lab_trials/TRACKER.md` after listening):
+**Source and limits.** The owner listened to the runs, saved a verdict on each run card, and stated the conclusions below in chat on 2026-10-24. No run card carries a written note. The agent cannot listen, so the **Answer** column is the owner's, and the **Evidence** column is the verdict counts read from the `lab_music_run` table (good / usable / bad), which rate overall quality, not timing accuracy. `music_lab_trials/TRACKER.md` was not filled in.
+
+**Verdict counts by kind and model:**
+
+| Kind | ACE-Step 1.5 | Stable Audio 3 | Stable Audio Open | LTX audio | YuE2 |
+|---|---|---|---|---|---|
+| Score (runs 7–36, 80–85) | 11 / 2 / 0 of 13 | 12 / 6 / 0 of 18 | — | — | — |
+| Stem (74–79) | 2 / 1 / 0 of 3 | 1 / 2 / 0 of 3 | — | — | — |
+| Sound effect (1–6, 47–61) | — | 2 / 3 / 1 of 7 (1 unrated) | 1 / 3 / 2 of 7 (1 unrated) | 0 / 2 / 5 of 7 | — |
+| Ambience (17–19, 22–23, 62–73) | — | 2 / 3 / 0 of 5 | 0 / 6 / 0 of 6 | 0 / 6 / 0 of 6 | — |
+| Song (37–46, 86–87) | 7 / 0 / 0 of 7 | — | — | — | 5 / 0 / 0 of 5 |
+
+**Conclusions:**
 
 | Question | Answer | Evidence (case, run ids) |
 |---|---|---|
-| Best model for score | | |
-| Best model for themes and stems | | |
-| Best model for short effects (Stable Audio 3 or Open) | | |
-| Best model for ambience | | |
-| Timing and cue adherence | Not followed; changes are vague; no bang at 34 s (owner, group B) | B1 runs 13–14, B2 runs 15–16 |
-| Clean endings at odd lengths | | B3a, B3b |
-| Long pieces: loops or drift | | A4, B4b |
-| One long piece or per-scene pieces | | C1 against C2a–C2d |
-| Effect counts and order | | E1–E6 |
-| Seed repeatability | | H1a, H1b |
-| Prompt writer against hand-written | | H2, H3 |
+| Best model for score | **ACE-Step 1.5** (owner: "for audio generation we use ACE-Step 1.5") | Score: ACE 11 good of 13, Stable Audio 3 12 good of 18 |
+| Best model for themes and stems | ACE-Step 1.5 (the same decision; stems rated slightly better) | G1 to G3, runs 74–79 |
+| Best model for sound effects | **Stable Audio 3** (owner: "SFX were used for Stable Audio 3") | E-group: SA3 best, LTX worst (5 bad of 7), Open mixed |
+| Best model for ambience | **Stable Audio 3** for ambience that spans shots (owner). Ambience inside one shot is H3's (MD-24). | F-group and B3a: SA3 the only model with good ratings (runs 19, 67) |
+| Timing and cue adherence | Not followed; changes are vague; no bang at 34 s (owner, group B). Trust broad order only (MD-8). | B1 runs 13–14, B2 runs 15–16 |
+| Songs | Both ACE-Step and YuE2 rated good. YuE2 is not used (MD-9), so nothing further was needed. | D-group, runs 37–46, 86, 87 |
+| Clean endings at odd lengths | **Not stated by the owner.** Verdicts only: SA3 20 usable, ACE 21 good; SA3 19 good | B3a, B3b |
+| Long pieces: loops or drift | **Not stated by the owner.** Verdicts only: 180 s SA3 usable, ACE good; 285 s SA3 good | A4 runs 11–12, B4b run 24 |
+| One long piece or per-scene pieces | **Not stated by the owner.** Verdicts only: C1 (runs 25, 26) both good; C2 all ACE good, SA3 two usable (29, 33) | C1 against C2a to C2d (QM-2 stays open) |
+| Effect counts and order | **Not stated by the owner.** Verdicts only | E1–E6 |
+| Seed repeatability | **Not stated by the owner.** All four H1 runs rated good | H1a runs 80–82, H1b run 83 |
+| Prompt writer against hand-written | **Not stated by the owner.** H2 and H3 drafts all rated good | H2 runs 84–85, H3 runs 86–87 |
+| Sound and music made by H3 | Good **inside a shot**, mostly no problem. **Continuous across shots: hinders** (owner). | MUSIC-002 |
+| Routing by scope | Inside one shot: H3. Spans shots (rain): Stable Audio 3. Time-critical (thunder): H3. (owner) | MD-24 |
 
-**H3 shot-audio survey** (filled by MUSIC-002):
+**H3 shot-audio survey** (MUSIC-002): the owner gave the findings above by ear. **The per-shot table was not filled**, so it is left empty:
 
 | Shot | Story | Effects heard | Ambience and level | Any music | Jump at the cut | Measured loudness |
 |---|---|---|---|---|---|---|
@@ -1209,7 +1266,7 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 
 ## Appendix C — Round-2 trial plan (run by MUSIC-005)
 
-ACE-Step 1.5 and Stable Audio (3, and Open for short effects) only. Seed 1717 unless a case says otherwise, as in round 1. Source runs are round-1 lab run ids. All runs are paid GPU jobs started by the owner. Run counts are approximate and are confirmed when the cases are prepared.
+ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used). Seed 1717 unless a case says otherwise, as in round 1. Source runs are round-1 lab run ids. All runs are paid GPU jobs started by the owner. Run counts are approximate and are confirmed when the cases are prepared.
 
 **I. Music character**
 - I1: Four candidate themes for the mother's lullaby, about 25 s each, solo music box and solo piano. ACE-Step and Stable Audio 3, four variants each (16 runs).
@@ -1238,8 +1295,8 @@ ACE-Step 1.5 and Stable Audio (3, and Open for short effects) only. Seed 1717 un
 **M. Ambience and effects**
 - M1: A 120 s rain bed (Stable Audio 3). Then inpaint-extend a 60 s bed to 120 s. Audible loop? Smooth extension?
 - M2: Rain growing from light to heavy over 60 s (Stable Audio 3).
-- M3: Distant thunder (6 s) and a distant fox howl (5 s), four takes each, Stable Audio 3 and Open. Measure where the loudest moment falls (MUSIC-003).
-- M4: A low impact, a riser into a hit (4 s), and a cymbal swell. Stable Audio 3 and Open. Does the riser peak at its end?
+- M3: A distant fox howl (5 s), four takes, Stable Audio 3. Measure where the loudest moment falls (MUSIC-003). (Thunder is dropped from this trial: it is H3's, MD-24.)
+- M4: A low impact, a riser into a hit (4 s), and a cymbal swell, Stable Audio 3. Does the riser peak at its end?
 
 **Results** (filled after listening):
 
@@ -1259,6 +1316,9 @@ ACE-Step 1.5 and Stable Audio (3, and Open for short effects) only. Seed 1717 un
 | Date | Phase | Event | Notes |
 |---|---|---|---|
 | 2026-10-23 | — | Document created | 16 phases defined (MUSIC-001 to MUSIC-016); MUSIC-016 deferred. Replaces PHASE-034, PHASE-035 and PHASE-036 of `Implementation_phases.md` (to be marked Dropped by MUSIC-001). |
+| 2026-10-24 | MUSIC-001 | Completed | The owner listened to round 1. ACE-Step 1.5 for music, Stable Audio 3 for effects and ambience (MD-9). Verdict counts and conclusions in Appendix B. `KIND_MODELS` reordered; PHASE-034/035/036 marked Dropped; `Path_ahead.md` §34 updated. Several questions left open because the owner did not state a finding (Appendix B). |
+| 2026-10-24 | MUSIC-002 | Completed | The owner's findings: H3 sound and music work inside a shot, not across shots; rain-like sounds go to Stable Audio 3, timing-critical sounds such as thunder to H3 (MD-24). Per-shot table not filled. New open questions QM-15 and QM-16. |
+| 2026-10-24 | MUSIC-003 | In Progress (code complete) | Measurement service (`audio_measurements`, `audio_analysis`, `ffmpeg.scan_loudness`), table `audio_measurement` (migration `0062`) and `GET /api/lab/music/runs/{id}/measurements`. Checked on TTS, effects, an H3 clip and synthetic files. Waiting for the owner to confirm the change points and loudest moments of runs 13 to 16 by ear. Docker app not rebuilt. |
 
 ---
 
@@ -1266,4 +1326,5 @@ ACE-Step 1.5 and Stable Audio (3, and Open for short effects) only. Seed 1717 un
 
 | Date | Change | Reason |
 |---|---|---|
+| 2026-10-24 | **MD-9 changed and MD-24 added from the owner's listening:** Stable Audio Open, LTX audio and YuE2 leave the pipeline; sound is routed by how far it reaches (inside one shot: H3; spans shots: Stable Audio 3; time-critical such as thunder: H3). MD-17 confirmed. MUSIC-001 and MUSIC-002 completed. MUSIC-008 notes the routing and the ordering problem it creates. QM-1 and QM-3 answered; QM-15 and QM-16 added. Round-2 trial M3 drops thunder; Stable Audio Open dropped from Appendix C. | Owner listened to round 1 and the H3 shots. |
 | 2026-10-23 | Initial version: decisions MD-1 to MD-16 from the owner's design discussion, and MD-17 to MD-23 added on re-evaluation; design §4; phases MUSIC-001 to MUSIC-016; round-2 trial plan. | Owner asked for a music-specific roadmap that follows the Opus plan, Sonnet execute workflow. |

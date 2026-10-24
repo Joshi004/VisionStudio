@@ -55,11 +55,11 @@ KIND_LABELS: Final[dict[MusicKind, str]] = {
 
 # The models that can make each kind, best first. The lab only offers these for a kind.
 KIND_MODELS: Final[dict[MusicKind, tuple[MusicModel, ...]]] = {
-    "score": ("stable-audio-3", "ace-step-1.5"),
+    "score": ("ace-step-1.5", "stable-audio-3"),
     "song": ("ace-step-1.5", "yue2"),
-    "stem": ("stable-audio-3", "ace-step-1.5"),
-    "sfx": ("stable-audio-open", "stable-audio-3", "ltx-audio"),
-    "ambience": ("ltx-audio", "stable-audio-open", "stable-audio-3"),
+    "stem": ("ace-step-1.5", "stable-audio-3"),
+    "sfx": ("stable-audio-3", "stable-audio-open", "ltx-audio"),
+    "ambience": ("stable-audio-3", "stable-audio-open", "ltx-audio"),
 }
 
 

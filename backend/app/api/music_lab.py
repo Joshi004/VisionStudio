@@ -14,6 +14,10 @@ Activity page shows). The runs of one click share a `group_key`.
 
 `PATCH .../runs/{id}` records what a person decided after listening: a verdict and a note.
 
+`GET .../runs/{id}/measurements` says what is in a run's audio (silences, loudness, the loudest
+moment, sudden sounds, quiet points, changes of character, how it ends). It is measured the first
+time it is asked for and stored with the file's hash (MUSIC-003).
+
 Several of the models are licensed with limits (YuE2 is non-commercial, Stable Audio needs a
 licence above USD 1M revenue): `GET .../models` carries the warning for each, and the page shows it.
 """
@@ -32,9 +36,9 @@ from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.providers import music_generator
-from app.services import music_lab, music_models
+from app.services import audio_measurements, music_lab, music_models
 from app.services.music_models import MusicKind, MusicModel
-from app.services.storage import media_url
+from app.services.storage import StorageError, get_storage, media_url
 
 router = APIRouter()
 
@@ -183,6 +187,78 @@ class LabMusicRunOut(BaseModel):
     note: str | None
 
 
+class LoudestMomentOut(BaseModel):
+    # The middle of the loudest 100 ms, and its level in dB relative to full scale.
+    time_s: float
+    level_db: float
+
+
+class SilenceOut(BaseModel):
+    start_s: float
+    end_s: float
+
+
+class StrongPointOut(BaseModel):
+    """A sudden sound or a change of character. `strength` is how many standard deviations the
+    point stands above the file's typical value, so 3 is clear and 10 is unmistakable."""
+
+    time_s: float
+    strength: float
+
+
+class QuietPointOut(BaseModel):
+    time_s: float
+    level_db: float
+
+
+class EndingOut(BaseModel):
+    # `decay`: the sound dies away (a real ending or a fade). `cut`: it stops while still loud.
+    kind: Literal["decay", "cut"]
+    end_level_db: float
+    # How far the last half second is under the loud level of the piece.
+    drop_db: float
+
+
+class LoudnessOut(BaseModel):
+    integrated_lufs: float | None
+    loudness_range_lu: float | None
+    true_peak_dbtp: float | None
+    sample_peak_dbfs: float | None
+    clipping: bool
+    clipped_sample_count: int
+
+
+class ShortTermLoudnessOut(BaseModel):
+    # `lufs[i]` is the loudness of the 3 seconds that end at `i * step_s`. None where undefined
+    # (the first 3 seconds, and silence).
+    step_s: float
+    lufs: list[float | None]
+
+
+class AudioMeasurementOut(BaseModel):
+    """What was measured in a run's audio (MUSIC-003). All times are seconds from the start."""
+
+    analysis_version: int
+    # The rules and thresholds the result was made with.
+    parameters: dict[str, Any]
+    sample_rate: int | None
+    channels: int | None
+    duration_s: float
+    leading_silence_s: float
+    trailing_silence_s: float
+    # Silences inside the sound (the leading and trailing ones are the two fields above).
+    silences: list[SilenceOut]
+    loudness: LoudnessOut
+    short_term_loudness: ShortTermLoudnessOut
+    loudest_moment: LoudestMomentOut | None
+    # Sudden sounds. Good to about 50 ms.
+    onsets: list[StrongPointOut]
+    quiet_points: list[QuietPointOut]
+    # Where the sound changes character. None in the first and last 2 seconds.
+    change_points: list[StrongPointOut]
+    ending: EndingOut | None
+
+
 def _unprocessable(message: str) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, message)
 
@@ -325,6 +401,34 @@ async def get_run(run_id: int, session: SessionDep) -> LabMusicRunOut:
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
     return run_out(row)
+
+
+@router.get(
+    "/lab/music/runs/{run_id}/measurements",
+    response_model=AudioMeasurementOut,
+    responses={
+        **_NOT_FOUND,
+        409: {"model": ErrorResponse, "description": "The run has no audio yet."},
+        422: {"model": ErrorResponse, "description": "The audio could not be measured."},
+    },
+)
+async def get_run_measurements(run_id: int, session: SessionDep) -> AudioMeasurementOut:
+    """What is in the run's audio: silences, loudness, the loudest moment, sudden sounds, quiet
+    points, places where the sound changes and how it ends. Measured the first time it is asked
+    for and stored with the file's hash, so asking again reads the stored result.
+    """
+    row = await music_lab.get_run(session, run_id) if 1 <= run_id <= _MAX_ID else None
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
+    run = row.run
+    if run.path is None or run.sha256 is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Run {run_id} has no audio yet.")
+    try:
+        path = get_storage().get_path(run.path)
+        content = await audio_measurements.measure(session, path, run.sha256)
+    except (StorageError, audio_measurements.MeasurementError) as exc:
+        raise _unprocessable(str(exc)) from exc
+    return AudioMeasurementOut.model_validate(content)
 
 
 @router.patch(
