@@ -6,16 +6,22 @@ import {
   useCreateMusicLabRuns,
   useCreateMusicPromptDraft,
   useMusicCatalog,
+  type LabMusicRun,
   type MusicModel,
 } from "../../api/musicLab";
+import { MusicEditPanel } from "../musicLab/MusicEditPanel";
 import { MusicLabForm } from "../musicLab/MusicLabForm";
 import { MusicLabRunList } from "../musicLab/MusicLabRunList";
+import type { MusicEditFormState } from "../musicLab/musicEditView";
 import { briefRequest, selectedModels, toRequest, type MusicLabFormState } from "../musicLab/musicLabView";
 
 type MusicLabPanelProps = {
   /** The form lives in the Lab page, so changing tabs never loses what was typed. */
   form: MusicLabFormState;
   onFormChange: Dispatch<SetStateAction<MusicLabFormState>>;
+  /** The edit form lives in the Lab page for the same reason. */
+  editForm: MusicEditFormState;
+  onEditFormChange: Dispatch<SetStateAction<MusicEditFormState>>;
 };
 
 /**
@@ -24,7 +30,7 @@ type MusicLabPanelProps = {
  * sound each does best. A language model can write each model's fields from the brief. Each run
  * is a paid GPU job. It belongs to no project and changes none.
  */
-export function MusicLabPanel({ form, onFormChange }: MusicLabPanelProps) {
+export function MusicLabPanel({ form, onFormChange, editForm, onEditFormChange }: MusicLabPanelProps) {
   const catalog = useMusicCatalog();
   const create = useCreateMusicLabRuns();
   const draft = useCreateMusicPromptDraft();
@@ -53,6 +59,19 @@ export function MusicLabPanel({ form, onFormChange }: MusicLabPanelProps) {
         setStarting((current) => current.filter((entry) => entry !== model));
       }
     }
+  }
+
+  /** Fills the edit form with this run as the source, and brings the form into view. */
+  function editRun(run: LabMusicRun) {
+    const description = typeof run.brief.description === "string" ? run.brief.description : "";
+    onEditFormChange((current) => ({
+      ...current,
+      sourceMode: "run",
+      runNumber: String(run.id),
+      kind: run.kind,
+      description: current.description.trim() === "" ? description : current.description,
+    }));
+    document.getElementById("music-edit")?.scrollIntoView({ behavior: "smooth" });
   }
 
   if (catalog.isLoading) {
@@ -106,8 +125,12 @@ export function MusicLabPanel({ form, onFormChange }: MusicLabPanelProps) {
         </Alert>
       )}
 
+      <Paper withBorder p="md" radius="md" id="music-edit">
+        <MusicEditPanel state={editForm} onChange={onEditFormChange} catalog={catalog.data} />
+      </Paper>
+
       <Paper withBorder p="md" radius="md">
-        <MusicLabRunList onLoad={onFormChange} />
+        <MusicLabRunList onLoad={onFormChange} onEdit={editRun} />
       </Paper>
     </Stack>
   );

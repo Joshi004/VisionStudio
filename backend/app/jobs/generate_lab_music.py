@@ -1,8 +1,12 @@
 """The `lab_music` job: one piece of audio from the Music lab, made by one of the GPU server's
 music models (ACE-Step 1.5, YuE2, Stable Audio 3, Stable Audio Open or LTX text-to-audio).
 
-It is the simplest remote job there is: no file is uploaded (text-to-audio only), so `start`
-submits the request the service built and saves the server's job id. Everything after that is
+For text-to-audio no file is uploaded, so `start` submits the request the service built and saves
+the server's job id. An edit (repaint, cover, inpaint, transform) first uploads its source
+recording with `POST /v1/uploads` and names it in the request (`source_audio_asset_id`); the upload
+is done here, right before the submit, because the server deletes an upload that no job uses after
+60 minutes, and a job that is submitted again after a pre-emption uploads again. Everything after
+the submit is
 `RemoteVideoHandler`'s: it polls once per tick, downloads the result, resubmits after a
 pre-emption, handles an expired result, and purges and cancels on the server. Failure handling
 follows ANALYSIS.md Section 5.8: a dropped connection never fails the job. (The shared phases
@@ -14,7 +18,7 @@ finished job. The job belongs to no project (`job.project_id` is NULL).
 
 The request is built and checked by `services/music_lab.py`, so a bad form starts nothing. This
 module only submits what the job recorded, and refuses an endpoint that is not the one its model
-has (a job's input is data, not a place to pick any URL).
+(and operation) has (a job's input is data, not a place to pick any URL).
 """
 
 from __future__ import annotations
@@ -36,12 +40,21 @@ from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import gpu_server, music_generator
 from app.providers.gpu_server import GpuCallError
 from app.services import ffmpeg, music_lab, music_models
-from app.services.music_models import MusicModel
-from app.services.storage import TempFile, get_storage
+from app.services.music_models import EditOperation, MusicModel
+from app.services.storage import StorageError, TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = music_lab.RUN_JOB
+
+
+@dataclass(frozen=True)
+class _Source:
+    """The recording an edit starts from: a stored file under `media/` and how to send it."""
+
+    path: str
+    filename: str
+    mime: str
 
 
 @dataclass(frozen=True)
@@ -53,6 +66,9 @@ class _Plan:
     endpoint: str
     request: dict[str, Any]
     extension: str
+    # Set for an edit.
+    operation: EditOperation | None
+    source: _Source | None
 
 
 def _plan(recorded: object) -> _Plan | None:
@@ -65,7 +81,24 @@ def _plan(recorded: object) -> _Plan | None:
         return None
     if not music_models.is_music_model(model) or not isinstance(request, dict):
         return None
-    if endpoint != music_generator.ENDPOINTS[model]:
+
+    operation = recorded.get("operation")
+    source: _Source | None = None
+    if operation is None:
+        expected = music_generator.ENDPOINTS[model]
+    else:
+        if not music_models.is_edit_operation(operation):
+            return None
+        expected_or_none = music_generator.EDIT_ENDPOINTS.get((operation, model))
+        raw = recorded.get("source")
+        if expected_or_none is None or not isinstance(raw, dict):
+            return None
+        path, filename, mime = raw.get("path"), raw.get("filename"), raw.get("mime")
+        if not (isinstance(path, str) and isinstance(filename, str) and isinstance(mime, str)):
+            return None
+        expected = expected_or_none
+        source = _Source(path=path, filename=filename, mime=mime)
+    if endpoint != expected:
         return None
     return _Plan(
         run_id=run_id,
@@ -73,6 +106,8 @@ def _plan(recorded: object) -> _Plan | None:
         endpoint=endpoint,
         request=request,
         extension=music_generator.EXTENSIONS[model],
+        operation=operation,
+        source=source,
     )
 
 
@@ -96,19 +131,42 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
             return
 
         retried_server_error = False
+        retried_asset = False
         while True:
             try:
                 if not await self._is_running(job_id):
                     return  # cancelled before it was submitted
+                body = plan.request
+                uploads: list[dict[str, Any]] = []
+                if plan.source is not None:
+                    await self._phase(job_id, phases.UPLOADING_MUSIC_SOURCE)
+                    path = get_storage().get_path(plan.source.path)
+                    remote_id = await gpu_server.upload_file(
+                        base_url, path, plan.source.filename, plan.source.mime
+                    )
+                    uploads.append({"filename": plan.source.filename, "remote_asset_id": remote_id})
+                    body = music_generator.with_source(body, remote_id)
+                    if not await self._is_running(job_id):
+                        return  # cancelled while uploading: nothing was submitted
                 await self._phase(job_id, phases.SUBMITTING)
-                answer = await gpu_server.submit(base_url, plan.endpoint, plan.request)
+                answer = await gpu_server.submit(base_url, plan.endpoint, body)
                 break
+            except (StorageError, OSError):
+                await self._fail(job_id, "The source recording's file could not be read.")
+                return
             except GpuCallError as exc:
-                # 502 at submit is retried once after a pause. 429 and no answer put the job
-                # back in the queue, and any other refusal fails it with the server's message.
+                # 502 at submit is retried once after a pause. A 400 for an unknown asset id
+                # uploads the source again once. 429 and no answer put the job back in the
+                # queue, and any other refusal fails it with the server's message.
                 if exc.kind == "server_error" and not retried_server_error:
                     retried_server_error = True
                     await asyncio.sleep(SERVER_RETRY_DELAY_S)
+                    continue
+                unknown_asset = (
+                    exc.status_code == 400 and "invalid asset reference" in exc.message.lower()
+                )
+                if exc.kind == "rejected" and unknown_asset and not retried_asset:
+                    retried_asset = True  # the server lost the upload: send it again
                     continue
                 await self._give_up_starting(job_id, exc)
                 return
@@ -118,6 +176,10 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
             "server_url": docker_mapped(base_url),
             "submit_answer": answer.to_json(),
         }
+        if plan.source is not None:
+            # What was uploaded, and the request exactly as it was sent.
+            submitted["uploads"] = uploads
+            submitted["body"] = body
         async with SessionLocal() as session:
             saved = await store.mark_submitted(session, job_id, answer.job_id, submitted)
         if not saved:

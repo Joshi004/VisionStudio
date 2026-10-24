@@ -41,6 +41,13 @@ SHORT_TERM_STEP_S: Final = 0.5
 CLIPPING_PEAK_DBFS: Final = -0.1
 
 
+# Every run card asks for its measurements, so the first page after an upgrade can ask for twenty
+# new files at once. Each takes a few FFmpeg runs and some CPU: only this many are measured at a
+# time, and the rest wait.
+_MAX_AT_ONCE: Final = 2
+_slots = asyncio.Semaphore(_MAX_AT_ONCE)
+
+
 class MeasurementError(Exception):
     """The file could not be measured. The message is meant to be shown to the user."""
 
@@ -55,7 +62,8 @@ async def measure(session: AsyncSession, path: Path, sha256: str) -> dict[str, A
     if stored is not None:
         return stored
 
-    content = await _measure_file(path)
+    async with _slots:
+        content = await _measure_file(path)
     # Two requests for the same new file may both get here. The first row stays, and both
     # callers return what is stored, so they never disagree.
     statement = (

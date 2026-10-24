@@ -15,6 +15,11 @@ limits of the server's schema before anything starts, so a bad form starts nothi
 Every run is a paid GPU job, so it starts only from a click and is never merged into an earlier
 one: trying the same brief again with another seed is what the lab is for.
 
+An edit (MUSIC-004: repaint, cover, inpaint, transform) is a run too: it starts from a source
+recording (an earlier run, an uploaded file or a join of two runs, `services/music_sources.py`),
+has the fields of its operation (`music_models.EDIT_FIELDS`) and is made by the same job. Its
+window or strength is part of the fields, so the card shows it with everything else that was sent.
+
 This module builds and checks the requests and reads the runs. It never calls the GPU server:
 `jobs/generate_lab_music.py` does that.
 """
@@ -25,17 +30,17 @@ import logging
 import math
 import secrets
 from collections.abc import Collection
-from dataclasses import dataclass
-from typing import Any, Final
+from dataclasses import dataclass, replace
+from typing import Any, Final, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Job, LabMusicRun
+from app.db.models import Job, LabMusicRun, LabMusicSource
 from app.jobs import store
 from app.providers import contract_guard, music_generator
-from app.services import api_contract, music_models
+from app.services import api_contract, music_models, music_sources
 from app.services import music_prompt_writer as prompt_writer
 from app.services.music_models import MusicKind, MusicModel
 
@@ -103,11 +108,28 @@ class MusicLabForm:
 
 
 @dataclass(frozen=True)
+class SourceRef:
+    """What an edit started from, for the run card."""
+
+    type: Literal["run", "upload", "join"]
+    label: str
+    # The stored file, or None when it is gone from the database.
+    path: str | None
+    duration_s: float | None
+    run_id: int | None
+    source_id: int | None
+    # The middle of a join, in seconds from the start of the joined file.
+    seam_s: float | None
+    recipe: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
 class RunRow:
-    """A run with its job."""
+    """A run with its job, and for an edit what it started from."""
 
     run: LabMusicRun
     job: Job | None
+    source: SourceRef | None = None
 
 
 # --- The brief ----------------------------------------------------------------------------
@@ -282,7 +304,7 @@ async def create_runs(session: AsyncSession, form: MusicLabForm) -> list[RunRow]
         if problems:
             raise MusicLabInputError(f"{music_models.label(item.model)}: {problems[0]}")
         try:
-            music_generator.check_endpoint(spec, item.model)
+            music_generator.check_endpoint(spec, music_generator.ENDPOINTS[item.model])
         except ValueError as exc:
             raise MusicLabInputError(str(exc)) from exc
         await _check_prompt_job(session, item.prompt_job_id)
@@ -330,6 +352,127 @@ async def create_runs(session: AsyncSession, form: MusicLabForm) -> list[RunRow]
     return rows
 
 
+# --- Edits --------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EditForm:
+    """One edit: the operation, the model, the source (a run or a stored source), the fields of
+    the operation, and how many seeds to make."""
+
+    operation: str
+    model: str
+    kind: str
+    # What the edit is for, in a sentence. It is the brief's description.
+    description: str
+    source_run_id: int | None
+    source_id: int | None
+    fields: dict[str, Any]
+    variants: int
+    seed: int | None
+
+
+async def create_edits(session: AsyncSession, form: EditForm) -> list[RunRow]:
+    """Checks the edit and starts one run for every seed. Commits. Raises MusicLabInputError.
+
+    Everything is checked first (the operation and model, the source, the fields and the rules
+    that need the source's length, and that the newest recorded GPU API has the endpoint and the
+    upload endpoint), so a bad edit starts nothing. The runs share a `group_key`.
+    """
+    operation, model = form.operation, form.model
+    if not music_models.is_edit_operation(operation):
+        raise MusicLabInputError("Choose what to do: repaint, cover, inpaint or transform.")
+    if not music_models.is_music_model(model) or not music_models.edit_supported(operation, model):
+        raise MusicLabInputError(
+            f"{music_models.label(model)} does not make "
+            f"{music_models.EDIT_LABELS[operation].lower()}."
+        )
+    if not 1 <= form.variants <= MAX_VARIANTS:
+        raise MusicLabInputError(f"Make from 1 to {MAX_VARIANTS} versions.")
+    if form.seed is not None and not 0 <= form.seed <= music_models.SEED_MAX:
+        raise MusicLabInputError(f"The seed must be from 0 to {music_models.SEED_MAX}.")
+    brief = clean_brief(form.kind, {"description": form.description})
+
+    try:
+        source = await music_sources.resolve(
+            session, run_id=form.source_run_id, source_id=form.source_id
+        )
+    except music_sources.MusicSourceError as exc:
+        raise MusicLabInputError(exc.message) from exc
+
+    fields = music_models.coerce_edit_fields(operation, model, form.fields)
+    problems = music_models.edit_problems(operation, model, fields, source.duration_s)
+    if problems:
+        raise MusicLabInputError(f"{music_models.label(model)}: {problems[0]}")
+
+    endpoint = music_generator.EDIT_ENDPOINTS[(operation, model)]
+    bodies = await contract_guard.latest_bodies(session)
+    spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
+    try:
+        music_generator.check_edit_endpoints(spec, endpoint)
+    except ValueError as exc:
+        raise MusicLabInputError(str(exc)) from exc
+    partition = await settings_service.get_str(session, PARTITION_KEY)
+
+    base_seed = form.seed if form.seed is not None else secrets.randbelow(music_models.SEED_MAX + 1)
+    seeds = [(base_seed + offset) % (music_models.SEED_MAX + 1) for offset in range(form.variants)]
+
+    group_key = secrets.token_hex(8)
+    rows: list[RunRow] = []
+    for seed in seeds:
+        body = music_generator.build_edit_body(
+            operation, model, fields, seed=seed, partition=partition
+        )
+        run = LabMusicRun(
+            group_key=group_key,
+            kind=brief["kind"],
+            model=model,
+            endpoint=endpoint,
+            brief=brief,
+            fields=fields,
+            params={"seed": seed},
+            operation=operation,
+            source_run_id=source.run_id,
+            source_id=source.source_id,
+        )
+        session.add(run)
+        await session.flush()
+        job, _created = await store.create_job(
+            session,
+            project_id=None,
+            type=RUN_JOB,
+            provider="gpu",
+            input={
+                "requested": "lab_music",
+                "run_id": run.id,
+                "model": model,
+                "operation": operation,
+                "endpoint": endpoint,
+                "request": body,
+                "source": {
+                    "path": source.path,
+                    "filename": source.filename,
+                    "mime": source.mime,
+                    "label": source.label,
+                },
+            },
+            commit=False,
+            dedupe=False,
+        )
+        run.job_id = job.id
+        rows.append(RunRow(run=run, job=job))
+    await session.commit()
+    _logger.info(
+        "lab music edits started: group=%s operation=%s model=%s source=%s runs=%d",
+        group_key,
+        operation,
+        model,
+        source.label,
+        len(rows),
+    )
+    return await _attach_sources(session, rows)
+
+
 # --- Judging a run ------------------------------------------------------------------------
 
 
@@ -364,6 +507,55 @@ def _rows(result: Any) -> list[RunRow]:
     return [RunRow(run=run, job=job) for run, job in result.all()]
 
 
+async def _attach_sources(session: AsyncSession, rows: list[RunRow]) -> list[RunRow]:
+    """The rows with what each edit started from. Text-to-audio rows are returned as they are."""
+    run_ids = {row.run.source_run_id for row in rows if row.run.source_run_id is not None}
+    source_ids = {row.run.source_id for row in rows if row.run.source_id is not None}
+    if not run_ids and not source_ids:
+        return rows
+    runs: dict[int, LabMusicRun] = {}
+    if run_ids:
+        found = await session.execute(select(LabMusicRun).where(LabMusicRun.id.in_(run_ids)))
+        runs = {run.id: run for run in found.scalars()}
+    sources: dict[int, LabMusicSource] = {}
+    if source_ids:
+        found_sources = await session.execute(
+            select(LabMusicSource).where(LabMusicSource.id.in_(source_ids))
+        )
+        sources = {source.id: source for source in found_sources.scalars()}
+
+    attached: list[RunRow] = []
+    for row in rows:
+        ref: SourceRef | None = None
+        if row.run.source_run_id is not None:
+            source_run = runs.get(row.run.source_run_id)
+            ref = SourceRef(
+                type="run",
+                label=f"Run {row.run.source_run_id}",
+                path=source_run.path if source_run is not None else None,
+                duration_s=source_run.duration_s if source_run is not None else None,
+                run_id=row.run.source_run_id,
+                source_id=None,
+                seam_s=None,
+                recipe=None,
+            )
+        elif row.run.source_id is not None:
+            source = sources.get(row.run.source_id)
+            if source is not None:
+                ref = SourceRef(
+                    type="join" if source.kind == "join" else "upload",
+                    label=source.label,
+                    path=source.path,
+                    duration_s=source.duration_s,
+                    run_id=None,
+                    source_id=source.id,
+                    seam_s=music_sources.seam_s(source),
+                    recipe=source.recipe if isinstance(source.recipe, dict) else None,
+                )
+        attached.append(replace(row, source=ref))
+    return attached
+
+
 def _select() -> Any:
     return select(LabMusicRun, Job).outerjoin(Job, Job.id == LabMusicRun.job_id)
 
@@ -373,7 +565,8 @@ async def list_runs(session: AsyncSession, before_id: int | None, limit: int) ->
     statement = _select().order_by(LabMusicRun.id.desc()).limit(limit)
     if before_id is not None:
         statement = statement.where(LabMusicRun.id < before_id)
-    return _rows(await session.execute(statement.execution_options(populate_existing=True)))
+    rows = _rows(await session.execute(statement.execution_options(populate_existing=True)))
+    return await _attach_sources(session, rows)
 
 
 async def get_runs(session: AsyncSession, run_ids: Collection[int]) -> dict[int, RunRow]:
@@ -383,10 +576,11 @@ async def get_runs(session: AsyncSession, run_ids: Collection[int]) -> dict[int,
     statement = (
         _select().where(LabMusicRun.id.in_(run_ids)).execution_options(populate_existing=True)
     )
-    return {row.run.id: row for row in _rows(await session.execute(statement))}
+    rows = await _attach_sources(session, _rows(await session.execute(statement)))
+    return {row.run.id: row for row in rows}
 
 
 async def get_run(session: AsyncSession, run_id: int) -> RunRow | None:
     statement = _select().where(LabMusicRun.id == run_id).execution_options(populate_existing=True)
-    rows = _rows(await session.execute(statement))
+    rows = await _attach_sources(session, _rows(await session.execute(statement)))
     return rows[0] if rows else None

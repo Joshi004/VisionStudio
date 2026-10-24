@@ -14,6 +14,13 @@ Activity page shows). The runs of one click share a `group_key`.
 
 `PATCH .../runs/{id}` records what a person decided after listening: a verdict and a note.
 
+`POST .../edits` starts the same kind of run from a recording instead of text (MUSIC-004):
+`repaint` or `cover` (ACE-Step), `inpaint` or `transform` (Stable Audio 3), `transform` (Stable
+Audio Open). The recording is an earlier run, an uploaded file or a join of two runs. `POST
+.../sources/upload` stores an uploaded recording (the raw file is the request body), `POST
+.../sources/join` puts two finished runs end to end, with silence between and after them if asked,
+and `GET .../sources` lists the stored ones.
+
 `GET .../runs/{id}/measurements` says what is in a run's audio (silences, loudness, the loudest
 moment, sudden sounds, quiet points, changes of character, how it ends). It is measured the first
 time it is asked for and stored with the file's hash (MUSIC-003).
@@ -27,16 +34,18 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Final, Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobDetail, JobSummary, job_detail, job_summary
+from app.api.projects import content_length, require_octet_stream
+from app.db.models import LabMusicSource
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.providers import music_generator
-from app.services import audio_measurements, music_lab, music_models
+from app.services import audio_measurements, music_lab, music_models, music_sources
 from app.services.music_models import MusicKind, MusicModel
 from app.services.storage import StorageError, get_storage, media_url
 
@@ -48,6 +57,12 @@ Id = Annotated[int, Field(strict=True, ge=1, le=_MAX_ID)]
 
 _INVALID = {422: {"model": ErrorResponse, "description": "The form breaks a rule."}}
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No run has this id."}}
+_UPLOAD_BODY = {
+    "requestBody": {
+        "required": True,
+        "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+    }
+}
 
 # The widest a free-form object of the request may be. The values are checked field by field.
 _MAX_KEYS: Final = 40
@@ -123,6 +138,34 @@ class LabMusicRunUpdate(BaseModel):
     note: StrictStr | None = None
 
 
+class MusicEditCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["repaint", "cover", "inpaint", "transform"]
+    model: MusicModel
+    kind: MusicKind
+    # What the edit is for, in a sentence.
+    description: StrictStr
+    # Exactly one of the two: an earlier run, or an uploaded or joined recording.
+    source_run_id: Id | None = None
+    source_id: Id | None = None
+    # The fields of the operation (`GET .../models` lists them). Checked field by field.
+    fields: dict[str, Any] = Field(max_length=_MAX_KEYS)
+    # How many seeds to make (1 to 4).
+    variants: StrictInt = 1
+    seed: StrictInt | None = None
+
+
+class MusicSourceJoin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Two finished runs, in the order they are put together.
+    run_ids: list[Id] = Field(min_length=2, max_length=2)
+    # Silence between the two, and after them, in seconds.
+    gap_s: Annotated[float, Field(allow_inf_nan=False)] = 0.0
+    tail_s: Annotated[float, Field(allow_inf_nan=False)] = 0.0
+
+
 class FieldSpecOut(BaseModel):
     name: str
     label: str
@@ -149,6 +192,22 @@ class MusicModelOut(BaseModel):
     fields: list[FieldSpecOut]
 
 
+class EditModelOut(BaseModel):
+    model: MusicModel
+    label: str
+    endpoint: str
+    # The longest source this model takes for the operation, in seconds.
+    max_source_s: float
+    fields: list[FieldSpecOut]
+
+
+class EditOperationOut(BaseModel):
+    id: Literal["repaint", "cover", "inpaint", "transform"]
+    label: str
+    help: str
+    models: list[EditModelOut]
+
+
 class MusicKindOut(BaseModel):
     id: MusicKind
     label: str
@@ -159,6 +218,47 @@ class MusicKindOut(BaseModel):
 class MusicCatalogOut(BaseModel):
     kinds: list[MusicKindOut]
     models: list[MusicModelOut]
+    # The editing operations, each with the models that make it and the fields it takes.
+    operations: list[EditOperationOut]
+
+
+class JoinPartOut(BaseModel):
+    run_id: int
+    # Where the part sits in the joined file, in seconds.
+    start_s: float
+    end_s: float
+
+
+class MusicSourceOut(BaseModel):
+    """A recording made for editing: an upload, or a join of two runs."""
+
+    id: int
+    created_at: datetime
+    kind: Literal["upload", "join"]
+    label: str
+    url: str
+    duration_s: float
+    size_bytes: int
+    sample_rate: int | None
+    channels: int | None
+    # A join only: the middle of the join, in seconds from the start, and how it was made.
+    seam_s: float | None
+    parts: list[JoinPartOut] | None
+    gap_s: float | None
+    tail_s: float | None
+
+
+class RunSourceOut(BaseModel):
+    """What an edit started from."""
+
+    type: Literal["run", "upload", "join"]
+    label: str
+    # The recording, to play it. None when its file is gone.
+    url: str | None
+    duration_s: float | None
+    run_id: int | None
+    source_id: int | None
+    seam_s: float | None
 
 
 class LabMusicRunOut(BaseModel):
@@ -185,6 +285,9 @@ class LabMusicRunOut(BaseModel):
     channels: int | None
     verdict: Literal["good", "usable", "bad"] | None
     note: str | None
+    # An edit: what it does and what it started from. None for text-to-audio.
+    operation: Literal["repaint", "cover", "inpaint", "transform"] | None
+    source: RunSourceOut | None
 
 
 class LoudestMomentOut(BaseModel):
@@ -263,6 +366,19 @@ def _unprocessable(message: str) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, message)
 
 
+def _field_spec_out(spec: music_models.FieldSpec) -> FieldSpecOut:
+    return FieldSpecOut(
+        name=spec.name,
+        label=spec.label,
+        type=spec.type,
+        required=spec.required,
+        max_chars=spec.max_chars,
+        minimum=spec.minimum,
+        maximum=spec.maximum,
+        choices=list(spec.choices) if spec.choices else None,
+    )
+
+
 def _catalog() -> MusicCatalogOut:
     models = []
     for model in music_models.MODEL_IDS:
@@ -277,26 +393,35 @@ def _catalog() -> MusicCatalogOut:
                 min_duration_s=music_models.MIN_DURATION_S[model],
                 max_duration_s=music_models.MAX_DURATION_S[model],
                 extension=music_generator.EXTENSIONS[model],
-                fields=[
-                    FieldSpecOut(
-                        name=spec.name,
-                        label=spec.label,
-                        type=spec.type,
-                        required=spec.required,
-                        max_chars=spec.max_chars,
-                        minimum=spec.minimum,
-                        maximum=spec.maximum,
-                        choices=list(spec.choices) if spec.choices else None,
-                    )
-                    for spec in music_models.field_specs(model)
-                ],
+                fields=[_field_spec_out(spec) for spec in music_models.field_specs(model)],
             )
         )
     kinds = [
         MusicKindOut(id=kind, label=music_models.KIND_LABELS[kind], models=list(chosen))
         for kind, chosen in music_models.KIND_MODELS.items()
     ]
-    return MusicCatalogOut(kinds=kinds, models=models)
+    operations = [
+        EditOperationOut(
+            id=operation,
+            label=music_models.EDIT_LABELS[operation],
+            help=music_models.EDIT_HELP[operation],
+            models=[
+                EditModelOut(
+                    model=model,
+                    label=music_models.LABELS[model],
+                    endpoint=music_generator.EDIT_ENDPOINTS[(operation, model)],
+                    max_source_s=music_models.MAX_SOURCE_S[(operation, model)],
+                    fields=[
+                        _field_spec_out(spec)
+                        for spec in music_models.edit_field_specs(operation, model)
+                    ],
+                )
+                for model in music_models.EDIT_MODELS[operation]
+            ],
+        )
+        for operation in music_models.EDIT_OPERATION_IDS
+    ]
+    return MusicCatalogOut(kinds=kinds, models=models, operations=operations)
 
 
 def run_out(row: music_lab.RunRow) -> LabMusicRunOut:
@@ -324,6 +449,44 @@ def run_out(row: music_lab.RunRow) -> LabMusicRunOut:
         channels=run.channels,
         verdict=run.verdict,  # type: ignore[arg-type]  # the database CHECK holds the three
         note=run.note,
+        operation=run.operation,  # type: ignore[arg-type]  # the database CHECK holds the four
+        source=_run_source_out(row.source),
+    )
+
+
+def _run_source_out(ref: music_lab.SourceRef | None) -> RunSourceOut | None:
+    if ref is None:
+        return None
+    return RunSourceOut(
+        type=ref.type,
+        label=ref.label,
+        url=media_url(ref.path) if ref.path is not None else None,
+        duration_s=ref.duration_s,
+        run_id=ref.run_id,
+        source_id=ref.source_id,
+        seam_s=ref.seam_s,
+    )
+
+
+def source_out(source: LabMusicSource) -> MusicSourceOut:
+    recipe = source.recipe if isinstance(source.recipe, dict) else None
+    parts = recipe.get("parts") if recipe is not None else None
+    return MusicSourceOut(
+        id=source.id,
+        created_at=source.created_at,
+        kind=source.kind,  # type: ignore[arg-type]  # the database CHECK holds the two
+        label=source.label,
+        url=media_url(source.path),
+        duration_s=source.duration_s,
+        size_bytes=source.size_bytes,
+        sample_rate=source.sample_rate,
+        channels=source.channels,
+        seam_s=music_sources.seam_s(source),
+        parts=[JoinPartOut.model_validate(part) for part in parts]
+        if isinstance(parts, list)
+        else None,
+        gap_s=recipe.get("gap_s") if recipe is not None else None,
+        tail_s=recipe.get("tail_s") if recipe is not None else None,
     )
 
 
@@ -382,6 +545,92 @@ async def create_runs(body: LabMusicRunCreate, session: SessionDep) -> list[LabM
         raise _unprocessable(str(exc)) from exc
     dispatcher.nudge()
     return [run_out(row) for row in rows]
+
+
+@router.post(
+    "/lab/music/edits",
+    response_model=list[LabMusicRunOut],
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=_INVALID,
+)
+async def create_edits(body: MusicEditCreate, session: SessionDep) -> list[LabMusicRunOut]:
+    """Starts one edit run per seed, from an earlier run, an uploaded recording or a join of two
+    runs. Each is a paid GPU job.
+    """
+    form = music_lab.EditForm(
+        operation=body.operation,
+        model=body.model,
+        kind=body.kind,
+        description=body.description,
+        source_run_id=body.source_run_id,
+        source_id=body.source_id,
+        fields=body.fields,
+        variants=body.variants,
+        seed=body.seed,
+    )
+    try:
+        rows = await music_lab.create_edits(session, form)
+    except music_lab.MusicLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    dispatcher.nudge()
+    return [run_out(row) for row in rows]
+
+
+@router.get("/lab/music/sources", response_model=list[MusicSourceOut])
+async def list_sources(session: SessionDep) -> list[MusicSourceOut]:
+    """The recordings made for editing (uploads and joins), newest first."""
+    return [source_out(source) for source in await music_sources.list_sources(session)]
+
+
+@router.post(
+    "/lab/music/sources/upload",
+    response_model=MusicSourceOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        413: {"model": ErrorResponse, "description": "The file is larger than the limit."},
+        415: {
+            "model": ErrorResponse,
+            "description": "The body is not sent as application/octet-stream.",
+        },
+        422: {"model": ErrorResponse, "description": "The file or the name is not acceptable."},
+    },
+    openapi_extra=_UPLOAD_BODY,
+)
+async def upload_source(
+    request: Request,
+    session: SessionDep,
+    name: Annotated[str, Query(max_length=400)],
+) -> MusicSourceOut:
+    """Stores a recording (WAV, MP3, M4A or FLAC, sent as the raw request body) to edit. The type
+    is decided by what the file holds.
+    """
+    require_octet_stream(request)
+    # No transaction of this request stays open while the file is received and probed.
+    await session.commit()
+    try:
+        source = await music_sources.save_upload(
+            session, name, request.stream(), content_length(request)
+        )
+    except music_sources.MusicSourceError as exc:
+        raise HTTPException(exc.status_code, exc.message) from exc
+    return source_out(source)
+
+
+@router.post(
+    "/lab/music/sources/join",
+    response_model=MusicSourceOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_INVALID,
+)
+async def join_sources(body: MusicSourceJoin, session: SessionDep) -> MusicSourceOut:
+    """Puts two finished runs end to end, with silence between them and after them if asked, and
+    stores the result as a recording to edit. Free: nothing goes to the GPU server.
+    """
+    try:
+        source = await music_sources.make_join(session, body.run_ids, body.gap_s, body.tail_s)
+    except music_sources.MusicSourceError as exc:
+        raise _unprocessable(exc.message) from exc
+    return source_out(source)
 
 
 @router.get("/lab/music/runs", response_model=list[LabMusicRunOut])

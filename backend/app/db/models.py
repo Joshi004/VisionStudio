@@ -1109,6 +1109,15 @@ class LabMusicRun(Base):
         CheckConstraint(
             "verdict IS NULL OR verdict IN ('good', 'usable', 'bad')", name="verdict_valid"
         ),
+        CheckConstraint(
+            "operation IS NULL OR operation IN ('repaint', 'cover', 'inpaint', 'transform')",
+            name="operation_valid",
+        ),
+        CheckConstraint(
+            "(operation IS NULL AND source_run_id IS NULL AND source_id IS NULL) "
+            "OR (operation IS NOT NULL AND (source_run_id IS NULL) + (source_id IS NULL) = 1)",
+            name="source_matches_operation",
+        ),
         Index("idx_lab_music_run_created", "created_at"),
         Index("idx_lab_music_run_group", "group_key"),
         Index("idx_lab_music_run_job", "job_id"),
@@ -1143,6 +1152,44 @@ class LabMusicRun(Base):
     # What a person decided after listening: good, usable or bad. NULL until then.
     verdict: Mapped[str | None] = mapped_column(default=None)
     note: Mapped[str | None] = mapped_column(default=None)
+    # Editing (MUSIC-004, revision 0063). NULL `operation`: text-to-audio. Otherwise one of
+    # repaint, cover, inpaint, transform, started from exactly one source: an earlier run
+    # (`source_run_id`) or an uploaded or joined file (`source_id`). The window or strength is in
+    # `fields`.
+    operation: Mapped[str | None] = mapped_column(default=None)
+    source_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_music_run.id", ondelete="SET NULL"), default=None
+    )
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_music_source.id", ondelete="SET NULL"), default=None
+    )
+
+
+class LabMusicSource(Base):
+    """An audio file made for editing in the Music lab (MUSIC-004, revision 0063): a recording a
+    person uploaded (`kind` `upload`), or two lab runs put end to end (`kind` `join`). The file is
+    under `media/lab/`. For a join, `recipe` is `{parts: [{run_id, start_s, end_s}], gap_s,
+    tail_s}`, where the times are seconds in the joined file, so the seam is `parts[0].end_s`
+    plus half the gap. Rows are never changed or deleted.
+    """
+
+    __tablename__ = "lab_music_source"
+    __table_args__ = (
+        CheckConstraint("kind IN ('upload', 'join')", name="kind_valid"),
+        Index("idx_lab_music_source_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    kind: Mapped[str]
+    label: Mapped[str]
+    path: Mapped[str]
+    size_bytes: Mapped[int]
+    sha256: Mapped[str]
+    duration_s: Mapped[float]
+    sample_rate: Mapped[int | None] = mapped_column(default=None)
+    channels: Mapped[int | None] = mapped_column(default=None)
+    recipe: Mapped[Any | None] = mapped_column(JSON, default=None)
 
 
 class AudioMeasurement(Base):

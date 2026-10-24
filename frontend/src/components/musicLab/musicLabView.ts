@@ -10,7 +10,7 @@ import type {
 } from "../../api/musicLab";
 
 export const MAX_VARIANTS = 4;
-const SEED_MAX = 2147483647;
+export const SEED_MAX = 2147483647;
 
 /** What a field holds in the form: text for text and numbers, true or false for a flag. */
 export type FieldValue = string | boolean;
@@ -178,7 +178,7 @@ export function selectedModels(state: MusicLabFormState, catalog: MusicCatalog):
 }
 
 /** The values a model starts with: every field empty, flags off. */
-export function emptyValues(info: MusicModelInfo): ModelValues {
+export function emptyValues(info: { fields: MusicFieldSpec[] }): ModelValues {
   const values: ModelValues = {};
   for (const spec of info.fields) {
     values[spec.name] = spec.type === "flag" ? false : "";
@@ -212,13 +212,13 @@ export function valuesFromFields(info: MusicModelInfo, fields: Record<string, un
 }
 
 /** Whole numbers only (a seed or the number of variants). */
-function wholeNumber(text: string): number | null {
+export function wholeNumber(text: string): number | null {
   const trimmed = text.trim();
   return /^\d{1,10}$/.test(trimmed) ? Number(trimmed) : null;
 }
 
 /** A decimal number, or null for an empty box and NaN for text that is not a number. */
-function decimalOf(text: string): number | null {
+export function decimalOf(text: string): number | null {
   const trimmed = text.trim();
   if (trimmed === "") {
     return null;
@@ -266,7 +266,7 @@ export function briefRequest(kind: MusicKind, brief: MusicBriefState): MusicBrie
 }
 
 /** One model's values as the fields the server takes: trimmed text, numbers, flags. */
-export function fieldsRequest(info: MusicModelInfo, values: ModelValues): Record<string, unknown> {
+export function fieldsRequest(info: { fields: MusicFieldSpec[] }, values: ModelValues): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   for (const spec of info.fields) {
     const value = values[spec.name];
@@ -426,8 +426,13 @@ export const LICENSE_LABELS: Record<MusicModelInfo["license_level"], string> = {
 
 /** A run's values as lines of "Label: value" for the "what was sent" box. */
 export function sentLines(run: LabMusicRun, catalog: MusicCatalog | undefined): string[] {
-  const info = catalog?.models.find((entry) => entry.id === run.model);
-  const specs: MusicFieldSpec[] = info?.fields ?? [];
+  // An edit has its own fields (the window, the strength), so its labels come from its operation.
+  const specs: MusicFieldSpec[] =
+    (run.operation === null
+      ? catalog?.models.find((entry) => entry.id === run.model)?.fields
+      : catalog?.operations
+          .find((entry) => entry.id === run.operation)
+          ?.models.find((entry) => entry.model === run.model)?.fields) ?? [];
   const labelOf = (name: string) => specs.find((spec) => spec.name === name)?.label ?? name;
   return Object.entries(run.fields)
     .filter(([, value]) => value !== null && value !== "")

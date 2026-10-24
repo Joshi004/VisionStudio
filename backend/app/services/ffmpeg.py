@@ -574,6 +574,67 @@ async def decode_mono_float(
     return result.stdout
 
 
+JOIN_SAMPLE_RATE = 48_000
+
+
+async def join_audio(
+    parts: Sequence[Path],
+    dest: Path,
+    *,
+    gap_s: float = 0.0,
+    tail_s: float = 0.0,
+    timeout_s: float = 300.0,
+) -> str | None:
+    """Puts the first audio stream of each file in `parts` end to end in a new FLAC at `dest`
+    (48 kHz, stereo, 24-bit), with `gap_s` seconds of silence between neighbours and `tail_s`
+    seconds of silence at the end. Returns None on success, or a sentence for the user when
+    FFmpeg could not do it. Never raises.
+    """
+    args = ["-hide_banner", "-nostdin", "-nostats", "-loglevel", "error", "-y"]
+    for part in parts:
+        args += ["-i", file_input(part)]
+    convert = f"aresample={JOIN_SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo"
+    silence = f"anullsrc=r={JOIN_SAMPLE_RATE}:cl=stereo:d={{seconds:.6f}}"
+
+    graph: list[str] = []
+    labels: list[str] = []
+    for index in range(len(parts)):
+        if index > 0 and gap_s > 0:
+            graph.append(silence.format(seconds=gap_s) + f"[gap{index}]")
+            labels.append(f"[gap{index}]")
+        graph.append(f"[{index}:a:0]{convert}[part{index}]")
+        labels.append(f"[part{index}]")
+    if tail_s > 0:
+        graph.append(silence.format(seconds=tail_s) + "[tail]")
+        labels.append("[tail]")
+    graph.append("".join(labels) + f"concat=n={len(labels)}:v=0:a=1[joined]")
+    args += [
+        "-filter_complex",
+        ";".join(graph),
+        "-map",
+        "[joined]",
+        "-c:a",
+        "flac",
+        "-sample_fmt",
+        "s32",
+        "-ar",
+        str(JOIN_SAMPLE_RATE),
+        "-f",
+        "flac",
+        dest.resolve().as_posix(),
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not join audio: %s", exc)
+        return "The audio could not be joined: FFmpeg did not run."
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")[:_STDERR_LOG_CHARS]
+        _logger.info("ffmpeg join exit code %s: %s", result.returncode, stderr.strip())
+        return "The audio could not be joined. A file may be damaged."
+    return None
+
+
 async def tool_version(tool: Tool) -> str | None:
     """Returns the tool's version string (e.g. "7.1.5-0+deb13u1").
 

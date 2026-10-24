@@ -4,6 +4,7 @@ import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { uploadError } from "./projects";
 import type { components } from "./schema";
 
 export type MusicCatalog = components["schemas"]["MusicCatalogOut"];
@@ -17,6 +18,16 @@ export type MusicPromptDraftCreate = components["schemas"]["MusicPromptDraftCrea
 export type LabMusicRun = components["schemas"]["LabMusicRunOut"];
 export type LabMusicRunCreate = components["schemas"]["LabMusicRunCreate"];
 export type MusicVerdict = NonNullable<LabMusicRun["verdict"]>;
+export type MusicEditOperation = MusicCatalog["operations"][number];
+export type MusicEditModel = MusicEditOperation["models"][number];
+export type MusicEditCreate = components["schemas"]["MusicEditCreate"];
+export type MusicSource = components["schemas"]["MusicSourceOut"];
+export type MusicSourceJoin = components["schemas"]["MusicSourceJoin"];
+export type RunSource = components["schemas"]["RunSourceOut"];
+export type AudioMeasurement = components["schemas"]["AudioMeasurementOut"];
+
+/** The backend's own limit. The server stays the judge; this only avoids a pointless upload. */
+export const SOURCE_UPLOAD_MAX_MB = 200;
 
 const PAGE_SIZE = 20;
 
@@ -133,5 +144,113 @@ export function useUpdateMusicRun() {
       return data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: runsKey }),
+  });
+}
+
+const sourcesKey = [...MUSIC_LAB_KEY, "sources"] as const;
+
+/** The recordings and joins that can be edited, newest first. */
+export function useMusicSources() {
+  return useQuery({
+    queryKey: sourcesKey,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/lab/music/sources");
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not load the sources (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+  });
+}
+
+/** Stores a recording to edit. The recording is the request body; its name goes in the query. */
+export function useUploadMusicSource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { file: File; name: string }) => {
+      if (input.file.size > SOURCE_UPLOAD_MAX_MB * 1024 * 1024) {
+        throw new ApiError(`The recording is larger than ${SOURCE_UPLOAD_MAX_MB} MB.`, 413);
+      }
+      const query = new URLSearchParams({ name: input.name });
+      const response = await fetch(`/api/lab/music/sources/upload?${query.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: input.file,
+      });
+      if (!response.ok) {
+        throw await uploadError(response);
+      }
+      return (await response.json()) as MusicSource;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: sourcesKey }),
+  });
+}
+
+/** Joins two finished runs into one recording to edit. */
+export function useJoinMusicSources() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: MusicSourceJoin) => {
+      const { data, error, response } = await api.POST("/api/lab/music/sources/join", { body });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `The runs were not joined (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: sourcesKey }),
+  });
+}
+
+/** Starts one edit job per variant. Each is a paid GPU job, like a run. */
+export function useCreateMusicEdits() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: MusicEditCreate) => {
+      const { data, error, response } = await api.POST("/api/lab/music/edits", { body });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `The edit was not started (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: runsKey }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/**
+ * What was measured in a run's audio. Fetched once the audio exists and kept: the audio of a
+ * run never changes. A run whose audio cannot be measured answers with an error, which the
+ * card shows as "unavailable".
+ */
+export function useRunMeasurements(runId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: [...MUSIC_LAB_KEY, "measurements", runId],
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/lab/music/runs/{run_id}/measurements", {
+        params: { path: { run_id: runId } },
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not measure the run (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
   });
 }

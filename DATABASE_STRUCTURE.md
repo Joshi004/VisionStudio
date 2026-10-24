@@ -128,6 +128,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (PHASE-043 rapid exchange, 2026-10-23): no migration, no new table, no new column, no new job type.** **One shot can hold a quick back-and-forth between two characters: the clip cuts at each line.** (1) **`shot_plan.content.shots[].rapid_exchange`** (boolean): the Shot Planning model or the user sets it; a plan stored before this phase has no such key and reads as `false`. It is accepted only for a shot that carries two or three lines of dialogue (no narration) from exactly two speakers who take turns, and never together with `continues_previous`. (2) **`generation_request.content.exchange`** (`{cuts: [{shot, audio, speaker_id, at_s}]}`) is set for such a shot and absent (null) otherwise: one cut for each line in order, the first at 0 and each later one at its line's `starts_in_shot_seconds`. The route stays `reference`; both speakers must be visible with a character picture, and the shot cannot have a continuity anchor. (3) **`shot_prompt.content.pieces`** has `shot_1`, `shot_2`, ... instead of `shot`, and **`content.cuts`** (`[{shot, cue, audio_label, speaker, subject_label, text}]`) lists the internal shots; both are absent from the prompt of any other shot. The prompt's `detailed_description` holds `[Shot 1]` and then `[Shot n] At MM:SS.mmm, ...` for every later cut, written by code. (4) The skeleton that a shot definition is checked against gains `rapid_exchange: true` **only for an exchange shot**, so no other shot's definition becomes out of date. Section 5 (the shot plan, the generation request and the shot prompt) says the same where those artifacts are described.
 
+**Update (MUSIC-004 editing in the Music lab, 2026-10-24):** migration `0063`. **The Music lab can change a sound it already has.** Five edits (ACE-Step 1.5 repaint and cover, Stable Audio 3 inpaint and transform, Stable Audio Open transform) take a source sound, and the answer is a normal lab run. (1) **One new table, `lab_music_source`** (Section 4.57): an audio file made for editing, either a recording a person uploaded or two lab runs joined end to end (the recipe of the join is kept). (2) **Three new nullable columns on `lab_music_run`** (Section 4.57): `operation` (`repaint`, `cover`, `inpaint` or `transform`; NULL for a run made from text), `source_run_id` (FK to `lab_music_run.id`, `SET NULL`) and `source_id` (FK to `lab_music_source.id`, `SET NULL`). A `CHECK` says a run made from text has neither source, and an edit has exactly one of them. Every run made before the migration reads as a text run, so nothing is backfilled. (3) **No new job type**: an edit is a `lab_music` job whose input also carries `operation` and `source` (Section 4.57); the window or the strength is in the run's `fields`, the seed in `params`, as for every run. See Section 4.57.
+
 **Update (MUSIC-003 audio measurements, 2026-10-24):** migration `0062`. **What is in a sound file is measured once and stored.** One new table, `audio_measurement` (Section 4.56), keyed by the file's `sha256` and the version of the analysis (`services/audio_analysis.ANALYSIS_VERSION`): the length, leading and trailing silence, silences inside the sound, integrated loudness, a short-term loudness curve, true peak and clipping, the loudest moment, sudden sounds, quiet points, places where the sound changes character, and whether the sound ends with a decay or is cut. The key is a content hash that `lab_music_run`, `speech_unit_audio` and `shot_take` already store, so no existing table changes and a later music take needs no migration. Nothing is stored on the file's own row, and nothing about staleness is stored: a file whose bytes change has a new hash, and a changed analysis has a new version, so the old row is simply not read. `GET /api/lab/music/runs/{id}/measurements` measures a lab run the first time it is asked for. No job type is added. See Section 4.56.
 
 **Update (PHASE-055 deleting projects and library items, 2026-10-24):** migration `0061`. **Projects, library characters and library environments can be deleted.** One new table, `project_missing_library_item` (Section 4.55): when a library character or environment is deleted, each project that used it gets one row, written before the library row goes (its links and cast rows then cascade away). The row lets the project show the entry as "deleted from the library" and stops the pipeline from quietly making a new item for it; linking the entry again clears it. No column is added or changed. Foreign keys that already existed do the rest: deleting a `project` row cascades to every story artifact and job, and deleting a `library_character` or `library_environment` row cascades to its versions, looks, takes, named looks, references, states, views, links and cast rows. The stored files are deleted by code, not by the database (`services/storage.delete_media`, `delete_project_dir`): a project's folder `media/<project_id>/`, and a library item's pictures, cut-outs, speech and clips under `media/lab/` only when no remaining row uses them. The "Never deleted" notes on `library_character`, `library_environment`, `lab_run`, `voice` and the stored files are therefore no longer true; a deletion is always the user's explicit choice.
@@ -355,6 +357,8 @@ erDiagram
 | `scene_discovery` | `project_id` | `project.id` | No (`CASCADE`). PHASE-006 |
 | `scene_discovery` | `job_id` | `job.id` | Yes (the `discover_scenes` job that wrote the version; `SET NULL` if that job row is ever removed, and NULL for a manual version). PHASE-006 |
 | `lab_video_run` | `job_id` | `job.id` | Yes (the `lab_video` job that makes the run's clip; `SET NULL` if that job row is ever removed). Phase 19 |
+| `lab_music_run` | `source_run_id` | `lab_music_run.id` | Yes (the run an edit started from; `SET NULL`). MUSIC-004 |
+| `lab_music_run` | `source_id` | `lab_music_source.id` | Yes (the recording or join an edit started from; `SET NULL`). MUSIC-004 |
 | `lab_voice_run` | `job_id` | `job.id` | Yes (the `lab_voice` job that makes the run's speech; `SET NULL` if that job row is ever removed). Phase 21 |
 | `lab_voice_run` | `voice_id` | `voice.id` | Yes (the saved voice that read the text; `SET NULL`). Phase 21 |
 | `lab_voice_run` | `project_id` | `project.id` | Yes (the project the pipeline made the sample for; `SET NULL`; NULL for a run made by hand). PHASE-011 |
@@ -2605,6 +2609,59 @@ CREATE TABLE audio_measurement (
 - `loudest_moment` is the middle of the loudest 100 ms (not the 3 s short-term loudness), so the crack of an effect is found where it is. Null for silence or a file under 100 ms.
 - `onsets` are the sudden sounds, good to about 50 ms; a sound already playing at the start of the file is an onset at about 0.03 s. `change_points` are where the sound changes character (the spectrum, and so the level, moves); none is reported in the first or last 2 seconds. For both, `strength` is how many standard deviations the point stands above the file's typical value. `quiet_points` are the lowest stretches of the sound between its leading and trailing silence.
 - `ending.kind` is `decay` when the last 0.5 s before the trailing silence is 6 dB or more under the loud level of the piece (the sound dies away, a real ending or a fade) and `cut` when it stops while still loud. It is null for silence. A cut in the middle of a quiet passage reads as a decay.
+
+### 4.57 `lab_music_source`, and the editing columns of `lab_music_run`
+
+*Added in MUSIC-004 (migration `0063`).* `lab_music_run` has no section of its own (it was made in MUSIC-001); only what MUSIC-004 added is described here.
+
+**`lab_music_source`** is an audio file made for editing. A lab run that is already finished can be edited as it is, so it needs no row. A row is made by `POST /api/lab/music/sources/upload` (a recording sent as the raw request body) or `POST /api/lab/music/sources/join` (two finished runs, with an optional silence between them and after them, put end to end by `ffmpeg.join_audio` as a 48 kHz stereo 24-bit FLAC). The file is under `media/lab/`. Rows are never changed or deleted.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | Indexed by `idx_lab_music_source_created` |
+| `kind` | TEXT | NOT NULL | — | `upload` or `join` (`CHECK`, `ck_lab_music_source_kind_valid`) |
+| `label` | TEXT | NOT NULL | — | A name for the list: what the person typed, or "Run 1 + run 2" for a join |
+| `path` | TEXT | NOT NULL | — | The file, relative to the media folder (`lab/<hash>.<ext>`) |
+| `size_bytes` | INTEGER | NOT NULL | — | |
+| `sha256` | TEXT | NOT NULL | — | The hash of the file's bytes |
+| `duration_s` | REAL | NOT NULL | — | The length of the sound |
+| `sample_rate` | INTEGER | NULL | — | |
+| `channels` | INTEGER | NULL | — | |
+| `recipe` | JSON | NULL | — | A join only (below). NULL for an upload |
+
+```json
+{"parts": [{"run_id": 28, "start_s": 0.0, "end_s": 30.0},
+           {"run_id": 30, "start_s": 30.5, "end_s": 48.0}],
+ "gap_s": 0.5, "tail_s": 2.0}
+```
+
+`start_s` and `end_s` are seconds in the joined file. The place where the two runs meet (the seam) is `parts[0].end_s + gap_s / 2`; it is not stored. The file is `tail_s` longer than the last part.
+
+**New columns of `lab_music_run`.**
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `operation` | TEXT | NULL | NULL | `repaint`, `cover`, `inpaint` or `transform` (`CHECK`, `ck_lab_music_run_operation_valid`). NULL for a run made from text |
+| `source_run_id` | INTEGER, FK → `lab_music_run.id` | NULL | NULL | The run the edit started from. `ON DELETE SET NULL` (`fk_lab_music_run_source_run_id_lab_music_run`) |
+| `source_id` | INTEGER, FK → `lab_music_source.id` | NULL | NULL | The recording or join the edit started from. `ON DELETE SET NULL` (`fk_lab_music_run_source_id_lab_music_source`) |
+
+`ck_lab_music_run_source_matches_operation` says: no operation means neither source is set; an operation means exactly one of the two is set. (Nothing is ever deleted, so `SET NULL` is a safeguard, not a flow.)
+
+**What an edit stores.** `fields` holds the model's own fields for the operation: `repaint_start` and `repaint_end` (repaint, seconds), `cover_strength` (cover, 0 to 1), `mask_start`, `mask_end` and `duration` (inpaint, seconds; a window past the end of the source extends it), `init_noise_level` (transform) and the prompt fields of the model. `params` holds `{"seed": n}`. `model` is the model that did the edit and `endpoint` the endpoint it used. `brief` holds only the description the person typed, and `kind` is the kind chosen for the edit.
+
+**`job.input` of an edit** (a `lab_music` job; a run made from text has the same keys without `operation` and `source`):
+
+```json
+{"requested": "lab_music", "run_id": 41, "model": "ace-step-1.5", "operation": "repaint",
+ "endpoint": "/v1/ace-step15/music/repaint",
+ "request": {"seed": 7, "caption": "...", "lyrics": "", "instrumental": true,
+             "repaint_start": 2.0, "repaint_end": 5.0},
+ "source": {"path": "lab/<hash>.flac", "filename": "lab-source-run-1.flac",
+            "mime": "audio/flac", "label": "Run 1"}}
+```
+
+`request` is the body without the source: the GPU server's upload does not outlive 60 minutes, so the handler uploads `source.path` when the job starts (and again if the job is queued again), and adds `source_audio_asset_id` to a copy of `request`. Once the job has submitted, its input also records `uploads` (the assets uploaded) and `body` (the body as sent, with the asset id).
 
 ---
 

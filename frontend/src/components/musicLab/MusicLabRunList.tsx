@@ -5,6 +5,7 @@ import { describeError } from "../../api/errors";
 import {
   useMusicCatalog,
   useMusicLabRuns,
+  useRunMeasurements,
   useUpdateMusicRun,
   type LabMusicRun,
   type MusicCatalog,
@@ -16,6 +17,7 @@ import { elapsedText } from "../jobs/jobFormat";
 import { JobActions } from "../jobs/JobActions";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { LicenseBadge } from "./MusicLicense";
+import { measurementLine, sourceLine } from "./musicEditView";
 import { groupRuns, paramsLine, sentLines, stateFromRun, type MusicLabFormState } from "./musicLabView";
 
 const VERDICTS: { value: MusicVerdict; label: string }[] = [
@@ -69,17 +71,34 @@ function Verdict({ run }: { run: LabMusicRun }) {
   );
 }
 
+/** What was measured in the sound (its length, its silences, its loudest moment, its ending). */
+function Measurements({ run }: { run: LabMusicRun }) {
+  const measurement = useRunMeasurements(run.id, run.url !== null);
+  if (run.url === null) {
+    return null;
+  }
+  return (
+    <Text size="xs" c="dimmed">
+      {measurement.isLoading && "Measuring the sound…"}
+      {measurement.isError && "The sound could not be measured."}
+      {measurement.data && measurementLine(measurement.data)}
+    </Text>
+  );
+}
+
 type RunCardProps = {
   run: LabMusicRun;
   now: number;
   catalog: MusicCatalog | undefined;
   onLoad: (state: MusicLabFormState) => void;
+  onEdit: (run: LabMusicRun) => void;
 };
 
-function RunCard({ run, now, catalog, onLoad }: RunCardProps) {
+function RunCard({ run, now, catalog, onLoad, onEdit }: RunCardProps) {
   const info = catalog?.models.find((entry) => entry.id === run.model);
   const failed = run.job?.status === "failed";
   const lines = sentLines(run, catalog);
+  const operation = catalog?.operations.find((entry) => entry.id === run.operation);
 
   return (
     <Paper withBorder p="sm" radius="md">
@@ -89,6 +108,9 @@ function RunCard({ run, now, catalog, onLoad }: RunCardProps) {
             <Text size="sm" fw={600}>
               {run.model_label}
             </Text>
+            <Badge variant="light" color="gray">
+              Run {run.id}
+            </Badge>
             {info && <LicenseBadge model={info} />}
           </Group>
           {run.job && (
@@ -120,6 +142,22 @@ function RunCard({ run, now, catalog, onLoad }: RunCardProps) {
           </Alert>
         )}
 
+        <Measurements run={run} />
+
+        {run.source !== null && (
+          <Stack gap={2}>
+            <Text size="xs" fw={600}>
+              {operation?.label ?? run.operation}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {sourceLine(run.source)}
+            </Text>
+            {run.source.type !== "run" && run.source.url !== null && (
+              <audio controls preload="none" src={run.source.url} style={{ width: "100%" }} />
+            )}
+          </Stack>
+        )}
+
         <Text size="xs" c="dimmed">
           {paramsLine(run)}
         </Text>
@@ -139,13 +177,18 @@ function RunCard({ run, now, catalog, onLoad }: RunCardProps) {
 
         {run.url !== null && <Verdict run={run} />}
 
-        {catalog && (
-          <Group>
+        <Group gap="xs">
+          {catalog && run.operation === null && (
             <Button size="compact-xs" variant="subtle" onClick={() => onLoad(stateFromRun(run, catalog))}>
               Load into the form
             </Button>
-          </Group>
-        )}
+          )}
+          {run.url !== null && (
+            <Button size="compact-xs" variant="subtle" onClick={() => onEdit(run)}>
+              Edit this run
+            </Button>
+          )}
+        </Group>
       </Stack>
     </Paper>
   );
@@ -155,7 +198,13 @@ function RunCard({ run, now, catalog, onLoad }: RunCardProps) {
  * The runs, newest first, grouped by the click that made them so the models can be heard one
  * after the other on the same brief. Nothing here is ever deleted.
  */
-export function MusicLabRunList({ onLoad }: { onLoad: (state: MusicLabFormState) => void }) {
+export function MusicLabRunList({
+  onLoad,
+  onEdit,
+}: {
+  onLoad: (state: MusicLabFormState) => void;
+  onEdit: (run: LabMusicRun) => void;
+}) {
   const runs = useMusicLabRuns();
   const catalog = useMusicCatalog();
   const all = runs.data?.pages.flat() ?? [];
@@ -198,7 +247,7 @@ export function MusicLabRunList({ onLoad }: { onLoad: (state: MusicLabFormState)
             )}
             <SimpleGrid cols={{ base: 1, md: 2 }}>
               {group.runs.map((run) => (
-                <RunCard key={run.id} run={run} now={now} catalog={catalog.data} onLoad={onLoad} />
+                <RunCard key={run.id} run={run} now={now} catalog={catalog.data} onLoad={onLoad} onEdit={onEdit} />
               ))}
             </SimpleGrid>
           </Stack>

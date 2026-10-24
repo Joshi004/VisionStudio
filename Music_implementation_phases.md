@@ -76,7 +76,7 @@ All of it must run **automatically** by default, like the rest of the pipeline, 
   - `POST /v1/stable-audio3/audio/transform`: audio-to-audio with `init_noise_level` (0 keeps the source, about 0.6 is a style shift).
   - `POST /v1/stable-audio-open/audio/transform`: the same idea, first 47 s only.
   - Every editing call takes `source_audio_asset_id` from `POST /v1/uploads`. `providers/gpu_server.upload_file` already uploads files for H3.
-  - The stored 0.18.0 snapshot is **pending** approval in the app (Settings → GPU contract). MUSIC-004 checks how that affects new endpoints.
+  - The stored 0.18.0 snapshot is **pending** approval in the app (Settings → GPU contract). MUSIC-004 checked it: it does **not** block the editing endpoints (RM-12 closed).
 - **Story render** (PHASE-028): narration as its own sample-exact layer (`render_commands.narration_track_args`), shot audio moved toward -16 LUFS and ducked by 12 dB under narration (`story_render_plan.duck_windows`, `render_commands.duck_volume_filter`), mixed with `amix normalize=0` and `alimiter=limit=0.97`. The timeline is frozen on the job (`TIMELINE_VERSION = 1`). **There is no music layer and no final loudness normalization**, only a sample-peak limiter.
 - **Timing sources**: speech units have measured TTS lengths (PHASE-019). Shot plans (PHASE-020/021) give every shot's start and end, its `source_event_ids` and its `speech_unit_ids`. The scene timeline (`services/scene_timeline.py`) and the story render plan turn these into story seconds and frames. Scene definitions carry `mood.start/middle/end` (PHASE-014). Events carry `sound_event`, `pause` and off-screen dialogue (PHASE-015). Shot definitions say who is in each shot (PHASE-022).
 - **Orchestration** (PHASE-030): a step graph in `services/story_pipeline.py` with one `Adapter` per step in `services/story_pipeline_targets.py`. Per-run "Pause after…" pauses for any step. Saved review points (PHASE-041, `services/review_points.py`). Staleness computed on read (PHASE-039).
@@ -312,7 +312,7 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 
 - Completed: MUSIC-001 (2026-10-24), MUSIC-002 (2026-10-24)
 - In progress: MUSIC-003 (code complete 2026-10-24; the owner's check of the change points and loudest moments of round-1 runs 13 to 16 by ear is still open)
-- Ready: MUSIC-004 (it only needs MUSIC-003's code, which is complete)
+- In progress: MUSIC-004 (code complete 2026-10-24; the owner's one run of each operation on the real GPU server is still open)
 - Deferred: MUSIC-016 (singing characters, until the owner decides)
 
 | ID | Title | Milestone | Hard dependencies | Status |
@@ -320,7 +320,7 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 | MUSIC-001 | Listen to round 1 and record the model choices (manual) | MM0 | — | Completed |
 | MUSIC-002 | Survey what sound H3 adds (manual) | MM0 | PHASE-027 (real takes exist) | Completed |
 | MUSIC-003 | Audio measurements | MM0 | — | In Progress (code complete) |
-| MUSIC-004 | Editing in the Music Lab | MM0 | 003 | Not Started |
+| MUSIC-004 | Editing in the Music Lab | MM0 | 003 | In Progress (code complete) |
 | MUSIC-005 | Round-2 trials (manual) | MM0 | 004 (001 recommended) | Not Started |
 | MUSIC-006 | Music Bible: four directions, a choice, the Bible | MM1 | 001; PHASE-014, PHASE-015, PHASE-030 | Not Started |
 | MUSIC-007 | Themes and their emotional versions | MM1 | 005, 006 | Not Started |
@@ -556,7 +556,7 @@ flowchart TD
 
 ### MUSIC-004 — Editing in the Music Lab
 
-**Status:** Not Started · **Milestone:** MM0 · **Vision:** MD-16
+**Status:** In Progress (code complete) · **Milestone:** MM0 · **Vision:** MD-16
 
 **Objective.** Let the Music Lab repair, extend, join and restyle audio with the GPU server's editing endpoints, so round 2 can test them and later phases reuse the same code.
 
@@ -592,14 +592,39 @@ flowchart TD
 **Observable improvements.** Editing becomes available for trials and, later, the pipeline.
 
 **Completion checklist.**
-- [ ] Provider bodies and endpoint checks for the five operations
-- [ ] Sources: earlier run, upload, join of two runs
-- [ ] Storage, job, API, lab UI with measurements
-- [ ] Trial helper can start editing cases
-- [ ] Docs (`DATABASE_STRUCTURE.md`); standard checks
+- [x] Provider bodies and endpoint checks for the five operations
+- [x] Sources: earlier run, upload, join of two runs
+- [x] Storage, job, API, lab UI with measurements
+- [x] Trial helper can start editing cases
+- [x] Docs (`DATABASE_STRUCTURE.md`); standard checks
 - [ ] Owner runs one of each operation
 
-**Completion notes.** _(fill in)_
+**Completion notes.**
+
+- **Not marked Completed, and why.** Two Verification criteria need the real GPU server and paid runs, and the agent does not start those without the owner's go-ahead: one run of each operation, and the check that a repaint leaves the sound outside its window unchanged. Everything that can be checked without the GPU was checked (below). Until the owner has run the five operations and the outside-window number is read from a real result, the status stays In Progress.
+- **How "Planning decides" was settled.** Editing runs live in `lab_music_run`: three new nullable columns, `operation`, `source_run_id` and `source_id` (migration `0063`), with a CHECK that a text run has no source and an edit has exactly one. A join (and an uploaded recording) is a row of a new table, `lab_music_source` (`kind` `upload` or `join`, the file under `media/lab/`, and for a join a `recipe` with the two runs, their times in the joined file, the gap and the tail). The seam is not stored: it is `parts[0].end_s + gap_s / 2`. Shape: `DATABASE_STRUCTURE.md` §4.57. The window or the strength is in the run's `fields`, the seed in `params`, so a run reads like every other run. No new job type: an edit is a `lab_music` job.
+- **RM-12 (the pending 0.18.0 snapshot).** It does not block. The endpoint checks read the newest recorded OpenAPI snapshot whether or not it is approved, so the owner has nothing to approve for editing. `music_generator.check_endpoint` now takes the endpoint path; `check_edit_endpoints` also checks `/v1/uploads`, because every edit uploads its source first.
+- **The five operations** (`services/music_models.py`: `EDIT_FIELDS`, `EDIT_MODELS`, `MAX_SOURCE_S`, `edit_problems`; `providers/music_generator.py`: `EDIT_ENDPOINTS`, `build_edit_body`, `with_source`):
+  - ACE-Step 1.5 `repaint` (`/v1/ace-step15/music/repaint`): `repaint_start`, optional `repaint_end`, source at most 600 s; no tempo, key or thinking fields.
+  - ACE-Step 1.5 `cover` (`/v1/ace-step15/music/cover`): `cover_strength` from 0 to 1, source at most 600 s.
+  - Stable Audio 3 `inpaint` (`/v1/stable-audio3/audio/inpaint`): `mask_start`, `mask_end`, optional `duration` of at most 380 s. A window that starts at the end of the source extends it.
+  - Stable Audio 3 `transform` (`/v1/stable-audio3/audio/transform`): `init_noise_level` from 0 to 1, source at most 380 s.
+  - Stable Audio Open `transform` (`/v1/stable-audio-open/audio/transform`): `init_noise_level` from 0.05 to 20, `negative_prompt`, source at most 120 s (the server uses only the first 47 s).
+  - The checks (the server and the form): a source longer than the model takes is refused; a repaint window must start inside the source and end after it starts and not after the source ends (0.1 s of tolerance); an inpaint window may start at the end, must end after it starts and at most 380 s, and `duration` must be at least its end. A window past the end of an ACE-Step source is refused with a hint to join a silent tail first.
+- **Sources** (`services/music_sources.py`, `ffmpeg.join_audio`): `save_upload` takes a WAV, MP3, M4A or FLAC as the raw request body (type decided by the content, at most 200 MB and 600 s, empty and non-audio files refused); `make_join` joins exactly two finished runs with an optional silence between (`gap_s`) and after (`tail_s`), each at most 30 s, in one FFmpeg call to a 48 kHz stereo FLAC. The result was probed: 24-bit (`s32` container, 24 bits per sample).
+- **The job** (`jobs/generate_lab_music.py`): the source is uploaded **when the job starts**, not when it is created, because the server deletes an upload that no job uses after 60 minutes; a job that is queued again uploads again. The handler retries the upload once if the server answers "invalid asset reference", and the submit once on a 502. The submitted job input also holds `uploads` and `body`. Polling, download, pre-emption and purge are the existing ones. New phase text: "uploading the source audio".
+- **API** (`api/music_lab.py`): `POST /api/lab/music/edits` (202, one run per variant), `GET /api/lab/music/sources`, `POST /api/lab/music/sources/upload?name=` (raw body, 201), `POST /api/lab/music/sources/join` (201). `GET /api/lab/music/models` gains `operations` (label, help, models with their fields and `max_source_s`), and a run gains `operation` and `source` (type, label, url, duration, run or source id, seam). `schema.d.ts` is regenerated. The measurement service gained a limit of two measurements at once (`audio_measurements._slots`), because every card now asks for its measurement.
+- **Lab page.** New `components/musicLab/MusicEditPanel.tsx` and `musicEditView.ts`, above the run list: a source (a run number, a saved recording or join, an upload, or a join of two run numbers with gap and tail; a player and the seam), the operation, the model (for transform), the fields of that operation, kind, description, variants and seed. Every run card now shows its run number and one line from its measurements (length, silence at the start, loudest moment, ends by fading or cut off); an edit card shows the operation, its source (with a player for an upload or a join) and the settings; "Edit this run" fills the panel with that run. `FieldInput` of `MusicModelFields.tsx` is shared. The form state lives in `LabPage.tsx` like the other forms.
+- **Trial helper.** `music_lab_trials/trigger.py` takes a case with `"type": "edit"`: `source` is `{"run": N}` or `{"join": {"runs": [a, b], "gap_s": 0, "tail_s": 0}}` (a join is made once and its id is kept in `results.json` under `_joins`), plus `operation`, `model`, `fields`, `kind`, `description`, `variants`, `seed`. `cases.json` has no edit case yet: the real round-2 cases belong to MUSIC-005.
+- **What was checked (agent, 2026-10-24, throwaway database and media folder; nothing of the real app was touched, no paid GPU call was made).**
+  - **Sources.** A join of runs 1 and 2 with a gap and a tail has the right length and seam (for example 10 s + 1.5 s + 6 s + 2 s = 19.5 s, seam 10.75 s) and plays. An upload of a FLAC and of a WAV is accepted; a PNG, an empty file, a wrong content type, a recording over 200 MB and one over 600 s are refused with a clear message; a join with a run that has no audio, or a gap over 30 s, is refused.
+  - **Edit validation.** Every refusal listed above was triggered through the endpoint (window outside the source, end before start, no lyrics and not instrumental, missing window start, no source or two sources, strength 2, noise below 0.05, a model that does not do the operation, an inpaint duration shorter than its end, a blank description), and each answered 422 with its message. Valid repaint (2 variants, seed 7), cover (on a join), inpaint with an extension and transform (Stable Audio Open) were accepted.
+  - **The whole job, against a stand-in GPU server** (a small script outside the repository that answers the health, API, upload, submit, status, result and purge calls): the source was uploaded, the submitted body had the right fields and `source_audio_asset_id`, the audio was downloaded, stored and listed, and the card shows its source, settings and measurements. A text-to-audio run still works after the change. Because the stand-in is not the real server, it proves the app's side only.
+  - **The outside-window comparison** was run once as a throwaway script (it decodes the source and the result to mono at 24 kHz, and compares them outside the window with a 1 s margin on each side). On the stand-in's result the residual outside the window was -200 dB (identical) and inside the window it was -18 dB, so the script tells the two apart. **The real number has to come from a real repaint**; until then the threshold for "unchanged" is not set (a provisional -40 dB is the starting point). The script is not part of the app.
+  - **Trial helper.** `--dry-run` printed the exact body of a run source and of a join source ("would join runs [1, 2]"), and a real run of three edit cases against the throwaway app made the join once and reused it.
+  - **The lab page** was rendered once in a headless browser against the throwaway app: the panel, the run numbers and the measurement line appear.
+- **Standard checks.** `ruff check` and `ruff format --check` pass, `npm run lint` and `npm run typecheck` pass, migration `0063` upgrades, downgrades and upgrades again on a fresh database, and `alembic check` reports the same four existing `FLOAT` against `REAL` differences as before (none from this phase). `DATABASE_STRUCTURE.md` is updated. The running Docker app has **not** been rebuilt: it still runs the old code until the owner rebuilds it (`docker compose up --build -d`), which applies migrations `0062` and `0063` and installs the code.
+- **For the owner.** After the rebuild, run one of each operation from the Music lab (a repaint, a cover, an inpaint with a window and one that extends, a Stable Audio 3 transform, a Stable Audio Open transform), then say so, and the agent compares a repaint's outside with its source and closes the phase. Any finished run can be the source (Appendix C lists the round-1 runs); "Edit this run" on its card fills the panel.
 
 ---
 
@@ -1210,7 +1235,7 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 | RM-9 | **Long cues loop or wander** | Medium / Medium | Round-1 A4 and B4b; cue length guidance in level 2; repaint a bad section | 001, 009 |
 | RM-10 | **Final loudness normalization changes every existing render's sound** | Certain / Low | Settings; recorded on each render; the owner listens once (MUSIC-012) | 012 |
 | RM-11 | **Generated music resembles existing works** | Low / Low (personal use, MD-13) | None required now; revisit before publishing (`Implementation_phases.md` R-7) | — |
-| RM-12 | **The 0.18.0 API snapshot is pending approval**, which may block the editing endpoints | Medium / Low | MUSIC-004 checks it and names the owner's approval step | 004 |
+| RM-12 | **The 0.18.0 API snapshot is pending approval**, which may block the editing endpoints | Medium / Low | **Closed (MUSIC-004):** the endpoint checks use the newest recorded snapshot whether or not it is approved, so nothing blocks and the owner has nothing to approve | 004 |
 
 ---
 
@@ -1319,6 +1344,7 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 | 2026-10-24 | MUSIC-001 | Completed | The owner listened to round 1. ACE-Step 1.5 for music, Stable Audio 3 for effects and ambience (MD-9). Verdict counts and conclusions in Appendix B. `KIND_MODELS` reordered; PHASE-034/035/036 marked Dropped; `Path_ahead.md` §34 updated. Several questions left open because the owner did not state a finding (Appendix B). |
 | 2026-10-24 | MUSIC-002 | Completed | The owner's findings: H3 sound and music work inside a shot, not across shots; rain-like sounds go to Stable Audio 3, timing-critical sounds such as thunder to H3 (MD-24). Per-shot table not filled. New open questions QM-15 and QM-16. |
 | 2026-10-24 | MUSIC-003 | In Progress (code complete) | Measurement service (`audio_measurements`, `audio_analysis`, `ffmpeg.scan_loudness`), table `audio_measurement` (migration `0062`) and `GET /api/lab/music/runs/{id}/measurements`. Checked on TTS, effects, an H3 clip and synthetic files. Waiting for the owner to confirm the change points and loudest moments of runs 13 to 16 by ear. Docker app not rebuilt. |
+| 2026-10-24 | MUSIC-004 | In Progress (code complete) | Five editing operations (ACE-Step repaint and cover, Stable Audio 3 inpaint and transform, Stable Audio Open transform) with three kinds of source (a run, an upload, a join of two runs). Migration `0063` (`lab_music_source`; `operation`, `source_run_id`, `source_id` on `lab_music_run`), `services/music_sources.py`, `ffmpeg.join_audio`, `POST /api/lab/music/edits` and the sources endpoints, `MusicEditPanel`, measurements on every card, trial helper edit cases. RM-12 closed. Checked offline against a stand-in GPU server. Waiting for the owner's run of each operation on the real server and the outside-window number of a real repaint. Docker app not rebuilt. |
 
 ---
 

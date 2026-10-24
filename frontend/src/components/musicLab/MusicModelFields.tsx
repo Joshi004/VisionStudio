@@ -2,7 +2,7 @@ import { Alert, Button, Checkbox, Group, Paper, Select, Stack, Text, TextInput, 
 
 import { describeError } from "../../api/errors";
 import { useJob } from "../../api/jobs";
-import type { MusicFieldSpec, MusicModelInfo } from "../../api/musicLab";
+import type { MusicFieldSpec, MusicModel, MusicModelInfo } from "../../api/musicLab";
 import { isJobActive } from "../../api/polling";
 import { useNow } from "../../hooks/useNow";
 import { elapsedText } from "../jobs/jobFormat";
@@ -43,13 +43,14 @@ function readOutput(output: unknown): { fields: Record<string, unknown>; warning
   return { fields: record.fields as Record<string, unknown>, warnings };
 }
 
-function FieldInput({
-  info,
+/** One field of a model: a box, a choice or a tick, as its spec says. */
+export function FieldInput({
+  model,
   spec,
   value,
   onChange,
 }: {
-  info: MusicModelInfo;
+  model: MusicModel;
   spec: MusicFieldSpec;
   value: FieldValue;
   onChange: (value: FieldValue) => void;
@@ -66,7 +67,7 @@ function FieldInput({
 
   const text = typeof value === "string" ? value : "";
   const range = rangeText(spec);
-  const hint = hintFor(info.id, spec);
+  const hint = hintFor(model, spec);
 
   if (spec.choices !== null) {
     return (
@@ -87,7 +88,7 @@ function FieldInput({
       <TextInput
         label={spec.label}
         description={[range, hint].filter((part) => part !== "").join(". ") || undefined}
-        placeholder="Empty: the model or the lab chooses"
+        placeholder={spec.required ? undefined : "Empty: the model or the lab chooses"}
         value={text}
         onChange={(event) => onChange(event.currentTarget.value)}
       />
@@ -225,7 +226,7 @@ export function MusicModelFields({
         {info.fields.map((spec) => (
           <FieldInput
             key={spec.name}
-            info={info}
+            model={info.id}
             spec={spec}
             value={values[spec.name] ?? (spec.type === "flag" ? false : "")}
             onChange={(value) => onChange({ ...values, [spec.name]: value })}

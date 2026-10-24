@@ -1311,6 +1311,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/music/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Edits
+         * @description Starts one edit run per seed, from an earlier run, an uploaded recording or a join of two
+         *     runs. Each is a paid GPU job.
+         */
+        post: operations["create_edits_api_lab_music_edits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sources
+         * @description The recordings made for editing (uploads and joins), newest first.
+         */
+        get: operations["list_sources_api_lab_music_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/sources/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Source
+         * @description Stores a recording (WAV, MP3, M4A or FLAC, sent as the raw request body) to edit. The type
+         *     is decided by what the file holds.
+         */
+        post: operations["upload_source_api_lab_music_sources_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/sources/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join Sources
+         * @description Puts two finished runs end to end, with silence between them and after them if asked, and
+         *     stores the result as a recording to edit. Free: nothing goes to the GPU server.
+         */
+        post: operations["join_sources_api_lab_music_sources_join_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/music/runs/{run_id}": {
         parameters: {
             query?: never;
@@ -4686,6 +4769,36 @@ export interface components {
              */
             created_at: string;
         };
+        /** EditModelOut */
+        EditModelOut: {
+            /**
+             * Model
+             * @enum {string}
+             */
+            model: "ace-step-1.5" | "yue2" | "stable-audio-3" | "stable-audio-open" | "ltx-audio";
+            /** Label */
+            label: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Max Source S */
+            max_source_s: number;
+            /** Fields */
+            fields: components["schemas"]["FieldSpecOut"][];
+        };
+        /** EditOperationOut */
+        EditOperationOut: {
+            /**
+             * Id
+             * @enum {string}
+             */
+            id: "repaint" | "cover" | "inpaint" | "transform";
+            /** Label */
+            label: string;
+            /** Help */
+            help: string;
+            /** Models */
+            models: components["schemas"]["EditModelOut"][];
+        };
         /** EndingOut */
         EndingOut: {
             /**
@@ -5641,6 +5754,15 @@ export interface components {
             /** Can Resubmit */
             can_resubmit: boolean;
         };
+        /** JoinPartOut */
+        JoinPartOut: {
+            /** Run Id */
+            run_id: number;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+        };
         /** LabImageOut */
         LabImageOut: {
             /** Id */
@@ -5764,6 +5886,9 @@ export interface components {
             verdict: ("good" | "usable" | "bad") | null;
             /** Note */
             note: string | null;
+            /** Operation */
+            operation: ("repaint" | "cover" | "inpaint" | "transform") | null;
+            source: components["schemas"]["RunSourceOut"] | null;
         };
         /**
          * LabMusicRunUpdate
@@ -6510,6 +6635,43 @@ export interface components {
             kinds: components["schemas"]["MusicKindOut"][];
             /** Models */
             models: components["schemas"]["MusicModelOut"][];
+            /** Operations */
+            operations: components["schemas"]["EditOperationOut"][];
+        };
+        /** MusicEditCreate */
+        MusicEditCreate: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "repaint" | "cover" | "inpaint" | "transform";
+            /**
+             * Model
+             * @enum {string}
+             */
+            model: "ace-step-1.5" | "yue2" | "stable-audio-3" | "stable-audio-open" | "ltx-audio";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "score" | "song" | "stem" | "sfx" | "ambience";
+            /** Description */
+            description: string;
+            /** Source Run Id */
+            source_run_id?: number | null;
+            /** Source Id */
+            source_id?: number | null;
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
+            /**
+             * Variants
+             * @default 1
+             */
+            variants: number;
+            /** Seed */
+            seed?: number | null;
         };
         /** MusicKindOut */
         MusicKindOut: {
@@ -6563,6 +6725,59 @@ export interface components {
              */
             kind: "score" | "song" | "stem" | "sfx" | "ambience";
             brief: components["schemas"]["MusicBrief"];
+        };
+        /** MusicSourceJoin */
+        MusicSourceJoin: {
+            /** Run Ids */
+            run_ids: number[];
+            /**
+             * Gap S
+             * @default 0
+             */
+            gap_s: number;
+            /**
+             * Tail S
+             * @default 0
+             */
+            tail_s: number;
+        };
+        /**
+         * MusicSourceOut
+         * @description A recording made for editing: an upload, or a join of two runs.
+         */
+        MusicSourceOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "upload" | "join";
+            /** Label */
+            label: string;
+            /** Url */
+            url: string;
+            /** Duration S */
+            duration_s: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Sample Rate */
+            sample_rate: number | null;
+            /** Channels */
+            channels: number | null;
+            /** Seam S */
+            seam_s: number | null;
+            /** Parts */
+            parts: components["schemas"]["JoinPartOut"][] | null;
+            /** Gap S */
+            gap_s: number | null;
+            /** Tail S */
+            tail_s: number | null;
         };
         /**
          * NamedLookOut
@@ -7715,6 +7930,29 @@ export interface components {
         RunOut: {
             /** Job Id */
             job_id: number;
+        };
+        /**
+         * RunSourceOut
+         * @description What an edit started from.
+         */
+        RunSourceOut: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "run" | "upload" | "join";
+            /** Label */
+            label: string;
+            /** Url */
+            url: string | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Run Id */
+            run_id: number | null;
+            /** Source Id */
+            source_id: number | null;
+            /** Seam S */
+            seam_s: number | null;
         };
         /** SceneContinuityOut */
         SceneContinuityOut: {
@@ -13694,6 +13932,145 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LabMusicRunOut"][];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_edits_api_lab_music_edits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicEditCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabMusicRunOut"][];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_sources_api_lab_music_sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicSourceOut"][];
+                };
+            };
+        };
+    };
+    upload_source_api_lab_music_sources_upload_post: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicSourceOut"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file or the name is not acceptable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    join_sources_api_lab_music_sources_join_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicSourceJoin"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicSourceOut"];
                 };
             };
             /** @description The form breaks a rule. */

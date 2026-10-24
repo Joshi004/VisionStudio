@@ -66,6 +66,8 @@ CHECKING_TALK_PROMPTS: Final = "checking the voice and video prompts"
 # is audio, but the phases say "clip"). Its prompt writer also uses PREPARING_PROMPT and
 # `asking_model`.
 CHECKING_MUSIC_PROMPT: Final = "checking the music prompt"
+# An edit (repaint, cover, inpaint, transform) uploads its source recording before the submit.
+UPLOADING_MUSIC_SOURCE: Final = "uploading the source audio"
 
 # --- Running: speech (Phase 21) ------------------------------------------------------------
 # A speech is made in one request per piece of the script. It also uses SUBMITTING and the

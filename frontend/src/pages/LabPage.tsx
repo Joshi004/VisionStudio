@@ -9,6 +9,7 @@ import { LabLibraryDrawer, type LibraryActions } from "../components/lab/LabLibr
 import { VideoLabPanel } from "../components/lab/VideoLabPanel";
 import { MusicLabPanel } from "../components/lab/MusicLabPanel";
 import { VoiceLabPanel } from "../components/lab/VoiceLabPanel";
+import { DEFAULT_EDIT_FORM, type MusicEditFormState } from "../components/musicLab/musicEditView";
 import { DEFAULT_FORM as DEFAULT_MUSIC_FORM, type MusicLabFormState } from "../components/musicLab/musicLabView";
 import { DEFAULT_FORM as DEFAULT_IMAGE_FORM, type LabFormState } from "../components/imageLab/labView";
 import {
@@ -59,6 +60,7 @@ export function LabPage() {
   const [videoForm, setVideoForm] = useState<VideoLabFormState>(DEFAULT_VIDEO_FORM);
   const [voiceForm, setVoiceForm] = useState<VoiceLabFormState>(DEFAULT_VOICE_FORM);
   const [musicForm, setMusicForm] = useState<MusicLabFormState>(DEFAULT_MUSIC_FORM);
+  const [musicEditForm, setMusicEditForm] = useState<MusicEditFormState>(DEFAULT_EDIT_FORM);
 
   if (!isLabTab(tab)) {
     return <Navigate to={`/lab/${DEFAULT_TAB}`} replace />;
@@ -135,7 +137,12 @@ export function LabPage() {
           <VoiceLabPanel form={voiceForm} onFormChange={setVoiceForm} />
         </Tabs.Panel>
         <Tabs.Panel value="music" pt="md">
-          <MusicLabPanel form={musicForm} onFormChange={setMusicForm} />
+          <MusicLabPanel
+            form={musicForm}
+            onFormChange={setMusicForm}
+            editForm={musicEditForm}
+            onEditFormChange={setMusicEditForm}
+          />
         </Tabs.Panel>
       </Tabs>
 

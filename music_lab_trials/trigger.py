@@ -10,6 +10,10 @@
     python3 trigger.py status                  # refresh results.json from the app
     python3 trigger.py tracker                 # copy run ids and statuses into TRACKER.md
 
+An "edit" case ("type": "edit" in cases.json) edits an earlier run or a join of two runs: its
+"source" is {"run": N} or {"join": {"runs": [a, b], "gap_s": 0, "tail_s": 0}}. A join is made
+once and its id is kept in results.json under "_joins", so a second case can reuse it.
+
 It only calls the app's own Music Lab endpoints. Nothing is deleted. Every run is a paid GPU job.
 The base URL can be changed with the MUSIC_LAB_URL environment variable.
 """
@@ -188,8 +192,68 @@ def run_summary(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def start_case(config: dict[str, Any], case: dict[str, Any], dry_run: bool) -> dict[str, Any] | None:
+def join_key(join: dict[str, Any]) -> str:
+    return json.dumps(join, sort_keys=True)
+
+
+def source_ids(case: dict[str, Any], results: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    """`source_run_id` or `source_id` of an edit case. A join is made once and then reused."""
+    source = case["source"]
+    if "run" in source:
+        return {"source_run_id": source["run"], "source_id": None}
+    join = source["join"]
+    key = join_key(join)
+    known = results.get("_joins", {}).get(key)
+    if known is not None:
+        print(f"  using the join already made (source {known})")
+        return {"source_run_id": None, "source_id": known}
+    if dry_run:
+        print(f"  would join runs {join['runs']} (gap {join.get('gap_s', 0)} s, tail {join.get('tail_s', 0)} s)")
+        return {"source_run_id": None, "source_id": "<the join>"}
+    made = call(
+        "POST",
+        "/api/lab/music/sources/join",
+        {"run_ids": join["runs"], "gap_s": join.get("gap_s", 0), "tail_s": join.get("tail_s", 0)},
+    )
+    print(f"  joined runs {join['runs']}: source {made['id']} ({made['duration_s']:.1f} s)")
+    results.setdefault("_joins", {})[key] = made["id"]
+    save_results(results)
+    return {"source_run_id": None, "source_id": made["id"]}
+
+
+def start_edit(
+    config: dict[str, Any], case: dict[str, Any], results: dict[str, Any], dry_run: bool
+) -> dict[str, Any] | None:
+    body = {
+        "operation": case["operation"],
+        "model": case["model"],
+        "kind": case["kind"],
+        "description": f"[{case['id']}] {case['description']}",
+        **source_ids(case, results, dry_run),
+        "fields": case["fields"],
+        "variants": case.get("variants", 1),
+        "seed": case.get("seed", config["defaults"]["seed"]),
+    }
+    if dry_run:
+        print(json.dumps(body, indent=2, ensure_ascii=False))
+        return None
+    runs = call("POST", "/api/lab/music/edits", body)
+    print(f"  started {len(runs)} edit(s): " + ", ".join(f"{r['id']} ({r['model']})" for r in runs))
+    return {
+        "title": case["title"],
+        "triggered_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "group_key": runs[0]["group_key"] if runs else None,
+        "runs": [run_summary(r) for r in runs],
+        "drafts": {},
+    }
+
+
+def start_case(
+    config: dict[str, Any], case: dict[str, Any], dry_run: bool, results: dict[str, Any]
+) -> dict[str, Any] | None:
     print(f"[{case['id']}] {case['title']}")
+    if case.get("type") == "edit":
+        return start_edit(config, case, results, dry_run)
     models = []
     drafts: dict[str, Any] = {}
     for item in case["models"]:
@@ -229,8 +293,13 @@ def start_case(config: dict[str, Any], case: dict[str, Any], dry_run: bool) -> d
     }
 
 
+def case_entries(results: dict[str, Any]) -> dict[str, Any]:
+    """The triggered cases of results.json (keys that start with "_" are bookkeeping)."""
+    return {case_id: entry for case_id, entry in results.items() if not case_id.startswith("_")}
+
+
 def refresh(results: dict[str, Any], case_ids: list[str] | None = None) -> None:
-    for case_id, entry in results.items():
+    for case_id, entry in case_entries(results).items():
         if case_ids is not None and case_id not in case_ids:
             continue
         entry["runs"] = [run_summary(call("GET", f"/api/lab/music/runs/{r['id']}")) for r in entry["runs"]]
@@ -308,7 +377,8 @@ def update_tracker(results: dict[str, Any], config: dict[str, Any]) -> None:
 
 
 def run_count(config: dict[str, Any], case: dict[str, Any]) -> int:
-    return len(case["models"]) * case.get("variants", 1)
+    models = 1 if case.get("type") == "edit" else len(case["models"])
+    return models * case.get("variants", 1)
 
 
 def main() -> None:
@@ -333,7 +403,7 @@ def main() -> None:
         for case in config["cases"]:
             count = run_count(config, case)
             total += count
-            done = "done" if case["id"] in results else "    "
+            done = "done" if case["id"] in case_entries(results) else "    "
             print(f"{done} {case['id']:4} {case['kind']:8} {count} run(s)  {case['title']}")
         print(f"total {total} runs")
         return
@@ -341,7 +411,7 @@ def main() -> None:
     if args.command == "status":
         refresh(results)
         save_results(results)
-        print_outcome(results, list(results))
+        print_outcome(results, list(case_entries(results)))
         return
 
     if args.command == "tracker":
@@ -361,7 +431,7 @@ def main() -> None:
         if case["id"] in results and not args.force and not args.dry_run:
             print(f"[{case['id']}] already triggered; skipped (use --force to start it again)")
             continue
-        entry = start_case(config, case, args.dry_run)
+        entry = start_case(config, case, args.dry_run, results)
         if entry is not None:
             if case["id"] in results:
                 # Keep the earlier attempt on record.
