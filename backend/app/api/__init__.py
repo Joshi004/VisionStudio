@@ -26,6 +26,7 @@ from app.api import (
     music_bible,
     music_cues,
     music_lab,
+    music_placement,
     music_plan,
     music_takes,
     music_themes,
@@ -62,6 +63,7 @@ api_router.include_router(music_themes.router, tags=["music-themes"])
 api_router.include_router(music_plan.router, tags=["music-plan"])
 api_router.include_router(music_cues.router, tags=["music-cues"])
 api_router.include_router(music_takes.router, tags=["music-takes"])
+api_router.include_router(music_placement.router, tags=["music-placement"])
 api_router.include_router(discovery.router, tags=["discovery"])
 api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(character_links.router, tags=["character-links"])

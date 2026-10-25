@@ -33,6 +33,7 @@ from app.services import (
     look_state_resolution,
     music_bible,
     music_cues,
+    music_placement,
     music_plan,
     music_takes,
     music_themes,
@@ -410,6 +411,21 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                         discovery_id=view.item_id,
                     ),
                 )
+
+    # The place of the music on the timeline (MUSIC-011): another take, cue detail or plan, or a
+    # change in the story's timeline since it was placed.
+    if project.music_enabled:
+        placement = await music_placement.state(session, project)
+        if placement.latest is not None and placement.out_of_date:
+            found.add(
+                "music_placement",
+                Item(
+                    "music_placement",
+                    "Music placement",
+                    placement.reasons,
+                    acceptable=False,
+                ),
+            )
 
     resolution = await look_state_resolution.state(session, project)
     if resolution.version is not None and resolution.reasons:

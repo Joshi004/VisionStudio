@@ -345,6 +345,37 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     )
 
 
+@dataclass(frozen=True)
+class RenderSources:
+    """What the next render would be made from, for a stage that must agree with the render's
+    own timeline (music placement, MUSIC-011).
+    """
+
+    # The scenes with their shots, speech units and selected takes. Empty when blocked.
+    scenes: list[story_render_plan.SceneSource]
+    # The frozen timeline the next render would use, or None when it cannot be made.
+    plan: story_render_plan.RenderPlan | None
+    # Why there is no plan, or None.
+    blocked_reason: str | None
+    takes: shot_takes.ShotTakesState
+
+
+async def next_render_sources(session: AsyncSession, project: Project) -> RenderSources:
+    """The sources and the frozen timeline of the render that would start now. Reads only; the
+    render itself uses the same functions, so the two cannot disagree about where a shot or a
+    narration line is.
+    """
+    plans = await shot_plans.state(session, project)
+    takes = await shot_takes.state(session, project)
+    blocked = plans.blocked_reason or takes.blocked_reason
+    if blocked is not None:
+        return RenderSources([], None, blocked, takes)
+    speech = _speech_by_unit(await speech_synthesis.state(session, project))
+    scenes = await _scene_sources(session, plans, takes, speech)
+    plan, blocked = _plan_of(project, scenes)
+    return RenderSources(scenes, plan, blocked, takes)
+
+
 # --- Starting a render ----------------------------------------------------------------------
 
 

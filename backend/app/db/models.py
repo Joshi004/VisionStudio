@@ -117,7 +117,8 @@ class Job(Base):
         # and the writing of a view's prompt, since revision 0059, and the Music Bible, since
         # revision 0065, and the writing of a theme's prompt, since revision 0066, and the music
         # plan, since revision 0067, and the cue detail and its audit, since revision 0068, and
-        # the rewrite of a rejected take's prompt, since revision 0069.
+        # the rewrite of a rejected take's prompt, since revision 0069, and the placement of the
+        # music on the timeline, since revision 0070.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -131,7 +132,7 @@ class Job(Base):
             "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
-            "'audit_music_cues', 'rewrite_music_prompt')",
+            "'audit_music_cues', 'rewrite_music_prompt', 'place_music')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -263,6 +264,33 @@ class MusicPlan(Base):
     rounds: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
     facts: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicPlacement(Base):
+    """One placement run of a story project's music (MUSIC-011, revision 0070).
+
+    Versioned like `MusicPlan` and never changed. `plan_id` is the plan version it was made for,
+    `inputs` what it was made from (so staleness is worked out on read), and `content` every
+    placement in samples at 48 kHz with its fades, joins, the fallbacks used, the sounds H3
+    makes and the language model's choices (`services/music_placer`).
+    """
+
+    __tablename__ = "music_placement"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version"),
+        Index("idx_music_placement_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    plan_id: Mapped[int] = mapped_column(ForeignKey("music_plan.id", ondelete="CASCADE"))
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

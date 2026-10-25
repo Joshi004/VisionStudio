@@ -132,6 +132,12 @@ MUSIC_CUE_PUSHBACK_ROUNDS_KEY = "music_cue_pushback_rounds"
 # How many times a take of a cue that fails its technical check is made again, with the same
 # prompt and a new seed, in one round (MUSIC-010).
 MUSIC_TAKE_MAX_RETRIES_KEY = "music_take_max_retries"
+# How exact music placement is (MUSIC-011, QM-11). Whole milliseconds and percent, because
+# settings are whole numbers.
+MUSIC_PLACE_TIGHT_KEY = "music_place_tight_ms"
+MUSIC_PLACE_LOOSE_KEY = "music_place_loose_ms"
+MUSIC_PLACE_WIDEN_KEY = "music_place_widen_pct"
+MUSIC_CROSSFADE_KEY = "music_crossfade_ms"
 
 # How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
 # estimated from its word count at a speaking pace; one above the limit is still saved.
@@ -713,6 +719,59 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=2,
         min_value=0,
         max_value=5,
+    ),
+    SettingSpec(
+        key=MUSIC_PLACE_TIGHT_KEY,
+        group=GROUP_MUSIC,
+        label="Tight placement window (milliseconds)",
+        help=(
+            "How far from the story moment a hit or a hard stop may land when the plan says "
+            "it must be exact. The placement looks for a cut, a gap in the speech or a "
+            "detected sound inside this window. It applies the next time the music is placed."
+        ),
+        value_type="integer",
+        default=250,
+        min_value=50,
+        max_value=1000,
+    ),
+    SettingSpec(
+        key=MUSIC_PLACE_LOOSE_KEY,
+        group=GROUP_MUSIC,
+        label="Loose placement window (milliseconds)",
+        help=(
+            "How far from the story moment a music entry or a fade may land when the plan "
+            "says it can be a second or two off. It applies the next time the music is placed."
+        ),
+        value_type="integer",
+        default=1500,
+        min_value=250,
+        max_value=5000,
+    ),
+    SettingSpec(
+        key=MUSIC_PLACE_WIDEN_KEY,
+        group=GROUP_MUSIC,
+        label="Widening of a placement window that finds nothing (percent)",
+        help=(
+            "When no good point is inside a window, the window is made this much wider once "
+            "before a gentler technique is tried. 100 doubles it. 0 never widens."
+        ),
+        value_type="integer",
+        default=100,
+        min_value=0,
+        max_value=300,
+    ),
+    SettingSpec(
+        key=MUSIC_CROSSFADE_KEY,
+        group=GROUP_MUSIC,
+        label="Crossfade between two music cues (milliseconds)",
+        help=(
+            "How long two cues overlap when their join is a crossfade. It is shortened when "
+            "the cues have less spare length than this."
+        ),
+        value_type="integer",
+        default=3000,
+        min_value=500,
+        max_value=8000,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

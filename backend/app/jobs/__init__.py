@@ -19,7 +19,7 @@
   (`write_environment_prompt.py`), the Music Bible (`write_music_bible.py`) and the music themes
   (`write_music_theme_prompt.py`), the music plan (`write_music_plan.py`) and the music cues
   (`write_music_cue.py`, `audit_music_cues.py`) and the rewrite of a rejected music take's prompt
-  (`rewrite_music_prompt.py`).
+  (`rewrite_music_prompt.py`) and the placement of the music on the timeline (`place_music.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -60,6 +60,7 @@ def register_handlers() -> None:
     from app.jobs.generate_lab_video import GenerateLabVideoHandler
     from app.jobs.generate_shot import GenerateShotHandler
     from app.jobs.lab_voice import LabVoiceHandler
+    from app.jobs.place_music import PlaceMusicHandler
     from app.jobs.plan_environment_views import PlanEnvironmentViewsHandler
     from app.jobs.plan_shots import PlanShotsHandler
     from app.jobs.render_story import RenderStoryHandler
@@ -123,3 +124,4 @@ def register_handlers() -> None:
     handlers.register(WriteMusicCueHandler())
     handlers.register(AuditMusicCuesHandler())
     handlers.register(RewriteMusicPromptHandler())
+    handlers.register(PlaceMusicHandler())

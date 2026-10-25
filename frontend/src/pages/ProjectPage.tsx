@@ -30,6 +30,7 @@ import { EnvironmentViewsPanel } from "../components/story/EnvironmentViewsPanel
 import { SceneEventsPanel } from "../components/story/SceneEventsPanel";
 import { MusicBiblePanel } from "../components/music/MusicBiblePanel";
 import { MusicCuesPanel } from "../components/music/MusicCuesPanel";
+import { MusicPlacementPanel } from "../components/music/MusicPlacementPanel";
 import { MusicPlanPanel } from "../components/music/MusicPlanPanel";
 import { MusicTakesPanel } from "../components/music/MusicTakesPanel";
 import { MusicThemesPanel } from "../components/music/MusicThemesPanel";
@@ -200,6 +201,9 @@ export function ProjectPage() {
           <ShotPromptsPanel projectId={project.id} />
           <div id="pipeline-step-shot_generation">
             <ShotTakesPanel projectId={project.id} />
+          </div>
+          <div id="pipeline-step-music_placement">
+            <MusicPlacementPanel projectId={project.id} />
           </div>
           <StoryRenderPanel projectId={project.id} />
           <StageList />

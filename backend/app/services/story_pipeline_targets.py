@@ -45,6 +45,7 @@ from app.services import (
     music_bible,
     music_cue_writer,
     music_cues,
+    music_placement,
     music_plan,
     music_takes,
     music_themes,
@@ -1119,6 +1120,42 @@ async def _start_music_generation(
     return await _start_each(session, targets, deadline, make)
 
 
+# --- The music placement (MUSIC-011) --------------------------------------------------------
+
+
+async def _evaluate_music_placement(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # With music switched off nothing is made (MD-21): one target that is already done. So it is
+    # when no cue makes audio: there is nothing to place.
+    if not project.music_enabled:
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await music_placement.state(session, project)
+    if state.nothing_to_place:
+        return StepView([Target(PROJECT_KEY, "", True)])
+    done = state.latest is not None and not state.out_of_date and state.blocked_reason is None
+    active = state.active
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                last_error=_failure(state.job),
+                stale=state.latest is not None and not done,
+            )
+        ]
+    )
+
+
+async def _call_music_placement(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> Job:
+    return await music_placement.start_run(session, project)
+
+
 # --- Scene staging and environment views (PHASE-051, PHASE-052) ------------------------------
 
 
@@ -2023,6 +2060,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "generation_requests": Adapter(_evaluate_generation_requests, _start_generation_requests),
     "prompts": Adapter(_evaluate_prompts, _start_prompts),
     "shot_generation": Adapter(_evaluate_shot_generation, _start_shot_generation),
+    "music_placement": Adapter(_evaluate_music_placement, _project_start(_call_music_placement)),
     "render": Adapter(_evaluate_render, _project_start(_call_render)),
 }
 

@@ -153,6 +153,13 @@ SAVING_MUSIC_CUES: Final = "saving the music cues"
 # `rewrite_music_prompt` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_MUSIC_TAKE: Final = "saving the new prompt and starting its recording"
 
+# --- Running: music placement (MUSIC-011) ------------------------------------------------
+# `place_music` also uses `asking_model` from above (once, only when code needs the model to choose
+# among real points).
+MEASURING_SOUNDS: Final = "measuring the sounds"
+PLACING_MUSIC: Final = "placing the music"
+SAVING_MUSIC_PLACEMENT: Final = "saving the music placement"
+
 # --- Running: character and environment discovery (PHASE-005) ----------------------------
 # `discover_characters` and `discover_environments` also use PREPARING_PROMPT and
 # `asking_model` from above.
