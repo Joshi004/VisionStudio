@@ -18,6 +18,7 @@ import { NarratorVoicePanel } from "../components/story/NarratorVoicePanel";
 import { SceneDefinitionsPanel } from "../components/story/SceneDefinitionsPanel";
 import { EnvironmentViewsPanel } from "../components/story/EnvironmentViewsPanel";
 import { SceneEventsPanel } from "../components/story/SceneEventsPanel";
+import { MusicBiblePanel } from "../components/music/MusicBiblePanel";
 import { SceneStagingPanel } from "../components/story/SceneStagingPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
 import { GenerationRequestsPanel } from "../components/story/GenerationRequestsPanel";
@@ -127,6 +128,9 @@ export function ProjectPage() {
           </div>
           <div id="pipeline-step-events">
             <SceneEventsPanel projectId={project.id} speechMode={project.speech_mode} />
+          </div>
+          <div id="pipeline-step-music_bible">
+            <MusicBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
           </div>
           <div id="pipeline-step-scene_staging">
             <SceneStagingPanel projectId={project.id} />

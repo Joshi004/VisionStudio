@@ -60,6 +60,9 @@ class Project(Base):
     # The keys of the review points the project has enabled (`services/review_points.py`), in
     # the order of the pipeline. A run of the story pipeline waits for the user at each one.
     review_points: Mapped[Any] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    # Whether the story gets planned music (MUSIC-006, MD-21). When off, the music steps are
+    # skipped as complete. Can be changed at any time.
+    music_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
 
 
 class Asset(Base):
@@ -111,7 +114,8 @@ class Job(Base):
         # dialogue, since revision 0051, and the choice of a shot's reference pictures by the
         # language model, since revision 0052, and the two Music lab jobs, since revision 0057, and
         # the staging of a scene, since revision 0058, and the planning of an environment's views
-        # and the writing of a view's prompt, since revision 0059.
+        # and the writing of a view's prompt, since revision 0059, and the Music Bible, since
+        # revision 0065.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -123,7 +127,7 @@ class Job(Base):
             "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes', "
             "'story_pipeline', 'check_take_dialogue', 'select_shot_references', "
             "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
-            "'plan_environment_views', 'write_environment_view_prompt')",
+            "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -186,6 +190,39 @@ class StoryBible(Base):
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
     inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicBible(Base):
+    """One version of a story project's Music Bible (MUSIC-006).
+
+    The same provenance shape as `StoryBible`: every run, choice of another direction or edit is
+    a new row with the next `version`, and a stored row is never changed. `directions` are the
+    four directions written at level 0a (`[{id, name, summary, instruments, feel, differs_by}]`),
+    `choice` is `{direction_id, by, reasons}` (`by` is `ai` or `owner`), and `content` is the
+    Bible itself (concept, sound world, musical feel, themes, arc, restraint, ambience).
+    `inputs` holds the story hash and the exact upstream versions the version was built from.
+    """
+
+    __tablename__ = "music_bible"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_music_bible_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    directions: Mapped[Any] = mapped_column(JSON)
+    choice: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 

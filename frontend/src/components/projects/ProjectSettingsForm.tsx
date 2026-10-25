@@ -7,6 +7,7 @@ import {
   NumberInput,
   Paper,
   Stack,
+  Switch,
   Text,
   TextInput,
   Title,
@@ -98,6 +99,21 @@ export function ProjectSettingsForm({
               The speech mode is fixed after creation.
             </Text>
           </Group>
+        </Paper>
+
+        <Paper withBorder p="md" radius="md">
+          <Stack gap="xs">
+            <Title order={4}>Music</Title>
+            <Switch
+              label="Plan and generate music for this story"
+              checked={draft.music_enabled}
+              onChange={(event) => edit("music_enabled", event.currentTarget.checked)}
+            />
+            <Text size="xs" c="dimmed">
+              When off, the music steps are skipped and the video is made without music. It can be
+              changed at any time.
+            </Text>
+          </Stack>
         </Paper>
 
         <Paper withBorder p="md" radius="md">

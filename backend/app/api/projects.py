@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
@@ -62,6 +62,8 @@ class ProjectUpdate(BaseModel):
     script_text: StrictStr | None = None
     # The review points the pipeline stops at (PHASE-041). The whole list is sent.
     review_points: list[ReviewPointKey] | None = None
+    # Whether the story gets planned music (MUSIC-006). Can be changed at any time.
+    music_enabled: StrictBool | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -96,6 +98,8 @@ class ProjectDetail(BaseModel):
     script_text: str | None
     # The review points the project has enabled, in the order of the pipeline. None by default.
     review_points: list[ReviewPointKey]
+    # Whether the story gets planned music. On by default.
+    music_enabled: bool
     story_length: StoryLengthOut
 
 
@@ -131,6 +135,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         fps=project.fps,
         script_text=project.script_text,
         review_points=_review_points(project),
+        music_enabled=project.music_enabled,
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,

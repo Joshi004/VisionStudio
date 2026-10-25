@@ -108,7 +108,13 @@ GROUP_IMAGE = "Image model"
 GROUP_DURATION = "Shot duration"
 GROUP_SPEECH = "Speech"
 GROUP_STORY = "Story"
+GROUP_MUSIC = "Music"
 GROUP_LIMITS = "Limits"
+
+# The most themes a story's Music Bible may hold, the main theme included (MUSIC-006, QM-6). The
+# model decides how many the story needs and is asked for fewer in a short story; code refuses
+# an answer above this.
+MUSIC_MAX_THEMES_KEY = "music_max_themes"
 
 # How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
 # estimated from its word count at a speaking pace; one above the limit is still saved.
@@ -573,6 +579,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
             ),
             SettingChoice(REFERENCE_METHOD_DETERMINISTIC, "Fixed rule only"),
         ),
+    ),
+    SettingSpec(
+        key=MUSIC_MAX_THEMES_KEY,
+        group=GROUP_MUSIC,
+        label="Most music themes per story",
+        help=(
+            "The most recurring musical themes (for a character, a place or an idea) that a "
+            "story's Music Bible may have, the main theme included. The language model decides "
+            "how many the story needs and is asked for fewer in a short story; an answer with "
+            "more than this is refused. It applies to the next Music Bible that is written or "
+            "edited."
+        ),
+        value_type="integer",
+        default=3,
+        min_value=1,
+        max_value=5,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

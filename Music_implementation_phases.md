@@ -313,6 +313,7 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 - Completed: MUSIC-001 (2026-10-24), MUSIC-002 (2026-10-24), MUSIC-004 (2026-10-25)
 - In progress: MUSIC-003 (code complete 2026-10-24; the owner's check of the change points and loudest moments of round-1 runs 13 to 16 by ear is still open)
 - MUSIC-005 (review screen ready, wave 1 of 4 run, waves 2 to 4 waiting for the owner)
+- MUSIC-006 (code complete 2026-10-25; the owner's S2 run with the real model is still open)
 - Deferred: MUSIC-016 (singing characters, until the owner decides)
 
 | ID | Title | Milestone | Hard dependencies | Status |
@@ -322,7 +323,7 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 | MUSIC-003 | Audio measurements | MM0 | — | In Progress (code complete) |
 | MUSIC-004 | Editing in the Music Lab | MM0 | 003 | Completed |
 | MUSIC-005 | Round-2 trials (manual) | MM0 | 004 (001 recommended) | In Progress (wave 1 run; waves 2 to 4 waiting) |
-| MUSIC-006 | Music Bible: four directions, a choice, the Bible | MM1 | 001; PHASE-014, PHASE-015, PHASE-030 | Not Started |
+| MUSIC-006 | Music Bible: four directions, a choice, the Bible | MM1 | 001; PHASE-014, PHASE-015, PHASE-030 | In Progress (code complete; S2 run waiting for the owner) |
 | MUSIC-007 | Themes and their emotional versions | MM1 | 005, 006 | Not Started |
 | MUSIC-008 | Music plan with critics | MM2 | 006; PHASE-021 | Not Started |
 | MUSIC-009 | Cue detail and prompts | MM2 | 007, 008; PHASE-022 | Not Started |
@@ -689,7 +690,7 @@ flowchart TD
 
 ### MUSIC-006 — Music Bible: four directions, a choice, the Bible
 
-**Status:** Not Started · **Milestone:** MM1 · **Vision:** §4.2, §4.3 (levels 0a to 0c), MD-5
+**Status:** In Progress (code complete 2026-10-25; waiting for the owner to run S2 with the real model) · **Milestone:** MM1 · **Vision:** §4.2, §4.3 (levels 0a to 0c), MD-5
 
 **Objective.** Give every story a musical identity, chosen from four directions, that every later music call follows.
 
@@ -723,14 +724,28 @@ flowchart TD
 **Observable improvements.** A visible musical identity for each story.
 
 **Completion checklist.**
-- [ ] Prompts and parsers (0a, 0b, 0c), validation
-- [ ] Storage with versions and provenance; job type(s)
-- [ ] Choose another direction; edit
-- [ ] Pipeline step and adapter; music on/off project setting
-- [ ] Panel; docs; standard checks
-- [ ] Owner runs S2 with the real model
+- [x] Prompts and parsers (0a, 0b, 0c), validation
+- [x] Storage with versions and provenance; job type(s)
+- [x] Choose another direction; edit
+- [x] Pipeline step and adapter; music on/off project setting
+- [x] Panel; docs; standard checks
+- [ ] Owner runs S2 with the real model (no paid call was made; see the notes)
 
-**Completion notes.** _(fill in)_
+**Completion notes.**
+
+- **Not marked Completed, and why.** Three Verification criteria need the real story model, which is a paid call the agent does not make without the owner's go-ahead: "the four directions are clearly different (owner's judgment)", "a one-click run makes the Bible" and "choosing another direction makes a new version without re-running 0a". Everything else was checked offline (below). To finish: rebuild with `docker compose up --build -d` (the container applies migration `0065` itself), save S2, run the Story Bible, the three discoveries and the scene steps up to events, then press **Run** on the Music Bible panel. Tell the agent how the four directions read, and mark the phase Completed.
+- **How "Planning decides" was settled.** (1) The cap on themes is a **global setting**, `music_max_themes` (group `Music`, whole number 1 to 5, default 3: the main theme plus two). The model decides how many the story needs and is told the cap; the code refuses an answer with more, and a hand edit with more. Exactly one theme is the main one. (2) Music on or off is a **project column**, `project.music_enabled` (`BOOLEAN NOT NULL DEFAULT 1`, migration `0065`): on for every project that exists and every new one (QM-14 answered), changed at any time with `PATCH /api/projects/{id}` and by a switch on the Project settings page. Both were the owner's choices (2026-10-25).
+- **Storage.** New table `music_bible` (migration `0065`, model `MusicBible`): `UNIQUE (project_id, version)`, `source` `ai` or `manual`, `job_id`, `inputs` (provenance, D-3), and three JSON columns, `directions` (exactly four, ids `d1` to `d4` set by code), `choice` (`direction_id`, `by` = `ai` or `owner`, `reasons`) and `content` (the Bible). Theme ids `theme_1`, `theme_2`, ... are set by code, the main theme first. A version is never changed. The job type `write_music_bible` was added to the `job.type` CHECK in the same migration. `DATABASE_STRUCTURE.md` Section 4.59 has every field.
+- **The Bible's fields (§4.2).** `concept`, `sound_world` (`instruments`, `avoid`), `musical_feel` (`tempo`, `mode_leaning`, `density`), `themes` (each: `id`, `name`, `main`, `stands_for` {`kind` = character, place or idea; `ref` = the id of a character or environment of the project, null for an idea; `description`}, `signature_instrument`, `emotions`), `arc` (one line per scene, in story order), `restraint` (`amount`, `silence_rules`) and `ambience_signature`. MUSIC-007 reads `themes[].signature_instrument` and `emotions`; MUSIC-008 reads `arc`, `restraint` and `ambience_signature`.
+- **Modules.** `services/music_bible_writer.py` (prompts, request builders and the checks `check_directions`, `check_choice`, `check_bible`; pure, no database), `services/music_bible.py` (reading, `start_run`, `start_choose`, `save_manual`, `state`, out-of-date reasons), `jobs/write_music_bible.py` (`WriteMusicBibleHandler`, provider `llm`, restart rule `never_rerun`, story model, two attempts per call), `api/music_bible.py`. `jobs/llm_call.ask_model` gained a `keep=` keyword so the paid answers of the earlier calls stay on the job while a later call runs.
+- **Calls and modes.** Mode `full` makes three calls (0a four directions, 0b the choice with reasons, 0c the Bible) and saves one row. Mode `expand` (**Choose this direction**) makes only 0c from the directions of the version the owner is looking at, saves a new version with `choice.by = owner` and a reason of "Chosen by the owner.", and leaves 0a and 0b untouched. A failure in 0c does not lose the paid 0a and 0b answers (`job.output.calls`).
+- **Endpoints.** `GET /api/projects/{id}/music-bible` (newest version, the list of versions, the job, `out_of_date` with plain-word `reasons`, `needs_confirmation`, `blocked_reason`, `music_enabled`, `max_themes`, and the scenes, characters and places an edit may point to), `GET .../music-bible/versions/{version}`, `POST .../music-bible/run` (202; body `confirm_replace_manual`), `POST .../music-bible/choose` (202; body `version`, `direction_id`), `PUT .../music-bible` (the owner's edit, saved as a `manual` version; the four directions and the choice are kept from the newest). A run needs the saved story, a Story Bible and the events of every scene, and says which is missing (`blocked_reason`, 422).
+- **Pipeline.** Step `music_bible` ("Write the Music Bible") sits right after `events`; the pipeline now has **27 steps**. It is done when a version exists and is not out of date, so a second run makes nothing. With `music_enabled` off it is one done target and nothing is made (the `relations` pattern, MD-21). It asks for consent before running over a version the owner wrote or chose (`_CONSENT_STEPS`). "Pause after..." can stop at it. The staleness screen lists an out-of-date Bible but does not offer to accept it.
+- **UI.** `components/music/MusicBiblePanel.tsx` (Run or Re-run, the version picker, the job state, the reasons it is out of date, the four direction cards with the chosen one marked with who chose and why, **Choose this direction** on the others, the Bible, **Edit**, and an explanation when music is off) and `MusicBibleEditor.tsx` (lists one per line, add or remove themes, one main theme, the cap, a character or place picker for a theme, one arc line per scene), on the project page in `#pipeline-step-music_bible`; hooks in `api/musicBible.ts`; a **Music** switch in `ProjectSettingsForm` (`settingsDraft.ts`); the job label "Music Bible" in `jobFormat.ts`.
+- **Checks run.** `uv run ruff check . && uv run ruff format --check .` pass. `npm run lint && npm run typecheck` pass (`schema.d.ts` regenerated from the app's OpenAPI document). Migration `0065` upgrade, downgrade to `0064` and upgrade again on a throwaway database (`DATA_DIR` set to a temporary folder; the real database was never opened), with the table, index and `music_enabled` default checked. Offline checks of the validators with hand-written answers: three directions instead of four, an unknown chosen direction, an arc line for an unknown scene, a scene left out of the arc, two main themes, no main theme, more themes than the cap, a theme that stands for an id that is not a character or place: each refused with a message that names the field; a good answer gets ids `d1` to `d4` and `theme_1`..., the main theme first, and the arc in story order. A smoke run of the endpoints on the throwaway database: a new project has music on; the Music Bible state says "Save the story first"; `run` is refused with 422; `PATCH` accepts true and false and refuses anything else; the step is listed in the pipeline. No automated tests were added (D-11).
+- **Not done here, on purpose.** No real model call (see above). The Docker app was not rebuilt. `alembic check` reports an older, unrelated `FLOAT` against `REAL` difference on four `duration_s` columns; nothing from this phase.
+- **For the next phases.** Read the newest `music_bible` row: `content.themes`, `content.arc`, `content.restraint`, `content.ambience_signature`, and `choice` for the direction's name. Check `project.music_enabled` before making anything music (a skipped step is done, so the later music steps should do the same). Theme `ref` ties a theme to a character or environment by the id used in the discovery lists.
+
 
 ---
 
@@ -1218,7 +1233,7 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 | QM-3 | Does H3 add music or heavy ambience in tense scenes? Should the H3 prompt drop ambience under a bed? | 002, 012 | H3 makes good sound and music inside a shot; it fails across shots (MD-24). MD-17 stands (no prompt change for ambience). | Answered 2026-10-24 (MUSIC-002) |
 | QM-4 | Theme variation method and strengths (ACE-Step `cover` or Stable Audio 3 `transform`) | 005, 007 | **Fresh text-to-music** with the theme described in the prompt | **Answered for now (owner, 2026-10-25):** start from text; the owner is not sure a recording can be converted to another mood yet. `cover` and `transform` stay a later iteration |
 | QM-5 | Do `model_join` and `continuation` work, and with what windows? | 005, 013 | Default: `crossfade`, `under_cover`, `through_silence`, `hard_cut` only | Open (MUSIC-005) |
-| QM-6 | How many themes per story | 006 | Main theme plus at most two others; fewer for short stories | Open (MUSIC-006 planning) |
+| QM-6 | How many themes per story | 006 | Main theme plus at most two others; fewer for short stories | **Answered (owner, 2026-10-25):** a global setting `music_max_themes`, default 3 (1 to 5). The model decides fewer for short stories; the code enforces one main theme and the cap |
 | QM-7 | Takes per cue and theme candidates | 007, 010 | Planning decides (a setting) | Open |
 | QM-8 | Automatic selection: first passing, or GLM ranking from facts | 010 | First passing (MD-10); ranking optional | Open (MUSIC-010 planning) |
 | QM-9 | Critic rounds | 008 | At most two | Open (MUSIC-008 planning) |
@@ -1226,7 +1241,7 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 | QM-11 | Window sizes (tight, loose, widen) and handle length | 009, 011 | Planning decides; tuned by ear | Open (MUSIC-011) |
 | QM-12 | Is GLM's choice the normal path for important anchors? | 011 | Planning decides | Open (MUSIC-011) |
 | QM-13 | Singing characters | 016 | Deferred (MD-14) | Deferred |
-| QM-14 | Is music on by default for new projects? | 006 | On | Open |
+| QM-14 | Is music on by default for new projects? | 006 | On | **Answered (owner, 2026-10-25):** on, for new and existing projects; a switch on the Project settings page (`project.music_enabled`) |
 | QM-15 | H3 can make good music inside a shot, but D-10 tells it to make none, because the continuous score is ACE-Step's. Keep suppressing H3 music (clean, one score), or allow it when a cue is confined to one shot (H3 makes that cue, no ACE-Step take needed), or leave it on and duck it under the score? | 008, 009, 012 | Default: keep D-10 (suppress H3 music). The H3 prompt is not changed by any music phase. | Open (owner) |
 | QM-16 | How does a sound that H3 must make (thunder on a flash, an in-shot effect) reach the shot's prompt, given that the plan comes after shot planning? See MUSIC-008. | 008, 009 | Default: option (b), H3 makes only the sounds the story's events already name; other planned sounds fall back to Stable Audio 3. | Open (MUSIC-008 planning) |
 
@@ -1362,6 +1377,7 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 | 2026-10-24 | MUSIC-005 | In Progress (prepared) | 38 round-2 cases (Appendix C, 87 GPU runs, a few local) and the review screen Lab > Music > Round 2 trials: what to verify, source audio, what was done, outputs with Good/Usable/Bad, the owner's answer per case. Migration `0064` (`lab_music_trial_case`), `/api/lab/music/trials`, `/runs/{id}/outside-window`, joins with a crossfade or a silent tail, `music_lab_trials/round2.py` and `round2_cases.json`. Docker app rebuilt (revision 0064). Wave 1 (12 runs, all succeeded) started with the owner's go-ahead; waves 2 to 4 (75 runs) wait for the owner. |
 | 2026-10-25 | MUSIC-004 | Completed | The owner validated repaint and the other editing. Real runs in round-2 wave 1: ACE-Step repaint leaves the sound outside the window unchanged (only 1 dB quieter); Stable Audio 3 inpaint changes it (-23 dB). |
 | 2026-10-25 | MUSIC-005 | In Progress | The owner is not sure a recording can be converted to another mood yet, so emotional theme versions start as fresh text-to-music (MD-6, QM-4 changed). Conversion cases for grief, anger and tenderness (18 runs) deferred to wave 5. Waves 2 to 4 still wait for the owner. |
+| 2026-10-25 | MUSIC-006 | In Progress (code complete) | Music Bible: four directions, a choice with reasons and the Bible (three calls, or only the Bible when the owner chooses another direction). Table `music_bible` and `project.music_enabled` (migration `0065`), job type `write_music_bible`, setting `music_max_themes`, `/api/projects/{id}/music-bible`, pipeline step `music_bible` (27 steps), `MusicBiblePanel`, a Music switch on the project settings. Checked offline; no paid call made. Docker app not rebuilt. Waiting for the owner to run S2 with the real model. |
 
 ---
 
@@ -1369,6 +1385,7 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 
 | Date | Change | Reason |
 |---|---|---|
+| 2026-10-25 | **QM-6 and QM-14 answered; MUSIC-006 code complete.** Theme cap is a setting (`music_max_themes`, default 3); music is on by default and can be switched off per project. | The owner chose both during MUSIC-006 planning. |
 | 2026-10-25 | **MD-6 changed, QM-4 answered for now:** emotional versions of a theme start as fresh text-to-music with the theme described in the prompt; `cover` and `transform` conversion is a later iteration. MUSIC-004 marked Completed. | The owner validated the editing operations but is not sure a recording can be converted to horror or another mood yet. |
 | 2026-10-24 | **MD-9 changed and MD-24 added from the owner's listening:** Stable Audio Open, LTX audio and YuE2 leave the pipeline; sound is routed by how far it reaches (inside one shot: H3; spans shots: Stable Audio 3; time-critical such as thunder: H3). MD-17 confirmed. MUSIC-001 and MUSIC-002 completed. MUSIC-008 notes the routing and the ordering problem it creates. QM-1 and QM-3 answered; QM-15 and QM-16 added. Round-2 trial M3 drops thunder; Stable Audio Open dropped from Appendix C. | Owner listened to round 1 and the H3 shots. |
 | 2026-10-23 | Initial version: decisions MD-1 to MD-16 from the owner's design discussion, and MD-17 to MD-23 added on re-evaluation; design §4; phases MUSIC-001 to MUSIC-016; round-2 trial plan. | Owner asked for a music-specific roadmap that follows the Opus plan, Sonnet execute workflow. |

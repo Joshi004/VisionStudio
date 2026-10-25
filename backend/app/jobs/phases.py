@@ -129,6 +129,10 @@ SAVING_LOOK_REFERENCE: Final = "saving the reference picture"
 # `write_story_bible` also uses PREPARING_PROMPT and `asking_model` from above.
 SAVING_STORY_BIBLE: Final = "saving the Story Bible"
 
+# --- Running: the Music Bible (MUSIC-006) ------------------------------------------------
+# `write_music_bible` also uses PREPARING_PROMPT and `asking_model` from above (once per call).
+SAVING_MUSIC_BIBLE: Final = "saving the Music Bible"
+
 # --- Running: character and environment discovery (PHASE-005) ----------------------------
 # `discover_characters` and `discover_environments` also use PREPARING_PROMPT and
 # `asking_model` from above.

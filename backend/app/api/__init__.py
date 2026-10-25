@@ -23,6 +23,7 @@ from app.api import (
     jobs,
     look_state_images,
     look_state_resolution,
+    music_bible,
     music_lab,
     project_cast,
     projects,
@@ -52,6 +53,7 @@ api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(projects.router, tags=["projects"])
 api_router.include_router(story_bible.router, tags=["story-bible"])
+api_router.include_router(music_bible.router, tags=["music-bible"])
 api_router.include_router(discovery.router, tags=["discovery"])
 api_router.include_router(scenes.router, tags=["scenes"])
 api_router.include_router(character_links.router, tags=["character-links"])

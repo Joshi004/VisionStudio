@@ -104,6 +104,9 @@ STEPS: Final[tuple[Step, ...]] = (
         ("character_definitions", "environment_definitions"),
     ),
     Step("events", "Extract the events", ("scene_definitions",)),
+    # MUSIC-006: the story's musical identity. Skipped as complete when the project's music is
+    # switched off.
+    Step("music_bible", "Write the Music Bible", ("events",)),
     Step("resolution", "Resolve looks and states", ("scene_definitions",)),
     Step(
         "scene_staging",

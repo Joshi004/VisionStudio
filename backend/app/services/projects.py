@@ -65,7 +65,8 @@ ORIENTATION_DEFAULTS: Final[Mapping[str, OrientationDefaults]] = {
 }
 
 # What a PATCH may change. The orientation, the speech mode and the id are not here. The review
-# points (PHASE-041) are a list, checked by `_prepare_review_points`.
+# points (PHASE-041) are a list, checked by `_prepare_review_points`. The music switch
+# (MUSIC-006) can be changed at any time.
 _FIELD_LABELS: Final[Mapping[str, str]] = {
     "name": "Name",
     "gen_width": "Generation width",
@@ -75,6 +76,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "fps": "Frame rate",
     "script_text": "Story",
     "review_points": "Review points",
+    "music_enabled": "Music",
 }
 _NULLABLE_FIELDS: Final = frozenset(("script_text",))
 
@@ -176,6 +178,7 @@ async def create_project(
         fps=DEFAULT_FPS,
         speech_mode=speech_mode,
         review_points=[],
+        music_enabled=True,
     )
     validate_project(project)
     session.add(project)
@@ -227,6 +230,8 @@ def _prepare_value(field: str, value: object) -> object:
         return _normalise_script(value if isinstance(value, str) else None)
     if field == "review_points":
         return _prepare_review_points(value)
+    if field == "music_enabled" and not isinstance(value, bool):
+        raise ProjectValidationError("Music must be on or off.")
     return value
 
 

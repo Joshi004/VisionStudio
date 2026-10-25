@@ -120,6 +120,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/music-bible/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Music Bible
+         * @description Starts the job that writes the four directions, the choice and the Bible. If one is
+         *     already waiting or running for the project, its id is returned and no second job is made.
+         */
+        post: operations["run_music_bible_api_projects__project_id__music_bible_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-bible/choose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose Music Direction
+         * @description Starts the job that writes the Bible again from the direction the owner chose. The four
+         *     directions are not written again.
+         */
+        post: operations["choose_music_direction_api_projects__project_id__music_bible_choose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-bible": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Music Bible */
+        get: operations["get_music_bible_api_projects__project_id__music_bible_get"];
+        /**
+         * Save Music Bible
+         * @description Saves the whole edited Bible as the next version, written by the owner.
+         */
+        put: operations["save_music_bible_api_projects__project_id__music_bible_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-bible/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Music Bible Version */
+        get: operations["get_music_bible_version_api_projects__project_id__music_bible_versions__version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/discovery/{kind}/run": {
         parameters: {
             query?: never;
@@ -3988,6 +4068,20 @@ export interface components {
             /** Tags */
             tags: components["schemas"]["TagGroupOut"][];
         };
+        /** ArcEntry */
+        ArcEntry: {
+            /** Scene Id */
+            scene_id: string;
+            /** Music */
+            music: string;
+        };
+        /** ArcEntryIn */
+        ArcEntryIn: {
+            /** Scene Id */
+            scene_id: string;
+            /** Music */
+            music: string;
+        };
         /** AudioInputIn */
         AudioInputIn: {
             /**
@@ -4420,6 +4514,18 @@ export interface components {
             /** Next Before Id */
             next_before_id: number | null;
         };
+        /** ChoiceOut */
+        ChoiceOut: {
+            /** Direction Id */
+            direction_id: string;
+            /**
+             * By
+             * @enum {string}
+             */
+            by: "ai" | "owner";
+            /** Reasons */
+            reasons: string;
+        };
         /** ChooseMasterIn */
         ChooseMasterIn: {
             /** Candidate Id */
@@ -4727,6 +4833,21 @@ export interface components {
             after: string | null;
             /** Text Diff */
             text_diff: string[] | null;
+        };
+        /** DirectionOut */
+        DirectionOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Summary */
+            summary: string;
+            /** Instruments */
+            instruments: string[];
+            /** Feel */
+            feel: string;
+            /** Differs By */
+            differs_by: string;
         };
         /**
          * DiscoveryItem
@@ -5698,7 +5819,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
             /**
              * Status
              * @enum {string}
@@ -5751,7 +5872,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
             /**
              * Kind
              * @enum {string}
@@ -5790,7 +5911,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
             /**
              * Status
              * @enum {string}
@@ -6659,6 +6780,153 @@ export interface components {
              */
             background_side: "ahead" | "left" | "right" | "behind";
         };
+        /** MusicBibleChooseIn */
+        MusicBibleChooseIn: {
+            /** Version */
+            version: number;
+            /** Direction Id */
+            direction_id: string;
+        };
+        /**
+         * MusicBibleContent
+         * @description The Bible itself (`Music_implementation_phases.md` Section 4.2).
+         */
+        MusicBibleContent: {
+            /** Concept */
+            concept: string;
+            sound_world: components["schemas"]["SoundWorld"];
+            musical_feel: components["schemas"]["MusicalFeel"];
+            /** Themes */
+            themes: components["schemas"]["ThemeOut"][];
+            /** Arc */
+            arc: components["schemas"]["ArcEntry"][];
+            restraint: components["schemas"]["Restraint"];
+            /** Ambience Signature */
+            ambience_signature: string;
+        };
+        /**
+         * MusicBibleJobOut
+         * @description The newest `write_music_bible` job of the project, whatever its status.
+         */
+        MusicBibleJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** MusicBibleOut */
+        MusicBibleOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Chosen By
+             * @enum {string}
+             */
+            chosen_by: "ai" | "owner";
+            /** Id */
+            id: number;
+            /** Directions */
+            directions: components["schemas"]["DirectionOut"][];
+            choice: components["schemas"]["ChoiceOut"];
+            content: components["schemas"]["MusicBibleContent"];
+        };
+        /** MusicBibleRun */
+        MusicBibleRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** MusicBibleRunIn */
+        MusicBibleRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /**
+         * MusicBibleSaveIn
+         * @description The Bible as the owner edited it. The size limits that matter are checked by
+         *     `music_bible_writer.check_bible`; these only keep a request from being huge.
+         */
+        MusicBibleSaveIn: {
+            /** Concept */
+            concept: string;
+            sound_world: components["schemas"]["SoundWorldIn"];
+            musical_feel: components["schemas"]["MusicalFeelIn"];
+            /** Themes */
+            themes: components["schemas"]["ThemeIn"][];
+            /** Arc */
+            arc: components["schemas"]["ArcEntryIn"][];
+            restraint: components["schemas"]["RestraintIn"];
+            /** Ambience Signature */
+            ambience_signature: string;
+        };
+        /** MusicBibleState */
+        MusicBibleState: {
+            latest: components["schemas"]["MusicBibleOut"] | null;
+            /** Versions */
+            versions: components["schemas"]["MusicBibleVersionOut"][];
+            job: components["schemas"]["MusicBibleJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Music Enabled */
+            music_enabled: boolean;
+            /** Max Themes */
+            max_themes: number;
+            /** Scenes */
+            scenes: components["schemas"]["SceneRef"][];
+            /** Characters */
+            characters: components["schemas"]["NameRef"][];
+            /** Places */
+            places: components["schemas"]["NameRef"][];
+        };
+        /** MusicBibleVersionOut */
+        MusicBibleVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Chosen By
+             * @enum {string}
+             */
+            chosen_by: "ai" | "owner";
+        };
         /**
          * MusicBrief
          * @description What the author wants. Every part but `description` is optional: the ones with a story
@@ -6854,6 +7122,31 @@ export interface components {
             tail_s: number | null;
             /** Crossfade S */
             crossfade_s: number | null;
+        };
+        /** MusicalFeel */
+        MusicalFeel: {
+            /** Tempo */
+            tempo: string;
+            /** Mode Leaning */
+            mode_leaning: string;
+            /** Density */
+            density: string;
+        };
+        /** MusicalFeelIn */
+        MusicalFeelIn: {
+            /** Tempo */
+            tempo: string;
+            /** Mode Leaning */
+            mode_leaning: string;
+            /** Density */
+            density: string;
+        };
+        /** NameRef */
+        NameRef: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /**
          * NamedLookOut
@@ -7338,7 +7631,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
             /** Running */
             running: number;
             /** Queued */
@@ -7422,6 +7715,8 @@ export interface components {
             script_text: string | null;
             /** Review Points */
             review_points: ("story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots")[];
+            /** Music Enabled */
+            music_enabled: boolean;
             story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
@@ -7492,6 +7787,8 @@ export interface components {
             script_text?: string | null;
             /** Review Points */
             review_points?: ("story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots")[] | null;
+            /** Music Enabled */
+            music_enabled?: boolean | null;
         };
         /**
          * ProjectUseOut
@@ -7957,6 +8254,20 @@ export interface components {
             video_prompt?: string | null;
             /** Delivery Instruction */
             delivery_instruction?: string | null;
+        };
+        /** Restraint */
+        Restraint: {
+            /** Amount */
+            amount: string;
+            /** Silence Rules */
+            silence_rules: string[];
+        };
+        /** RestraintIn */
+        RestraintIn: {
+            /** Amount */
+            amount: string;
+            /** Silence Rules */
+            silence_rules: string[];
         };
         /**
          * ReviewOut
@@ -8514,6 +8825,13 @@ export interface components {
             middle: string;
             /** End */
             end: string;
+        };
+        /** SceneRef */
+        SceneRef: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
         };
         /** SceneRunIn */
         SceneRunIn: {
@@ -9740,6 +10058,20 @@ export interface components {
             /** End S */
             end_s: number;
         };
+        /** SoundWorld */
+        SoundWorld: {
+            /** Instruments */
+            instruments: string[];
+            /** Avoid */
+            avoid: string[];
+        };
+        /** SoundWorldIn */
+        SoundWorldIn: {
+            /** Instruments */
+            instruments: string[];
+            /** Avoid */
+            avoid: string[];
+        };
         /** SourceApprovalOut */
         SourceApprovalOut: {
             /** Name */
@@ -10190,6 +10522,27 @@ export interface components {
             count: number;
             /** Groups */
             groups: components["schemas"]["StalenessGroupOut"][];
+        };
+        /** StandsFor */
+        StandsFor: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "character" | "place" | "idea";
+            /** Ref */
+            ref: string | null;
+            /** Description */
+            description: string;
+        };
+        /** StandsForIn */
+        StandsForIn: {
+            /** Kind */
+            kind: string;
+            /** Ref */
+            ref?: string | null;
+            /** Description */
+            description: string;
         };
         /**
          * StatePictureOut
@@ -10787,6 +11140,36 @@ export interface components {
             takes: components["schemas"]["TakeOut"][];
             /** Next Before Id */
             next_before_id: number | null;
+        };
+        /**
+         * ThemeIn
+         * @description A theme as edited. Its `id` is not sent: code sets `theme_1`, `theme_2`, ... with the
+         *     main theme first.
+         */
+        ThemeIn: {
+            /** Name */
+            name: string;
+            /** Main */
+            main: boolean;
+            stands_for: components["schemas"]["StandsForIn"];
+            /** Signature Instrument */
+            signature_instrument: string;
+            /** Emotions */
+            emotions: string[];
+        };
+        /** ThemeOut */
+        ThemeOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Main */
+            main: boolean;
+            stands_for: components["schemas"]["StandsFor"];
+            /** Signature Instrument */
+            signature_instrument: string;
+            /** Emotions */
+            emotions: string[];
         };
         /** TimelineProblemOut */
         TimelineProblemOut: {
@@ -11541,6 +11924,219 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoryBibleOut"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_music_bible_api_projects__project_id__music_bible_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["MusicBibleRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicBibleRun"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, or the story is not ready for a Music Bible. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    choose_music_direction_api_projects__project_id__music_bible_choose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicBibleChooseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicBibleRun"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, or the story is not ready for a Music Bible. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_music_bible_api_projects__project_id__music_bible_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicBibleState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_music_bible_api_projects__project_id__music_bible_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicBibleSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicBibleState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, or the story is not ready for a Music Bible. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_music_bible_version_api_projects__project_id__music_bible_versions__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicBibleOut"];
                 };
             };
             /** @description No such project or version. */

@@ -93,8 +93,14 @@ async def ask_model(
     read: ReadAnswer,
     *,
     timeout_s: float,
+    keep: dict[str, Any] | None = None,
 ) -> Outcome:
-    """Sends `body` to `target` (up to `MAX_ATTEMPTS` times) until `read` accepts an answer."""
+    """Sends `body` to `target` (up to `MAX_ATTEMPTS` times) until `read` accepts an answer.
+
+    `keep` is for a job that makes several calls in a row: what the earlier calls came to. It is
+    saved on the job's output next to this call's own record, every time progress is saved, so
+    the paid answers of the earlier calls are not lost while a later call runs.
+    """
     outcome = Outcome()
     for attempt in range(1, MAX_ATTEMPTS + 1):
         await _phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
@@ -123,7 +129,7 @@ async def ask_model(
                 exc.kind,
                 exc.status_code,
             )
-            await _save_progress(job_id, outcome)
+            await _save_progress(job_id, outcome, keep)
             if exc.kind == "refused":
                 break  # asking again cannot help
         else:
@@ -157,11 +163,11 @@ async def ask_model(
                 outcome.value = value
                 outcome.failure = None
                 # The paid answer is saved before anything else happens to it.
-                await _save_progress(job_id, outcome)
+                await _save_progress(job_id, outcome, keep)
                 return outcome
             outcome.failure = problem
             outcome.unusable_content = result.content[:RAW_CONTENT_MAX_CHARS]
-            await _save_progress(job_id, outcome)
+            await _save_progress(job_id, outcome, keep)
 
         if attempt < MAX_ATTEMPTS:
             await asyncio.sleep(RETRY_DELAY_S)
@@ -175,10 +181,10 @@ def _add_usage(outcome: Outcome, counts: dict[str, int | None]) -> None:
     outcome.usage = total
 
 
-async def _save_progress(job_id: int, outcome: Outcome) -> None:
+async def _save_progress(job_id: int, outcome: Outcome, keep: dict[str, Any] | None = None) -> None:
     """Writes what is known so far to `job.output`. The final output replaces it."""
     async with SessionLocal() as session:
-        await store.record_output(session, job_id, outcome.record())
+        await store.record_output(session, job_id, {**(keep or {}), **outcome.record()})
 
 
 async def _phase(job_id: int, phase: str) -> None:
