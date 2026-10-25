@@ -67,9 +67,6 @@ _logger = logging.getLogger(__name__)
 Kind = Literal["character", "environment"]
 KINDS: Final[tuple[Kind, ...]] = ("character", "environment")
 
-# A look in one of these states is being made right now.
-_LOOK_BUSY: Final = ("writing_prompt", "making_angles")
-
 
 class LibraryDeletionError(ValueError):
     """A request that cannot be done. The message is meant to be shown to the user."""
@@ -117,8 +114,6 @@ class _Owned:
     voice_run_ids: set[int] = field(default_factory=set)
     video_run_ids: set[int] = field(default_factory=set)
     job_ids: set[int] = field(default_factory=set)
-    # A look or a reference attempt of the item that is being made right now.
-    making: bool = False
 
 
 @dataclass
@@ -242,14 +237,13 @@ async def _owned_character(session: AsyncSession, character_id: int) -> _Owned:
     owned = _Owned()
     looks = (
         await session.execute(
-            select(CharacterLook.id, CharacterLook.status, CharacterLook.prompt_job_id).where(
+            select(CharacterLook.id, CharacterLook.prompt_job_id).where(
                 CharacterLook.character_id == character_id
             )
         )
     ).all()
-    look_ids = {look_id for look_id, _status, _job in looks}
-    owned.making = any(status in _LOOK_BUSY for _id, status, _job in looks)
-    owned.job_ids |= {job_id for _id, _status, job_id in looks if job_id is not None}
+    look_ids = {look_id for look_id, _job in looks}
+    owned.job_ids |= {job_id for _id, job_id in looks if job_id is not None}
     if look_ids:
         owned.image_run_ids |= await _ids(
             session,
@@ -282,16 +276,13 @@ async def _owned_environment(session: AsyncSession, environment_id: int) -> _Own
     owned = _Owned()
     references = (
         await session.execute(
-            select(
-                EnvironmentReference.id,
-                EnvironmentReference.status,
-                EnvironmentReference.prompt_job_id,
-            ).where(EnvironmentReference.environment_id == environment_id)
+            select(EnvironmentReference.id, EnvironmentReference.prompt_job_id).where(
+                EnvironmentReference.environment_id == environment_id
+            )
         )
     ).all()
-    reference_ids = {reference_id for reference_id, _status, _job in references}
-    owned.making = any(status == "writing_prompt" for _id, status, _job in references)
-    owned.job_ids |= {job_id for _id, _status, job_id in references if job_id is not None}
+    reference_ids = {reference_id for reference_id, _job in references}
+    owned.job_ids |= {job_id for _id, job_id in references if job_id is not None}
     if reference_ids:
         owned.image_run_ids |= await _ids(
             session,
@@ -321,33 +312,39 @@ async def _owned_environment(session: AsyncSession, environment_id: int) -> _Own
 # --- Checks ----------------------------------------------------------------------------------
 
 
+async def _any_active(session: AsyncSession, job_ids: set[int]) -> bool:
+    """Whether any of these jobs is queued or running."""
+    active = await session.execute(
+        select(Job.id).where(Job.id.in_(job_ids), Job.status.in_(store.ACTIVE_STATUSES)).limit(1)
+    )
+    return active.first() is not None
+
+
 async def _busy_reason(
     session: AsyncSession, kind: Kind, library_id: int, owned: _Owned, uses: list[ProjectUse]
 ) -> str | None:
-    """Why the item cannot be deleted now, or None."""
-    if owned.making:
-        return "Its pictures are being made right now. Wait for them to finish, then delete it."
+    """Why the item cannot be deleted now, or None.
 
+    Only a job that is queued or running counts. A look's or a reference attempt's status is
+    not enough: a look whose prompt job or angle pictures were cancelled, failed, or were
+    interrupted by a restart keeps its `writing_prompt` or `making_angles` status, and a
+    picture whose job failed or was cancelled keeps its `running` run.
+    """
     job_ids = set(owned.job_ids)
     if owned.voice_run_ids:
         job_ids |= await _ids(session, LabVoiceRun.job_id, LabVoiceRun.id.in_(owned.voice_run_ids))
     if owned.video_run_ids:
         job_ids |= await _ids(session, LabVideoRun.job_id, LabVideoRun.id.in_(owned.video_run_ids))
-    if job_ids:
-        active = await session.execute(
-            select(Job.id)
-            .where(Job.id.in_(job_ids), Job.status.in_(store.ACTIVE_STATUSES))
-            .limit(1)
-        )
-        if active.first() is not None:
-            return "Work on it is still running. Wait for it to finish, or cancel it, first."
+    if job_ids and await _any_active(session, job_ids):
+        return "Work on it is still running. Wait for it to finish, or cancel it, first."
     if owned.image_run_ids:
-        running = await session.execute(
-            select(LabRun.id)
-            .where(LabRun.id.in_(owned.image_run_ids), LabRun.status == "running")
-            .limit(1)
+        picture_job_ids = await _ids(
+            session,
+            LabRun.job_id,
+            LabRun.id.in_(owned.image_run_ids),
+            LabRun.status == "running",
         )
-        if running.first() is not None:
+        if picture_job_ids and await _any_active(session, picture_job_ids):
             return "A picture is being made right now. Wait for it to finish, then delete it."
 
     project_ids = {use.project_id for use in uses}
