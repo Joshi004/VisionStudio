@@ -165,19 +165,21 @@ def _theme_reader(duration_s: float, warnings: list[str]) -> llm_call.ReadAnswer
     return read
 
 
-def _versions_reader(task: _Task) -> llm_call.ReadAnswer:
+def _versions_reader(task: _Task, warnings: list[str]) -> llm_call.ReadAnswer:
     def read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
         if result.finish_reason == "length":
             return _TOO_LONG, None
         assert task.canonical is not None and task.emotions is not None
         try:
-            return None, writer.check_versions_answer(
+            checked = writer.check_versions_answer(
                 writer.parse_answer(result.content),
                 emotions=task.emotions,
                 canonical=task.canonical,
             )
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = checked.warnings
+        return None, checked.versions
 
     return read
 
@@ -215,7 +217,7 @@ class WriteMusicThemePromptHandler(JobHandler):
             body = writer.build_versions_request(
                 task.context, task.canonical, task.emotions, model=target.model
             )
-            read = _versions_reader(task)
+            read = _versions_reader(task, warnings)
 
         job_input.update(
             server_url=docker_mapped(target.base_url),
@@ -225,7 +227,10 @@ class WriteMusicThemePromptHandler(JobHandler):
         )
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
-        outcome = await llm_call.ask_model(job_id, target, body, read, timeout_s=REQUEST_TIMEOUT_S)
+        # `correct`: the second attempt is told why the first answer was refused.
+        outcome = await llm_call.ask_model(
+            job_id, target, body, read, timeout_s=REQUEST_TIMEOUT_S, correct=True
+        )
         if outcome.value is None:
             what = "theme" if task.requested == music_themes.REQUESTED_THEME else "versions"
             await self._fail(job_id, f"The {what} could not be written: {outcome.failure}")

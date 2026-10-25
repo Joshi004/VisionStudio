@@ -122,6 +122,13 @@ MUSIC_THEME_DURATION_KEY = "music_theme_duration_s"
 # How many rounds of critics and reviser the music plan gets at most (MUSIC-008, QM-9). 0 skips
 # the review.
 MUSIC_PLAN_CRITIC_ROUNDS_KEY = "music_plan_critic_rounds"
+# The cue detail (MUSIC-009): how many prompt wordings each thing to generate gets (one per take,
+# QM-7), how many seconds are added on each side of a cue's span as spare length for joins and
+# fades (the handles, QM-11), and how many times a cue's pushback may send the plan back to be
+# revised.
+MUSIC_CUE_WORDINGS_KEY = "music_cue_wordings"
+MUSIC_CUE_HANDLES_KEY = "music_cue_handles_s"
+MUSIC_CUE_PUSHBACK_ROUNDS_KEY = "music_cue_pushback_rounds"
 
 # How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
 # estimated from its word count at a speaking pace; one above the limit is still saved.
@@ -643,6 +650,49 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
         value_type="integer",
         default=2,
+        min_value=0,
+        max_value=3,
+    ),
+    SettingSpec(
+        key=MUSIC_CUE_WORDINGS_KEY,
+        group=GROUP_MUSIC,
+        label="Prompt wordings per music cue",
+        help=(
+            "How many genuinely different wordings of the music model's prompt are written for "
+            "each cue and each hit (one per take when the audio is made). Each is part of a "
+            "paid language-model call. It applies the next time the cues are detailed."
+        ),
+        value_type="integer",
+        default=3,
+        min_value=1,
+        max_value=6,
+    ),
+    SettingSpec(
+        key=MUSIC_CUE_HANDLES_KEY,
+        group=GROUP_MUSIC,
+        label="Spare music length on each side of a cue (seconds)",
+        help=(
+            "A cue is made this many seconds longer than its span at the start and at the "
+            "end, so that fades and joins have sound to work with. The music model makes "
+            "nothing shorter than 10 seconds. It applies the next time the cues are detailed."
+        ),
+        value_type="integer",
+        default=4,
+        min_value=0,
+        max_value=15,
+    ),
+    SettingSpec(
+        key=MUSIC_CUE_PUSHBACK_ROUNDS_KEY,
+        group=GROUP_MUSIC,
+        label="Plan revisions from a cue's pushback",
+        help=(
+            "When a cue says the plan cannot work (for example, too short to introduce its "
+            "theme), the music plan is revised once with those objections. This is the most "
+            "times that happens for one plan. 0 never revises: the objections are only shown. "
+            "A plan you wrote is never revised by the model."
+        ),
+        value_type="integer",
+        default=1,
         min_value=0,
         max_value=3,
     ),

@@ -35,11 +35,17 @@ MODEL: Final = "ace-step-1.5"
 MAX_TOKENS: Final = 8000
 REASONING_EFFORT: Final = "high"
 
+# The most ACE-Step takes. A model counts characters badly, so it is told a size in words that
+# stays well under this, and code trims what still goes over (`_fit_caption`).
 CAPTION_MAX_CHARS: Final = 512
 # A caption shorter than this cannot describe an instrument and a tune.
 CAPTION_MIN_CHARS: Final = 20
-# The model is told to aim for this, which leaves room for the emotion to be added in a version.
-CAPTION_AIM_CHARS: Final = 400
+# What the theme call is told to aim for. It leaves room for an emotion to be added in a version.
+CAPTION_AIM_WORDS: Final = 45
+CAPTION_AIM_CHARS: Final = 300
+# What the versions call is told to aim for: the canonical caption and the emotion's parts.
+VERSION_AIM_WORDS: Final = 65
+VERSION_AIM_CHARS: Final = 420
 DEFAULT_TIME_SIGNATURE: Final = "4"
 INSTRUMENTAL_LYRICS: Final = "[Instrumental]"
 # For an instrumental the model is told there is no sung language.
@@ -59,14 +65,16 @@ recordings of the same theme are matched against.
 {_CONTEXT_RULES}
 
 Give these fields:
-- "caption": one description of the recording, at most {CAPTION_AIM_CHARS} characters, made of \
-comma-separated parts. Say that it is instrumental with no vocals and name the signature \
-instrument as the only instrument. Describe the tune itself in plain musical words: its shape \
-(rising, falling, circling, a few long notes or many short ones), how simple or ornamented it is, \
-its register, how it is played and how the recording sounds. A later recording of the same theme \
-will be written from this caption, so the tune must be described clearly enough to be repeated. \
-Follow the Bible's sound world and never use anything it says to avoid. Never put the tempo or \
-the key in the caption: they have their own fields.
+- "caption": one description of the recording, at most {CAPTION_AIM_WORDS} words (about \
+{CAPTION_AIM_CHARS} characters; a longer one is cut off), made of 6 to 10 short comma-separated \
+parts, the most important first, in this order: that it is instrumental with no vocals and the \
+signature instrument as the only instrument; then the tune itself in plain musical words (its \
+shape: rising, falling, circling, a few long notes or many short ones; how simple or ornamented \
+it is; its register); then how it is played; and last how the recording sounds. A later \
+recording of the same theme will be written from this caption, so the tune must be described \
+clearly enough to be repeated, in few words. Follow the Bible's sound world and never use \
+anything it says to avoid. Never put the tempo or the key in the caption: they have their own \
+fields.
 - "bpm": the tempo, a whole number from 30 to 300, in the Bible's tempo range.
 - "keyscale": the key, for example "A minor" or "F# minor", leaning the way the Bible's mode \
 leaning says.
@@ -88,13 +96,16 @@ Each version must be recognisably the same theme: the same tune, the same instru
 same tempo, key and time signature (those are sent separately and cannot change). Only the way \
 the tune is played and what is around it changes, to make the emotion felt: dynamics, how \
 hard or soft the notes are played, how they are held or cut, a darker or brighter tone, a \
-little texture or space around it. Keep the tune's description from the canonical caption \
-word for word where you can, because that sentence is what carries the melody.
+little texture or space around it. Keep the parts of the canonical caption that name the \
+instrument and describe the tune word for word where you can, because they carry the melody.
 
-Write exactly one caption for every emotion in the list, each at most {CAPTION_MAX_CHARS} \
-characters, comma-separated parts, instrumental with no vocals and the same single instrument. \
-Never put the tempo or the key in a caption. Follow the Bible's sound world and never use \
-anything it says to avoid.
+Write exactly one caption for every emotion in the list, each at most {VERSION_AIM_WORDS} words \
+(about {VERSION_AIM_CHARS} characters; a longer one is cut off), made of short comma-separated \
+parts, the most important first: instrumental with no vocals and the same single instrument, \
+then the tune's parts from the canonical caption, then at most 3 short parts for the emotion. \
+The canonical caption's parts about how the recording sounds may be shortened or left out to \
+keep to the size. Never put the tempo or the key in a caption. Follow the Bible's sound world \
+and never use anything it says to avoid.
 
 Answer with one JSON object only, in exactly this form: {{"versions": [{{"emotion": "...", \
 "caption": "..."}}]}} where "emotion" is the emotion exactly as given."""
@@ -177,9 +188,25 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _caption(value: object, name: str) -> str:
-    """A caption on one line. Raises ValueError when it is missing, not text, too short or longer
-    than ACE-Step takes.
+def _fit_caption(text: str) -> tuple[str, bool]:
+    """A caption of one line cut to ACE-Step's limit, and whether it was cut. The cut is made
+    at the last comma that fits, so only whole trailing parts are dropped (the model is told to
+    put the least important parts last). With no usable comma it is made at the last space. The
+    result may still be too short to use when the text has no place to cut: the caller checks.
+    """
+    if len(text) <= CAPTION_MAX_CHARS:
+        return text, False
+    window = text[:CAPTION_MAX_CHARS]
+    fitted = window[: window.rfind(",")].rstrip(" ,") if "," in window else ""
+    if len(fitted) < CAPTION_MIN_CHARS and " " in window:
+        fitted = window[: window.rfind(" ")].rstrip(" ,")
+    return fitted, True
+
+
+def _caption(value: object, name: str, *, aim_words: int) -> tuple[str, str | None]:
+    """A caption on one line, and a warning when it had to be cut to ACE-Step's limit. Raises
+    ValueError when it is missing, not text, too short, or too long to cut. `aim_words` is the
+    size the model is told to write, repeated in the message so a retry has a target.
     """
     if value is None:
         raise ValueError(f'There is no "{name}".')
@@ -188,9 +215,19 @@ def _caption(value: object, name: str) -> str:
     text = _one_line(value)
     if len(text) < CAPTION_MIN_CHARS:
         raise ValueError(f'The "{name}" was too short to describe a recording.')
-    if len(text) > CAPTION_MAX_CHARS:
-        raise ValueError(f'The "{name}" was longer than {CAPTION_MAX_CHARS} characters.')
-    return text
+    fitted, was_cut = _fit_caption(text)
+    if len(fitted) < CAPTION_MIN_CHARS:
+        raise ValueError(
+            f'The "{name}" was {len(text)} characters; ACE-Step takes at most '
+            f"{CAPTION_MAX_CHARS}. Write it in at most {aim_words} words, in comma-separated parts."
+        )
+    warning = None
+    if was_cut:
+        warning = (
+            f'The "{name}" was {len(text)} characters; its last parts were dropped to fit '
+            f"ACE-Step's {CAPTION_MAX_CHARS}."
+        )
+    return fitted, warning
 
 
 def caption_warnings(caption: str) -> list[str]:
@@ -224,9 +261,10 @@ def check_theme_answer(answer: dict[str, Any], *, duration_s: float) -> CheckedT
     parts that are not the model's to decide: an instrumental recording (no vocals, the lyrics
     `[Instrumental]`) of `duration_s` seconds. The tempo and the key are required, so the
     server does not plan its own. Raises ValueError, with a message fit for the user, for the
-    first field that is missing or breaks a limit.
+    first field that is missing or breaks a limit. A caption that is a little too long is cut
+    (`_fit_caption`) and says so in the warnings.
     """
-    caption = _caption(answer.get("caption"), "caption")
+    caption, cut_warning = _caption(answer.get("caption"), "caption", aim_words=CAPTION_AIM_WORDS)
     time_signature = answer.get("time_signature")
     if time_signature is None or (isinstance(time_signature, str) and not time_signature.strip()):
         time_signature = DEFAULT_TIME_SIGNATURE
@@ -244,15 +282,27 @@ def check_theme_answer(answer: dict[str, Any], *, duration_s: float) -> CheckedT
         value = candidate[name]
         if value is None or (isinstance(value, str) and not value.strip()):
             raise ValueError(f'There is no "{name}".')
-    return CheckedTheme(fields=_checked_fields(candidate), warnings=caption_warnings(caption))
+    warnings = caption_warnings(caption)
+    if cut_warning:
+        warnings.append(cut_warning)
+    return CheckedTheme(fields=_checked_fields(candidate), warnings=warnings)
+
+
+@dataclass(frozen=True)
+class CheckedVersions:
+    """The fields of each emotion's recording, by emotion, and what was cut from the captions."""
+
+    versions: dict[str, dict[str, Any]]
+    warnings: list[str]
 
 
 def check_versions_answer(
     answer: dict[str, Any], *, emotions: list[str], canonical: dict[str, Any]
-) -> dict[str, dict[str, Any]]:
+) -> CheckedVersions:
     """The versions call's answer as the fields of each emotion's recording, by emotion as the
     Bible spells it. Each is the canonical fields with the emotion's caption, so the tempo, key,
-    time signature and length cannot change. Raises ValueError, with a message fit for the
+    time signature and length cannot change. A caption that is a little too long is cut
+    (`_fit_caption`) and says so in the warnings. Raises ValueError, with a message fit for the
     user, when the answer is not a list, names an emotion that was not asked for or the same one
     twice, leaves one out, or has a caption that breaks a limit.
     """
@@ -263,6 +313,7 @@ def check_versions_answer(
         raise ValueError('The "versions" was not a list.')
     asked = {_fold(emotion): emotion for emotion in emotions}
     captions: dict[str, str] = {}
+    warnings: list[str] = []
     for position, entry in enumerate(entries, start=1):
         label = f"versions[{position}]"
         if not isinstance(entry, dict):
@@ -274,14 +325,21 @@ def check_versions_answer(
         emotion = asked[key]
         if emotion in captions:
             raise ValueError(f'The emotion "{emotion}" was written twice.')
-        captions[emotion] = _caption(entry.get("caption"), f"{label}.caption")
+        captions[emotion], cut_warning = _caption(
+            entry.get("caption"), f"{label}.caption", aim_words=VERSION_AIM_WORDS
+        )
+        if cut_warning:
+            warnings.append(cut_warning)
     missing = [emotion for emotion in emotions if emotion not in captions]
     if missing:
         raise ValueError(f"There was no caption for the emotion(s) {', '.join(missing)}.")
-    return {
-        emotion: _checked_fields({**canonical, "caption": captions[emotion]})
-        for emotion in emotions
-    }
+    return CheckedVersions(
+        versions={
+            emotion: _checked_fields({**canonical, "caption": captions[emotion]})
+            for emotion in emotions
+        },
+        warnings=warnings,
+    )
 
 
 _SPACES = re.compile(r"\s+")

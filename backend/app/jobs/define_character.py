@@ -108,16 +108,21 @@ class DefineCharacterHandler(JobHandler):
 
     @staticmethod
     def _read(
-        result: llm.ChatResult, discovery_id: str
+        result: llm.ChatResult, discovery_id: str, warnings: list[str]
     ) -> tuple[str | None, dict[str, Any] | None]:
-        """Reads one answer: `(None, definition)` when it can be stored, else `(why not, None)`."""
+        """Reads one answer: `(None, definition)` when it can be stored, else `(why not, None)`.
+        What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+        """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
+        found: list[str] = []
         try:
             answer = character_definition_writer.parse_answer(result.content)
-            return None, character_definition_writer.check_definition(answer, discovery_id)
+            definition = character_definition_writer.check_definition(answer, discovery_id, found)
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, definition
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -182,12 +187,15 @@ class DefineCharacterHandler(JobHandler):
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
+        warnings: list[str] = []
+        # `correct`: the second attempt is told why the first answer was refused.
         outcome = await llm_call.ask_model(
             job_id,
             target,
             body,
-            lambda result: self._read(result, discovery_id),
+            lambda result: self._read(result, discovery_id, warnings),
             timeout_s=REQUEST_TIMEOUT_S,
+            correct=True,
         )
         definition: dict[str, Any] | None = outcome.value
         if definition is None:
@@ -215,6 +223,7 @@ class DefineCharacterHandler(JobHandler):
             output = {
                 **outcome.record(),
                 "content": None,
+                "warnings": warnings,
                 "character_id": read.character_id,
                 "version": version.version,
                 "seconds": round(time.monotonic() - started, 1),

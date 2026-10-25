@@ -17,6 +17,13 @@ The calls, in order:
    the review and keeps the last plan that passed the checks. Neither fails the job: a plan
    that has been paid for and checked is not thrown away.
 
+**A revision from the cues' objections** (`input.mode` is `pushback`, MUSIC-009). The cue
+detail may find that the plan cannot work for a cue. `music_plan.start_pushback_revision` then
+sends the plan, the objections (`input.previous_plan`, `input.notes`) and the round number. There
+is no new plan and no critics: one reviser call reads the objections as the notes of one
+reviewer (`PUSHBACK_LENS`) and writes the next version, whose `inputs.pushback` records the
+round. A reviser whose answer cannot be used fails the job, since there is nothing to keep.
+
 Each call builds its request in `services/music_plan_writer.py`, asks the model and checks the
 answer there. The result is saved as the project's next version, in the same transaction that
 marks the job succeeded.
@@ -58,6 +65,10 @@ _TOO_LONG = "The model's answer was cut off because it reached the token limit."
 # A critic whose answer could not be used.
 VERDICT_FAILED: Final = "failed"
 
+MODE_PUSHBACK: Final = "pushback"
+# The "lens" under which the cues' objections are shown to the reviser and stored in `rounds`.
+PUSHBACK_LENS: Final = music_plan.PUSHBACK_LENS
+
 
 @dataclass(frozen=True)
 class _Task:
@@ -68,6 +79,9 @@ class _Task:
     theme_ids: set[str]
     critic_rounds: int
     saved_inputs: dict[str, Any]
+    # Set for a revision from the cues' objections: the plan to revise and the objections.
+    previous_plan: dict[str, Any] | None = None
+    notes: list[dict[str, Any]] | None = None
 
 
 def _read_task(job_input: dict[str, Any]) -> _Task | None:
@@ -90,12 +104,27 @@ def _read_task(job_input: dict[str, Any]) -> _Task | None:
     for key in ("total_s", "scenes", "shots", "units", "events"):
         if key not in timeline:
             return None
+    previous: dict[str, Any] | None = None
+    notes: list[dict[str, Any]] | None = None
+    if job_input.get("mode") == MODE_PUSHBACK:
+        previous = job_input.get("previous_plan")
+        notes = job_input.get("notes")
+        if (
+            not isinstance(previous, dict)
+            or "cues" not in previous
+            or "boundaries" not in previous
+            or not isinstance(notes, list)
+            or not notes
+        ):
+            return None
     return _Task(
         bible=bible,
         timeline=timeline,
         theme_ids={str(item) for item in theme_ids},
         critic_rounds=rounds,
         saved_inputs=saved_inputs,
+        previous_plan=previous,
+        notes=notes,
     )
 
 
@@ -184,19 +213,56 @@ class WriteMusicPlanHandler(JobHandler):
             _add_usage(usage, outcome.usage)
             return outcome
 
-        outcome = await ask(
-            "plan",
-            writer.build_plan_request(task.bible, task.timeline, model=target.model),
-            _plan_reader(task),
-        )
-        draft: dict[str, Any] | None = outcome.value
-        if draft is None:
-            await self._fail(job_id, f"The music plan could not be written: {outcome.failure}")
-            return
-
-        current = draft
         rounds: list[dict[str, Any]] = []
-        for number in range(1, task.critic_rounds + 1):
+        if task.previous_plan is not None and task.notes is not None:
+            # A revision from the cues' objections: no new plan and no critics.
+            draft: dict[str, Any] = task.previous_plan
+            outcome = await ask(
+                "revise_pushback",
+                writer.build_revise_request(
+                    writer.plan_for_model(draft),
+                    [{"lens": PUSHBACK_LENS, "notes": task.notes}],
+                    task.bible,
+                    task.timeline,
+                    model=target.model,
+                ),
+                _plan_reader(task),
+            )
+            if outcome.value is None:
+                await self._fail(job_id, f"The music plan could not be revised: {outcome.failure}")
+                return
+            current = outcome.value
+            rounds.append(
+                {
+                    "round": 1,
+                    "critiques": [
+                        {
+                            "lens": PUSHBACK_LENS,
+                            "verdict": writer.VERDICT_CHANGE,
+                            "notes": task.notes,
+                            "failure": None,
+                        }
+                    ],
+                    "revised": True,
+                    "failure": None,
+                }
+            )
+            review_rounds = 0
+        else:
+            outcome = await ask(
+                "plan",
+                writer.build_plan_request(task.bible, task.timeline, model=target.model),
+                _plan_reader(task),
+            )
+            first: dict[str, Any] | None = outcome.value
+            if first is None:
+                await self._fail(job_id, f"The music plan could not be written: {outcome.failure}")
+                return
+            draft = first
+            current = draft
+            review_rounds = task.critic_rounds
+
+        for number in range(1, review_rounds + 1):
             shown = writer.plan_for_model(current)
             critiques: list[dict[str, Any]] = []
             for lens in writer.LENSES:

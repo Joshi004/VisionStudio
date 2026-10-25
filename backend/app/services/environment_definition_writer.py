@@ -162,13 +162,16 @@ there. A place with no walls (a street, a market, a ground) uses the same four s
 stretches ahead, to the left, to the right and behind. The sides must agree with "layout", \
 "visual_identity" and "important_landmarks": a window that the visual identity mentions is on \
 one of the sides. "zones" is from {ZONES_MIN_ITEMS} to {ZONES_MAX_ITEMS} places where a person \
-can stand or sit, each with a short lower-case "id" (letters, digits and underscores), a \
+can stand or sit: always at least {ZONES_MIN_ITEMS}, even for a small place such as a bedroom \
+(for example the spot by the bed and the spot by the door), and never more than \
+{ZONES_MAX_ITEMS}, each with a short lower-case "id" (letters, digits and underscores), a \
 "name" of at most {ZONE_NAME_MAX_CHARS} characters, the "side" it is on (one of ahead, left, \
 right, behind) and a "description" of at most {ZONE_DESCRIPTION_MAX_CHARS} characters saying \
 what is behind a person who stands there, when seen from the middle of the place. Spread the \
 zones over different sides, so that two people in the place can have different backgrounds.
-- Every other field is one plain sentence or phrase on one line, with at most this many \
-characters: "architecture" ({ARCHITECTURE_MAX_CHARS}), "layout" ({LAYOUT_MAX_CHARS}), \
+- Every other field is one short phrase or sentence on one line, with at most this many \
+characters (a longer value is cut off, so keep to it and say the most important thing \
+first): "architecture" ({ARCHITECTURE_MAX_CHARS}), "layout" ({LAYOUT_MAX_CHARS}), \
 "atmosphere.baseline" ({BASELINE_MAX_CHARS}) and
 {_limits_text()}
 
@@ -288,9 +291,20 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
-    """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
+def _fit(text: str, path: str, max_chars: int, warnings: list[str]) -> str:
+    """`text` as it is up to `max_chars` with `LIMIT_SLACK` allowed on top. Longer than that it
+    is cut at the last whole word that fits `max_chars` and a warning is added to `warnings`,
+    so a long description does not fail the whole definition.
+    """
+    if len(text) <= int(max_chars * LIMIT_SLACK):
+        return text
+    warnings.append(f'The "{path}" was {len(text)} characters; it was cut to fit {max_chars}.')
+    return discovery_writer.cut_at_word(text, max_chars)
+
+
+def _text(parent: dict[str, Any], key: str, path: str, max_chars: int, warnings: list[str]) -> str:
+    """One piece of text on one line. Raises ValueError when it is missing, is not text or is
+    empty. A text far over `max_chars` is cut (`_fit`).
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -298,19 +312,21 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
-    accepted_chars = int(max_chars * LIMIT_SLACK)
-    if len(text) > accepted_chars:
-        raise ValueError(
-            f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
-        )
-    return text
+    return _fit(text, path, max_chars, warnings)
 
 
 def _text_list(
-    parent: dict[str, Any], key: str, path: str, max_items: int, max_chars: int
+    parent: dict[str, Any],
+    key: str,
+    path: str,
+    max_items: int,
+    max_chars: int,
+    warnings: list[str],
 ) -> list[str]:
     """A list of from 1 to `max_items` pieces of text on one line, each at most `max_chars`
-    characters (with `LIMIT_SLACK` allowed on top). Raises ValueError otherwise.
+    characters. Raises ValueError when it is missing, empty, or has an item that is no text.
+    Items beyond `max_items` are dropped and a text far over `max_chars` is cut, each with a
+    warning.
     """
     values = parent.get(key)
     if not isinstance(values, list):
@@ -318,19 +334,15 @@ def _text_list(
     if not values:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
     if len(values) > max_items:
-        raise ValueError(f'The "{path}" of the model\'s answer had more than {max_items} items.')
-    accepted_chars = int(max_chars * LIMIT_SLACK)
+        warnings.append(
+            f'The "{path}" had {len(values)} items; only the first {max_items} were kept.'
+        )
+        values = values[:max_items]
     items: list[str] = []
     for position, value in enumerate(values, start=1):
         if not isinstance(value, str) or not _one_line(value):
             raise ValueError(f'Item {position} of the "{path}" of the model\'s answer was no text.')
-        text = _one_line(value)
-        if len(text) > accepted_chars:
-            raise ValueError(
-                f'Item {position} of the "{path}" of the model\'s answer was longer than '
-                f"{accepted_chars} characters."
-            )
-        items.append(text)
+        items.append(_fit(_one_line(value), f"{path}[{position}]", max_chars, warnings))
     return items
 
 
@@ -395,11 +407,11 @@ def _zone_id(raw_id: object, name: str) -> str:
     return slug
 
 
-def _check_zone(raw: object, position: int) -> dict[str, str]:
+def _check_zone(raw: object, position: int, warnings: list[str]) -> dict[str, str]:
     if not isinstance(raw, dict):
         raise ValueError(f'Zone {position} of the "spatial_plan.zones" was not an object.')
     path = f"spatial_plan.zones[{position}]"
-    name = _text(raw, "name", f"{path}.name", ZONE_NAME_MAX_CHARS)
+    name = _text(raw, "name", f"{path}.name", ZONE_NAME_MAX_CHARS, warnings)
     side_value = raw.get("side")
     side = side_value.strip().lower() if isinstance(side_value, str) else None
     if side not in SPATIAL_SIDES:
@@ -410,44 +422,59 @@ def _check_zone(raw: object, position: int) -> dict[str, str]:
         "id": _zone_id(raw.get("id"), name),
         "name": name,
         "side": side,
-        "description": _text(raw, "description", f"{path}.description", ZONE_DESCRIPTION_MAX_CHARS),
+        "description": _text(
+            raw, "description", f"{path}.description", ZONE_DESCRIPTION_MAX_CHARS, warnings
+        ),
     }
 
 
-def check_spatial_plan(answer: dict[str, Any]) -> dict[str, Any]:
+def check_spatial_plan(answer: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
     """The `spatial_plan` of the answer, checked and cleaned (PHASE-050): the master view, the
     four sides and from `ZONES_MIN_ITEMS` to `ZONES_MAX_ITEMS` zones with unique slug ids.
-    Raises ValueError, with a message fit for the user, for the first problem found.
+    More zones than that are cut to the first ones, with a warning. Fewer is refused: a zone
+    cannot be made up by code. Raises ValueError, with a message fit for the user, for the first
+    problem found.
     """
     plan = _object(answer, "spatial_plan", "spatial_plan")
     sides = _object(plan, "sides", "spatial_plan.sides")
     raw_zones = plan.get("zones")
     if not isinstance(raw_zones, list):
         raise ValueError('The "spatial_plan.zones" of the model\'s answer was missing or no list.')
-    if not ZONES_MIN_ITEMS <= len(raw_zones) <= ZONES_MAX_ITEMS:
+    if len(raw_zones) < ZONES_MIN_ITEMS:
         raise ValueError(
-            f'The "spatial_plan.zones" of the model\'s answer must have from {ZONES_MIN_ITEMS} '
-            f"to {ZONES_MAX_ITEMS} zones."
+            f'The "spatial_plan.zones" of the model\'s answer had {len(raw_zones)} zone(s). '
+            f"Write from {ZONES_MIN_ITEMS} to {ZONES_MAX_ITEMS} zones, even for a small place: "
+            "for example one by each wall, door or window, or two spots in the same room "
+            "with different backgrounds."
         )
-    zones = [_check_zone(raw, position) for position, raw in enumerate(raw_zones, start=1)]
+    if len(raw_zones) > ZONES_MAX_ITEMS:
+        warnings.append(
+            f'The "spatial_plan.zones" had {len(raw_zones)} zones; only the first '
+            f"{ZONES_MAX_ITEMS} were kept."
+        )
+        raw_zones = raw_zones[:ZONES_MAX_ITEMS]
+    zones = [
+        _check_zone(raw, position, warnings) for position, raw in enumerate(raw_zones, start=1)
+    ]
     ids = [zone["id"] for zone in zones]
     if len(set(ids)) != len(ids):
         raise ValueError('Two zones of the "spatial_plan.zones" had the same id.')
     return {
         "master_view": _text(
-            plan, "master_view", "spatial_plan.master_view", MASTER_VIEW_MAX_CHARS
+            plan, "master_view", "spatial_plan.master_view", MASTER_VIEW_MAX_CHARS, warnings
         ),
         "sides": {
-            side: _text(sides, side, f"spatial_plan.sides.{side}", SIDE_MAX_CHARS)
+            side: _text(sides, side, f"spatial_plan.sides.{side}", SIDE_MAX_CHARS, warnings)
             for side in SPATIAL_SIDES
         },
         "zones": zones,
     }
 
 
-def check_definition(answer: Any, discovery_id: str) -> dict[str, Any]:
+def check_definition(answer: Any, discovery_id: str, warnings: list[str]) -> dict[str, Any]:
     """The answer checked and cleaned, as the definition that is stored. Raises ValueError, with
-    a message fit for the user, for the first problem found.
+    a message fit for the user, for the first problem found. A text far over its size, or a list
+    with too many items, is cut instead, and each cut is added to `warnings`.
 
     The definition's `id` is `discovery_id`, set here and never read from the model. Only the
     fields asked for are kept, in a fixed order.
@@ -458,11 +485,13 @@ def check_definition(answer: Any, discovery_id: str) -> dict[str, Any]:
     atmosphere = _object(answer, "atmosphere", "atmosphere")
     definition: dict[str, Any] = {
         "id": discovery_id,
-        "architecture": _text(answer, "architecture", "architecture", ARCHITECTURE_MAX_CHARS),
-        "layout": _text(answer, "layout", "layout", LAYOUT_MAX_CHARS),
-        "spatial_plan": check_spatial_plan(answer),
+        "architecture": _text(
+            answer, "architecture", "architecture", ARCHITECTURE_MAX_CHARS, warnings
+        ),
+        "layout": _text(answer, "layout", "layout", LAYOUT_MAX_CHARS, warnings),
+        "spatial_plan": check_spatial_plan(answer, warnings),
         "visual_identity": {
-            key: _text(visual, key, f"visual_identity.{key}", limit)
+            key: _text(visual, key, f"visual_identity.{key}", limit, warnings)
             for key, limit in _VISUAL_IDENTITY_FIELDS.items()
         },
         "important_landmarks": _text_list(
@@ -471,12 +500,20 @@ def check_definition(answer: Any, discovery_id: str) -> dict[str, Any]:
             "important_landmarks",
             LANDMARKS_MAX_ITEMS,
             LANDMARK_MAX_CHARS,
+            warnings,
         ),
         "atmosphere": {
-            "baseline": _text(atmosphere, "baseline", "atmosphere.baseline", BASELINE_MAX_CHARS)
+            "baseline": _text(
+                atmosphere, "baseline", "atmosphere.baseline", BASELINE_MAX_CHARS, warnings
+            )
         },
         "continuity_rules": _text_list(
-            answer, "continuity_rules", "continuity_rules", RULES_MAX_ITEMS, RULE_MAX_CHARS
+            answer,
+            "continuity_rules",
+            "continuity_rules",
+            RULES_MAX_ITEMS,
+            RULE_MAX_CHARS,
+            warnings,
         ),
         "era": _check_era(answer),
     }

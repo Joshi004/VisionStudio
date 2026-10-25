@@ -50,6 +50,7 @@ const LENS_LABELS: Record<string, string> = {
   variety_restraint: "Variety and restraint",
   theme_use: "Use of the themes",
   joins: "Joins",
+  cue_detail: "Objections of the cues",
 };
 
 /**
@@ -335,7 +336,9 @@ function MusicPlanView({ plan }: { plan: MusicPlanOut }) {
               <Stack key={round.round} gap={4}>
                 <Group gap="xs">
                   <Text size="sm" fw={600}>
-                    Round {round.round}
+                    {round.critiques.length === 1 && round.critiques[0].lens === "cue_detail"
+                      ? "Revision from the cues"
+                      : `Round ${round.round}`}
                   </Text>
                   <Badge size="sm" variant="light" color={round.revised ? "blue" : "gray"}>
                     {round.revised ? "Revised" : "Not revised"}

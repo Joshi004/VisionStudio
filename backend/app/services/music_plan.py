@@ -71,6 +71,9 @@ REPLACE_MESSAGE: Final = (
     "model, so it has to be confirmed."
 )
 BUSY_MESSAGE: Final = "The music plan is being written. Wait for it to finish first."
+# The "lens" under which the cues' objections are shown to the reviser and kept in `rounds`
+# (MUSIC-009). `inputs.pushback` of a version made from them records the round.
+PUSHBACK_LENS: Final = "cue_detail"
 NO_BIBLE_MESSAGE: Final = "Write the Music Bible first: the plan follows it."
 
 
@@ -263,6 +266,46 @@ async def start_run(
         type=JOB_TYPE,
         provider="llm",
         input=await _job_input(session, loaded),
+    )
+    return job
+
+
+async def start_pushback_revision(
+    session: AsyncSession,
+    project: Project,
+    *,
+    plan_id: int,
+    notes: list[dict[str, Any]],
+    pushback_round: int,
+) -> Job:
+    """Queues the job that revises the newest plan from the objections of its cues, and commits
+    (MUSIC-009). `plan_id` must be the newest version, which must be the model's own and not out
+    of date. The new version records the round in `inputs.pushback`. Raises MusicPlanError.
+    """
+    loaded = await _refuse_when_unable(session, project)
+    newest = await latest(session, project.id)
+    if newest is None or newest.id != plan_id:
+        raise MusicPlanError("The music plan has changed. Detail the cues again first.")
+    if newest.source != SOURCE_AI:
+        raise MusicPlanError("The newest music plan was written by you, so it is not revised.")
+    if not notes:
+        raise MusicPlanError("There is nothing to revise the plan from.")
+    job_input = await _job_input(session, loaded)
+    job_input["saved_inputs"] = {
+        **job_input["saved_inputs"],
+        "pushback": {
+            "round": pushback_round,
+            "from": {"id": newest.id, "version": newest.version},
+            "notes": notes,
+        },
+    }
+    job_input.update(mode="pushback", previous_plan=newest.content, notes=notes)
+    job, _created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=JOB_TYPE,
+        provider="llm",
+        input=job_input,
     )
     return job
 

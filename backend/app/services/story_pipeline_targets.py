@@ -43,6 +43,7 @@ from app.services import (
     look_state_images,
     look_state_resolution,
     music_bible,
+    music_cues,
     music_plan,
     music_themes,
     review_points,
@@ -968,6 +969,94 @@ async def _call_music_plan(session: AsyncSession, project: Project, options: Run
     )
 
 
+# --- The music cues (MUSIC-009) -------------------------------------------------------------
+
+# The targets of the step are named for the plan version they belong to, so that a revised plan
+# starts its cues with fresh tries.
+_CUE_PREFIX: Final = "cue"
+_REVISE_PREFIX: Final = "revise"
+_AUDIT_PREFIX: Final = "audit"
+
+
+async def _evaluate_music_cues(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # With music switched off nothing is made (MD-21): one target that is already done.
+    if not project.music_enabled:
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await music_cues.state(session, project)
+    if state.plan is None or state.blocked_reason is not None:
+        return _blocked_project(state.blocked_reason or music_cues.NO_PLAN_MESSAGE)
+    version = state.plan.version
+    audio = [view for view in state.cues if view.makes_audio]
+    if not audio:
+        return StepView([Target(PROJECT_KEY, "", True)])  # silences and sounds H3 makes only
+
+    cue_keys = tuple(f"{_CUE_PREFIX}:v{version}:{view.cue['id']}" for view in audio)
+    targets: list[Target] = []
+    for key, view in zip(cue_keys, audio, strict=True):
+        targets.append(
+            Target(
+                key,
+                str(view.cue["summary"]),
+                view.done,
+                active=view.active,
+                block=None if view.done or view.active else view.blocked_reason,
+                last_error=_failure(view.job),
+                ref=(view.cue["id"],),
+                stale=view.row is not None and not view.done,
+            )
+        )
+    if state.revision_pending:
+        # Cues that pushed back wait for one revision of the plan, then are detailed again.
+        targets.append(
+            Target(
+                f"{_REVISE_PREFIX}:v{version}",
+                "Revise the plan from the cues' objections",
+                False,
+                active=state.revision_active,
+                last_error=_failure(state.plan_job),
+                waits_for=cue_keys,
+                stale=True,
+            )
+        )
+    else:
+        targets.append(
+            Target(
+                f"{_AUDIT_PREFIX}:v{version}",
+                "Audit all prompts",
+                state.audit_current,
+                active=state.audit_active,
+                last_error=_failure(state.audit_job),
+                waits_for=cue_keys,
+                stale=state.audit is not None and not state.audit_current,
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_music_cues(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    loaded = await music_cues.load(session, project)
+
+    async def make(target: Target) -> tuple[int, ...]:
+        kind = target.key.split(":", 1)[0]
+        if kind == _CUE_PREFIX:
+            return await _ids_of(
+                music_cues.start_cue(session, project, target.ref[0], loaded=loaded)
+            )
+        if kind == _REVISE_PREFIX:
+            return await _ids_of(music_cues.start_revision(session, project))
+        return await _ids_of(music_cues.start_audit(session, project))
+
+    return await _start_each(session, targets, deadline, make)
+
+
 # --- Scene staging and environment views (PHASE-051, PHASE-052) ------------------------------
 
 
@@ -1857,6 +1946,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "music_bible": Adapter(_evaluate_music_bible, _project_start(_call_music_bible)),
     "music_themes": Adapter(_evaluate_music_themes, _start_music_themes),
     "music_plan": Adapter(_evaluate_music_plan, _project_start(_call_music_plan)),
+    "music_cues": Adapter(_evaluate_music_cues, _start_music_cues),
     "resolution": Adapter(_evaluate_resolution, _project_start(_call_resolution)),
     "scene_staging": Adapter(_evaluate_scene_staging, _start_scene_staging),
     "environment_views": Adapter(_evaluate_environment_views, _start_environment_views),

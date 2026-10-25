@@ -222,6 +222,18 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
+def cut_at_word(text: str, max_chars: int) -> str:
+    """`text` cut to at most `max_chars` characters at the last whole word, without a dangling
+    comma or dash. A text with no space in it is cut at `max_chars`.
+    """
+    if len(text) <= max_chars:
+        return text
+    window = text[:max_chars]
+    if text[max_chars] != " " and " " in window:
+        window = window[: window.rfind(" ")]
+    return window.rstrip(" ,;:-")
+
+
 def clean_text(value: object, field: str, position: int, max_chars: int) -> str:
     """One piece of text on one line. Raises ValueError when it is not text, is empty, or is
     longer than `max_chars`.

@@ -144,6 +144,11 @@ SAVING_MUSIC_THEME_VERSIONS: Final = "saving the versions and starting their rec
 # plan, then four critics and a reviser per round).
 SAVING_MUSIC_PLAN: Final = "saving the music plan"
 
+# --- Running: the music cues (MUSIC-009) -------------------------------------------------
+# `write_music_cue` and `audit_music_cues` also use PREPARING_PROMPT and `asking_model` from above
+# (once per call: the cue's detail, then one call per prompt to write; or the audit).
+SAVING_MUSIC_CUES: Final = "saving the music cues"
+
 # --- Running: character and environment discovery (PHASE-005) ----------------------------
 # `discover_characters` and `discover_environments` also use PREPARING_PROMPT and
 # `asking_model` from above.

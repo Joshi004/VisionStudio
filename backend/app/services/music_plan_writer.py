@@ -265,6 +265,11 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=1)
 
 
+# Used by the cue detail (MUSIC-009) for its own requests.
+ANCHOR_RULES = _ANCHOR_RULES
+request_body = _request
+
+
 def _material(bible: dict[str, Any], timeline: dict[str, Any]) -> str:
     return "MUSIC BIBLE:\n" + _json(bible) + "\n\nTIMELINE:\n" + context_text(timeline)
 
@@ -381,6 +386,15 @@ def _check_anchor(value: object, name: str, index: music_timeline.Index) -> dict
     if seconds is None:  # not reachable once the ref is known, kept as a guard
         raise ValueError(f'The "{name}" does not point at a time.')
     return {"ref": ref, "edge": edge, "relation": relation, "strict": strict, "seconds": seconds}
+
+
+# The cue detail (MUSIC-009, `services/music_cue_writer.py`) checks its answers the same way, so
+# it uses these checks under public names.
+check_anchor = _check_anchor
+check_object = _object
+check_text = _text
+check_optional_text = _optional_text
+check_choice = _choice
 
 
 # --- The plan ------------------------------------------------------------------------------

@@ -32,6 +32,7 @@ from app.services import (
     look_state_images,
     look_state_resolution,
     music_bible,
+    music_cues,
     music_plan,
     music_themes,
     project_cast,
@@ -377,6 +378,22 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                 "music_plan",
                 Item("music_plan", "Music plan", plan.reasons, acceptable=False),
             )
+
+    # The detail and prompts of each music cue (MUSIC-009). Only for a plan that is current: a
+    # plan that is out of date has to be written again first.
+    if project.music_enabled:
+        for view in (await music_cues.state(session, project)).cues:
+            if view.out_of_date:
+                found.add(
+                    "music_cues",
+                    Item(
+                        "music_cues",
+                        str(view.cue["summary"]),
+                        view.reasons,
+                        acceptable=False,
+                        discovery_id=view.cue["id"],
+                    ),
+                )
 
     resolution = await look_state_resolution.state(session, project)
     if resolution.version is not None and resolution.reasons:

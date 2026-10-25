@@ -116,7 +116,7 @@ class Job(Base):
         # the staging of a scene, since revision 0058, and the planning of an environment's views
         # and the writing of a view's prompt, since revision 0059, and the Music Bible, since
         # revision 0065, and the writing of a theme's prompt, since revision 0066, and the music
-        # plan, since revision 0067.
+        # plan, since revision 0067, and the cue detail and its audit, since revision 0068.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -129,7 +129,8 @@ class Job(Base):
             "'story_pipeline', 'check_take_dialogue', 'select_shot_references', "
             "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
-            "'write_music_theme_prompt', 'write_music_plan')",
+            "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
+            "'audit_music_cues')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -261,6 +262,63 @@ class MusicPlan(Base):
     rounds: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
     facts: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicCue(Base):
+    """One version of one cue of one music plan version (MUSIC-009, revision 0068).
+
+    A stored row is never changed: the model's run is `source` `ai`, and the audit's fixes are a
+    new row with `source` `audit`. `detail` is what level 2 wrote (anchors with their resolved
+    seconds, the broad order of moods, hit requests, mix notes and fades), `items` are the
+    things to generate, each with its model, requested length and prompt wordings (level 3), and
+    `pushback` is the cue's objection to the plan (`{problem, suggestion, sent}`), or NULL.
+    `inputs` records the plan, the Music Bible, the theme and the shot definitions it used.
+    """
+
+    __tablename__ = "music_cue"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'audit')", name="source_valid"),
+        UniqueConstraint("plan_id", "cue_id", "version"),
+        Index("idx_music_cue_plan", "plan_id", "cue_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    plan_id: Mapped[int] = mapped_column(ForeignKey("music_plan.id", ondelete="CASCADE"))
+    cue_id: Mapped[str]
+    version: Mapped[int]
+    source: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    detail: Mapped[Any] = mapped_column(JSON)
+    items: Mapped[Any] = mapped_column(JSON)
+    pushback: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicCueAudit(Base):
+    """One audit of all the cue prompts of a music plan version (MUSIC-009, revision 0068).
+
+    `findings` is what the audit call answered (`{verdict, fixes}`), `inputs` the ids of the cue
+    rows it read, and `result_row_ids` the ids of the newest cue rows once its fixes were
+    applied. The audit is current while those are still the newest rows.
+    """
+
+    __tablename__ = "music_cue_audit"
+    __table_args__ = (Index("idx_music_cue_audit_plan", "plan_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    plan_id: Mapped[int] = mapped_column(ForeignKey("music_plan.id", ondelete="CASCADE"))
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    findings: Mapped[Any] = mapped_column(JSON)
+    result_row_ids: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

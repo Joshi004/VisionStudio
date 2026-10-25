@@ -176,8 +176,9 @@ message), "past" or "future". For "past" and "future", "years" is the whole numb
 before or after today's year, from {character_library.MIN_ERA_YEARS} to \
 {character_library.MAX_ERA_YEARS}, and "setting" is a short text of what that time looks like \
 (for example "1920s Bombay"), or null. For "present", "years" and "setting" are null.
-- Every other field is one plain sentence or phrase on one line, with at most this many \
-characters:
+- Every other field is one short phrase on one line, with at most this many characters (a \
+longer value is cut off, so keep to it, also for a creature, a machine or any character that \
+needs a lot to describe: say only the most important thing first):
 {_limits_text()}
 
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
@@ -256,9 +257,20 @@ def _object(parent: dict[str, Any], key: str, path: str) -> dict[str, Any]:
     return value
 
 
-def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
-    """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
+def _text(
+    parent: dict[str, Any],
+    key: str,
+    path: str,
+    max_chars: int,
+    warnings: list[str],
+    *,
+    may_cut: bool = True,
+) -> str:
+    """One piece of text on one line. Raises ValueError when it is missing, is not text or is
+    empty. Up to `max_chars` with `LIMIT_SLACK` allowed on top it is kept as it is. Longer than
+    that it is cut at the last whole word that fits `max_chars` and a warning is added to
+    `warnings`, so a long description does not fail the whole definition. With `may_cut` False
+    (a value that means nothing when cut, such as the species) it raises ValueError instead.
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -268,9 +280,14 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
     accepted_chars = int(max_chars * LIMIT_SLACK)
     if len(text) > accepted_chars:
-        raise ValueError(
-            f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
+        if not may_cut:
+            raise ValueError(
+                f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
+            )
+        warnings.append(
+            f'The "{path}" was {len(text)} characters; it was cut to fit {max_chars}.'
         )
+        text = discovery_writer.cut_at_word(text, max_chars)
     return text
 
 
@@ -289,7 +306,7 @@ def _whole_number(value: object, path: str) -> int:
     raise ValueError(f'The "{path}" of the model\'s answer was not a whole number.')
 
 
-def _check_visual_identity(raw: dict[str, Any]) -> dict[str, Any]:
+def _check_visual_identity(raw: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
     visual = _object(raw, "visual_identity", "visual_identity")
     age_value = visual.get("apparent_age")
     age: int | None = None
@@ -309,22 +326,32 @@ def _check_visual_identity(raw: dict[str, Any]) -> dict[str, Any]:
         "apparent_age": age,
         # Lower case, so "Male" and "male" are one choice in the lab's growing list of options.
         "sex": _text(
-            visual, "sex", "visual_identity.sex", character_library.GENDER_MAX_CHARS
+            visual,
+            "sex",
+            "visual_identity.sex",
+            character_library.GENDER_MAX_CHARS,
+            warnings,
+            may_cut=False,
         ).lower(),
         "species": _text(
-            visual, "species", "visual_identity.species", character_library.SPECIES_MAX_CHARS
+            visual,
+            "species",
+            "visual_identity.species",
+            character_library.SPECIES_MAX_CHARS,
+            warnings,
+            may_cut=False,
         ).lower(),
         "has_visible_mouth": mouth,
     }
     for key, limit in _TEXT_FIELDS["visual_identity"].items():
-        checked[key] = _text(visual, key, f"visual_identity.{key}", limit)
+        checked[key] = _text(visual, key, f"visual_identity.{key}", limit, warnings)
     return checked
 
 
-def _check_section(raw: dict[str, Any], section: str) -> dict[str, str]:
+def _check_section(raw: dict[str, Any], section: str, warnings: list[str]) -> dict[str, str]:
     values = _object(raw, section, section)
     return {
-        key: _text(values, key, f"{section}.{key}", limit)
+        key: _text(values, key, f"{section}.{key}", limit, warnings)
         for key, limit in _TEXT_FIELDS[section].items()
     }
 
@@ -363,9 +390,10 @@ def _check_era(raw: dict[str, Any]) -> dict[str, Any]:
     return {"kind": kind, "years": years, "setting": setting}
 
 
-def check_definition(answer: Any, discovery_id: str) -> dict[str, Any]:
+def check_definition(answer: Any, discovery_id: str, warnings: list[str]) -> dict[str, Any]:
     """The answer checked and cleaned, as the definition that is stored. Raises ValueError, with
-    a message fit for the user, for the first problem found.
+    a message fit for the user, for the first problem found. A text that is far over its size is
+    cut instead, and each cut is added to `warnings` (`_text`).
 
     The definition's `id` is `discovery_id`, set here and never read from the model. Only the
     fields asked for are kept, in a fixed order.
@@ -374,10 +402,10 @@ def check_definition(answer: Any, discovery_id: str) -> dict[str, Any]:
         raise ValueError("The model's answer was not a JSON object.")
     definition: dict[str, Any] = {
         "id": discovery_id,
-        "visual_identity": _check_visual_identity(answer),
-        "default_wardrobe": _check_section(answer, "default_wardrobe"),
-        "voice_identity": _check_section(answer, "voice_identity"),
-        "behavior": _check_section(answer, "behavior"),
+        "visual_identity": _check_visual_identity(answer, warnings),
+        "default_wardrobe": _check_section(answer, "default_wardrobe", warnings),
+        "voice_identity": _check_section(answer, "voice_identity", warnings),
+        "behavior": _check_section(answer, "behavior", warnings),
         "era": _check_era(answer),
     }
     # The sizes above are chosen so this holds. It stays as a guard: a profile field that is

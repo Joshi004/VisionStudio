@@ -137,6 +137,13 @@ STEPS: Final[tuple[Step, ...]] = (
         "Define the shots",
         ("shot_plans", "resolution", "environment_views"),
     ),
+    # MUSIC-009: the exact detail of each cue and its prompts, then an audit of all prompts. A cue
+    # may send the plan back once (a revision target in this step). Skipped when music is off.
+    Step(
+        "music_cues",
+        "Detail the music cues",
+        ("music_plan", "music_themes", "shot_definitions"),
+    ),
     Step("shot_continuity", "Check shot continuity", ("shot_definitions",)),
     Step(
         "references",

@@ -112,7 +112,7 @@ _ACE_EXAMPLE_ANSWER: Final = json.dumps(
 
 ACE_STEP: Final = MusicPromptProfile(
     id="ace-step-1.5",
-    version=1,
+    version=2,
     model="ace-step-1.5",
     model_name="ACE-Step 1.5",
     intro=(
@@ -123,8 +123,9 @@ ACE_STEP: Final = MusicPromptProfile(
     prompt_rules="\n".join(
         [
             "Rules for the fields:",
-            "1. caption: one description, at most 512 characters (aim for 150 to 300), made of "
-            "comma-separated parts: genre, mood, instruments and how they sound, timbre, era, "
+            "1. caption: one description, at most 45 words (about 300 characters; ACE-Step "
+            "refuses more than 512), made of comma-separated parts, the most important first: "
+            "genre, mood, instruments and how they sound, timbre, era, "
             "production style and the vocal character (voice type, tone, delivery). For an "
             'instrumental say so ("instrumental, no vocals"). Never put the tempo or the key in '
             "the caption: they have their own fields.",
