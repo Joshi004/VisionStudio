@@ -49,6 +49,7 @@ from app.services.projects import (
     SPEECH_NO_DIALOGUE,
     SPEECH_NO_NARRATION,
 )
+from app.services.text_limits import fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -76,10 +77,14 @@ MAX_EVENTS: Final = 100
 SPEECH_MAX_CHARS: Final = 2000
 DESCRIPTION_MAX_CHARS: Final = 300
 EMOTION_MAX_CHARS: Final = 100
-# The prompt states the description and emotion limits, but the check accepts this much more:
-# the model often misses a stated length by a few characters, and that should not fail the
-# scene. Speech is copied from the story, so `SPEECH_MAX_CHARS` is checked exactly.
-LIMIT_SLACK: Final = 1.25
+# Speech is copied from the story, so `SPEECH_MAX_CHARS` is checked exactly and never cut; the
+# description and emotion limits are kept with the slack and cut beyond it (`text_limits`).
+# The limited fields as the model sees them in its answer.
+_LIMITS: Final = {
+    "events[].text (spoken words; give a longer passage as several events)": SPEECH_MAX_CHARS,
+    "events[].description (action and sound_event)": DESCRIPTION_MAX_CHARS,
+    "events[].delivery.emotion": EMOTION_MAX_CHARS,
+}
 
 # What the model is shown as the form of each type of event in its answer. The form is built
 # from a dict so the braces and quotes are always valid JSON.
@@ -89,10 +94,10 @@ _ANSWER_EXAMPLES: Final[dict[str, dict[str, Any]]] = {
         "type": "dialogue",
         "speaker_id": "an id from CHARACTERS",
         "text": "the spoken words, copied exactly",
-        "delivery": {"emotion": "..."},
+        "delivery": {"emotion": "tense, quiet"},
     },
-    "action": {"type": "action", "description": "..."},
-    "sound_event": {"type": "sound_event", "description": "..."},
+    "action": {"type": "action", "description": "Arjun laughs."},
+    "sound_event": {"type": "sound_event", "description": "One heavy thump above the ceiling."},
     "pause": {"type": "pause"},
 }
 
@@ -134,8 +139,8 @@ listed in CHARACTERS (never invent an id; a voice from another room or a charact
 the scene is allowed when the story has them speak). Give "text": the spoken words copied from \
 the scene text exactly as written, without the quotation marks and without the words that only \
 say who is speaking (such as "he said"), at most {SPEECH_MAX_CHARS} characters. You may give \
-"delivery": {{"emotion": "..."}}, a short phrase of at most {EMOTION_MAX_CHARS} characters for \
-how the line is spoken, when the story makes it clear."""
+"delivery": {{"emotion": "tense, quiet"}}, a short phrase of at most {EMOTION_MAX_CHARS} \
+characters for how the line is spoken, when the story makes it clear."""
 
 _ACTION_BOTH: Final = f"""\
 - "action": something a character or thing visibly does. Give "description": one plain sentence \
@@ -226,6 +231,7 @@ def _rules(speech_mode: str) -> str:
             '- Write "description" and "emotion" in English, in plain concrete words. "text" '
             "stays in the story's own language.",
             f"- List at most {MAX_EVENTS} events.",
+            "- " + length_rule(_LIMITS).replace("\n", "\n  "),
         ]
     )
 
@@ -303,10 +309,18 @@ def _one_line(value: str) -> str:
 
 
 def _text(
-    event: dict[str, Any], key: str, position: int, max_chars: int, slack: float = LIMIT_SLACK
+    event: dict[str, Any],
+    key: str,
+    position: int,
+    max_chars: int,
+    warnings: list[str] | None,
+    *,
+    exact: bool = False,
 ) -> str:
-    """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars` with `slack` allowed on top (1.0 for no slack).
+    """One piece of text on one line. Raises ValueError when it is missing, is not text or is
+    empty. A description far over `max_chars` is cut with a warning (`fit_text`), or refused
+    when `warnings` is None. With `exact` (spoken words, copied from the story) it is never
+    cut: a text over `max_chars` is refused so that it is written again as several events.
     """
     value = event.get(key)
     if not isinstance(value, str):
@@ -314,15 +328,19 @@ def _text(
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{key}" of event {position} was empty.')
-    accepted_chars = int(max_chars * slack)
-    if len(text) > accepted_chars:
-        raise ValueError(
-            f'The "{key}" of event {position} was longer than {accepted_chars} characters.'
-        )
-    return text
+    if exact:
+        if len(text) > max_chars:
+            raise ValueError(
+                f'The "{key}" of event {position} was longer than {max_chars} characters. '
+                "Give it as several events, each within the limit."
+            )
+        return text
+    return fit_text(text, f"events[{position}].{key}", max_chars, warnings)
 
 
-def _delivery(event: dict[str, Any], position: int) -> dict[str, str] | None:
+def _delivery(
+    event: dict[str, Any], position: int, warnings: list[str] | None
+) -> dict[str, str] | None:
     """The optional delivery of a dialogue event, or None when it has none."""
     value = event.get("delivery")
     if value is None:
@@ -332,11 +350,15 @@ def _delivery(event: dict[str, Any], position: int) -> dict[str, str] | None:
     emotion = value.get("emotion")
     if emotion is None:
         return None
-    return {"emotion": _text(value, "emotion", position, EMOTION_MAX_CHARS)}
+    return {"emotion": _text(value, "emotion", position, EMOTION_MAX_CHARS, warnings)}
 
 
 def _event(
-    entry: Any, position: int, character_ids: Collection[str], allowed: tuple[str, ...]
+    entry: Any,
+    position: int,
+    character_ids: Collection[str],
+    allowed: tuple[str, ...],
+    warnings: list[str] | None,
 ) -> dict[str, Any]:
     """One event checked and cleaned, without its id. Only the fields of its type are kept.
     `allowed` is the types the project's speech mode allows.
@@ -354,7 +376,10 @@ def _event(
             f"Use one of: {', '.join(allowed)}."
         )
     if kind == "narration":
-        return {"type": kind, "text": _text(entry, "text", position, SPEECH_MAX_CHARS, 1.0)}
+        return {
+            "type": kind,
+            "text": _text(entry, "text", position, SPEECH_MAX_CHARS, warnings, exact=True),
+        }
     if kind == "dialogue":
         speaker = entry.get("speaker_id")
         if not isinstance(speaker, str) or speaker not in character_ids:
@@ -364,25 +389,30 @@ def _event(
         event: dict[str, Any] = {
             "type": kind,
             "speaker_id": speaker,
-            "text": _text(entry, "text", position, SPEECH_MAX_CHARS, 1.0),
+            "text": _text(entry, "text", position, SPEECH_MAX_CHARS, warnings, exact=True),
         }
-        delivery = _delivery(entry, position)
+        delivery = _delivery(entry, position, warnings)
         if delivery is not None:
             event["delivery"] = delivery
         return event
     if kind in ("action", "sound_event"):
         return {
             "type": kind,
-            "description": _text(entry, "description", position, DESCRIPTION_MAX_CHARS),
+            "description": _text(entry, "description", position, DESCRIPTION_MAX_CHARS, warnings),
         }
     return {"type": kind}
 
 
 def check_events(
-    answer: Any, character_ids: Collection[str], speech_mode: str = SPEECH_BOTH
+    answer: Any,
+    character_ids: Collection[str],
+    speech_mode: str = SPEECH_BOTH,
+    warnings: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """The answer's events checked and cleaned, with ids `evt_1`, `evt_2`, ... set in order.
-    Raises ValueError, with a message fit for the user, for the first problem found.
+    Raises ValueError, with a message fit for the user, for the first problem found. With
+    `warnings` (a model's answer), a description far over its size is cut instead and added to
+    it; spoken words and the number of events are never cut.
 
     `character_ids` is the ids of the story's discovered characters: every speaker must be one
     of them. Only the fields of each type are kept, in a fixed order. A type the project's
@@ -401,7 +431,7 @@ def check_events(
 
     events: list[dict[str, Any]] = []
     for position, entry in enumerate(entries, start=1):
-        checked = _event(entry, position, character_ids, allowed)
+        checked = _event(entry, position, character_ids, allowed, warnings)
         events.append({"id": f"evt_{position}", **checked})
     return events
 
@@ -481,11 +511,13 @@ def check_answer(
     scene_text: str,
     character_ids: Collection[str],
     speech_mode: str = SPEECH_BOTH,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Runs `check_events` and `check_coverage` and returns the content that is stored:
     `{scene_id, events, uncovered}`. Raises ValueError, with a message fit for the user, for
-    the first problem found. `scene_id` is set here and never read from the model.
+    the first problem found. `scene_id` is set here and never read from the model. `warnings`
+    is for what `check_events` cuts from a model's answer.
     """
-    events = check_events(answer, character_ids, speech_mode)
+    events = check_events(answer, character_ids, speech_mode, warnings)
     uncovered = check_coverage(events, scene_text)
     return {"scene_id": scene_id, "events": events, "uncovered": uncovered}

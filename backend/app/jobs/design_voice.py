@@ -43,14 +43,19 @@ REQUEST_TIMEOUT_S: Final = 300.0
 _BAD_INPUT = "This job has no voice to design."
 
 
-def _read_answer(result: llm.ChatResult) -> tuple[str | None, str | None]:
-    """Reads one answer: `(None, description)` when it can be used, else `(why not, None)`."""
+def _read_answer(result: llm.ChatResult, warnings: list[str]) -> tuple[str | None, str | None]:
+    """Reads one answer: `(None, description)` when it can be used, else `(why not, None)`.
+    What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+    """
     if result.finish_reason == "length":
         return "The model's answer was cut off because it reached the token limit.", None
+    found: list[str] = []
     try:
-        return None, writer.check_instruction(writer.parse_answer(result.content))
+        instruction = writer.check_instruction(writer.parse_answer(result.content), found)
     except ValueError as exc:
         return str(exc), None
+    warnings[:] = found
+    return None, instruction
 
 
 class DesignVoiceHandler(JobHandler):
@@ -88,8 +93,13 @@ class DesignVoiceHandler(JobHandler):
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
+        warnings: list[str] = []
         outcome = await llm_call.ask_model(
-            job_id, target, body, _read_answer, timeout_s=REQUEST_TIMEOUT_S
+            job_id,
+            target,
+            body,
+            lambda result: _read_answer(result, warnings),
+            timeout_s=REQUEST_TIMEOUT_S,
         )
         instruction: str | None = outcome.value
         if instruction is None:
@@ -109,6 +119,7 @@ class DesignVoiceHandler(JobHandler):
             output = {
                 **outcome.record(),
                 "content": None,
+                "warnings": warnings,
                 "instruction": instruction,
                 "run_id": run_id,
                 "seconds": round(time.monotonic() - started, 1),

@@ -45,6 +45,7 @@ from typing import Any, Final, Literal
 
 from app.providers import llm, speech_synthesizer
 from app.services import lab_prompt_writer
+from app.services.text_limits import LIMIT_SLACK, fit_text
 
 # Hidden reasoning is billed as output. Three short texts are at most a few hundred tokens, so
 # this leaves room to think. A MiniMax H3 prompt is a few thousand characters, so it gets more.
@@ -95,6 +96,10 @@ H3_GENERATE_ASKED_WORDS: Final = (120, 250)
 H3_GENERATE_MIN_WORDS: Final = 80
 H3_GENERATE_MAX_WORDS: Final = 400
 DELIVERY_MAX_CHARS: Final = speech_synthesizer.INSTRUCTION_MAX_CHARS
+# What the model is asked to stay under. The speech model refuses more than `DELIVERY_MAX_CHARS`;
+# a text up to `LIMIT_SLACK` times this is kept, and a longer one is cut to this with a warning.
+DELIVERY_ASKED_MAX_CHARS: Final = 400
+assert int(DELIVERY_ASKED_MAX_CHARS * LIMIT_SLACK) <= DELIVERY_MAX_CHARS
 
 ACTION_MAX_CHARS: Final = 1000
 DIALOGUE_MAX_CHARS: Final = speech_synthesizer.TEXT_MAX_CHARS
@@ -327,8 +332,9 @@ _TASK_TEXT: Final[dict[str, str]] = {
         'Rules for "delivery_instruction": how the character\'s own voice reads its line '
         "aloud, for a speech model that is steered by a short instruction (not the words "
         "themselves). Describe the tone, the emotion and the pace the personality and what is "
-        "happening call for, in one or two short sentences, plain prose, up to "
-        f"{DELIVERY_MAX_CHARS} characters."
+        "happening call for, in one or two short sentences, plain prose. The limit is hard: at "
+        f"most {DELIVERY_ASKED_MAX_CHARS} characters, so count while you write, aim for about "
+        "250, and put the most important thing first, because a longer text is cut off."
     ),
 }
 
@@ -914,10 +920,11 @@ def _h3_generate_warnings(text: str) -> list[str]:
 def check_prompts(answer: dict[str, Any], inputs: dict[str, Any]) -> CheckedTakePrompts:
     """The answer's texts made into single lines and checked. Raises ValueError, with a
     message for the user, when one that was asked for cannot be used: not text, empty, or
-    longer than the limit.
+    far longer than the limit.
 
     Warnings never block: a text of an unusual length, or one that breaks a wording rule, is
-    still returned, so the author can edit it before anything runs.
+    still returned, so the author can edit it before anything runs. A delivery instruction far
+    over its size is cut at a whole word, with a warning.
     """
     needed = frozenset(inputs["needed"])
     target = _target(inputs)
@@ -979,11 +986,8 @@ def check_prompts(answer: dict[str, Any], inputs: dict[str, Any]) -> CheckedTake
                     "Double quotes found in the video prompt. The speech is a separate sound, "
                     "so the words are not needed in the prompt."
                 )
-    if delivery is not None and len(delivery) > DELIVERY_MAX_CHARS:
-        raise ValueError(
-            f'The model\'s "{DELIVERY_INSTRUCTION}" was longer than {DELIVERY_MAX_CHARS} '
-            "characters."
-        )
+    if delivery is not None:
+        delivery = fit_text(delivery, DELIVERY_INSTRUCTION, DELIVERY_ASKED_MAX_CHARS, warnings)
 
     return CheckedTakePrompts(
         image_prompt=image_prompt,

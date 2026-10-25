@@ -118,15 +118,22 @@ class CheckShotContinuityHandler(JobHandler):
     model_key = STORY_MODEL_KEY
 
     @staticmethod
-    def _read(result: llm.ChatResult, read: _Input) -> tuple[str | None, dict[str, Any] | None]:
-        """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`."""
+    def _read(
+        result: llm.ChatResult, read: _Input, warnings: list[str]
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
+        What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+        """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
+        found: list[str] = []
         try:
             answer = shot_continuity_writer.parse_answer(result.content)
-            return None, shot_continuity_writer.check_answer(answer, read.boundaries)
+            content = shot_continuity_writer.check_answer(answer, read.boundaries, found)
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, content
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -172,11 +179,12 @@ class CheckShotContinuityHandler(JobHandler):
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
+        warnings: list[str] = []
         outcome = await llm_call.ask_model(
             job_id,
             target,
             body,
-            lambda result: self._read(result, read),
+            lambda result: self._read(result, read, warnings),
             timeout_s=REQUEST_TIMEOUT_S,
         )
         content: dict[str, Any] | None = outcome.value
@@ -204,6 +212,7 @@ class CheckShotContinuityHandler(JobHandler):
             output = {
                 **outcome.record(),
                 "content": None,
+                "warnings": warnings,
                 "scene_id": read.scene_id,
                 "version": row.version,
                 "round": read.round,

@@ -42,14 +42,19 @@ REQUEST_TIMEOUT_S: Final = 600.0
 _BAD_INPUT = "This job has no story to read."
 
 
-def _read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
-    """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`."""
+def _read(result: llm.ChatResult, warnings: list[str]) -> tuple[str | None, dict[str, Any] | None]:
+    """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
+    What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+    """
     if result.finish_reason == "length":
         return "The model's answer was cut off because it reached the token limit.", None
+    found: list[str] = []
     try:
-        return None, writer.check_bible(writer.parse_answer(result.content))
+        content = writer.check_bible(writer.parse_answer(result.content), found)
     except ValueError as exc:
         return str(exc), None
+    warnings[:] = found
+    return None, content
 
 
 class WriteStoryBibleHandler(JobHandler):
@@ -87,7 +92,14 @@ class WriteStoryBibleHandler(JobHandler):
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
-        outcome = await llm_call.ask_model(job_id, target, body, _read, timeout_s=REQUEST_TIMEOUT_S)
+        warnings: list[str] = []
+        outcome = await llm_call.ask_model(
+            job_id,
+            target,
+            body,
+            lambda result: _read(result, warnings),
+            timeout_s=REQUEST_TIMEOUT_S,
+        )
         content: dict[str, Any] | None = outcome.value
         if content is None:
             await self._fail(job_id, f"The Story Bible could not be written: {outcome.failure}")
@@ -105,6 +117,7 @@ class WriteStoryBibleHandler(JobHandler):
             output = {
                 **outcome.record(),
                 "content": None,
+                "warnings": warnings,
                 "story_bible_id": bible.id,
                 "version": bible.version,
                 "seconds": round(time.monotonic() - started, 1),

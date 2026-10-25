@@ -30,6 +30,7 @@ import json
 from typing import Any, Final
 
 from app.services import character_library, discovery_writer
+from app.services.text_limits import LIMIT_SLACK, cut_at_word, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -61,10 +62,6 @@ _TEXT_FIELDS: Final[dict[str, dict[str, int]]] = {
     },
     "behavior": {"baseline": 300, "gesture_style": 200},
 }
-
-# The prompt states the limits above, but the check accepts this much more: the model often
-# misses a stated length by a few characters, and that should not fail the definition.
-LIMIT_SLACK: Final = 1.25
 
 # The profile fields a definition writes, and the most characters each may hold.
 _PROFILE_TEXT_LIMITS: Final[dict[str, int]] = {
@@ -100,34 +97,43 @@ _ANSWER_FORM: Final = json.dumps(
             "sex": "male",
             "species": "human",
             "has_visible_mouth": True,
-            "build": "...",
-            "height_character": "...",
-            "skin_tone": "...",
-            "face_shape": "...",
-            "hair": "...",
-            "eyes": "...",
-            "distinctive_features": "...",
+            "build": "lean, narrow shoulders",
+            "height_character": "tall, slightly stooped",
+            "skin_tone": "warm brown",
+            "face_shape": "long face, strong jaw",
+            "hair": "short black hair, grey at the temples",
+            "eyes": "dark brown, tired",
+            "distinctive_features": "a scar through the left eyebrow",
         },
-        "default_wardrobe": {"upper": "...", "lower": "...", "footwear": "..."},
+        "default_wardrobe": {
+            "upper": "faded blue work shirt",
+            "lower": "grey wool trousers",
+            "footwear": "scuffed brown boots",
+        },
         "voice_identity": {
-            "age_character": "...",
-            "pitch": "...",
-            "texture": "...",
-            "accent": "...",
-            "default_energy": "...",
+            "age_character": "middle-aged, worn",
+            "pitch": "low",
+            "texture": "dry, slightly rough",
+            "accent": "soft regional accent",
+            "default_energy": "quiet, measured",
         },
-        "behavior": {"baseline": "...", "gesture_style": "..."},
+        "behavior": {
+            "baseline": "guarded and patient, speaks only when needed",
+            "gesture_style": "small, still hands",
+        },
         "era": {"kind": "present", "years": None, "setting": None},
     }
 )
 
 
 def _limits_text() -> str:
-    lines = []
-    for section, fields in _TEXT_FIELDS.items():
-        sizes = ", ".join(f'"{key}" ({limit})' for key, limit in fields.items())
-        lines.append(f'  - "{section}": {sizes}')
-    return "\n".join(lines)
+    """The strict length block, listing every limited field by its path in the answer."""
+    limits = {
+        f"{section}.{key}": limit
+        for section, fields in _TEXT_FIELDS.items()
+        for key, limit in fields.items()
+    }
+    return length_rule(limits)
 
 
 _INSTRUCTIONS: Final = f"""You are the character designer of a studio that turns written \
@@ -176,9 +182,8 @@ message), "past" or "future". For "past" and "future", "years" is the whole numb
 before or after today's year, from {character_library.MIN_ERA_YEARS} to \
 {character_library.MAX_ERA_YEARS}, and "setting" is a short text of what that time looks like \
 (for example "1920s Bombay"), or null. For "present", "years" and "setting" are null.
-- Every other field is one short phrase on one line, with at most this many characters (a \
-longer value is cut off, so keep to it, also for a creature, a machine or any character that \
-needs a lot to describe: say only the most important thing first):
+- Every other field is one short phrase on one line.
+
 {_limits_text()}
 
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
@@ -284,10 +289,8 @@ def _text(
             raise ValueError(
                 f'The "{path}" of the model\'s answer was longer than {accepted_chars} characters.'
             )
-        warnings.append(
-            f'The "{path}" was {len(text)} characters; it was cut to fit {max_chars}.'
-        )
-        text = discovery_writer.cut_at_word(text, max_chars)
+        warnings.append(f'The "{path}" was {len(text)} characters; it was cut to fit {max_chars}.')
+        text = cut_at_word(text, max_chars)
     return text
 
 

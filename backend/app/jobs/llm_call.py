@@ -7,8 +7,8 @@ because every LLM job needs them:
 
 - At most `MAX_ATTEMPTS` attempts, the second only for a rate limit, a server error, no answer,
   or an answer that cannot be used. A refusal (HTTP 400, 401, 403, 404, 422) is never retried.
-  A caller that passes `correct=True` has the second attempt told why the first answer could
-  not be used (`with_correction`), so the model fixes that instead of guessing again.
+  The second attempt is told why the first answer could not be used (`with_correction`), so
+  the model fixes that instead of guessing again. A caller can pass `correct=False` to opt out.
 - Every answer is saved on the job (`store.record_output`) the moment it arrives, so a crash
   after the paid call still leaves the answer behind.
 - Logs hold the job id, what each attempt did and its token counts, never the prompt or the
@@ -113,7 +113,7 @@ async def ask_model(
     *,
     timeout_s: float,
     keep: dict[str, Any] | None = None,
-    correct: bool = False,
+    correct: bool = True,
 ) -> Outcome:
     """Sends `body` to `target` (up to `MAX_ATTEMPTS` times) until `read` accepts an answer.
 
@@ -121,8 +121,8 @@ async def ask_model(
     saved on the job's output next to this call's own record, every time progress is saved, so
     the paid answers of the earlier calls are not lost while a later call runs.
 
-    With `correct`, an attempt that follows an unusable answer is sent `with_correction`, and its
-    record holds the reason it was given (`correction`).
+    With `correct` (the default), an attempt that follows an unusable answer is sent
+    `with_correction`, and its record holds the reason it was given (`correction`).
     """
     outcome = Outcome()
     correction: str | None = None

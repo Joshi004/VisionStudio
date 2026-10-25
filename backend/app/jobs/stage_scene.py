@@ -122,21 +122,28 @@ class StageSceneHandler(JobHandler):
         character_ids: list[str],
         event_ids: list[str],
         spatial_plan: dict[str, Any],
+        warnings: list[str],
     ) -> tuple[str | None, dict[str, Any] | None]:
-        """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`."""
+        """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
+        What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+        """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
+        found: list[str] = []
         try:
             answer = scene_staging_writer.parse_answer(result.content)
-            return None, scene_staging_writer.check_answer(
+            content = scene_staging_writer.check_answer(
                 answer,
                 scene_id,
                 character_ids=character_ids,
                 event_ids=event_ids,
                 spatial_plan=spatial_plan,
+                warnings=found,
             )
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, content
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -185,12 +192,13 @@ class StageSceneHandler(JobHandler):
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
+        warnings: list[str] = []
         outcome = await llm_call.ask_model(
             job_id,
             target,
             body,
             lambda result: self._read(
-                result, scene_id, read.character_ids, read.event_ids, read.spatial_plan
+                result, scene_id, read.character_ids, read.event_ids, read.spatial_plan, warnings
             ),
             timeout_s=REQUEST_TIMEOUT_S,
         )
@@ -212,6 +220,7 @@ class StageSceneHandler(JobHandler):
             output = {
                 **outcome.record(),
                 "content": None,
+                "warnings": warnings,
                 "scene_id": scene_id,
                 "version": row.version,
                 "placements": len(content["placements"]),

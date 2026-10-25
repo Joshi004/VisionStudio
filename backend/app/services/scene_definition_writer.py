@@ -34,6 +34,7 @@ from collections.abc import Collection
 from typing import Any, Final
 
 from app.services import discovery_writer
+from app.services.text_limits import fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -51,24 +52,38 @@ LOOK_MAX_CHARS: Final = 100
 MOOD_MAX_CHARS: Final = 80
 GOAL_MAX_CHARS: Final = 300
 CONTINUITY_MAX_CHARS: Final = 200
-# The prompt states the limits above, but the check accepts this much more: the model often
-# misses a stated length by a few characters, and that should not fail the definition.
-LIMIT_SLACK: Final = 1.25
+# The limited fields as the model sees them in its answer.
+_LIMITS: Final = {
+    "story_context.before": CONTEXT_MAX_CHARS,
+    "story_context.current": CONTEXT_MAX_CHARS,
+    "story_context.after": CONTEXT_MAX_CHARS,
+    "environment_state": ENVIRONMENT_STATE_MAX_CHARS,
+    "time.time_of_day": TIME_OF_DAY_MAX_CHARS,
+    "time.lighting_state": LIGHTING_MAX_CHARS,
+    "character_looks.(each character)": LOOK_MAX_CHARS,
+    "mood.start, mood.middle, mood.end (each)": MOOD_MAX_CHARS,
+    "dramatic_goal": GOAL_MAX_CHARS,
+    "continuity_start.(each character), continuity_end.(each character)": CONTINUITY_MAX_CHARS,
+}
 
 # What the model is shown as the form of its answer. It is built from a dict so the braces and
 # quotes are always valid JSON.
 _ANSWER_FORM: Final = json.dumps(
     {
-        "story_context": {"before": "...", "current": "...", "after": "..."},
+        "story_context": {
+            "before": "A quarrel over the rent ends badly.",
+            "current": "Two neighbours meet on the stairs.",
+            "after": "One of them leaves the building.",
+        },
         "environment_id": "an id from ENVIRONMENTS",
-        "environment_state": "...",
-        "time": {"time_of_day": "...", "lighting_state": "..."},
+        "environment_state": "night",
+        "time": {"time_of_day": "late afternoon", "lighting_state": "low sun through dusty glass"},
         "characters": ["an id from CHARACTERS"],
-        "character_looks": {"an id from characters": "..."},
-        "mood": {"start": "...", "middle": "...", "end": "..."},
-        "dramatic_goal": "...",
-        "continuity_start": {"an id from characters": "..."},
-        "continuity_end": {"an id from characters": "..."},
+        "character_looks": {"an id from characters": "wet raincoat"},
+        "mood": {"start": "tense", "middle": "uneasy", "end": "resigned"},
+        "dramatic_goal": "Shows that the two can no longer share the house.",
+        "continuity_start": {"an id from characters": "angry, hands clenched"},
+        "continuity_end": {"an id from characters": "calm, tired, holding a bag"},
     }
 )
 
@@ -115,6 +130,8 @@ and body, what they are doing) at the start and at the end of the scene, at most
 {CONTINUITY_MAX_CHARS} characters each. You may leave out a character who has nothing to track.
 - This is the scene's context, not its events. Do not list what happens beat by beat, do not \
 write shots, camera instructions, durations or dialogue.
+
+{length_rule(_LIMITS)}
 
 Answer with one JSON object only, in exactly this form (the values here are only examples of the \
 type): {_ANSWER_FORM}"""
@@ -220,9 +237,12 @@ def _optional_object(parent: dict[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
-def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
-    """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
+def _text(
+    parent: dict[str, Any], key: str, path: str, max_chars: int, warnings: list[str] | None
+) -> str:
+    """One piece of text on one line. Raises ValueError when it is missing, is not text or is
+    empty. A text far over `max_chars` is cut with a warning (`fit_text`), or refused when
+    `warnings` is None.
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -230,14 +250,15 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{path}" was empty.')
-    accepted_chars = int(max_chars * LIMIT_SLACK)
-    if len(text) > accepted_chars:
-        raise ValueError(f'The "{path}" was longer than {accepted_chars} characters.')
-    return text
+    return fit_text(text, path, max_chars, warnings)
 
 
 def _character_map(
-    answer: dict[str, Any], key: str, characters: list[str], max_chars: int
+    answer: dict[str, Any],
+    key: str,
+    characters: list[str],
+    max_chars: int,
+    warnings: list[str] | None,
 ) -> dict[str, str]:
     """A map from the scene's characters to a piece of text. A key that is not one of
     `characters` is refused. Raises ValueError.
@@ -249,7 +270,9 @@ def _character_map(
             raise ValueError(
                 f'The "{key}" named "{character_id}", who is not one of the scene\'s characters.'
             )
-        result[character_id] = _text(raw, character_id, f"{key}.{character_id}", max_chars)
+        result[character_id] = _text(
+            raw, character_id, f"{key}.{character_id}", max_chars, warnings
+        )
     return result
 
 
@@ -258,9 +281,12 @@ def check_definition(
     scene_id: str,
     character_ids: Collection[str],
     environment_ids: Collection[str],
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the definition that is stored. Raises ValueError, with
-    a message fit for the user, for the first problem found.
+    a message fit for the user, for the first problem found. With `warnings` (a model's answer),
+    a text far over its size is cut instead and each cut is added to it. Without (a definition
+    a person edited), such a text is refused.
 
     The definition's `id` is `scene_id`, set here and never read from the model.
     `character_ids` and `environment_ids` are the ids of the story's discovered characters and
@@ -294,32 +320,42 @@ def check_definition(
     return {
         "id": scene_id,
         "story_context": {
-            "before": _text(context, "before", "story_context.before", CONTEXT_MAX_CHARS),
-            "current": _text(context, "current", "story_context.current", CONTEXT_MAX_CHARS),
-            "after": _text(context, "after", "story_context.after", CONTEXT_MAX_CHARS),
+            "before": _text(context, "before", "story_context.before", CONTEXT_MAX_CHARS, warnings),
+            "current": _text(
+                context, "current", "story_context.current", CONTEXT_MAX_CHARS, warnings
+            ),
+            "after": _text(context, "after", "story_context.after", CONTEXT_MAX_CHARS, warnings),
         },
         "environment_id": environment_id,
         "environment_state": _text(
-            answer, "environment_state", "environment_state", ENVIRONMENT_STATE_MAX_CHARS
+            answer,
+            "environment_state",
+            "environment_state",
+            ENVIRONMENT_STATE_MAX_CHARS,
+            warnings,
         ),
         "time": {
-            "time_of_day": _text(time, "time_of_day", "time.time_of_day", TIME_OF_DAY_MAX_CHARS),
+            "time_of_day": _text(
+                time, "time_of_day", "time.time_of_day", TIME_OF_DAY_MAX_CHARS, warnings
+            ),
             "lighting_state": _text(
-                time, "lighting_state", "time.lighting_state", LIGHTING_MAX_CHARS
+                time, "lighting_state", "time.lighting_state", LIGHTING_MAX_CHARS, warnings
             ),
         },
         "characters": characters,
-        "character_looks": _character_map(answer, "character_looks", characters, LOOK_MAX_CHARS),
+        "character_looks": _character_map(
+            answer, "character_looks", characters, LOOK_MAX_CHARS, warnings
+        ),
         "mood": {
-            "start": _text(mood, "start", "mood.start", MOOD_MAX_CHARS),
-            "middle": _text(mood, "middle", "mood.middle", MOOD_MAX_CHARS),
-            "end": _text(mood, "end", "mood.end", MOOD_MAX_CHARS),
+            "start": _text(mood, "start", "mood.start", MOOD_MAX_CHARS, warnings),
+            "middle": _text(mood, "middle", "mood.middle", MOOD_MAX_CHARS, warnings),
+            "end": _text(mood, "end", "mood.end", MOOD_MAX_CHARS, warnings),
         },
-        "dramatic_goal": _text(answer, "dramatic_goal", "dramatic_goal", GOAL_MAX_CHARS),
+        "dramatic_goal": _text(answer, "dramatic_goal", "dramatic_goal", GOAL_MAX_CHARS, warnings),
         "continuity_start": _character_map(
-            answer, "continuity_start", characters, CONTINUITY_MAX_CHARS
+            answer, "continuity_start", characters, CONTINUITY_MAX_CHARS, warnings
         ),
         "continuity_end": _character_map(
-            answer, "continuity_end", characters, CONTINUITY_MAX_CHARS
+            answer, "continuity_end", characters, CONTINUITY_MAX_CHARS, warnings
         ),
     }

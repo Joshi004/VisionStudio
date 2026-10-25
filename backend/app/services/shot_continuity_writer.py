@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from app.services import discovery_writer
+from app.services.text_limits import fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -52,11 +53,8 @@ SCENE_START: Final = "scene_start"
 SCENE_END: Final = "scene_end"
 _SCENE_EDGES: Final = (SCENE_START, SCENE_END)
 
-# The most characters a problem may have. The prompt states it, but the check accepts this much
-# more: the model often misses a stated length by a few characters, and that should not fail
-# the check.
+# The most characters a problem may have.
 PROBLEM_MAX_CHARS: Final = 300
-LIMIT_SLACK: Final = 1.25
 
 # What the model is shown as the form of its answer. It is built from a dict so the braces and
 # quotes are always valid JSON.
@@ -97,6 +95,8 @@ clearly contradicts the shot it belongs to.
 {PROBLEM_MAX_CHARS} characters what does not line up, naming the character and the two states. \
 When it is true, "problem" is null.
 - Write everything in English.
+
+{length_rule({"boundaries[].problem": PROBLEM_MAX_CHARS})}
 
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
@@ -197,8 +197,10 @@ def build_request(
 # --- Checking the answer ------------------------------------------------------------------
 
 
-def _problem(entry: dict[str, Any], boundary_id: str) -> str:
-    """The problem of a boundary that does not match: one line, present, within its limit."""
+def _problem(entry: dict[str, Any], boundary_id: str, warnings: list[str] | None) -> str:
+    """The problem of a boundary that does not match: one line, present. A text far over its
+    limit is cut with a warning (`fit_text`), or refused when `warnings` is None.
+    """
     value = entry.get("problem")
     if not isinstance(value, str):
         raise ValueError(
@@ -210,18 +212,15 @@ def _problem(entry: dict[str, Any], boundary_id: str) -> str:
             f'The model\'s answer for boundary "{boundary_id}" did not match but gave an empty '
             "problem."
         )
-    accepted_chars = int(PROBLEM_MAX_CHARS * LIMIT_SLACK)
-    if len(text) > accepted_chars:
-        raise ValueError(
-            f'The problem of boundary "{boundary_id}" in the model\'s answer was longer than '
-            f"{accepted_chars} characters."
-        )
-    return text
+    return fit_text(text, f"boundaries.{boundary_id}.problem", PROBLEM_MAX_CHARS, warnings)
 
 
-def check_answer(answer: Any, boundary_list: list[dict[str, Any]]) -> dict[str, Any]:
+def check_answer(
+    answer: Any, boundary_list: list[dict[str, Any]], warnings: list[str] | None = None
+) -> dict[str, Any]:
     """The answer checked and cleaned, as the verdict that is stored. Raises ValueError, with a
-    message fit for the user, for the first problem found.
+    message fit for the user, for the first problem found. With `warnings`, a problem far over
+    its size is cut instead and the cut is added to it.
 
     Every boundary of `boundary_list` must be answered exactly once and no other id may appear.
     The verdict keeps the boundaries in order, each as `{id, before, after, before_state,
@@ -263,7 +262,7 @@ def check_answer(answer: Any, boundary_list: list[dict[str, Any]]) -> dict[str, 
             {
                 **boundary,
                 "matches": matches,
-                "problem": None if matches else _problem(entry, boundary["id"]),
+                "problem": None if matches else _problem(entry, boundary["id"], warnings),
             }
         )
     return {

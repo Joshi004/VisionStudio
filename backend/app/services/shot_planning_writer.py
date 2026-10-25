@@ -43,6 +43,7 @@ from typing import Any, Final
 
 from app.services import discovery_writer, user_feedback
 from app.services.projects import SPEECH_BOTH, SPEECH_NO_NARRATION
+from app.services.text_limits import fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -73,7 +74,7 @@ _ANSWER_FORM: Final = json.dumps(
                 "target_duration": 2.5,
                 "continues_previous": False,
                 "rapid_exchange": False,
-                "description": "one plain sentence",
+                "description": "A woman waits at the door, listening.",
             }
         ]
     }
@@ -148,6 +149,8 @@ same scene was checked by code and had the problems listed. Plan the whole scene
 none of those problems remains: for example, merge a shot that is too short with a neighbour, \
 split one that is too long, or lengthen a shot so that the line spoken in it fits. Each problem \
 has a "message" with the numbers. Keep what was fine, and still follow every rule above.
+
+{length_rule({"shots[].description": DESCRIPTION_MAX_CHARS})}
 
 {user_feedback.INSTRUCTION}"""
 
@@ -264,19 +267,14 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _description(shot: dict[str, Any], position: int) -> str:
+def _description(shot: dict[str, Any], position: int, warnings: list[str] | None) -> str:
     value = shot.get("description")
     if not isinstance(value, str):
         raise ValueError(f'The "description" of shot {position} was missing or not text.')
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "description" of shot {position} was empty.')
-    if len(text) > DESCRIPTION_MAX_CHARS:
-        raise ValueError(
-            f'The "description" of shot {position} was longer than {DESCRIPTION_MAX_CHARS} '
-            "characters."
-        )
-    return text
+    return fit_text(text, f"shots[{position}].description", DESCRIPTION_MAX_CHARS, warnings)
 
 
 def _duration(shot: dict[str, Any], position: int) -> float:
@@ -455,10 +453,14 @@ def _check_exchanges(shots: list[dict[str, Any]], units: list[dict[str, Any]]) -
 
 
 def check_shots(
-    answer: Any, events: list[dict[str, Any]], units: list[dict[str, Any]]
+    answer: Any,
+    events: list[dict[str, Any]],
+    units: list[dict[str, Any]],
+    warnings: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """The answer's shots checked and cleaned, without their ids. Raises ValueError, with a
-    message fit for the user, for the first problem found.
+    message fit for the user, for the first problem found. With `warnings` (a model's answer),
+    a description far over its size is cut instead and the cut is added to it.
 
     `events` is the scene's stored events (each has an `id`); `units` is its speech units in
     order (each has `id`, `event_id`, `kind` and, for dialogue, `speaker_id`). Only the fields
@@ -503,7 +505,7 @@ def check_shots(
                 "target_duration": _duration(entry, position),
                 "continues_previous": _continues_previous(entry, position),
                 "rapid_exchange": _rapid_exchange(entry),
-                "description": _description(entry, position),
+                "description": _description(entry, position, warnings),
             }
         )
 
@@ -514,7 +516,11 @@ def check_shots(
 
 
 def check_answer(
-    answer: Any, scene_id: str, events: list[dict[str, Any]], units: list[dict[str, Any]]
+    answer: Any,
+    scene_id: str,
+    events: list[dict[str, Any]],
+    units: list[dict[str, Any]],
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Runs `check_shots` and returns the content that is stored: `{scene_id, shots}`, each
     shot `{id, scene_id, source_event_ids, speech_unit_ids, type, target_duration,
@@ -522,7 +528,7 @@ def check_answer(
     the scene id set here, never read from the model. Raises ValueError, with a message fit for
     the user, for the first problem found.
     """
-    checked = check_shots(answer, events, units)
+    checked = check_shots(answer, events, units, warnings)
     shots = [
         {"id": f"shot_{position}", "scene_id": scene_id, **shot}
         for position, shot in enumerate(checked, start=1)

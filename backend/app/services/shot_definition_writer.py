@@ -37,6 +37,7 @@ from collections.abc import Collection
 from typing import Any, Final
 
 from app.services import discovery_writer, shot_staging, user_feedback
+from app.services.text_limits import fit_text, keep_first, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -82,9 +83,24 @@ AMBIENT_MAX_CHARS: Final = 200
 SOUND_EVENT_MAX_CHARS: Final = 150
 MAX_SOUND_EVENTS: Final = 8
 MAX_STATE_KEYS: Final = 12
-# The prompt states the limits above, but the check accepts this much more: the model often
-# misses a stated length by a few characters, and that should not fail the shot.
-LIMIT_SLACK: Final = 1.25
+# The limited fields as the model sees them in its answer.
+LIMITS: Final = {
+    "visual_story": VISUAL_STORY_MAX_CHARS,
+    "characters[].expression": EXPRESSION_MAX_CHARS,
+    "characters[].pose": POSE_MAX_CHARS,
+    "characters[].gaze": GAZE_MAX_CHARS,
+    f"environment_state.(each value; at most {MAX_STATE_KEYS} keys)": STATE_VALUE_MAX_CHARS,
+    "composition.angle": COMPOSITION_MAX_CHARS,
+    "composition.focus": COMPOSITION_MAX_CHARS,
+    "camera.movement": CAMERA_MAX_CHARS,
+    "camera.intensity": CAMERA_MAX_CHARS,
+    "action.start_state": ACTION_MAX_CHARS,
+    "action.primary_action": ACTION_MAX_CHARS,
+    "action.end_state": ACTION_MAX_CHARS,
+    "continuity_start.(each character), continuity_end.(each character)": CONTINUITY_MAX_CHARS,
+    "audio_intent.ambient": AMBIENT_MAX_CHARS,
+    f"audio_intent.sound_events[] (each; at most {MAX_SOUND_EVENTS})": SOUND_EVENT_MAX_CHARS,
+}
 _STATE_KEY: Final = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # Durations are written to a thousandth of a second, as the timeline keeps them.
 _DURATION_DECIMALS: Final = 3
@@ -92,27 +108,31 @@ _DURATION_DECIMALS: Final = 3
 # What the model is shown as the form of its answer. It is built from a dict so the braces and
 # quotes are always valid JSON.
 ANSWER_FORM: Final[dict[str, Any]] = {
-    "visual_story": "...",
+    "visual_story": "A man waits by the window, unwilling to speak first.",
     "characters": [
         {
             "id": "an id from CHARACTERS IN THE SCENE",
-            "expression": "...",
-            "pose": "...",
-            "gaze": "...",
+            "expression": "tight-lipped, eyes tired",
+            "pose": "standing, arms crossed",
+            "gaze": "out of the window",
         }
     ],
-    "environment_state": {"lighting": "...", "an_aspect_of_the_place": "..."},
+    "environment_state": {"lighting": "grey morning light", "window": "closed"},
     "composition": {
         "shot_size": "one of the allowed sizes",
-        "angle": "...",
-        "focus": "...",
+        "angle": "eye level",
+        "focus": "an id from CHARACTERS IN THE SCENE",
         "view": "an id from VIEWS",
     },
-    "camera": {"movement": "...", "intensity": "..."},
-    "action": {"start_state": "...", "primary_action": "...", "end_state": "..."},
-    "continuity_start": {"an id from characters": "..."},
-    "continuity_end": {"an id from characters": "..."},
-    "audio_intent": {"ambient": "...", "sound_events": ["..."]},
+    "camera": {"movement": "slow push in", "intensity": "subtle"},
+    "action": {
+        "start_state": "He stands still at the window.",
+        "primary_action": "He turns his head and looks at her.",
+        "end_state": "He looks away again.",
+    },
+    "continuity_start": {"an id from characters": "standing, arms crossed"},
+    "continuity_end": {"an id from characters": "head turned away"},
+    "audio_intent": {"ambient": "distant traffic", "sound_events": ["a clock ticks"]},
 }
 _ANSWER_FORM: Final = json.dumps(ANSWER_FORM)
 
@@ -198,6 +218,8 @@ rapid exchange or any shot of several characters, choose a view whose "allowed_f
 the two speakers on their own sides of the screen, each looking toward the side where the other \
 stands, from the same side of the line between them (the 180-degree rule of STAGING AT THIS \
 SHOT's "axis"): never flip who is on the left or the right.
+
+{length_rule(LIMITS)}
 
 {user_feedback.INSTRUCTION}
 
@@ -324,9 +346,12 @@ def _optional_object(parent: dict[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
-def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
-    """One piece of text on one line. Raises ValueError when it is missing, is not text, is
-    empty, or is longer than `max_chars` with `LIMIT_SLACK` allowed on top.
+def _text(
+    parent: dict[str, Any], key: str, path: str, max_chars: int, warnings: list[str] | None
+) -> str:
+    """One piece of text on one line. Raises ValueError when it is missing, is not text or is
+    empty. A text far over `max_chars` is cut with a warning (`fit_text`), or refused when
+    `warnings` is None.
     """
     value = parent.get(key)
     if not isinstance(value, str):
@@ -334,10 +359,7 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{path}" was empty.')
-    accepted_chars = int(max_chars * LIMIT_SLACK)
-    if len(text) > accepted_chars:
-        raise ValueError(f'The "{path}" was longer than {accepted_chars} characters.')
-    return text
+    return fit_text(text, path, max_chars, warnings)
 
 
 def _shot_size(composition: dict[str, Any]) -> str:
@@ -357,7 +379,7 @@ def _shot_size(composition: dict[str, Any]) -> str:
 
 
 def _characters(
-    answer: dict[str, Any], scene_character_ids: Collection[str]
+    answer: dict[str, Any], scene_character_ids: Collection[str], warnings: list[str] | None
 ) -> list[dict[str, str]]:
     raw = answer.get("characters")
     if not isinstance(raw, list):
@@ -378,19 +400,20 @@ def _characters(
             {
                 "id": character_id,
                 "expression": _text(
-                    entry, "expression", f"{path}.expression", EXPRESSION_MAX_CHARS
+                    entry, "expression", f"{path}.expression", EXPRESSION_MAX_CHARS, warnings
                 ),
-                "pose": _text(entry, "pose", f"{path}.pose", POSE_MAX_CHARS),
-                "gaze": _text(entry, "gaze", f"{path}.gaze", GAZE_MAX_CHARS),
+                "pose": _text(entry, "pose", f"{path}.pose", POSE_MAX_CHARS, warnings),
+                "gaze": _text(entry, "gaze", f"{path}.gaze", GAZE_MAX_CHARS, warnings),
             }
         )
     return result
 
 
-def _environment_state(answer: dict[str, Any]) -> dict[str, str | bool]:
+def _environment_state(answer: dict[str, Any], warnings: list[str] | None) -> dict[str, str | bool]:
     raw = _optional_object(answer, "environment_state")
     if len(raw) > MAX_STATE_KEYS:
-        raise ValueError(f'The "environment_state" had more than {MAX_STATE_KEYS} entries.')
+        # The first entries are kept, in the order the model wrote them.
+        raw = dict(keep_first(list(raw.items()), MAX_STATE_KEYS, "environment_state", warnings))
     result: dict[str, str | bool] = {}
     for key, value in raw.items():
         if not _STATE_KEY.match(key):
@@ -403,7 +426,7 @@ def _environment_state(answer: dict[str, Any]) -> dict[str, str | bool]:
         elif isinstance(value, str | int | float):
             # A number is kept as the text the model wrote.
             result[key] = _text(
-                {key: str(value)}, key, f"environment_state.{key}", STATE_VALUE_MAX_CHARS
+                {key: str(value)}, key, f"environment_state.{key}", STATE_VALUE_MAX_CHARS, warnings
             )
         else:
             raise ValueError(
@@ -413,7 +436,10 @@ def _environment_state(answer: dict[str, Any]) -> dict[str, str | bool]:
 
 
 def _character_map(
-    answer: dict[str, Any], key: str, scene_character_ids: Collection[str]
+    answer: dict[str, Any],
+    key: str,
+    scene_character_ids: Collection[str],
+    warnings: list[str] | None,
 ) -> dict[str, str]:
     """A map from characters of the scene to a piece of text. A key that is not one of the
     scene's characters is refused. Raises ValueError.
@@ -427,24 +453,25 @@ def _character_map(
                 "of the scene's characters."
             )
         result[character_id] = _text(
-            raw, character_id, f"{key}.{character_id}", CONTINUITY_MAX_CHARS
+            raw, character_id, f"{key}.{character_id}", CONTINUITY_MAX_CHARS, warnings
         )
     return result
 
 
-def _sound_events(audio: dict[str, Any]) -> list[str]:
+def _sound_events(audio: dict[str, Any], warnings: list[str] | None) -> list[str]:
     raw = audio.get("sound_events")
     if raw is None:
         return []
     if not isinstance(raw, list):
         raise ValueError('The "audio_intent.sound_events" was not a list.')
-    if len(raw) > MAX_SOUND_EVENTS:
-        raise ValueError(
-            f'The "audio_intent.sound_events" had more than {MAX_SOUND_EVENTS} entries.'
-        )
+    raw = keep_first(raw, MAX_SOUND_EVENTS, "audio_intent.sound_events", warnings)
     return [
         _text(
-            {"event": item}, "event", f"audio_intent.sound_events.{position}", SOUND_EVENT_MAX_CHARS
+            {"event": item},
+            "event",
+            f"audio_intent.sound_events.{position}",
+            SOUND_EVENT_MAX_CHARS,
+            warnings,
         )
         for position, item in enumerate(raw, start=1)
     ]
@@ -491,9 +518,12 @@ def check_answer(
     dialogue: list[dict[str, str]],
     exchange: bool = False,
     staging: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the specification that is stored. Raises ValueError,
-    with a message fit for the user, for the first problem found.
+    with a message fit for the user, for the first problem found. With `warnings` (a model's
+    answer), a text far over its size, or a list with too many items, is cut instead and each
+    cut is added to it. Without (a specification a person edited), it is refused.
 
     `staging` is the result of `shot_staging.for_shot` (PHASE-054), or None for a shot that is
     not staged. With it, `composition.view` must be one of the views allowed for the shot (see
@@ -517,7 +547,7 @@ def check_answer(
     camera = _object(answer, "camera", "camera")
     action = _object(answer, "action", "action")
     audio = _object(answer, "audio_intent", "audio_intent")
-    characters = _characters(answer, scene_character_ids)
+    characters = _characters(answer, scene_character_ids, warnings)
     if exchange:
         shown = {character["id"] for character in characters}
         missing = sorted({line["speaker_id"] for line in dialogue} - shown)
@@ -529,8 +559,8 @@ def check_answer(
 
     shot_composition = {
         "shot_size": _shot_size(composition),
-        "angle": _text(composition, "angle", "composition.angle", COMPOSITION_MAX_CHARS),
-        "focus": _text(composition, "focus", "composition.focus", COMPOSITION_MAX_CHARS),
+        "angle": _text(composition, "angle", "composition.angle", COMPOSITION_MAX_CHARS, warnings),
+        "focus": _text(composition, "focus", "composition.focus", COMPOSITION_MAX_CHARS, warnings),
     }
     if staging is not None:
         shot_composition["view"] = _view(
@@ -542,26 +572,32 @@ def check_answer(
         "shot_id": shot_id,
         "scene_id": scene_id,
         "duration": round(duration, _DURATION_DECIMALS),
-        "visual_story": _text(answer, "visual_story", "visual_story", VISUAL_STORY_MAX_CHARS),
+        "visual_story": _text(
+            answer, "visual_story", "visual_story", VISUAL_STORY_MAX_CHARS, warnings
+        ),
         "characters": characters,
-        "environment_state": _environment_state(answer),
+        "environment_state": _environment_state(answer, warnings),
         "composition": shot_composition,
         "camera": {
-            "movement": _text(camera, "movement", "camera.movement", CAMERA_MAX_CHARS),
-            "intensity": _text(camera, "intensity", "camera.intensity", CAMERA_MAX_CHARS),
+            "movement": _text(camera, "movement", "camera.movement", CAMERA_MAX_CHARS, warnings),
+            "intensity": _text(camera, "intensity", "camera.intensity", CAMERA_MAX_CHARS, warnings),
         },
         "action": {
-            "start_state": _text(action, "start_state", "action.start_state", ACTION_MAX_CHARS),
-            "primary_action": _text(
-                action, "primary_action", "action.primary_action", ACTION_MAX_CHARS
+            "start_state": _text(
+                action, "start_state", "action.start_state", ACTION_MAX_CHARS, warnings
             ),
-            "end_state": _text(action, "end_state", "action.end_state", ACTION_MAX_CHARS),
+            "primary_action": _text(
+                action, "primary_action", "action.primary_action", ACTION_MAX_CHARS, warnings
+            ),
+            "end_state": _text(action, "end_state", "action.end_state", ACTION_MAX_CHARS, warnings),
         },
-        "continuity_start": _character_map(answer, "continuity_start", scene_character_ids),
-        "continuity_end": _character_map(answer, "continuity_end", scene_character_ids),
+        "continuity_start": _character_map(
+            answer, "continuity_start", scene_character_ids, warnings
+        ),
+        "continuity_end": _character_map(answer, "continuity_end", scene_character_ids, warnings),
         "audio_intent": {
             "dialogue": list(dialogue) if dialogue else None,
-            "ambient": _text(audio, "ambient", "audio_intent.ambient", AMBIENT_MAX_CHARS),
-            "sound_events": _sound_events(audio),
+            "ambient": _text(audio, "ambient", "audio_intent.ambient", AMBIENT_MAX_CHARS, warnings),
+            "sound_events": _sound_events(audio, warnings),
         },
     }

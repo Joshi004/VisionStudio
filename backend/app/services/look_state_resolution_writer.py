@@ -37,6 +37,7 @@ import re
 from typing import Any, Final
 
 from app.services import discovery_writer
+from app.services.text_limits import fit_text, length_rule
 
 # Hidden reasoning is billed as output, so this leaves room to think before the answer.
 MAX_TOKENS: Final = 12000
@@ -45,6 +46,11 @@ REASONING_EFFORT: Final = "high"
 DEFAULT: Final = "default"
 NAME_MAX_CHARS: Final = 60
 DESCRIPTION_MAX_CHARS: Final = 300
+# The limited fields as the model sees them in its answer.
+_LIMITS: Final = {
+    "new_looks[].name, new_states[].name": NAME_MAX_CHARS,
+    "new_looks[].description, new_states[].description": DESCRIPTION_MAX_CHARS,
+}
 # A new id is a slug the library can keep: lowercase letters, digits and underscores.
 SLUG_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 
@@ -89,6 +95,8 @@ appearance; for a state, the light and the condition of the place. Name no other
 request ids exactly as listed. Never invent a subject_id.
 - Looks and states are separate: "looks" answers the requests of kind "look", "states" those of \
 kind "state".
+
+{length_rule(_LIMITS)}
 
 Answer with one JSON object only, in exactly this form: {{"new_looks": [{{"character_id": "...", \
 "id": "...", "name": "...", "description": "..."}}], "new_states": [{{"environment_id": "...", \
@@ -257,15 +265,15 @@ def _list(answer: dict[str, Any], key: str) -> list[Any]:
     return value
 
 
-def _line(value: object, field: str, where: str, limit: int) -> str:
+def _line(value: object, field: str, where: str, limit: int, warnings: list[str] | None) -> str:
+    """One line of text. Raises ValueError when it is missing or empty. Line breaks are
+    turned into spaces, and a text far over `limit` is cut with a warning (`fit_text`), or
+    refused when `warnings` is None.
+    """
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'{where} had no "{field}".')
-    text = value.strip()
-    if "\n" in text or "\r" in text:
-        raise ValueError(f'The "{field}" of {where} was on more than one line.')
-    if len(text) > limit:
-        raise ValueError(f'The "{field}" of {where} was longer than {limit} characters.')
-    return text
+    text = " ".join(value.split())
+    return fit_text(text, f"{where}.{field}", limit, warnings)
 
 
 def _check_new(
@@ -273,6 +281,7 @@ def _check_new(
     key: str,
     subject_key: str,
     subjects: list[dict[str, Any]],
+    warnings: list[str] | None,
 ) -> list[dict[str, str]]:
     """The new entries under `key`, checked against the subjects of their kind."""
     known = {
@@ -308,9 +317,13 @@ def _check_new(
             {
                 subject_key: subject_id,
                 "id": slug,
-                "name": _line(entry.get("name"), "name", where, NAME_MAX_CHARS),
+                "name": _line(entry.get("name"), "name", where, NAME_MAX_CHARS, warnings),
                 "description": _line(
-                    entry.get("description"), "description", where, DESCRIPTION_MAX_CHARS
+                    entry.get("description"),
+                    "description",
+                    where,
+                    DESCRIPTION_MAX_CHARS,
+                    warnings,
                 ),
             }
         )
@@ -370,9 +383,11 @@ def check_answer(
     answer: Any,
     requests: list[dict[str, Any]],
     catalog: dict[str, list[dict[str, Any]]],
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned. Raises ValueError, with a message fit for the user, for
-    the first problem found.
+    the first problem found. With `warnings`, a name or description far over its size is cut
+    instead and the cut is added to it.
 
     Returns `{"new_looks": [{"character_id", "id", "name", "description"}], "new_states":
     [{"environment_id", ...}], "looks": {request id: target}, "states": {request id:
@@ -385,8 +400,8 @@ def check_answer(
     """
     if not isinstance(answer, dict):
         raise ValueError("The answer was not a JSON object.")
-    new_looks = _check_new(answer, "new_looks", "character_id", catalog["looks"])
-    new_states = _check_new(answer, "new_states", "environment_id", catalog["states"])
+    new_looks = _check_new(answer, "new_looks", "character_id", catalog["looks"], warnings)
+    new_states = _check_new(answer, "new_states", "environment_id", catalog["states"], warnings)
     looks = _check_targets(
         answer, "looks", "look", LOOK, requests, catalog["looks"], new_looks, "character_id"
     )

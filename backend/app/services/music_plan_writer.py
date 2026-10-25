@@ -37,7 +37,6 @@ from typing import Any, Final
 
 from app.services import music_timeline
 from app.services.music_bible_writer import (
-    LIMIT_SLACK,
     MAX_TOKENS,
     REASONING_EFFORT,
     context_text,
@@ -45,6 +44,7 @@ from app.services.music_bible_writer import (
 from app.services.music_bible_writer import (
     parse_answer as parse_answer,
 )
+from app.services.text_limits import fit_text, keep_first, length_rule
 
 MAX_CUES: Final = 80
 
@@ -136,6 +136,13 @@ second earlier, and "under" is somewhere inside it (for example partway through 
 narration line). "tight" is for hits and hard stops that must land within a fraction of a \
 second; "loose" is for entries and fades that can be a second or two off."""
 
+_CUE_LIMITS: Final = {
+    "cues[].summary": SUMMARY_MAX_CHARS,
+    "cues[].purpose": PURPOSE_MAX_CHARS,
+    "cues[].reason, boundaries[].reason": REASON_MAX_CHARS,
+    "cues[].emotion": EMOTION_MAX_CHARS,
+}
+
 _CUE_RULES: Final = f"""Each cue has a "kind":
 - "score": music for a stretch of the film. Made by a music model that follows broad structure \
 only. Give it "theme_id" (the id of a theme from the Bible, or null for music that is not a \
@@ -149,6 +156,8 @@ sound_event>"}}), otherwise "stable_audio_3". H3 can only make a sound the story
 names as a sound event in that shot.
 - "hit": a short impact, riser or sting at one moment that no shot carries. Never "h3".
 - "silence": a deliberate absence of music for a stretch (before a thump, after a loss).
+
+{length_rule(_CUE_LIMITS)}
 
 Fields of every cue: "id" (your own short label, such as "c1", unique; boundaries use it), \
 "kind", "summary" (one or two plain lines of what it is, at most {SUMMARY_MAX_CHARS} \
@@ -220,6 +229,8 @@ Answer "ok" when the plan needs no change through your lens. Otherwise answer "c
 "cue_3", or two cue ids for a boundary such as "cue_2>cue_3"), the "problem" in one sentence, \
 and a concrete "suggestion" in one sentence (each at most {note_chars} characters). Only raise \
 a problem that matters to the finished film.
+
+{limits_rule}
 
 Answer with one JSON object only, in exactly this form: {{"verdict": "ok", "notes": []}} or \
 {{"verdict": "change", "notes": [{{"target": "cue_3", "problem": "...", "suggestion": "..."}}]}}"""
@@ -295,6 +306,12 @@ def build_critic_request(
         context_rules=_CONTEXT_RULES,
         notes_max=CRITIC_NOTES_MAX,
         note_chars=NOTE_TEXT_MAX_CHARS,
+        limits_rule=length_rule(
+            {
+                "notes[].target": NOTE_TARGET_MAX_CHARS,
+                "notes[].problem, notes[].suggestion": NOTE_TEXT_MAX_CHARS,
+            }
+        ),
     )
     user = _material(bible, timeline) + "\n\nPLAN:\n" + _json(plan)
     return _request(system, user, model)
@@ -330,9 +347,9 @@ def _object(value: object, name: str) -> dict[str, Any]:
     return value
 
 
-def _text(value: object, name: str, max_chars: int) -> str:
-    """One piece of text on one line. Raises ValueError when it is missing, empty, or longer
-    than `max_chars` with `LIMIT_SLACK` allowed on top.
+def _text(value: object, name: str, max_chars: int, warnings: list[str] | None = None) -> str:
+    """One piece of text on one line. Raises ValueError when it is missing or empty. A text far
+    over `max_chars` is cut with a warning (`fit_text`), or refused when `warnings` is None.
     """
     if value is None:
         raise ValueError(f'There is no "{name}".')
@@ -341,16 +358,15 @@ def _text(value: object, name: str, max_chars: int) -> str:
     text = " ".join(value.split())
     if not text:
         raise ValueError(f'The "{name}" was empty.')
-    accepted = int(max_chars * LIMIT_SLACK)
-    if len(text) > accepted:
-        raise ValueError(f'The "{name}" was longer than {accepted} characters.')
-    return text
+    return fit_text(text, name, max_chars, warnings)
 
 
-def _optional_text(value: object, name: str, max_chars: int) -> str | None:
+def _optional_text(
+    value: object, name: str, max_chars: int, warnings: list[str] | None = None
+) -> str | None:
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
-    return _text(value, name, max_chars)
+    return _text(value, name, max_chars, warnings)
 
 
 def _choice(value: object, name: str, allowed: tuple[str, ...]) -> str:
@@ -418,7 +434,11 @@ def _check_sound_request(
 
 
 def _check_cue(
-    entry: object, position: int, index: music_timeline.Index, theme_ids: set[str]
+    entry: object,
+    position: int,
+    index: music_timeline.Index,
+    theme_ids: set[str],
+    warnings: list[str] | None,
 ) -> dict[str, Any]:
     name = f"cues[{position}]"
     fields = _object(entry, name)
@@ -431,8 +451,8 @@ def _check_cue(
         "label": label.strip(),
         "kind": kind,
         "maker": None,
-        "summary": _text(fields.get("summary"), f"{name}.summary", SUMMARY_MAX_CHARS),
-        "purpose": _text(fields.get("purpose"), f"{name}.purpose", PURPOSE_MAX_CHARS),
+        "summary": _text(fields.get("summary"), f"{name}.summary", SUMMARY_MAX_CHARS, warnings),
+        "purpose": _text(fields.get("purpose"), f"{name}.purpose", PURPOSE_MAX_CHARS, warnings),
         "theme_id": None,
         "emotion": None,
         "intensity": _intensity(fields.get("intensity"), f"{name}.intensity"),
@@ -443,7 +463,7 @@ def _check_cue(
         "end_style": None,
         "sound_request": None,
         "rerouted": None,
-        "reason": _text(fields.get("reason"), f"{name}.reason", REASON_MAX_CHARS),
+        "reason": _text(fields.get("reason"), f"{name}.reason", REASON_MAX_CHARS, warnings),
     }
 
     if kind in SPAN_KINDS:
@@ -466,7 +486,9 @@ def _check_cue(
                     f'The cue "{cue["label"]}" names the theme "{theme_id}", not in the Bible.'
                 )
             cue["theme_id"] = theme_id.strip()
-        cue["emotion"] = _optional_text(fields.get("emotion"), f"{name}.emotion", EMOTION_MAX_CHARS)
+        cue["emotion"] = _optional_text(
+            fields.get("emotion"), f"{name}.emotion", EMOTION_MAX_CHARS, warnings
+        )
     elif kind in (KIND_BED, KIND_HIT):
         cue["maker"] = MAKER_STABLE_AUDIO_3
     elif kind == KIND_POINT:
@@ -510,7 +532,7 @@ def _end_of(cue: dict[str, Any]) -> float:
 
 
 def _check_boundaries(
-    value: object, cues: list[dict[str, Any]]
+    value: object, cues: list[dict[str, Any]], warnings: list[str] | None
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """The boundaries by `(from label, to label)`. Each neighbouring pair of a lane has exactly
     one, and nothing else has one. Raises ValueError for the first thing that is wrong.
@@ -552,7 +574,7 @@ def _check_boundaries(
             "to": pair[1],
             "lane": wanted[pair],
             "join": _choice(join, f"{name}.join", JOINS),
-            "reason": _text(fields.get("reason"), f"{name}.reason", REASON_MAX_CHARS),
+            "reason": _text(fields.get("reason"), f"{name}.reason", REASON_MAX_CHARS, warnings),
         }
     missing = [pair for pair in wanted if pair not in found]
     if missing:
@@ -601,7 +623,11 @@ def _check_order_and_overlaps(
 
 
 def check_plan(
-    answer: dict[str, Any], *, index: music_timeline.Index, theme_ids: set[str]
+    answer: dict[str, Any],
+    *,
+    index: music_timeline.Index,
+    theme_ids: set[str],
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The plan checked and cleaned, as the content that is stored: `cues`, `boundaries` and
     `sound_requests`. Raises ValueError, with a message fit for the user, for the first thing
@@ -610,7 +636,8 @@ def check_plan(
     `index` is the timeline's lookup (`music_timeline.index_of`) and `theme_ids` the ids of the
     Bible's themes. Cues come back in time order with ids `cue_1`, `cue_2`, ... set by code, and
     boundaries use those ids. The manual save runs this same check, so a hand edit obeys the
-    same rules.
+    same rules. With `warnings` (a model's answer), a text far over its size is cut instead and
+    the cut is added to it; without (the manual save), it is refused.
     """
     entries = answer.get("cues")
     if entries is None:
@@ -623,7 +650,7 @@ def check_plan(
         raise ValueError(f"The plan had more than {MAX_CUES} cues.")
 
     cues = [
-        _check_cue(entry, position, index, theme_ids)
+        _check_cue(entry, position, index, theme_ids, warnings)
         for position, entry in enumerate(entries, start=1)
     ]
     labels: set[str] = set()
@@ -632,7 +659,7 @@ def check_plan(
             raise ValueError(f'Two cues were both labelled "{cue["label"]}".')
         labels.add(cue["label"])
 
-    boundaries = _check_boundaries(answer.get("boundaries"), cues)
+    boundaries = _check_boundaries(answer.get("boundaries"), cues, warnings)
     _check_order_and_overlaps(cues, boundaries)
 
     # Where a boundary joins two cues, the join decides how they meet (MD-7).
@@ -728,9 +755,13 @@ def facts(plan: dict[str, Any], total_s: float) -> dict[str, Any]:
 # --- Critics -------------------------------------------------------------------------------
 
 
-def check_critique(answer: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
+def check_critique(
+    answer: dict[str, Any], plan: dict[str, Any], warnings: list[str] | None = None
+) -> dict[str, Any]:
     """One critic's answer checked: `{verdict, notes}`. Every note's target is the plan, a cue
     of `plan`, or two cues of it for a boundary (`cue_2>cue_3`). Raises ValueError otherwise.
+    With `warnings`, a note far over its size is cut, and extra notes are dropped, with a
+    warning each.
     """
     verdict = _choice(answer.get("verdict"), "verdict", (VERDICT_OK, VERDICT_CHANGE))
     raw = answer.get("notes")
@@ -742,8 +773,7 @@ def check_critique(answer: dict[str, Any], plan: dict[str, Any]) -> dict[str, An
         return {"verdict": VERDICT_OK, "notes": []}
     if not raw:
         raise ValueError('The verdict was "change" but there were no notes.')
-    if len(raw) > CRITIC_NOTES_MAX:
-        raise ValueError(f"There were more than {CRITIC_NOTES_MAX} notes.")
+    raw = keep_first(raw, CRITIC_NOTES_MAX, "notes", warnings)
 
     cue_ids = {cue["id"] for cue in plan["cues"]}
     notes: list[dict[str, str]] = []
@@ -761,9 +791,11 @@ def check_critique(answer: dict[str, Any], plan: dict[str, Any]) -> dict[str, An
         notes.append(
             {
                 "target": ">".join(part.strip() for part in parts) if parts else "plan",
-                "problem": _text(fields.get("problem"), f"{name}.problem", NOTE_TEXT_MAX_CHARS),
+                "problem": _text(
+                    fields.get("problem"), f"{name}.problem", NOTE_TEXT_MAX_CHARS, warnings
+                ),
                 "suggestion": _text(
-                    fields.get("suggestion"), f"{name}.suggestion", NOTE_TEXT_MAX_CHARS
+                    fields.get("suggestion"), f"{name}.suggestion", NOTE_TEXT_MAX_CHARS, warnings
                 ),
             }
         )

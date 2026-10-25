@@ -32,6 +32,7 @@ from typing import Any, Final, Literal
 
 from app.providers import speech_synthesizer
 from app.services import discovery_writer
+from app.services.text_limits import LIMIT_SLACK, fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -42,10 +43,12 @@ Subject = Literal["character", "narrator"]
 MAX_TOKENS: Final = 6000
 REASONING_EFFORT: Final = "high"
 
-# What the model is asked to stay under. The limit that is checked is
-# `speech_synthesizer.INSTRUCTION_MAX_CHARS`; asking for less leaves room for a model that
-# writes a little too much.
+# What the model is asked to stay under. The voice model refuses more than
+# `speech_synthesizer.INSTRUCTION_MAX_CHARS`; a text up to `LIMIT_SLACK` times this is kept, so
+# asking for less leaves room for a model that writes a little too much. Anything longer is cut
+# to this length.
 ASKED_MAX_CHARS: Final = 400
+assert int(ASKED_MAX_CHARS * LIMIT_SLACK) <= speech_synthesizer.INSTRUCTION_MAX_CHARS
 
 # What a character's sample says: neutral, about 22 words, so about 7 to 9 seconds of speech,
 # long enough for the voice to show its pitch, pace and texture.
@@ -58,6 +61,8 @@ CHARACTER_LINE: Final = (
 OPENING_MAX_CHARS: Final = 300
 
 _SENTENCE_END: Final = re.compile(r"(?<=[.!?])\s+")
+
+_LIMIT_RULE: Final = length_rule({"instruction": ASKED_MAX_CHARS})
 
 _CHARACTER_INSTRUCTIONS: Final = f"""You write the voice description for a text-to-speech model \
 that designs a voice from words. The user message holds the facts of ONE character of a story: \
@@ -73,6 +78,8 @@ picture of the character, or what is said.
 For a creature or a machine, describe the sound it makes as a voice.
 - One line, no lists, no quotation marks, at most {ASKED_MAX_CHARS} characters.
 
+{_LIMIT_RULE}
+
 Answer with one JSON object only, in exactly this form: {{"instruction": "..."}}"""
 
 _NARRATOR_INSTRUCTIONS: Final = f"""You write the voice description for a text-to-speech model \
@@ -87,6 +94,8 @@ are held. Choose what fits the narration style and the tone.
 - Use only words that a voice can follow. Do not write the story, a title or a name.
 - Where something is not given, choose a plain, fitting detail.
 - One line, no lists, no quotation marks, at most {ASKED_MAX_CHARS} characters.
+
+{_LIMIT_RULE}
 
 Answer with one JSON object only, in exactly this form: {{"instruction": "..."}}"""
 
@@ -177,9 +186,10 @@ def build_request(subject: Subject, facts: dict[str, Any], *, model: str) -> dic
     }
 
 
-def check_instruction(answer: Any) -> str:
+def check_instruction(answer: Any, warnings: list[str] | None = None) -> str:
     """The description from the model's answer, on one line. Raises ValueError, with a message
-    fit for the user, when the answer has none or it is too long for the voice model.
+    fit for the user, when the answer has none. A description far over `ASKED_MAX_CHARS` is cut
+    with a warning added to `warnings`, or refused when `warnings` is None.
     """
     if not isinstance(answer, dict):
         raise ValueError("The model's answer was not a JSON object.")
@@ -189,9 +199,4 @@ def check_instruction(answer: Any) -> str:
     text = " ".join(value.split())
     if not text:
         raise ValueError('The "instruction" of the model\'s answer was empty.')
-    if len(text) > speech_synthesizer.INSTRUCTION_MAX_CHARS:
-        raise ValueError(
-            'The "instruction" of the model\'s answer was longer than '
-            f"{speech_synthesizer.INSTRUCTION_MAX_CHARS} characters."
-        )
-    return text
+    return fit_text(text, "instruction", ASKED_MAX_CHARS, warnings)

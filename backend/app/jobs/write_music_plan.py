@@ -41,7 +41,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Final
 
 from app.core.urls import docker_mapped
@@ -132,29 +134,38 @@ def _cut_off(result: llm.ChatResult) -> bool:
     return result.finish_reason == "length"
 
 
-def _plan_reader(task: _Task) -> llm_call.ReadAnswer:
+def _plan_reader(task: _Task, warnings: list[str]) -> llm_call.ReadAnswer:
+    """Reads a plan. What had to be cut from a usable answer is put in `warnings` (replacing
+    earlier ones).
+    """
     index = music_timeline.index_of(task.timeline)
 
     def read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
         if _cut_off(result):
             return _TOO_LONG, None
+        found: list[str] = []
         try:
             answer = writer.parse_answer(result.content)
-            return None, writer.check_plan(answer, index=index, theme_ids=task.theme_ids)
+            plan = writer.check_plan(answer, index=index, theme_ids=task.theme_ids, warnings=found)
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, plan
 
     return read
 
 
-def _critic_reader(plan: dict[str, Any]) -> llm_call.ReadAnswer:
+def _critic_reader(plan: dict[str, Any], warnings: list[str]) -> llm_call.ReadAnswer:
     def read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
         if _cut_off(result):
             return _TOO_LONG, None
+        found: list[str] = []
         try:
-            return None, writer.check_critique(writer.parse_answer(result.content), plan)
+            critique = writer.check_critique(writer.parse_answer(result.content), plan, found)
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, critique
 
     return read
 
@@ -196,9 +207,14 @@ class WriteMusicPlanHandler(JobHandler):
         usage: dict[str, int] = {}
 
         async def ask(
-            name: str, body: dict[str, Any], read: llm_call.ReadAnswer
+            name: str,
+            body: dict[str, Any],
+            make_read: Callable[[list[str]], llm_call.ReadAnswer],
         ) -> llm_call.Outcome:
-            """Records the request on the job, makes one call, and keeps what it came to."""
+            """Records the request on the job, makes one call, and keeps what it came to,
+            with what had to be cut from the answer (`warnings`).
+            """
+            warnings: list[str] = []
             sent[name] = {
                 "instructions_sha256": llm_call.instructions_sha256(body),
                 "request": body,
@@ -207,9 +223,14 @@ class WriteMusicPlanHandler(JobHandler):
             async with SessionLocal() as session:
                 await store.update_input(session, job_id, job_input)
             outcome = await llm_call.ask_model(
-                job_id, target, body, read, timeout_s=REQUEST_TIMEOUT_S, keep={"calls": dict(calls)}
+                job_id,
+                target,
+                body,
+                make_read(warnings),
+                timeout_s=REQUEST_TIMEOUT_S,
+                keep={"calls": dict(calls)},
             )
-            calls[name] = outcome.record()
+            calls[name] = {**outcome.record(), "warnings": warnings}
             _add_usage(usage, outcome.usage)
             return outcome
 
@@ -226,7 +247,7 @@ class WriteMusicPlanHandler(JobHandler):
                     task.timeline,
                     model=target.model,
                 ),
-                _plan_reader(task),
+                lambda warnings: _plan_reader(task, warnings),
             )
             if outcome.value is None:
                 await self._fail(job_id, f"The music plan could not be revised: {outcome.failure}")
@@ -252,7 +273,7 @@ class WriteMusicPlanHandler(JobHandler):
             outcome = await ask(
                 "plan",
                 writer.build_plan_request(task.bible, task.timeline, model=target.model),
-                _plan_reader(task),
+                lambda warnings: _plan_reader(task, warnings),
             )
             first: dict[str, Any] | None = outcome.value
             if first is None:
@@ -271,7 +292,7 @@ class WriteMusicPlanHandler(JobHandler):
                     writer.build_critic_request(
                         lens, shown, task.bible, task.timeline, model=target.model
                     ),
-                    _critic_reader(current),
+                    partial(_critic_reader, current),
                 )
                 if outcome.value is None:
                     critiques.append(
@@ -305,7 +326,7 @@ class WriteMusicPlanHandler(JobHandler):
                 writer.build_revise_request(
                     shown, asked, task.bible, task.timeline, model=target.model
                 ),
-                _plan_reader(task),
+                lambda warnings: _plan_reader(task, warnings),
             )
             if outcome.value is None:
                 record["failure"] = f"The revision could not be used: {outcome.failure}"

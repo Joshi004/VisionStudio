@@ -31,6 +31,7 @@ from collections.abc import Collection, Sequence
 from typing import Any, Final
 
 from app.services import discovery_writer, shot_definition_writer
+from app.services.text_limits import length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -112,6 +113,8 @@ its view is no longer allowed.
 - At least one editable shot must change.
 - Do not write a shot's duration or its dialogue: they are filled in for you.
 
+{length_rule(shot_definition_writer.LIMITS)}
+
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
 
@@ -170,9 +173,11 @@ def check_answer(
     scene_id: str,
     scene_character_ids: Collection[str],
     editable: Sequence[dict[str, Any]],
+    warnings: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """The answer checked and cleaned. Raises ValueError, with a message fit for the user, for
-    the first problem found.
+    the first problem found. With `warnings`, a text far over its size is cut instead and each
+    cut is added to it (`shot_definition_writer.check_answer`).
 
     `editable` is the shots the repair may change, in order, each `{shot_id, duration,
     dialogue, exchange, staging}` (what code knows and writes itself; `staging` is
@@ -222,6 +227,7 @@ def check_answer(
                 dialogue=shot["dialogue"],
                 exchange=shot.get("exchange") is True,
                 staging=shot.get("staging"),
+                warnings=warnings,
             )
         except ValueError as exc:
             raise ValueError(f'Shot "{shot_id}": {exc}') from exc

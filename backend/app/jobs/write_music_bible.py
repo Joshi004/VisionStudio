@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -117,40 +118,57 @@ def _cut_off(result: llm.ChatResult) -> bool:
     return result.finish_reason == "length"
 
 
-def _read_directions(result: llm.ChatResult) -> tuple[str | None, list[dict[str, Any]] | None]:
-    if _cut_off(result):
-        return _TOO_LONG, None
-    try:
-        return None, writer.check_directions(writer.parse_answer(result.content))
-    except ValueError as exc:
-        return str(exc), None
+def _directions_reader(warnings: list[str]) -> llm_call.ReadAnswer:
+    """Reads the directions. What had to be cut from a usable answer is put in `warnings`
+    (replacing earlier ones). The other readers do the same.
+    """
 
-
-def _choice_reader(directions: list[dict[str, Any]]) -> llm_call.ReadAnswer:
-    def read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
+    def read(result: llm.ChatResult) -> tuple[str | None, list[dict[str, Any]] | None]:
         if _cut_off(result):
             return _TOO_LONG, None
+        found: list[str] = []
         try:
-            return None, writer.check_choice(writer.parse_answer(result.content), directions)
+            directions = writer.check_directions(writer.parse_answer(result.content), found)
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, directions
 
     return read
 
 
-def _bible_reader(task: _Task) -> llm_call.ReadAnswer:
+def _choice_reader(directions: list[dict[str, Any]], warnings: list[str]) -> llm_call.ReadAnswer:
     def read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
         if _cut_off(result):
             return _TOO_LONG, None
+        found: list[str] = []
         try:
-            return None, writer.check_bible(
+            choice = writer.check_choice(writer.parse_answer(result.content), directions, found)
+        except ValueError as exc:
+            return str(exc), None
+        warnings[:] = found
+        return None, choice
+
+    return read
+
+
+def _bible_reader(task: _Task, warnings: list[str]) -> llm_call.ReadAnswer:
+    def read(result: llm.ChatResult) -> tuple[str | None, dict[str, Any] | None]:
+        if _cut_off(result):
+            return _TOO_LONG, None
+        found: list[str] = []
+        try:
+            content = writer.check_bible(
                 writer.parse_answer(result.content),
                 scene_ids=task.scene_ids,
                 refs=task.refs,
                 max_themes=task.max_themes,
+                warnings=found,
             )
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, content
 
     return read
 
@@ -192,9 +210,14 @@ class WriteMusicBibleHandler(JobHandler):
         usage: dict[str, int] = {}
 
         async def ask(
-            name: str, body: dict[str, Any], read: llm_call.ReadAnswer
+            name: str,
+            body: dict[str, Any],
+            make_read: Callable[[list[str]], llm_call.ReadAnswer],
         ) -> llm_call.Outcome:
-            """Records the request on the job, makes one call, and keeps what it came to."""
+            """Records the request on the job, makes one call, and keeps what it came to,
+            with what had to be cut from the answer (`warnings`).
+            """
+            warnings: list[str] = []
             sent[name] = {
                 "instructions_sha256": llm_call.instructions_sha256(body),
                 "request": body,
@@ -206,12 +229,12 @@ class WriteMusicBibleHandler(JobHandler):
                 job_id,
                 target,
                 body,
-                read,
+                make_read(warnings),
                 timeout_s=REQUEST_TIMEOUT_S,
                 keep={"calls": dict(calls)},
                 correct=True,
             )
-            calls[name] = outcome.record()
+            calls[name] = {**outcome.record(), "warnings": warnings}
             _add_usage(usage, outcome.usage)
             return outcome
 
@@ -219,7 +242,7 @@ class WriteMusicBibleHandler(JobHandler):
             outcome = await ask(
                 "directions",
                 writer.build_directions_request(task.context, model=target.model),
-                _read_directions,
+                _directions_reader,
             )
             directions: list[dict[str, Any]] | None = outcome.value
             if directions is None:
@@ -231,7 +254,7 @@ class WriteMusicBibleHandler(JobHandler):
             outcome = await ask(
                 "choice",
                 writer.build_choice_request(task.context, directions, model=target.model),
-                _choice_reader(directions),
+                lambda warnings: _choice_reader(directions, warnings),
             )
             choice: dict[str, Any] | None = outcome.value
             if choice is None:
@@ -252,7 +275,7 @@ class WriteMusicBibleHandler(JobHandler):
             writer.build_bible_request(
                 task.context, direction, max_themes=task.max_themes, model=target.model
             ),
-            _bible_reader(task),
+            lambda warnings: _bible_reader(task, warnings),
         )
         content: dict[str, Any] | None = outcome.value
         if content is None:

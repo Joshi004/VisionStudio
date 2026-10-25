@@ -74,28 +74,36 @@ class DiscoveryHandler(JobHandler):
             cast=library_cast if isinstance(library_cast, list) else None,
         )
 
-    def check(self, content: str, story: str, library_cast: object) -> dict[str, Any]:
+    def check(
+        self, content: str, story: str, library_cast: object, warnings: list[str]
+    ) -> dict[str, Any]:
         """The model's text read and checked, as the content that is stored. Raises ValueError,
-        with a message fit for the user, when it cannot be used. Characters and environments
-        by default; the story is not needed for them, and the cast tells which `library_id`
-        values the answer may use.
+        with a message fit for the user, when it cannot be used. What had to be cut is added to
+        `warnings`. Characters and environments by default; the story is not needed for them,
+        and the cast tells which `library_id` values the answer may use.
         """
         return writer.check_items(
             cast(writer.Kind, self.kind),
             writer.parse_answer(content),
             writer.cast_library_ids(library_cast),
+            warnings,
         )
 
     def _read(
-        self, result: llm.ChatResult, story: str, library_cast: object
+        self, result: llm.ChatResult, story: str, library_cast: object, warnings: list[str]
     ) -> tuple[str | None, dict[str, Any] | None]:
-        """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`."""
+        """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
+        What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+        """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
+        found: list[str] = []
         try:
-            return None, self.check(result.content, story, library_cast)
+            content = self.check(result.content, story, library_cast, found)
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, content
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -143,11 +151,12 @@ class DiscoveryHandler(JobHandler):
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
+        warnings: list[str] = []
         outcome = await llm_call.ask_model(
             job_id,
             target,
             body,
-            lambda result: self._read(result, story, library_cast),
+            lambda result: self._read(result, story, library_cast, warnings),
             timeout_s=REQUEST_TIMEOUT_S,
         )
         content: dict[str, Any] | None = outcome.value
@@ -171,6 +180,7 @@ class DiscoveryHandler(JobHandler):
             output = {
                 **outcome.record(),
                 "content": None,
+                "warnings": warnings,
                 "discovery_id": row.id,
                 "version": row.version,
                 "count": len(content[self.kind]),

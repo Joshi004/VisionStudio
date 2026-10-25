@@ -34,6 +34,7 @@ import re
 from typing import Any, Final
 
 from app.services import discovery_writer, environment_library
+from app.services.text_limits import fit_text, keep_first, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -71,10 +72,6 @@ ZONE_NAME_MAX_CHARS: Final = 40
 ZONE_DESCRIPTION_MAX_CHARS: Final = 140
 # A zone's id: a short lower-case slug. Code makes it from the model's id (or name).
 ZONE_ID_PATTERN: Final = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
-# The prompt states the limits above, but the check accepts this much more: the model often
-# misses a stated length by a few characters, and that should not fail the definition.
-LIMIT_SLACK: Final = 1.25
-
 # The profile columns a definition run overwrites: `to_profile` fills them. The name and the
 # notes are never part of it.
 PROFILE_FIELDS_WRITTEN: Final[tuple[str, ...]] = (
@@ -89,25 +86,62 @@ PROFILE_FIELDS_WRITTEN: Final[tuple[str, ...]] = (
 # quotes are always valid JSON.
 _ANSWER_FORM: Final = json.dumps(
     {
-        "architecture": "...",
-        "layout": "...",
+        "architecture": "two-storey brick house, flat roof",
+        "layout": "one long room with a kitchen corner at the back",
         "spatial_plan": {
-            "master_view": "...",
-            "sides": {side: "..." for side in SPATIAL_SIDES},
-            "zones": [{"id": "by_window", "name": "...", "side": "ahead", "description": "..."}],
+            "master_view": "from the door, looking across the room at the window",
+            "sides": {
+                "ahead": "a window with a worn sofa below it",
+                "left": "a bed against the wall",
+                "right": "a kitchen counter",
+                "behind": "the front door",
+            },
+            "zones": [
+                {
+                    "id": "by_window",
+                    "name": "by the window",
+                    "side": "ahead",
+                    "description": "the sofa and the window",
+                },
+                {
+                    "id": "by_bed",
+                    "name": "by the bed",
+                    "side": "left",
+                    "description": "the bed and the wall",
+                },
+            ],
         },
-        "visual_identity": {key: "..." for key in _VISUAL_IDENTITY_FIELDS},
-        "important_landmarks": ["...", "..."],
-        "atmosphere": {"baseline": "..."},
-        "continuity_rules": ["...", "..."],
+        "visual_identity": {
+            "walls": "peeling cream paint",
+            "floor": "worn wooden boards",
+            "windows": "one tall sash window",
+            "doors": "a plain wooden door",
+            "furniture": "an old sofa, a narrow bed, a small table",
+            "color_palette": "faded cream and brown",
+        },
+        "important_landmarks": ["tall sash window", "narrow iron bed"],
+        "atmosphere": {"baseline": "quiet, dim, slightly cold morning light"},
+        "continuity_rules": ["The window is always closed."],
         "era": {"kind": "present", "years": None, "setting": None},
     }
 )
 
 
 def _limits_text() -> str:
-    sizes = ", ".join(f'"{key}" ({limit})' for key, limit in _VISUAL_IDENTITY_FIELDS.items())
-    return f'  - "visual_identity": {sizes}'
+    """The strict length block, listing every limited field by its path in the answer."""
+    limits = {
+        "architecture": ARCHITECTURE_MAX_CHARS,
+        "layout": LAYOUT_MAX_CHARS,
+        "spatial_plan.master_view": MASTER_VIEW_MAX_CHARS,
+        "spatial_plan.sides.(each side)": SIDE_MAX_CHARS,
+        "spatial_plan.zones[].name": ZONE_NAME_MAX_CHARS,
+        "spatial_plan.zones[].description": ZONE_DESCRIPTION_MAX_CHARS,
+        **{f"visual_identity.{key}": limit for key, limit in _VISUAL_IDENTITY_FIELDS.items()},
+        f"important_landmarks[] (each; at most {LANDMARKS_MAX_ITEMS} items)": LANDMARK_MAX_CHARS,
+        "atmosphere.baseline": BASELINE_MAX_CHARS,
+        f"continuity_rules[] (each; at most {RULES_MAX_ITEMS} items)": RULE_MAX_CHARS,
+    }
+    return length_rule(limits)
 
 
 _INSTRUCTIONS: Final = f"""You are the production designer of a studio that turns written \
@@ -169,10 +203,8 @@ can stand or sit: always at least {ZONES_MIN_ITEMS}, even for a small place such
 right, behind) and a "description" of at most {ZONE_DESCRIPTION_MAX_CHARS} characters saying \
 what is behind a person who stands there, when seen from the middle of the place. Spread the \
 zones over different sides, so that two people in the place can have different backgrounds.
-- Every other field is one short phrase or sentence on one line, with at most this many \
-characters (a longer value is cut off, so keep to it and say the most important thing \
-first): "architecture" ({ARCHITECTURE_MAX_CHARS}), "layout" ({LAYOUT_MAX_CHARS}), \
-"atmosphere.baseline" ({BASELINE_MAX_CHARS}) and
+- Every other field is one short phrase or sentence on one line.
+
 {_limits_text()}
 
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
@@ -291,17 +323,6 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _fit(text: str, path: str, max_chars: int, warnings: list[str]) -> str:
-    """`text` as it is up to `max_chars` with `LIMIT_SLACK` allowed on top. Longer than that it
-    is cut at the last whole word that fits `max_chars` and a warning is added to `warnings`,
-    so a long description does not fail the whole definition.
-    """
-    if len(text) <= int(max_chars * LIMIT_SLACK):
-        return text
-    warnings.append(f'The "{path}" was {len(text)} characters; it was cut to fit {max_chars}.')
-    return discovery_writer.cut_at_word(text, max_chars)
-
-
 def _text(parent: dict[str, Any], key: str, path: str, max_chars: int, warnings: list[str]) -> str:
     """One piece of text on one line. Raises ValueError when it is missing, is not text or is
     empty. A text far over `max_chars` is cut (`_fit`).
@@ -312,7 +333,7 @@ def _text(parent: dict[str, Any], key: str, path: str, max_chars: int, warnings:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
-    return _fit(text, path, max_chars, warnings)
+    return fit_text(text, path, max_chars, warnings)
 
 
 def _text_list(
@@ -333,16 +354,12 @@ def _text_list(
         raise ValueError(f'The "{path}" of the model\'s answer was missing or not a list.')
     if not values:
         raise ValueError(f'The "{path}" of the model\'s answer was empty.')
-    if len(values) > max_items:
-        warnings.append(
-            f'The "{path}" had {len(values)} items; only the first {max_items} were kept.'
-        )
-        values = values[:max_items]
+    values = keep_first(values, max_items, path, warnings)
     items: list[str] = []
     for position, value in enumerate(values, start=1):
         if not isinstance(value, str) or not _one_line(value):
             raise ValueError(f'Item {position} of the "{path}" of the model\'s answer was no text.')
-        items.append(_fit(_one_line(value), f"{path}[{position}]", max_chars, warnings))
+        items.append(fit_text(_one_line(value), f"{path}[{position}]", max_chars, warnings))
     return items
 
 
@@ -447,12 +464,7 @@ def check_spatial_plan(answer: dict[str, Any], warnings: list[str]) -> dict[str,
             "for example one by each wall, door or window, or two spots in the same room "
             "with different backgrounds."
         )
-    if len(raw_zones) > ZONES_MAX_ITEMS:
-        warnings.append(
-            f'The "spatial_plan.zones" had {len(raw_zones)} zones; only the first '
-            f"{ZONES_MAX_ITEMS} were kept."
-        )
-        raw_zones = raw_zones[:ZONES_MAX_ITEMS]
+    raw_zones = keep_first(raw_zones, ZONES_MAX_ITEMS, "spatial_plan.zones", warnings)
     zones = [
         _check_zone(raw, position, warnings) for position, raw in enumerate(raw_zones, start=1)
     ]

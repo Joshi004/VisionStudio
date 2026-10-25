@@ -117,17 +117,23 @@ class DefineSceneHandler(JobHandler):
         scene_id: str,
         character_ids: set[str],
         environment_ids: set[str],
+        warnings: list[str],
     ) -> tuple[str | None, dict[str, Any] | None]:
-        """Reads one answer: `(None, definition)` when it can be stored, else `(why not, None)`."""
+        """Reads one answer: `(None, definition)` when it can be stored, else `(why not, None)`.
+        What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+        """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
+        found: list[str] = []
         try:
             answer = scene_definition_writer.parse_answer(result.content)
-            return None, scene_definition_writer.check_definition(
-                answer, scene_id, character_ids, environment_ids
+            definition = scene_definition_writer.check_definition(
+                answer, scene_id, character_ids, environment_ids, found
             )
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, definition
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -179,11 +185,12 @@ class DefineSceneHandler(JobHandler):
         async with SessionLocal() as session:
             await store.update_input(session, job_id, job_input)
 
+        warnings: list[str] = []
         outcome = await llm_call.ask_model(
             job_id,
             target,
             body,
-            lambda result: self._read(result, scene_id, character_ids, environment_ids),
+            lambda result: self._read(result, scene_id, character_ids, environment_ids, warnings),
             timeout_s=REQUEST_TIMEOUT_S,
         )
         definition: dict[str, Any] | None = outcome.value
@@ -208,6 +215,7 @@ class DefineSceneHandler(JobHandler):
             output = {
                 **outcome.record(),
                 "content": None,
+                "warnings": warnings,
                 "scene_id": scene_id,
                 "version": row.version,
                 "seconds": round(time.monotonic() - started, 1),

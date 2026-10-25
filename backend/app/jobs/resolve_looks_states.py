@@ -93,17 +93,22 @@ class ResolveLooksStatesHandler(JobHandler):
         result: llm.ChatResult,
         requests: list[dict[str, Any]],
         catalog: dict[str, list[dict[str, Any]]],
+        warnings: list[str],
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, checked answer)` when it can be stored, else `(why not,
-        None)`.
+        None)`. What had to be cut from a usable answer is put in `warnings` (replacing earlier
+        ones).
         """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
+        found: list[str] = []
         try:
             answer = writer.parse_answer(result.content)
-            return None, writer.check_answer(answer, requests, catalog)
+            checked = writer.check_answer(answer, requests, catalog, found)
         except ValueError as exc:
             return str(exc), None
+        warnings[:] = found
+        return None, checked
 
     async def start(self, job_id: int) -> None:
         started = time.monotonic()
@@ -133,6 +138,7 @@ class ResolveLooksStatesHandler(JobHandler):
 
         usage: dict[str, Any] | None = None
         record: dict[str, Any] = {}
+        warnings: list[str] = []
         checked: dict[str, Any] | None
         if read.requests:
             await self._phase(job_id, phases.PREPARING_PROMPT)
@@ -152,7 +158,7 @@ class ResolveLooksStatesHandler(JobHandler):
                 job_id,
                 target,
                 body,
-                lambda result: self._read(result, read.requests, read.catalog),
+                lambda result: self._read(result, read.requests, read.catalog, warnings),
                 timeout_s=REQUEST_TIMEOUT_S,
             )
             checked = outcome.value
@@ -186,6 +192,7 @@ class ResolveLooksStatesHandler(JobHandler):
             output = {
                 **record,
                 "content": None,
+                "warnings": warnings,
                 "version": row.version,
                 "requests": len(read.requests),
                 "new_looks": len(checked["new_looks"]),

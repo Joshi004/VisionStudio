@@ -124,9 +124,7 @@ class DefineEnvironmentHandler(JobHandler):
         found: list[str] = []
         try:
             answer = environment_definition_writer.parse_answer(result.content)
-            definition = environment_definition_writer.check_definition(
-                answer, discovery_id, found
-            )
+            definition = environment_definition_writer.check_definition(answer, discovery_id, found)
         except ValueError as exc:
             return str(exc), None
         warnings[:] = found

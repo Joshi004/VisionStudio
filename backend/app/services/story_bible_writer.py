@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 from app.providers import llm
+from app.services.text_limits import fit_text, keep_first, length_rule
 
 # Hidden reasoning is billed as output, so this leaves room to think before the short answer.
 # Qwen3.8 ignores it and uses its own limit (`providers/qwen38.py`).
@@ -40,9 +41,16 @@ TIME_PERIOD_MAX_CHARS: Final = 120
 NARRATION_MAX_CHARS: Final = 400
 WORLD_RULES_MAX_ITEMS: Final = 10
 WORLD_RULE_MAX_CHARS: Final = 300
-# The prompt states the limits above, but the check accepts this much more: the model often
-# misses a stated length by a few characters, and that should not fail the StoryBible.
-LIMIT_SLACK: Final = 1.25
+# The limited fields as the model sees them in its answer.
+_LIMITS: Final = {
+    "title": TITLE_MAX_CHARS,
+    f"genre[] (each; at most {GENRE_MAX_ITEMS} items)": GENRE_ITEM_MAX_CHARS,
+    f"tone[] (each; at most {TONE_MAX_ITEMS} items)": TONE_ITEM_MAX_CHARS,
+    "visual_style": VISUAL_STYLE_MAX_CHARS,
+    "time_period": TIME_PERIOD_MAX_CHARS,
+    "storytelling_style.narration": NARRATION_MAX_CHARS,
+    f"world_rules[] (each; at most {WORLD_RULES_MAX_ITEMS} items)": WORLD_RULE_MAX_CHARS,
+}
 
 _SYSTEM_PROMPT: Final = f"""You are the story editor of a studio that turns written stories \
 into short films. You read one complete story and write its StoryBible: a short record of the \
@@ -73,9 +81,14 @@ and behave (for example "controlled storyteller whose tension increases graduall
 later steps must not break (for example how the supernatural behaves). Each is one sentence of \
 at most {WORLD_RULE_MAX_CHARS} characters. Use an empty list if the story needs none.
 
-Answer with one JSON object only, in exactly this form: {{"title": "...", "genre": ["..."], \
-"tone": ["..."], "visual_style": "...", "time_period": "...", \
-"storytelling_style": {{"narration": "..."}}, "world_rules": ["..."]}}"""
+{length_rule(_LIMITS)}
+
+Answer with one JSON object only, in exactly this form (the values here only show the type \
+and the length, never copy them): {{"title": "The Last Lamp", \
+"genre": ["supernatural horror"], "tone": ["slow burn", "ominous"], \
+"visual_style": "photorealistic cinematic horror", "time_period": "present day", \
+"storytelling_style": {{"narration": "controlled storyteller whose tension rises slowly"}}, \
+"world_rules": ["The ghost can only appear in mirrors."]}}"""
 
 
 def build_request(story_text: str, *, model: str) -> dict[str, Any]:
@@ -113,9 +126,10 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _text(value: object, name: str, max_chars: int) -> str:
-    """One piece of text on one line. Raises ValueError when it is not text, is empty, or is
-    longer than `max_chars` with `LIMIT_SLACK` allowed on top.
+def _text(value: object, name: str, max_chars: int, warnings: list[str] | None) -> str:
+    """One piece of text on one line. Raises ValueError when it is not text or is empty. A
+    text far over `max_chars` is cut with a warning (`fit_text`), or refused when `warnings` is
+    None.
     """
     if value is None:
         raise ValueError(f'There is no "{name}".')
@@ -124,17 +138,21 @@ def _text(value: object, name: str, max_chars: int) -> str:
     text = _one_line(value)
     if not text:
         raise ValueError(f'The "{name}" was empty.')
-    accepted_chars = int(max_chars * LIMIT_SLACK)
-    if len(text) > accepted_chars:
-        raise ValueError(f'The "{name}" was longer than {accepted_chars} characters.')
-    return text
+    return fit_text(text, name, max_chars, warnings)
 
 
 def _text_list(
-    value: object, name: str, *, min_items: int, max_items: int, item_max_chars: int
+    value: object,
+    name: str,
+    *,
+    min_items: int,
+    max_items: int,
+    item_max_chars: int,
+    warnings: list[str] | None,
 ) -> list[str]:
     """A list of texts without repeats (a repeat that differs only in case is dropped).
-    Raises ValueError when it is not a list of texts, or has too few or too many items.
+    Raises ValueError when it is not a list of texts, or has too few items. Too many items are
+    cut to the first ones with a warning, or refused when `warnings` is None.
     """
     if value is None:
         raise ValueError(f'There is no "{name}".')
@@ -145,20 +163,20 @@ def _text_list(
     for entry in value:
         if isinstance(entry, str) and not entry.strip():
             continue  # a blank entry says nothing
-        item = _text(entry, name, item_max_chars)
+        item = _text(entry, name, item_max_chars, warnings)
         if item.casefold() not in seen:
             seen.add(item.casefold())
             items.append(item)
     if len(items) < min_items:
         raise ValueError(f'The "{name}" had fewer than {min_items} item(s).')
-    if len(items) > max_items:
-        raise ValueError(f'The "{name}" had more than {max_items} items.')
-    return items
+    return keep_first(items, max_items, name, warnings)
 
 
-def check_bible(answer: dict[str, Any]) -> dict[str, Any]:
+def check_bible(answer: dict[str, Any], warnings: list[str] | None = None) -> dict[str, Any]:
     """The answer checked and cleaned, as the content that is stored. Raises ValueError, with
-    a message fit for the user, for the first field that is missing or breaks a rule.
+    a message fit for the user, for the first field that is missing or breaks a rule. With
+    `warnings` (a model's answer), a text far over its size, or a list with too many items, is
+    cut instead and each cut is added to it. Without (a Bible a person edited), it is refused.
     """
     style = answer.get("storytelling_style")
     if style is None:
@@ -171,7 +189,7 @@ def check_bible(answer: dict[str, Any]) -> dict[str, Any]:
         world_rules = []
 
     return {
-        "title": _text(answer.get("title"), "title", TITLE_MAX_CHARS),
+        "title": _text(answer.get("title"), "title", TITLE_MAX_CHARS, warnings),
         "language": LANGUAGE,
         "genre": _text_list(
             answer.get("genre"),
@@ -179,6 +197,7 @@ def check_bible(answer: dict[str, Any]) -> dict[str, Any]:
             min_items=GENRE_MIN_ITEMS,
             max_items=GENRE_MAX_ITEMS,
             item_max_chars=GENRE_ITEM_MAX_CHARS,
+            warnings=warnings,
         ),
         "tone": _text_list(
             answer.get("tone"),
@@ -186,12 +205,20 @@ def check_bible(answer: dict[str, Any]) -> dict[str, Any]:
             min_items=TONE_MIN_ITEMS,
             max_items=TONE_MAX_ITEMS,
             item_max_chars=TONE_ITEM_MAX_CHARS,
+            warnings=warnings,
         ),
-        "visual_style": _text(answer.get("visual_style"), "visual_style", VISUAL_STYLE_MAX_CHARS),
-        "time_period": _text(answer.get("time_period"), "time_period", TIME_PERIOD_MAX_CHARS),
+        "visual_style": _text(
+            answer.get("visual_style"), "visual_style", VISUAL_STYLE_MAX_CHARS, warnings
+        ),
+        "time_period": _text(
+            answer.get("time_period"), "time_period", TIME_PERIOD_MAX_CHARS, warnings
+        ),
         "storytelling_style": {
             "narration": _text(
-                style.get("narration"), "storytelling_style.narration", NARRATION_MAX_CHARS
+                style.get("narration"),
+                "storytelling_style.narration",
+                NARRATION_MAX_CHARS,
+                warnings,
             )
         },
         "world_rules": _text_list(
@@ -200,5 +227,6 @@ def check_bible(answer: dict[str, Any]) -> dict[str, Any]:
             min_items=0,
             max_items=WORLD_RULES_MAX_ITEMS,
             item_max_chars=WORLD_RULE_MAX_CHARS,
+            warnings=warnings,
         ),
     }

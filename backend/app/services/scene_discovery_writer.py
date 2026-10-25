@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from app.services import discovery_writer
+from app.services.text_limits import length_rule
 
 MAX_TOKENS: Final = discovery_writer.MAX_TOKENS
 
@@ -59,6 +60,12 @@ MIN_QUOTE_WORDS: Final = 5
 
 # How much of the story's opening is shown to the user when the first scene does not begin there.
 _OPENING_PREVIEW_CHARS: Final = 80
+
+# The limited fields as the model sees them in its answer.
+_LIMITS: Final = {
+    "scenes[].title": TITLE_MAX_CHARS,
+    "scenes[].description": DESCRIPTION_MAX_CHARS,
+}
 
 _WORD: Final = re.compile(r"\S+")
 
@@ -119,6 +126,8 @@ the words that follow it. They must appear in the story in the order of the scen
 scene's words must be the very first words of the story.
 - Do not list characters or places: other steps do that later.
 - List the scenes in the order of the story.
+
+{length_rule(_LIMITS)}
 
 Answer with one JSON object only, in exactly this form: {{"scenes": [{{"id": "...", \
 "title": "...", "description": "...", "starts_with": "..."}}]}}"""
@@ -191,7 +200,9 @@ class _Described:
     starts_with: str
 
 
-def _described(entry: object, position: int, seen: set[str]) -> _Described:
+def _described(
+    entry: object, position: int, seen: set[str], warnings: list[str] | None
+) -> _Described:
     if not isinstance(entry, dict):
         raise ValueError(f"Scene {position} was not an object.")
     scene_id = discovery_writer.clean_slug(entry.get("id"), position)
@@ -200,10 +211,13 @@ def _described(entry: object, position: int, seen: set[str]) -> _Described:
     seen.add(scene_id)
     return _Described(
         id=scene_id,
-        title=discovery_writer.clean_text(entry.get("title"), "title", position, TITLE_MAX_CHARS),
-        description=discovery_writer.clean_text(
-            entry.get("description"), "description", position, DESCRIPTION_MAX_CHARS
+        title=discovery_writer.clean_text(
+            entry.get("title"), "title", position, TITLE_MAX_CHARS, warnings
         ),
+        description=discovery_writer.clean_text(
+            entry.get("description"), "description", position, DESCRIPTION_MAX_CHARS, warnings
+        ),
+        # Words copied from the story: never cut, or they would not be found in it.
         starts_with=discovery_writer.clean_text(
             entry.get("starts_with"), "starts_with", position, STARTS_WITH_MAX_CHARS
         ),
@@ -260,9 +274,10 @@ def _locate(scenes: list[_Described], story_text: str, words: list[StoryWord]) -
     return starts
 
 
-def check_scenes(answer: Any, story_text: str) -> dict[str, Any]:
+def check_scenes(answer: Any, story_text: str, warnings: list[str] | None = None) -> dict[str, Any]:
     """The answer checked and placed in the story, as the content that is stored. Raises
-    ValueError, with a message fit for the user, for the first problem found.
+    ValueError, with a message fit for the user, for the first problem found. With `warnings`, a
+    title or description far over its size is cut and the cut is added to it.
 
     The answer is an object with the list under "scenes" (a bare list is accepted too). Each
     scene is stored as `{index, id, title, description, starts_with, start, end, text}`: the
@@ -280,7 +295,9 @@ def check_scenes(answer: Any, story_text: str) -> dict[str, Any]:
         raise ValueError(f'The "scenes" had more than {MAX_SCENES} scenes.')
 
     seen: set[str] = set()
-    described = [_described(entry, position, seen) for position, entry in enumerate(entries, 1)]
+    described = [
+        _described(entry, position, seen, warnings) for position, entry in enumerate(entries, 1)
+    ]
 
     words = story_words(story_text)
     if not words:

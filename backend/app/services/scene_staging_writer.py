@@ -37,6 +37,7 @@ from typing import Any, Final
 
 from app.services import discovery_writer
 from app.services.environment_definition_writer import SPATIAL_SIDES
+from app.services.text_limits import fit_text, keep_first, length_rule
 
 parse_answer = discovery_writer.parse_answer
 
@@ -48,8 +49,8 @@ SCREEN_SIDES: Final[tuple[str, ...]] = ("left", "right", "center")
 POSTURE_MAX_CHARS: Final = 80
 NOTE_MAX_CHARS: Final = 200
 MAX_MOVES: Final = 12
-# The prompt states the limits above, but the check accepts this much more.
-LIMIT_SLACK: Final = 1.25
+# The limited fields as the model sees them in its answer.
+_LIMITS: Final = {"placements[].posture": POSTURE_MAX_CHARS, "axis.note": NOTE_MAX_CHARS}
 
 _ANSWER_FORM: Final = json.dumps(
     {
@@ -57,7 +58,7 @@ _ANSWER_FORM: Final = json.dumps(
             {
                 "character_id": "an id from CHARACTERS IN THE SCENE",
                 "zone": "an id from the environment's zones",
-                "posture": "...",
+                "posture": "standing, arms crossed",
                 "faces": "a side, a zone id or a character id",
                 "screen_side": "left",
                 "background_side": "ahead",
@@ -66,7 +67,7 @@ _ANSWER_FORM: Final = json.dumps(
         "axis": {
             "between": ["a character id", "another character id"],
             "camera_half": "ahead",
-            "note": "...",
+            "note": "stay on the window side; cut between the two over the shoulder",
         },
         "group_side": "ahead",
         "moves": [
@@ -106,8 +107,9 @@ and none to anyone else (a voice from off screen has no placement).
 and, when the scene has a conversation, over different sides, so each speaker has their own \
 background. Choose the zones that suit what the scene says and does; never move a character \
 somewhere the story does not allow.
-- "posture" is a short phrase (at most {POSTURE_MAX_CHARS} characters): how the person stands \
-or sits.
+- "posture" is a short phrase of a few words, such as "standing, arms crossed" or "seated, \
+leaning forward": how the person stands or sits. Not a sentence, and nothing about their mood \
+or what they say.
 - "faces" is what the person looks toward: one side (ahead, left, right or behind), a zone id, \
 or the id of another character of the scene.
 - "screen_side" is the side of the frame the person appears on in a shot that shows them \
@@ -119,7 +121,7 @@ two characters of the scene's main conversation (the people who speak to each ot
 and the camera stays on one side of the line between them, so they keep opposite screen \
 sides, one "left" and one "right", for the whole scene. "camera_half" is the side of the \
 place the camera stays in; it is not a side where either of those two characters stands. \
-"note" is one line (at most {NOTE_MAX_CHARS} characters) on how the conversation is covered. \
+"note" is one short line on how the conversation is covered. \
 With fewer than two characters, "between" is an empty list, "camera_half" is null and "note" \
 says that nobody is on the line.
 - "group_side" is the side of the place seen behind the whole group in a two-shot or a wide \
@@ -132,6 +134,8 @@ scenes have none, so use an empty list. The two characters of the axis keep oppo
 sides after every move. At most {MAX_MOVES} moves.
 - Everything must agree with the scene's definition and with the events: who is where at the \
 start comes from "continuity_start" of the scene definition.
+
+{length_rule(_LIMITS)}
 
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
@@ -198,15 +202,16 @@ def _one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def _text(parent: dict[str, Any], key: str, path: str, max_chars: int) -> str:
+def _text(
+    parent: dict[str, Any], key: str, path: str, max_chars: int, warnings: list[str] | None
+) -> str:
+    """One piece of text on one line. Raises ValueError when it is missing. A text far over
+    `max_chars` is cut with a warning (`fit_text`), or refused when `warnings` is None.
+    """
     value = parent.get(key)
     if not isinstance(value, str) or not _one_line(value):
         raise ValueError(f'The "{path}" of the model\'s answer was missing or not text.')
-    text = _one_line(value)
-    accepted = int(max_chars * LIMIT_SLACK)
-    if len(text) > accepted:
-        raise ValueError(f'The "{path}" of the model\'s answer was longer than {accepted} chars.')
-    return text
+    return fit_text(_one_line(value), path, max_chars, warnings)
 
 
 def _choice(value: object, allowed: tuple[str, ...], path: str) -> str:
@@ -312,9 +317,12 @@ def check_answer(
     character_ids: list[str],
     event_ids: list[str],
     spatial_plan: dict[str, Any],
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the staging that is stored. Raises ValueError, with a
-    message fit for the user, for the first problem found.
+    message fit for the user, for the first problem found. With `warnings` (a model's answer), a
+    text far over its size, or more moves than allowed, is cut instead and added to it. Without
+    (a staging a person edited), it is refused.
 
     `character_ids` are the characters of the scene, in order; `event_ids` the scene's events,
     in order; `spatial_plan` the environment's. The scene id is set here, never read from the
@@ -337,7 +345,9 @@ def check_answer(
             raise ValueError(
                 f"{placing['character_id']} has more than one placement in the model's answer."
             )
-        posture = _text(raw, "posture", f"placements[{position}].posture", POSTURE_MAX_CHARS)
+        posture = _text(
+            raw, "posture", f"placements[{position}].posture", POSTURE_MAX_CHARS, warnings
+        )
         placed[placing["character_id"]] = {**placing, "posture": posture}
     missing = [item for item in character_ids if item not in placed]
     if missing:
@@ -381,7 +391,7 @@ def check_answer(
         between = []
     note_value = raw_axis.get("note")
     note = (
-        _text(raw_axis, "note", "axis.note", NOTE_MAX_CHARS)
+        _text(raw_axis, "note", "axis.note", NOTE_MAX_CHARS, warnings)
         if isinstance(note_value, str) and note_value.strip()
         else ""
     )
@@ -396,8 +406,7 @@ def check_answer(
         raw_moves = []
     if not isinstance(raw_moves, list):
         raise ValueError('The "moves" of the model\'s answer was not a list.')
-    if len(raw_moves) > MAX_MOVES:
-        raise ValueError(f'The "moves" of the model\'s answer had more than {MAX_MOVES} moves.')
+    raw_moves = keep_first(raw_moves, MAX_MOVES, "moves", warnings)
     moves: list[dict[str, Any]] = []
     last_index = -1
     for position, raw in enumerate(raw_moves, start=1):
