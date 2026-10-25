@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from sqlalchemy import func, select
@@ -171,7 +171,25 @@ def _inputs(
     }
 
 
-async def _collect(session: AsyncSession, project: Project) -> _Collected:
+def _with_override(
+    items: list[music_takes.ItemView], override: dict[str, music_takes.TakeView]
+) -> list[music_takes.ItemView]:
+    """The items with the take given for an item used in place of its selected one (the preview
+    of a take that is not selected). The take counts as current: it is the owner's own pick.
+    """
+    return [
+        replace(item, selection=override[item.item_id], reasons=[], locked=False)
+        if item.item_id in override
+        else item
+        for item in items
+    ]
+
+
+async def _collect(
+    session: AsyncSession,
+    project: Project,
+    override: dict[str, music_takes.TakeView] | None = None,
+) -> _Collected:
     if not project.music_enabled:
         return _blocked(MUSIC_OFF_MESSAGE)
     takes = await music_takes.state(session, project)
@@ -180,7 +198,8 @@ async def _collect(session: AsyncSession, project: Project) -> _Collected:
         return _blocked(takes.blocked_reason or music_cues.NO_PLAN_MESSAGE, plan)
     if not takes.items:
         return _Collected(plan, [], None, None, None, None)
-    for item in takes.items:
+    items = _with_override(takes.items, override) if override else takes.items
+    for item in items:
         reason = _item_block(item)
         if reason is not None:
             return _blocked(reason, plan)
@@ -189,9 +208,7 @@ async def _collect(session: AsyncSession, project: Project) -> _Collected:
         return _blocked(sources.blocked_reason or "The story cannot be rendered yet.", plan)
     loaded = await music_cues.load(session, project)
     values = await _setting_values(session)
-    return _Collected(
-        plan, takes.items, sources, loaded, _inputs(plan, takes.items, sources, values), None
-    )
+    return _Collected(plan, items, sources, loaded, _inputs(plan, items, sources, values), None)
 
 
 # --- Gathering (measures the sounds) -------------------------------------------------------
@@ -206,6 +223,9 @@ class Gathered:
     unmeasured: list[str]
     # The scenes, speech and cuts the placement was made on, to draw next to it.
     timeline: dict[str, Any]
+    # The story's render sources the placement was made on (the preview builds the render's own
+    # timeline from them).
+    sources: story_renders.RenderSources
 
 
 @dataclass(frozen=True)
@@ -470,11 +490,17 @@ def _timeline_summary(
     }
 
 
-async def gather(session: AsyncSession, project: Project) -> Gathered:
+async def gather(
+    session: AsyncSession,
+    project: Project,
+    override: dict[str, music_takes.TakeView] | None = None,
+) -> Gathered:
     """Everything `music_placer.place` needs, with the sounds measured. Raises
-    `MusicPlacementError` when music cannot be placed now.
+    `MusicPlacementError` when music cannot be placed now. `override` is a take for an item
+    (by item id) to use instead of the selected one: the preview of a take that is not selected
+    yet. A placement is never saved from it.
     """
-    collected = await _collect(session, project)
+    collected = await _collect(session, project, override)
     if collected.blocked_reason is not None:
         raise MusicPlacementError(collected.blocked_reason)
     plan = collected.plan
@@ -571,6 +597,35 @@ async def gather(session: AsyncSession, project: Project) -> Gathered:
         plan=plan,
         unmeasured=unmeasured,
         timeline=_timeline_summary(sources, layout, world),
+        sources=sources,
+    )
+
+
+@dataclass(frozen=True)
+class Previewable:
+    """What a preview can be asked for: the scenes of the story and the cues of the plan."""
+
+    scene_ids: frozenset[str]
+    cue_ids: frozenset[str]
+
+
+async def check_preview(
+    session: AsyncSession,
+    project: Project,
+    override: dict[str, music_takes.TakeView] | None = None,
+) -> Previewable:
+    """Whether the music can be previewed now (nothing is measured). Raises
+    `MusicPlacementError` with the reason when it cannot.
+    """
+    collected = await _collect(session, project, override)
+    if collected.blocked_reason is not None:
+        raise MusicPlacementError(collected.blocked_reason)
+    plan, sources = collected.plan, collected.sources
+    if plan is None or sources is None or not collected.items:
+        raise MusicPlacementError(NOTHING_MESSAGE)
+    return Previewable(
+        scene_ids=frozenset(scene.scene_id for scene in sources.scenes),
+        cue_ids=frozenset(str(cue["id"]) for cue in plan.content["cues"]),
     )
 
 

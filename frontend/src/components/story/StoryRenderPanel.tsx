@@ -61,6 +61,28 @@ function levelText(loudness: number | null, gain: number | null): string {
   return `${loudness.toFixed(1)} LUFS, gain ${sign}${gain.toFixed(1)} dB`;
 }
 
+/** "Music: placement version 2, 7 sounds (bed, score), ambience on." */
+function musicText(music: NonNullable<StoryRender["music"]>): string {
+  const parts = [
+    `placement version ${music.placement_version}`,
+    `${music.sounds} ${music.sounds === 1 ? "sound" : "sounds"} (${music.lanes.join(", ")})`,
+  ];
+  if (music.left_out > 0) {
+    parts.push(`${music.left_out} left out`);
+  }
+  parts.push(music.ambience ? "ambience on" : "ambience off");
+  return parts.join(", ");
+}
+
+/** "Finished sound: -14.1 LUFS, true peak -1.2 dBTP (target -14 LUFS, ceiling -1 dBTP)." */
+function masterText(master: NonNullable<StoryRender["master"]>): string {
+  const reached =
+    master.final_lufs === null || master.final_true_peak_dbtp === null
+      ? "not measured"
+      : `${master.final_lufs.toFixed(1)} LUFS, true peak ${master.final_true_peak_dbtp.toFixed(1)} dBTP`;
+  return `${reached} (target ${master.target_lufs} LUFS, ceiling ${master.true_peak_db} dBTP)`;
+}
+
 /** One render in the list: its status, why it is out of date, and what it was made from. */
 function RenderRow({ render }: { render: StoryRender }) {
   const status = STATUS[render.status];
@@ -107,7 +129,22 @@ function RenderRow({ render }: { render: StoryRender }) {
             )}
           </Text>
         )}
+        {render.music !== null && (
+          <Text size="xs" c="dimmed">
+            Music: {musicText(render.music)}
+          </Text>
+        )}
+        {render.master !== null && (
+          <Text size="xs" c="dimmed">
+            Finished sound: {masterText(render.master)}
+          </Text>
+        )}
       </Stack>
+      {render.master?.notes.map((note) => (
+        <Text key={note} size="xs" c="yellow.8">
+          {note}
+        </Text>
+      ))}
     </Stack>
   );
 }
@@ -136,9 +173,9 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
             <Text size="sm" c="dimmed">
               Trims the selected clip of each shot to its length on the
               timeline, puts the narration on top (the clips&apos; own sound is
-              lowered under it), and joins everything into one video. Nothing
-              starts by itself. Music, subtitles and the final checks come
-              later.
+              lowered under it), mixes in the placed music and ambience, brings
+              the finished sound to the target loudness, and joins everything
+              into one video. Nothing starts by itself. Subtitles come later.
             </Text>
           </Stack>
           <Button
@@ -170,7 +207,12 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
         {data && data.can_render && data.planned_seconds !== null && (
           <Text size="sm" c="dimmed">
             The video will be {data.planned_seconds.toFixed(2)} s (
-            {data.planned_frames} frames at {data.fps} fps).
+            {data.planned_frames} frames at {data.fps} fps),{" "}
+            {data.music_placement_version === null
+              ? "without music."
+              : `with the music of placement version ${data.music_placement_version}${
+                  data.ambience_enabled ? "." : ", without ambience."
+                }`}
           </Text>
         )}
         {data?.warnings.map((warning) => (
@@ -216,6 +258,11 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
             {newest.reasons.map((text) => (
               <Text key={text} size="xs" c="yellow.8">
                 {text}
+              </Text>
+            ))}
+            {newest.master?.notes.map((note) => (
+              <Text key={note} size="xs" c="yellow.8">
+                {note}
               </Text>
             ))}
           </Stack>

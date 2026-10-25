@@ -157,10 +157,10 @@ STEPS: Final[tuple[Step, ...]] = (
     Step("prompts", "Compile the shot prompts", ("generation_requests",)),
     Step("shot_generation", "Generate the clips", ("prompts",)),
     # MUSIC-011: the exact place of every selected music take on the render's own timeline. It
-    # needs the takes of the music and of the shots. Skipped as complete when music is off. The
-    # render does not wait for it until MUSIC-012 mixes the music in.
+    # needs the takes of the music and of the shots. Skipped as complete when music is off.
+    # The render waits for it (MUSIC-012): it mixes the placed music in.
     Step("music_placement", "Place the music", ("music_generation", "shot_generation")),
-    Step("render", "Render the video", ("shot_generation",)),
+    Step("render", "Render the video", ("shot_generation", "music_placement")),
 )
 
 STEP_KEYS: Final = tuple(step.key for step in STEPS)

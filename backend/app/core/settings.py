@@ -138,6 +138,13 @@ MUSIC_PLACE_TIGHT_KEY = "music_place_tight_ms"
 MUSIC_PLACE_LOOSE_KEY = "music_place_loose_ms"
 MUSIC_PLACE_WIDEN_KEY = "music_place_widen_pct"
 MUSIC_CROSSFADE_KEY = "music_crossfade_ms"
+# How the music sits in the render (MUSIC-012). The depths are whole dB below 0.
+MUSIC_DUCK_LOW_KEY = "music_duck_low_db"
+MUSIC_DUCK_MEDIUM_KEY = "music_duck_medium_db"
+MUSIC_BED_SHOT_DUCK_KEY = "music_bed_shot_duck_db"
+# The loudness every finished story video is brought to (MUSIC-012, MD-19).
+RENDER_LOUDNESS_KEY = "render_loudness_lufs"
+RENDER_TRUE_PEAK_KEY = "render_true_peak_db"
 
 # How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
 # estimated from its word count at a speaking pace; one above the limit is still saved.
@@ -772,6 +779,76 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=3000,
         min_value=500,
         max_value=8000,
+    ),
+    SettingSpec(
+        key=MUSIC_DUCK_LOW_KEY,
+        group=GROUP_MUSIC,
+        label="Music level under the voice when the cue says 'low' (dB)",
+        help=(
+            "How far the score and the ambience beds are lowered while someone speaks, for a "
+            "cue whose mix says it should be almost not there under the voice. A negative "
+            "number of decibels: -18 is much quieter, -6 only a little. It applies the next "
+            "time the video is rendered."
+        ),
+        value_type="integer",
+        default=-18,
+        min_value=-40,
+        max_value=-1,
+    ),
+    SettingSpec(
+        key=MUSIC_DUCK_MEDIUM_KEY,
+        group=GROUP_MUSIC,
+        label="Music level under the voice when the cue says 'medium' (dB)",
+        help=(
+            "The same, for a cue whose mix says it may stay audible under the voice. It "
+            "applies the next time the video is rendered."
+        ),
+        value_type="integer",
+        default=-10,
+        min_value=-40,
+        max_value=-1,
+    ),
+    SettingSpec(
+        key=MUSIC_BED_SHOT_DUCK_KEY,
+        group=GROUP_MUSIC,
+        label="Lowering of the video model's own sound under an ambience bed (dB)",
+        help=(
+            "Where an ambience bed plays, the sound that comes with each shot's clip is "
+            "lowered by this much, so the two do not stack up. It is never lowered during a "
+            "line of dialogue. 0 does nothing (the default, until you have listened). It "
+            "applies the next time the video is rendered."
+        ),
+        value_type="integer",
+        default=0,
+        min_value=-12,
+        max_value=0,
+    ),
+    SettingSpec(
+        key=RENDER_LOUDNESS_KEY,
+        group=GROUP_STORY,
+        label="Loudness of the finished video (LUFS)",
+        help=(
+            "Every rendered story video is brought to this integrated loudness. Streaming "
+            "services commonly use about -14. A lower (more negative) number is quieter. It "
+            "applies the next time the video is rendered."
+        ),
+        value_type="integer",
+        default=-14,
+        min_value=-24,
+        max_value=-10,
+    ),
+    SettingSpec(
+        key=RENDER_TRUE_PEAK_KEY,
+        group=GROUP_STORY,
+        label="True-peak ceiling of the finished video (dBTP)",
+        help=(
+            "The finished video's sound never goes above this level between samples. -1 is "
+            "common for streaming. It applies the next time the video is rendered."
+        ),
+        value_type="integer",
+        default=-1,
+        min_value=-3,
+        max_value=0,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

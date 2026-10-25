@@ -16,6 +16,10 @@ changes nothing in a render that has started.
 - **A selected take that is out of date still renders** when it has enough frames for its shot
   (the owner's decision); the render lists it as a warning.
 - Two presses make one job (`store.create_job` finds the active job of the project).
+- **Music (MUSIC-012).** With music on, a render uses the project's current music placement and is
+  refused without one (`render_music.gate`); the placement is read by id and recorded on the
+  render, and a newer placement makes the render out of date. The mix and loudness settings are
+  recorded on the render too.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from typing import Any, Final, Literal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import settings as settings_service
 from app.db.models import Job, Project, SpeechUnitAudio, StoryRender
 from app.jobs import store
 from app.services import provenance, shot_plans, shot_takes, speech_synthesis, story_render_plan
@@ -69,6 +74,10 @@ class StoryRendersState:
     warnings: list[dict[str, Any]]
     # How long the next render would be, in frames, or None when it cannot be made.
     planned_frames: int | None
+    # The music placement version the next render would use, or None when it has no music.
+    music_placement_version: int | None
+    # Whether the next render leaves the beds and point sounds out (ambience switch).
+    ambience_enabled: bool
     fps: int
     # The newest render job, whatever its status.
     job: Job | None
@@ -211,13 +220,45 @@ async def _scene_sources(
     return scenes
 
 
+async def mix_settings(session: AsyncSession) -> story_render_plan.MixSettings:
+    """The settings of the mix and the finished loudness, as the next render would use them."""
+    return story_render_plan.MixSettings(
+        loudness_lufs=await settings_service.get_int(session, settings_service.RENDER_LOUDNESS_KEY),
+        true_peak_db=await settings_service.get_int(session, settings_service.RENDER_TRUE_PEAK_KEY),
+        duck_low_db=await settings_service.get_int(session, settings_service.MUSIC_DUCK_LOW_KEY),
+        duck_medium_db=await settings_service.get_int(
+            session, settings_service.MUSIC_DUCK_MEDIUM_KEY
+        ),
+        bed_shot_duck_db=await settings_service.get_int(
+            session, settings_service.MUSIC_BED_SHOT_DUCK_KEY
+        ),
+    )
+
+
+async def _music_gate(session: AsyncSession, project: Project) -> Any:
+    """What the next render does about music (`render_music.gate`). Imported here because
+    `music_placement` imports this module.
+    """
+    from app.services import render_music
+
+    return await render_music.gate(session, project)
+
+
 def _plan_of(
-    project: Project, scenes: list[story_render_plan.SceneSource]
+    project: Project,
+    scenes: list[story_render_plan.SceneSource],
+    mix: story_render_plan.MixSettings,
+    music: story_render_plan.MusicSource | None = None,
 ) -> tuple[story_render_plan.RenderPlan | None, str | None]:
     """The plan of the next render, or the reason it cannot be made."""
     try:
         plan = story_render_plan.build_plan(
-            scenes, fps=project.fps, width=project.out_width, height=project.out_height
+            scenes,
+            fps=project.fps,
+            width=project.out_width,
+            height=project.out_height,
+            mix=mix,
+            music=music,
         )
     except story_render_plan.RenderPlanError as exc:
         return None, str(exc)
@@ -227,13 +268,64 @@ def _plan_of(
 # --- Reading the state ----------------------------------------------------------------------
 
 
+_MIX_CONSTANTS: Final = (
+    "music_duck_low_db",
+    "music_duck_medium_db",
+    "bed_shot_duck_db",
+)
+_MASTER_CONSTANTS: Final = ("master_lufs", "master_true_peak_db")
+
+
+def _music_reasons(
+    recorded: dict[str, Any],
+    project: Project,
+    source: story_render_plan.MusicSource | None,
+    music_blocked: str | None,
+    mix: story_render_plan.MixSettings,
+) -> list[str]:
+    """Why the music of a render, or its mix settings, no longer match."""
+    reasons: list[str] = []
+    used = recorded.get("music") if isinstance(recorded.get("music"), dict) else None
+    if used is not None and source is None:
+        if not project.music_enabled:
+            reasons.append("Music has been switched off since this video was made.")
+        elif music_blocked is not None:
+            reasons.append("The music of this video is out of date or no longer ready.")
+        else:
+            reasons.append("The music of this video is no longer part of the story.")
+    elif used is None and source is not None:
+        reasons.append("Music has been placed since this video was made.")
+    elif used is not None and source is not None:
+        if used.get("placement_id") != source.placement_id:
+            reasons.append(
+                f"The music was placed again since this video was made (version "
+                f"{source.placement_version}; this video used version "
+                f"{used.get('placement_version')})."
+            )
+        if used.get("ambience") != source.ambience:
+            reasons.append("The ambience switch has changed since this video was made.")
+
+    # A video made before the final loudness (timeline version 1) has no recorded settings.
+    constants = recorded.get("constants") if isinstance(recorded.get("constants"), dict) else {}
+    now = story_render_plan.constants(mix)
+    keys = _MASTER_CONSTANTS if used is None else (*_MIX_CONSTANTS, *_MASTER_CONSTANTS)
+    if any(key in constants and constants[key] != now[key] for key in keys):
+        reasons.append("A mix or loudness setting has changed since this video was made.")
+    return reasons
+
+
 def _render_reasons(
     row: StoryRender,
     plans: shot_plans.ShotPlansState,
     takes: shot_takes.ShotTakesState,
     speech: dict[tuple[str, str], speech_synthesis.UnitEntry],
+    music: tuple[
+        Project, story_render_plan.MusicSource | None, str | None, story_render_plan.MixSettings
+    ],
 ) -> list[str]:
-    """Why a render no longer matches the story, one sentence each."""
+    """Why a render no longer matches the story, one sentence each. `music` is the project, the
+    music source and refusal of the next render (`render_music.gate`) and the mix settings.
+    """
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
     current = {entry.item["id"]: entry for entry in plans.entries}
     reasons: list[str] = []
@@ -284,6 +376,7 @@ def _render_reasons(
             reasons.append(f"{label} is no longer ready.")
         elif made.audio.id != unit.get("audio_id"):
             reasons.append(f"{label} was made again since this video was made.")
+    reasons.extend(_music_reasons(recorded, *music))
     return reasons
 
 
@@ -316,16 +409,24 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     renders = await _all_renders(session, project.id)
     jobs = await _jobs_of(session, renders)
 
+    mix = await mix_settings(session)
+    gate = await _music_gate(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None:
-        plan, blocked = _plan_of(project, await _scene_sources(session, plans, takes, speech))
+        plan, blocked = _plan_of(
+            project, await _scene_sources(session, plans, takes, speech), mix, gate.source
+        )
+    if blocked is None and gate.blocked_reason is not None:
+        plan, blocked = None, gate.blocked_reason
     if blocked is None and job is not None and job.status in store.ACTIVE_STATUSES:
         blocked = _ALREADY_RENDERING
 
     entries: list[RenderEntry] = []
     for row in renders:
-        reasons = _render_reasons(row, plans, takes, speech)
+        reasons = _render_reasons(
+            row, plans, takes, speech, (project, gate.source, gate.blocked_reason, mix)
+        )
         entries.append(
             RenderEntry(
                 row=row,
@@ -339,6 +440,10 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
         blocked_reason=blocked,
         warnings=plan.warnings if plan is not None else [],
         planned_frames=plan.timeline["total_frames"] if plan is not None else None,
+        music_placement_version=(
+            gate.source.placement_version if gate.source is not None else None
+        ),
+        ambience_enabled=project.ambience_enabled,
         fps=project.fps,
         job=job,
         renders=entries,
@@ -372,7 +477,9 @@ async def next_render_sources(session: AsyncSession, project: Project) -> Render
         return RenderSources([], None, blocked, takes)
     speech = _speech_by_unit(await speech_synthesis.state(session, project))
     scenes = await _scene_sources(session, plans, takes, speech)
-    plan, blocked = _plan_of(project, scenes)
+    # Where the shots and the speech sit does not depend on the music, so the plan is made
+    # without it (the placement itself is made from this timeline).
+    plan, blocked = _plan_of(project, scenes, story_render_plan.MixSettings())
     return RenderSources(scenes, plan, blocked, takes)
 
 
@@ -394,9 +501,17 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
     blocked = plans.blocked_reason or takes.blocked_reason
     if blocked is not None:
         raise StoryRendersError(blocked)
-    plan, blocked = _plan_of(project, await _scene_sources(session, plans, takes, speech))
+    gate = await _music_gate(session, project)
+    plan, blocked = _plan_of(
+        project,
+        await _scene_sources(session, plans, takes, speech),
+        await mix_settings(session),
+        gate.source,
+    )
     if plan is None:
         raise StoryRendersError(blocked or "The story cannot be rendered now.")
+    if gate.blocked_reason is not None:
+        raise StoryRendersError(gate.blocked_reason)
 
     job, created = await store.create_job(
         session,

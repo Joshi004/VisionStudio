@@ -30,6 +30,7 @@ import {
 import { isJobActive } from "../../api/polling";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { Measurements } from "../musicLab/MusicRunRating";
+import { MusicPreviewPlayer } from "./MusicPreviewPlayer";
 
 // The longest note the server accepts (`NOTE_MAX_CHARS`).
 const NOTE_MAX_CHARS = 1000;
@@ -284,6 +285,8 @@ function ItemCard({ projectId, item, onMake, making }: ItemCardProps) {
             {item.takes.map((take) => (
               <TakeCard
                 key={take.id}
+                projectId={projectId}
+                cueId={item.cue_id}
                 take={take}
                 itemLocked={item.locked}
                 busy={busy}
@@ -389,6 +392,8 @@ function takeBadge(take: MusicTake) {
 }
 
 type TakeCardProps = {
+  projectId: number;
+  cueId: string;
   take: MusicTake;
   itemLocked: boolean;
   busy: boolean;
@@ -398,6 +403,8 @@ type TakeCardProps = {
 };
 
 function TakeCard({
+  projectId,
+  cueId,
   take,
   itemLocked,
   busy,
@@ -444,6 +451,13 @@ function TakeCard({
           </Text>
         )}
         <Recording run={run} />
+        {hasSound && take.current && !take.rejected && (
+          <MusicPreviewPlayer
+            projectId={projectId}
+            target={{ cueId, takeId: take.id }}
+            label="Hear it in the story"
+          />
+        )}
         {run !== null && <Measurements run={run} />}
         {take.check !== null && take.check.passed && (
           <Text size="xs" c="green">

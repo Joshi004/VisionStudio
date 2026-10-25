@@ -26,6 +26,7 @@ import {
 import { isJobActive } from "../../api/polling";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { MusicPlacementStrip } from "./MusicPlacementStrip";
+import { MusicPreviewPlayer } from "./MusicPreviewPlayer";
 import {
   JOIN_LABELS,
   KIND_COLORS,
@@ -190,7 +191,9 @@ export function MusicPlacementPanel({ projectId }: MusicPlacementPanelProps) {
         </Stack>
       </Paper>
 
-      {shown && <MusicPlacementView placement={shown} />}
+      {shown && (
+        <MusicPlacementView projectId={projectId} placement={shown} />
+      )}
       {viewingOlder && olderVersion.isError && (
         <Alert color="red" title="Could not load the version">
           {describeError(olderVersion.error)}
@@ -201,7 +204,13 @@ export function MusicPlacementPanel({ projectId }: MusicPlacementPanelProps) {
 }
 
 /** The placement over the time strip, then what was checked and every fallback. */
-function MusicPlacementView({ placement }: { placement: MusicPlacementOut }) {
+function MusicPlacementView({
+  projectId,
+  placement,
+}: {
+  projectId: number;
+  placement: MusicPlacementOut;
+}) {
   const { content } = placement;
   const { facts } = content;
   const inside = facts.inside_speech;
@@ -221,6 +230,7 @@ function MusicPlacementView({ placement }: { placement: MusicPlacementOut }) {
             </Text>
           </Group>
           <MusicPlacementStrip content={content} />
+          <ScenePreviews projectId={projectId} content={content} />
         </Stack>
       </Paper>
 
@@ -294,6 +304,7 @@ function MusicPlacementView({ placement }: { placement: MusicPlacementOut }) {
           {content.placements.map((item) => (
             <PlacedLine
               key={item.item_id}
+              projectId={projectId}
               item={item}
               rate={content.sample_rate}
             />
@@ -400,7 +411,15 @@ function MusicPlacementView({ placement }: { placement: MusicPlacementOut }) {
 }
 
 /** "cue_2  Score  0:10.00 to 0:42.50: a quiet piano line", then how each edge was found. */
-function PlacedLine({ item, rate }: { item: PlacedSound; rate: number }) {
+function PlacedLine({
+  projectId,
+  item,
+  rate,
+}: {
+  projectId: number;
+  item: PlacedSound;
+  rate: number;
+}) {
   const start = item.story_start_sample / rate;
   const end = start + item.length_samples / rate;
   return (
@@ -452,6 +471,52 @@ function PlacedLine({ item, rate }: { item: PlacedSound; rate: number }) {
           {note}
         </Text>
       ))}
+      {item.role === "cue" && (
+        <MusicPreviewPlayer
+          projectId={projectId}
+          target={{ cueId: item.cue_id }}
+          label="Hear it in context"
+        />
+      )}
+    </Stack>
+  );
+}
+
+/** A preview of each scene with the music placed as it is, to hear how it sits with the story. */
+function ScenePreviews({
+  projectId,
+  content,
+}: {
+  projectId: number;
+  content: MusicPlacementOut["content"];
+}) {
+  const scenes = content.timeline.scenes;
+  const [sceneRef, setSceneRef] = useState<string | null>(null);
+  if (scenes.length === 0) {
+    return null;
+  }
+  const chosen = sceneRef ?? scenes[0].ref;
+  return (
+    <Stack gap="xs">
+      <Group gap="sm" align="flex-end">
+        <Select
+          aria-label="Scene to hear"
+          w={260}
+          allowDeselect={false}
+          data={scenes.map((scene) => ({ value: scene.ref, label: scene.title }))}
+          value={chosen}
+          onChange={setSceneRef}
+        />
+        <Text size="xs" c="dimmed">
+          Hear the music with the clips&apos; sound and the narration of one scene.
+        </Text>
+      </Group>
+      <MusicPreviewPlayer
+        key={chosen}
+        projectId={projectId}
+        target={{ sceneId: chosen.slice("scene:".length) }}
+        label="Hear the scene"
+      />
     </Stack>
   );
 }

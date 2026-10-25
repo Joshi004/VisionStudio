@@ -24,18 +24,37 @@ source frame short; the render repeats its last frame then. The plan checks the 
   dialogue falls between them, so the sound does not pump between sentences.
 - *Narration layer*: only narration units, each at its place on the timeline. Dialogue is only in
   the shot audio, so it is never heard twice.
+
+**Music** (timeline version 2, MUSIC-012). When the project has a current music placement
+(`MusicSource`), the timeline also holds every placed sound with everything the mixer needs, in
+the sound's own seconds (its time 0 is the first sample it plays):
+
+- *Ducking*: the score and the ambience beds are lowered under narration and dialogue, by the
+  depth of the cue's own mix note (`under_voice`: low or medium, two settings). Where a cue's mix
+  lets the sound swell in the gaps between lines (`swell_in_gaps`), a gap of `MUSIC_GAP_RELEASE_S`
+  releases the duck; otherwise only a gap of `MUSIC_GAP_HOLD_S` does, so the music holds steady.
+- *Dips*: the score and the beds dip by `DIP_DB` around every placed hit, point sound and every
+  sound the video model makes for a cue, so a swell never hides the thump the scene depends on.
+- *Swells*: a placement's `mix_requests` (a bed swell that covers a join) raise the beds playing at
+  that second by `SWELL_DB`.
+- *The video model's sound under a bed* (MD-17): the shot audio is lowered by a setting wherever a
+  bed plays, never during a line of dialogue. The setting is 0 (off) until the owner tunes it.
+
+`master` holds the loudness the finished mix is brought to. Every constant used is recorded.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from app.services import frame_counts
+from app.services import frame_counts, render_commands
 
-# The shape of `job.input.timeline`. The job refuses a timeline it does not know.
-TIMELINE_VERSION: Final = 1
+# The shape of `job.input.timeline`. The job refuses a timeline it does not know. Version 2 adds
+# the music layers, the dip of the shot audio under a bed and the master loudness (MUSIC-012).
+TIMELINE_VERSION: Final = 2
 
 SHOT_TARGET_LUFS: Final = -16.0
 NARRATION_TARGET_LUFS: Final = -16.0
@@ -43,6 +62,33 @@ MAX_BOOST_DB: Final = 6.0
 DUCK_DB: Final = -12.0
 DUCK_RAMP_S: Final = 0.25
 DUCK_MERGE_GAP_S: Final = 1.0
+
+# --- The music in the mix (MUSIC-012). Starting values, untested by ear, to be tuned. ----------
+# The ramps of the music's duck under a voice, longer than the shot audio's, so music breathes.
+MUSIC_DUCK_RAMP_S: Final = 0.4
+# A gap between two spoken stretches this long lets music that may swell come back up.
+MUSIC_GAP_RELEASE_S: Final = 1.0
+# ... and this long for music that must hold steady.
+MUSIC_GAP_HOLD_S: Final = 4.0
+# A short dip around a sound the scene depends on: from DIP_BEFORE_S before to DIP_AFTER_S after.
+DIP_DB: Final = -6.0
+DIP_BEFORE_S: Final = 0.15
+DIP_AFTER_S: Final = 0.5
+DIP_RAMP_S: Final = 0.08
+# A bed's swell that covers a join.
+SWELL_DB: Final = 4.0
+SWELL_RAMP_S: Final = 0.5
+# The ramps of the shot audio's lowering under a bed.
+BED_SHOT_RAMP_S: Final = 1.0
+# loudnorm's loudness range, wide so a quiet story keeps its dynamics (linear mode).
+MASTER_LRA: Final = 20.0
+
+LANE_SCORE: Final = "score"
+LANE_BED: Final = "bed"
+LANE_SOUNDS: Final = "sounds"
+_LANES: Final = (LANE_SCORE, LANE_BED, LANE_SOUNDS)
+_POINT_KIND: Final = "point"
+UNDER_VOICE_LOW: Final = "low"
 
 # How many shots a refusal names before it says "and n more".
 _NAMED: Final = 5
@@ -112,6 +158,35 @@ class SceneSource:
     plan_version: int | None
     shots: list[ShotSource]
     units: list[UnitSource]
+
+
+@dataclass(frozen=True)
+class MixSettings:
+    """The settings of the mix, in whole dB and LUFS (`core/settings.py`, MUSIC-012)."""
+
+    loudness_lufs: int = -14
+    true_peak_db: int = -1
+    duck_low_db: int = -18
+    duck_medium_db: int = -10
+    # 0 leaves the shot audio alone under a bed.
+    bed_shot_duck_db: int = 0
+
+
+@dataclass(frozen=True)
+class MusicSource:
+    """The current music placement a render is made with (MUSIC-011's `music_placement.content`)
+    and what the cues' own mix notes say.
+    """
+
+    placement_id: int
+    placement_version: int
+    # `music_placement.content`: samples at 48 kHz on this render's own timeline.
+    content: dict[str, Any]
+    # By cue id: how far under the voice the cue sits (`low` or `medium`), and whether it may
+    # swell in the gaps between lines.
+    cue_mix: dict[str, tuple[str, bool]]
+    # Whether beds and point sounds are in the render (the project's ambience switch).
+    ambience: bool = True
 
 
 @dataclass(frozen=True)
@@ -187,8 +262,39 @@ def slice_windows(
     return sliced
 
 
-def constants() -> dict[str, float]:
+def merge_spans(spans: Sequence[tuple[float, float]], gap_s: float) -> list[tuple[float, float]]:
+    """The spans in order, with two made one when they overlap or are less than `gap_s` apart."""
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted(spans):
+        if merged and (start <= merged[-1][1] or start - merged[-1][1] < gap_s):
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def subtract_spans(
+    spans: Sequence[tuple[float, float]], removed: Sequence[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """What is left of `spans` once every span of `removed` is taken out."""
+    holes = merge_spans(removed, 0.0)
+    left: list[tuple[float, float]] = []
+    for start, end in merge_spans(spans, 0.0):
+        cursor = start
+        for hole_start, hole_end in holes:
+            if hole_end <= cursor or hole_start >= end:
+                continue
+            if hole_start > cursor:
+                left.append((cursor, hole_start))
+            cursor = max(cursor, hole_end)
+        if cursor < end:
+            left.append((cursor, end))
+    return left
+
+
+def constants(mix: MixSettings | None = None) -> dict[str, float]:
     """The audio values a render used, recorded on it (D-3)."""
+    mix = mix or MixSettings()
     return {
         "shot_target_lufs": SHOT_TARGET_LUFS,
         "narration_target_lufs": NARRATION_TARGET_LUFS,
@@ -196,7 +302,161 @@ def constants() -> dict[str, float]:
         "duck_db": DUCK_DB,
         "duck_ramp_s": DUCK_RAMP_S,
         "duck_merge_gap_s": DUCK_MERGE_GAP_S,
+        "music_duck_low_db": float(mix.duck_low_db),
+        "music_duck_medium_db": float(mix.duck_medium_db),
+        "music_duck_ramp_s": MUSIC_DUCK_RAMP_S,
+        "music_gap_release_s": MUSIC_GAP_RELEASE_S,
+        "music_gap_hold_s": MUSIC_GAP_HOLD_S,
+        "dip_db": DIP_DB,
+        "dip_before_s": DIP_BEFORE_S,
+        "dip_after_s": DIP_AFTER_S,
+        "dip_ramp_s": DIP_RAMP_S,
+        "swell_db": SWELL_DB,
+        "swell_ramp_s": SWELL_RAMP_S,
+        "bed_shot_duck_db": float(mix.bed_shot_duck_db),
+        "bed_shot_ramp_s": BED_SHOT_RAMP_S,
+        "master_lufs": float(mix.loudness_lufs),
+        "master_true_peak_db": float(mix.true_peak_db),
+        "master_lra": MASTER_LRA,
     }
+
+
+def master(mix: MixSettings) -> dict[str, float]:
+    """The loudness the finished mix is brought to."""
+    return {
+        "target_lufs": float(mix.loudness_lufs),
+        "true_peak_db": float(mix.true_peak_db),
+        "lra": MASTER_LRA,
+    }
+
+
+# --- The music layers -----------------------------------------------------------------------
+
+
+def _fade(raw: object, length: int) -> dict[str, Any]:
+    """A placement's fade as the timeline records it, never longer than the sound."""
+    fade = raw if isinstance(raw, dict) else {}
+    samples = fade.get("samples")
+    shape = fade.get("shape")
+    return {
+        "samples": max(0, min(samples if isinstance(samples, int) else 0, length)),
+        "shape": shape if shape in ("linear", "equal_power") else "linear",
+    }
+
+
+def _windows_of(
+    windows: Sequence[tuple[float, float]], start_s: float, end_s: float, ramp_s: float
+) -> list[list[float]]:
+    return slice_windows(list(windows), start_s, end_s, ramp_s)
+
+
+def _music_timeline(
+    music: MusicSource,
+    mix: MixSettings,
+    speech_spans: Sequence[tuple[float, float]],
+    dialogue_spans: Sequence[tuple[float, float]],
+    total_samples: int,
+) -> tuple[dict[str, Any], list[tuple[float, float]]]:
+    """The `music` part of the timeline, and the spans of the story (seconds) in which a bed
+    plays. Raises RenderPlanError for a placement this version cannot read.
+    """
+    content = music.content
+    rate = content.get("sample_rate")
+    placements = content.get("placements")
+    if rate != render_commands.SAMPLE_RATE or not isinstance(placements, list):
+        raise RenderPlanError(
+            "The music placement is not one this version can render. Place again."
+        )
+    rate_f = float(rate)
+
+    kept: list[dict[str, Any]] = []
+    left_out: list[dict[str, str]] = []
+    for placed in placements:
+        lane, kind = placed.get("lane"), placed.get("kind")
+        if lane not in _LANES:
+            raise RenderPlanError("The music placement is not one this version can render.")
+        if not music.ambience and (lane == LANE_BED or kind == _POINT_KIND):
+            left_out.append({"item_id": str(placed["item_id"]), "reason": "ambience is off"})
+            continue
+        start = int(placed["story_start_sample"])
+        if start >= total_samples or int(placed["length_samples"]) < 1:
+            left_out.append({"item_id": str(placed["item_id"]), "reason": "outside the video"})
+            continue
+        kept.append(placed)
+
+    # The moments the music must make room for: placed hits and point sounds, and the sounds the
+    # video model makes for a cue.
+    moments = [
+        int(placed["moment"]["moment_sample"]) / rate_f for placed in kept if placed.get("moment")
+    ]
+    moments += [float(item["chosen_s"]) for item in content.get("h3_sounds") or []]
+    dips = merge_spans([(t - DIP_BEFORE_S, t + DIP_AFTER_S) for t in moments], 0.0)
+
+    swells = [
+        (float(item["second"]), float(item["second"]) + float(item["length_s"]))
+        for item in content.get("mix_requests") or []
+        if item.get("kind") == "swell"
+    ]
+    holds = {
+        True: merge_spans(speech_spans, MUSIC_GAP_RELEASE_S),
+        False: merge_spans(speech_spans, MUSIC_GAP_HOLD_S),
+    }
+
+    sounds: list[dict[str, Any]] = []
+    bed_spans: list[tuple[float, float]] = []
+    for placed in kept:
+        lane = str(placed["lane"])
+        start = int(placed["story_start_sample"])
+        source_in = int(placed["source_in_sample"])
+        length = min(int(placed["length_samples"]), total_samples - start)
+        start_s, end_s = start / rate_f, (start + length) / rate_f
+        musical = lane in (LANE_SCORE, LANE_BED)
+        if lane == LANE_BED:
+            bed_spans.append((start_s, end_s))
+
+        duck: list[list[float]] = []
+        duck_db: float | None = None
+        dip: list[list[float]] = []
+        bumps: list[list[float]] = []
+        if musical:
+            under, may_swell = music.cue_mix.get(str(placed["cue_id"]), (UNDER_VOICE_LOW, False))
+            duck = _windows_of(holds[may_swell], start_s, end_s, MUSIC_DUCK_RAMP_S)
+            if duck:
+                duck_db = float(mix.duck_low_db if under == UNDER_VOICE_LOW else mix.duck_medium_db)
+            dip = _windows_of(dips, start_s, end_s, DIP_RAMP_S)
+        if lane == LANE_BED:
+            bumps = _windows_of(
+                [(a, b) for a, b in swells if start_s <= a <= end_s], start_s, end_s, SWELL_RAMP_S
+            )
+        sounds.append(
+            {
+                "item_id": str(placed["item_id"]),
+                "cue_id": str(placed["cue_id"]),
+                "lane": lane,
+                "kind": str(placed["kind"]),
+                "path": str(placed["path"]),
+                "start_sample": start,
+                "in_sample": source_in,
+                "length_samples": length,
+                "gain_db": float(placed.get("match_gain_db") or 0.0),
+                "fade_in": _fade(placed.get("fade_in"), length),
+                "fade_out": _fade(placed.get("fade_out"), length),
+                "duck": duck,
+                "duck_db": duck_db,
+                "dips": dip,
+                "bumps": bumps,
+            }
+        )
+
+    timeline = {
+        "placement_id": music.placement_id,
+        "placement_version": music.placement_version,
+        "ambience": music.ambience,
+        "total_samples": total_samples,
+        "sounds": sounds,
+        "left_out": left_out,
+    }
+    return timeline, bed_spans
 
 
 # --- The plan -------------------------------------------------------------------------------
@@ -245,10 +505,19 @@ def _check_takes(scenes: list[SceneSource]) -> None:
         )
 
 
-def build_plan(scenes: list[SceneSource], *, fps: int, width: int, height: int) -> RenderPlan:
+def build_plan(
+    scenes: list[SceneSource],
+    *,
+    fps: int,
+    width: int,
+    height: int,
+    mix: MixSettings | None = None,
+    music: MusicSource | None = None,
+) -> RenderPlan:
     """The frozen timeline of a render and its warnings. Raises RenderPlanError with the reason
-    when the story cannot be rendered now.
+    when the story cannot be rendered now. `music` is None for a render without music.
     """
+    mix = mix or MixSettings()
     if fps < 1 or width < 2 or height < 2:
         raise RenderPlanError("The project's output size or frame rate is not usable.")
     _check_scenes(scenes)
@@ -317,6 +586,7 @@ def build_plan(scenes: list[SceneSource], *, fps: int, width: int, height: int) 
                     "source_frames": needed,
                     "has_audio": take.has_audio,
                     "duck": [],  # filled in below, once every narration span is known
+                    "bed_duck": [],  # and every bed
                 }
             )
         for unit in scene.units:
@@ -362,6 +632,26 @@ def build_plan(scenes: list[SceneSource], *, fps: int, width: int, height: int) 
             DUCK_RAMP_S,
         )
 
+    music_entry: dict[str, Any] | None = None
+    if music is not None:
+        music_entry, bed_spans = _music_timeline(
+            music,
+            mix,
+            [*narration_spans, *dialogue_spans],
+            dialogue_spans,
+            render_commands.sample_count(cursor, fps),
+        )
+        if mix.bed_shot_duck_db < 0:
+            # The video model's own sound is lowered under a bed, but never in a line of dialogue.
+            lowered = subtract_spans(bed_spans, dialogue_spans)
+            for shot_entry in shots:
+                shot_entry["bed_duck"] = slice_windows(
+                    lowered,
+                    shot_entry["start_frame"] / fps,
+                    (shot_entry["start_frame"] + shot_entry["frames"]) / fps,
+                    BED_SHOT_RAMP_S,
+                )
+
     timeline: dict[str, Any] = {
         "version": TIMELINE_VERSION,
         "fps": fps,
@@ -381,7 +671,9 @@ def build_plan(scenes: list[SceneSource], *, fps: int, width: int, height: int) 
         ],
         "shots": shots,
         "narration": narration,
-        "constants": constants(),
+        "music": music_entry,
+        "master": master(mix),
+        "constants": constants(mix),
         "warnings": warnings,
     }
     return RenderPlan(timeline=timeline, warnings=warnings)

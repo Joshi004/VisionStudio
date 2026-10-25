@@ -423,6 +423,82 @@ async def measure_loudness(
 
 
 @dataclass(frozen=True)
+class LoudnormMeasure:
+    """What the first pass of `loudnorm` measured in a file (MUSIC-012). The second pass is given
+    these numbers, which is what lets it change the level without squeezing the sound.
+    """
+
+    input_i: float
+    input_tp: float
+    input_lra: float
+    input_thresh: float
+    target_offset: float
+
+
+async def measure_loudnorm(
+    path: Path,
+    *,
+    target_lufs: float,
+    true_peak_db: float,
+    lra: float,
+    timeout_s: float = 600.0,
+) -> LoudnormMeasure | None:
+    """The first pass of two-pass `loudnorm` over a file's first audio stream: integrated loudness,
+    true peak, loudness range, gating threshold and the offset to the target. Nothing is written.
+
+    Returns None when the file has no sound, is silent (at or below -70 LUFS) or too short to
+    measure, when FFmpeg cannot run, or when it prints something unusable. Never raises.
+    """
+    args = [
+        "-hide_banner",
+        "-nostdin",
+        "-nostats",
+        "-loglevel",
+        "info",
+        "-i",
+        file_input(path),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-af",
+        f"loudnorm=I={target_lufs:.2f}:TP={true_peak_db:.2f}:LRA={lra:.2f}:print_format=json",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not measure loudnorm: %s", exc)
+        return None
+    text = result.stderr.decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        _logger.info(
+            "ffmpeg loudnorm exit code %s: %s", result.returncode, text[-_STDERR_LOG_CHARS:]
+        )
+        return None
+    blocks = _LOUDNORM_JSON.findall(text)
+    if not blocks:
+        return None
+    try:
+        data = json.loads(blocks[-1])
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    values = [
+        _number(data.get(key))
+        for key in ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+    ]
+    if any(value is None for value in values):
+        return None
+    measured, peak, spread, threshold, offset = (float(value or 0.0) for value in values)
+    if measured <= _SILENCE_LUFS:
+        return None
+    return LoudnormMeasure(measured, peak, spread, threshold, offset)
+
+
+@dataclass(frozen=True)
 class LoudnessScan:
     """What one pass of FFmpeg's EBU R128 scanner and `astats` measured in a file (MUSIC-003)."""
 

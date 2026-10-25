@@ -558,6 +558,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/music-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Music Preview */
+        get: operations["get_music_preview_api_projects__project_id__music_preview_get"];
+        put?: never;
+        /**
+         * Run Music Preview
+         * @description Starts the job that makes a preview. The same preview, if already waiting or running, is
+         *     returned instead of a second job.
+         */
+        post: operations["run_music_preview_api_projects__project_id__music_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/discovery/{kind}/run": {
         parameters: {
             query?: never;
@@ -6474,7 +6496,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix";
             /**
              * Status
              * @enum {string}
@@ -6527,7 +6549,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix";
             /**
              * Kind
              * @enum {string}
@@ -6566,7 +6588,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix";
             /**
              * Status
              * @enum {string}
@@ -8015,6 +8037,59 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * MusicPreviewOut
+         * @description The newest preview job.
+         */
+        MusicPreviewOut: {
+            /** Job Id */
+            job_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+            /** Scene Id */
+            scene_id: string | null;
+            /** Cue Id */
+            cue_id: string | null;
+            /** Take Id */
+            take_id: number | null;
+            /** Url */
+            url: string | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Window Start S */
+            window_start_s: number | null;
+            /** Window End S */
+            window_end_s: number | null;
+        };
+        /**
+         * MusicPreviewRequest
+         * @description What to hear: exactly one of `scene_id` and `cue_id`, and optionally a take to hear in
+         *     place of the selected one.
+         */
+        MusicPreviewRequest: {
+            /** Scene Id */
+            scene_id?: string | null;
+            /** Cue Id */
+            cue_id?: string | null;
+            /** Take Id */
+            take_id?: number | null;
+        };
+        /** MusicPreviewRun */
+        MusicPreviewRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** MusicPreviewState */
+        MusicPreviewState: {
+            preview: components["schemas"]["MusicPreviewOut"] | null;
+        };
         /** MusicPromptDraftCreate */
         MusicPromptDraftCreate: {
             /**
@@ -9102,7 +9177,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix";
             /** Running */
             running: number;
             /** Queued */
@@ -9195,6 +9270,8 @@ export interface components {
             review_points: ("story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots")[];
             /** Music Enabled */
             music_enabled: boolean;
+            /** Ambience Enabled */
+            ambience_enabled: boolean;
             story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
@@ -9267,6 +9344,8 @@ export interface components {
             review_points?: ("story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots")[] | null;
             /** Music Enabled */
             music_enabled?: boolean | null;
+            /** Ambience Enabled */
+            ambience_enabled?: boolean | null;
         };
         /**
          * ProjectUseOut
@@ -9567,6 +9646,45 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * RenderMasterOut
+         * @description The finished loudness against its target (MUSIC-012). Only a render made with timeline
+         *     version 2 has it.
+         */
+        RenderMasterOut: {
+            /** Target Lufs */
+            target_lufs: number;
+            /** True Peak Db */
+            true_peak_db: number;
+            /** Premaster Lufs */
+            premaster_lufs: number | null;
+            /** Premaster True Peak Dbtp */
+            premaster_true_peak_dbtp: number | null;
+            /** Normalized */
+            normalized: boolean;
+            /** Final Lufs */
+            final_lufs: number | null;
+            /** Final True Peak Dbtp */
+            final_true_peak_dbtp: number | null;
+            /** Notes */
+            notes: string[];
+        };
+        /**
+         * RenderMusicOut
+         * @description The music a render was made with (MUSIC-012). Only a render with music has it.
+         */
+        RenderMusicOut: {
+            /** Placement Version */
+            placement_version: number;
+            /** Ambience */
+            ambience: boolean;
+            /** Sounds */
+            sounds: number;
+            /** Left Out */
+            left_out: number;
+            /** Lanes */
+            lanes: string[];
         };
         /** RenderNarrationOut */
         RenderNarrationOut: {
@@ -12335,6 +12453,8 @@ export interface components {
             /** Takes */
             takes: components["schemas"]["RenderTakeOut"][];
             narration: components["schemas"]["RenderNarrationOut"] | null;
+            music: components["schemas"]["RenderMusicOut"] | null;
+            master: components["schemas"]["RenderMasterOut"] | null;
             /**
              * Created At
              * Format: date-time
@@ -12361,6 +12481,10 @@ export interface components {
             fps: number;
             /** Planned Seconds */
             planned_seconds: number | null;
+            /** Music Placement Version */
+            music_placement_version: number | null;
+            /** Ambience Enabled */
+            ambience_enabled: boolean;
             job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Renders */
             renders: components["schemas"]["StoryRenderOut"][];
@@ -14726,6 +14850,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_music_preview_api_projects__project_id__music_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPreviewState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_music_preview_api_projects__project_id__music_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPreviewRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The music cannot be previewed now: music is off, something it needs is not ready, or the scene, cue or take does not exist. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

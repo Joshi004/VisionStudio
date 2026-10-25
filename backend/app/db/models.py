@@ -63,6 +63,10 @@ class Project(Base):
     # Whether the story gets planned music (MUSIC-006, MD-21). When off, the music steps are
     # skipped as complete. Can be changed at any time.
     music_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # Whether a render includes the beds and the point sounds Stable Audio makes (MUSIC-012). Only
+    # matters while `music_enabled` is on; changing it makes the render out of date, not the
+    # placement.
+    ambience_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
 
 
 class Asset(Base):
@@ -118,7 +122,8 @@ class Job(Base):
         # revision 0065, and the writing of a theme's prompt, since revision 0066, and the music
         # plan, since revision 0067, and the cue detail and its audit, since revision 0068, and
         # the rewrite of a rejected take's prompt, since revision 0069, and the placement of the
-        # music on the timeline, since revision 0070.
+        # music on the timeline, since revision 0070, and the preview of a music mix, since revision
+        # 0071.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -132,7 +137,8 @@ class Job(Base):
             "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
-            "'audit_music_cues', 'rewrite_music_prompt', 'place_music')",
+            "'audit_music_cues', 'rewrite_music_prompt', 'place_music', "
+            "'preview_music_mix')",
             name="type_valid",
         ),
         CheckConstraint(

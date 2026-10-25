@@ -73,6 +73,35 @@ class RenderNarrationOut(BaseModel):
     gain_db: float | None
 
 
+class RenderMusicOut(BaseModel):
+    """The music a render was made with (MUSIC-012). Only a render with music has it."""
+
+    placement_version: int
+    ambience: bool
+    sounds: int
+    # How many placed sounds were left out (the ambience switch, or a place outside the video).
+    left_out: int
+    # The layers that were made: `bed`, `score`, `sounds`.
+    lanes: list[str]
+
+
+class RenderMasterOut(BaseModel):
+    """The finished loudness against its target (MUSIC-012). Only a render made with timeline
+    version 2 has it.
+    """
+
+    target_lufs: float
+    true_peak_db: float
+    premaster_lufs: float | None
+    premaster_true_peak_dbtp: float | None
+    # False when the sound was too quiet or too short to measure, so it was left as it was.
+    normalized: bool
+    final_lufs: float | None
+    final_true_peak_dbtp: float | None
+    # One sentence for each miss of the target or the ceiling. Empty when both were met.
+    notes: list[str]
+
+
 class StoryRenderOut(BaseModel):
     id: int
     render_number: int
@@ -89,6 +118,8 @@ class StoryRenderOut(BaseModel):
     warnings: list[RenderWarningOut]
     takes: list[RenderTakeOut]
     narration: RenderNarrationOut | None
+    music: RenderMusicOut | None
+    master: RenderMasterOut | None
     created_at: datetime
     job: DiscoveryJobOut | None
 
@@ -103,6 +134,10 @@ class StoryRendersOut(BaseModel):
     planned_frames: int | None
     fps: int
     planned_seconds: float | None
+    # The music placement version the next render would use, or None when it has no music.
+    music_placement_version: int | None
+    # Whether the next render leaves the beds and the point sounds out (the ambience switch).
+    ambience_enabled: bool
     # The newest render job, whatever its status.
     job: DiscoveryJobOut | None
     renders: list[StoryRenderOut]
@@ -170,6 +205,36 @@ def _narration_out(entry: RenderEntry) -> RenderNarrationOut | None:
     )
 
 
+def _music_out(entry: RenderEntry) -> RenderMusicOut | None:
+    music = (entry.row.levels or {}).get("music")
+    if not isinstance(music, dict):
+        return None
+    lanes = music.get("lanes")
+    return RenderMusicOut(
+        placement_version=music["placement_version"],
+        ambience=music["ambience"],
+        sounds=music["sounds"],
+        left_out=music.get("left_out", 0),
+        lanes=list(lanes) if isinstance(lanes, dict) else [],
+    )
+
+
+def _master_out(entry: RenderEntry) -> RenderMasterOut | None:
+    master = (entry.row.levels or {}).get("master")
+    if not isinstance(master, dict):
+        return None
+    return RenderMasterOut(
+        target_lufs=master["target_lufs"],
+        true_peak_db=master["true_peak_db"],
+        premaster_lufs=master.get("premaster_lufs"),
+        premaster_true_peak_dbtp=master.get("premaster_true_peak_dbtp"),
+        normalized=bool(master.get("normalized")),
+        final_lufs=master.get("final_lufs"),
+        final_true_peak_dbtp=master.get("final_true_peak_dbtp"),
+        notes=[str(note) for note in master.get("notes") or []],
+    )
+
+
 def _render_out(entry: RenderEntry) -> StoryRenderOut:
     row = entry.row
     return StoryRenderOut(
@@ -187,6 +252,8 @@ def _render_out(entry: RenderEntry) -> StoryRenderOut:
         warnings=[_warning_out(item) for item in row.inputs.get("warnings", [])],
         takes=_takes_out(entry),
         narration=_narration_out(entry),
+        music=_music_out(entry),
+        master=_master_out(entry),
         created_at=row.created_at,
         job=_job_out(entry.job),
     )
@@ -211,6 +278,8 @@ async def get_story_renders(project_id: int, session: SessionDep) -> StoryRender
             if result.planned_frames is not None
             else None
         ),
+        music_placement_version=result.music_placement_version,
+        ambience_enabled=result.ambience_enabled,
         job=_job_out(result.job),
         renders=[_render_out(entry) for entry in result.renders],
     )

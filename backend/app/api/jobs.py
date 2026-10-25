@@ -71,6 +71,7 @@ JobType = Literal[
     "audit_music_cues",
     "rewrite_music_prompt",
     "place_music",
+    "preview_music_mix",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

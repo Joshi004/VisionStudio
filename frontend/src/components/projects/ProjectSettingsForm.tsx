@@ -113,6 +113,17 @@ export function ProjectSettingsForm({
               When off, the music steps are skipped and the video is made without music. It can be
               changed at any time.
             </Text>
+            <Switch
+              label="Include ambience in the video"
+              checked={draft.ambience_enabled}
+              disabled={!draft.music_enabled}
+              onChange={(event) => edit("ambience_enabled", event.currentTarget.checked)}
+            />
+            <Text size="xs" c="dimmed">
+              Ambience is the background beds and the sounds made for points in the music. When
+              off, the video is rendered with the score and hits only; the music does not have to
+              be placed again.
+            </Text>
           </Stack>
         </Paper>
 

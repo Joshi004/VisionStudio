@@ -64,6 +64,8 @@ class ProjectUpdate(BaseModel):
     review_points: list[ReviewPointKey] | None = None
     # Whether the story gets planned music (MUSIC-006). Can be changed at any time.
     music_enabled: StrictBool | None = None
+    # Whether a render includes the beds and point sounds (MUSIC-012). Can be changed at any time.
+    ambience_enabled: StrictBool | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -100,6 +102,8 @@ class ProjectDetail(BaseModel):
     review_points: list[ReviewPointKey]
     # Whether the story gets planned music. On by default.
     music_enabled: bool
+    # Whether a render includes the beds and point sounds. On by default.
+    ambience_enabled: bool
     story_length: StoryLengthOut
 
 
@@ -136,6 +140,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         script_text=project.script_text,
         review_points=_review_points(project),
         music_enabled=project.music_enabled,
+        ambience_enabled=project.ambience_enabled,
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,

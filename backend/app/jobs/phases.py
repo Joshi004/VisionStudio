@@ -242,9 +242,18 @@ SAVING_SHOT_PROMPT: Final = "saving the shot prompt"
 CHECKING_RENDER_CLIPS: Final = "checking the clips"
 MEASURING_LEVELS: Final = "measuring the sound levels"
 PLACING_NARRATION: Final = "placing the narration"
-JOINING_STORY: Final = "joining the shots and mixing the sound"
+# MUSIC-012: the music layers, the mix of everything into the pre-master, its loudness, and the
+# loudness of the finished video. `preview_music_mix` uses the same phases.
+PLACING_MUSIC_LAYERS: Final = "placing the music layers"
+MIXING_SOUND: Final = "mixing the sound"
+MEASURING_MIX: Final = "measuring the mix"
+JOINING_STORY: Final = "joining the shots and encoding the video"
 CHECKING_STORY_VIDEO: Final = "checking the video"
+MEASURING_FINAL_SOUND: Final = "measuring the finished sound"
 SAVING_STORY_VIDEO: Final = "saving the video"
+# The preview of the music in context (MUSIC-012, MD-20).
+PREPARING_PREVIEW: Final = "preparing the preview"
+SAVING_PREVIEW: Final = "saving the preview"
 
 
 def trimming_shot(number: int, total: int) -> str:
