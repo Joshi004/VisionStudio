@@ -122,7 +122,7 @@ These were decided with the owner on 2026-10-23, unless marked **(re-evaluation)
 | MD-3 | **Scene music is planned only once exact timings exist**: every speech unit is synthesized and measured, and every scene has a shot plan with a valid timeline. Cue detail also waits for shot definitions (it needs who appears in which shot). The Music Bible and themes need no timings and may run earlier. | 006–009 |
 | MD-4 | **Top-down levels, each seeing more of the story and writing less:** level 0 the Music Bible, level 1 the music plan (one or two lines per cue), level 1b critics and a revision, level 2 cue detail, level 3 prompt writing per model (§4.3). | 006, 008, 009 |
 | MD-5 | **Four directions at level 0.** GLM writes four clearly different directions for the whole score, a separate GLM call picks one with its reasons, and the chosen one is expanded into the Music Bible. At the review point the owner can choose another. | 006 |
-| MD-6 | **The music character.** The Bible names a main theme and a few themes for characters, places or ideas that matter. Each theme gets a canonical recording, and its emotional versions (grief, fear, anger, tenderness…) are made from that recording, not from text alone. The method (ACE-Step `cover` or Stable Audio 3 `transform`) is chosen from round-2 results. | 006, 007, 009 |
+| MD-6 | **The music character.** The Bible names a main theme and a few themes for characters, places or ideas that matter. Each theme gets a canonical recording. **Changed 2026-10-25 (owner):** its emotional versions (grief, fear, anger, tenderness…) start as **fresh text-to-music** with the theme described in the prompt (instrument, tempo, key, the feel of the tune), not as a conversion of the recording. Converting a recording with ACE-Step `cover` or Stable Audio 3 `transform` is not relied on until it is shown to work; it can be added later as an improvement. | 006, 007, 009 |
 | MD-7 | **The model decides how music starts and ends** (fade, hard start on a cut or hit, rising out of the ambience, hard stop, musical ending, crossfade, through silence, sting), with a one-line reason. **The join between two cues is decided once, at level 1, for the boundary**, so two neighbours never disagree. | 008, 009, 011 |
 | MD-8 | **The music model is trusted for broad structure only** (from round-1 group B, §2.2). Prompts ask for a broad order of moods, never timestamps. Exact moments come from placement (§4.6) and from separate hit sounds placed by code. | 009, 010, 011 |
 | MD-9 | **Who makes which sound (confirmed by the owner after listening to round 1, 2026-10-24):** **ACE-Step 1.5** makes the score, the themes and songs. **Stable Audio 3** makes sound effects and ambience that H3 does not make (MD-24). **Stable Audio Open, LTX audio and YuE2 are not used in the pipeline** (they stay in the lab). H3 keeps each shot's own sounds (D-10, see MD-24 for what that now includes). | 001, 007, 009, 010 |
@@ -310,9 +310,9 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 
 **Progress snapshot** (update when a phase changes status):
 
-- Completed: MUSIC-001 (2026-10-24), MUSIC-002 (2026-10-24)
+- Completed: MUSIC-001 (2026-10-24), MUSIC-002 (2026-10-24), MUSIC-004 (2026-10-25)
 - In progress: MUSIC-003 (code complete 2026-10-24; the owner's check of the change points and loudest moments of round-1 runs 13 to 16 by ear is still open)
-- In progress: MUSIC-004 (code complete 2026-10-24; the owner's one run of each operation on the real GPU server is still open)
+- MUSIC-005 (review screen ready, wave 1 of 4 run, waves 2 to 4 waiting for the owner)
 - Deferred: MUSIC-016 (singing characters, until the owner decides)
 
 | ID | Title | Milestone | Hard dependencies | Status |
@@ -320,8 +320,8 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 | MUSIC-001 | Listen to round 1 and record the model choices (manual) | MM0 | — | Completed |
 | MUSIC-002 | Survey what sound H3 adds (manual) | MM0 | PHASE-027 (real takes exist) | Completed |
 | MUSIC-003 | Audio measurements | MM0 | — | In Progress (code complete) |
-| MUSIC-004 | Editing in the Music Lab | MM0 | 003 | In Progress (code complete) |
-| MUSIC-005 | Round-2 trials (manual) | MM0 | 004 (001 recommended) | Not Started |
+| MUSIC-004 | Editing in the Music Lab | MM0 | 003 | Completed |
+| MUSIC-005 | Round-2 trials (manual) | MM0 | 004 (001 recommended) | In Progress (wave 1 run; waves 2 to 4 waiting) |
 | MUSIC-006 | Music Bible: four directions, a choice, the Bible | MM1 | 001; PHASE-014, PHASE-015, PHASE-030 | Not Started |
 | MUSIC-007 | Themes and their emotional versions | MM1 | 005, 006 | Not Started |
 | MUSIC-008 | Music plan with critics | MM2 | 006; PHASE-021 | Not Started |
@@ -556,7 +556,7 @@ flowchart TD
 
 ### MUSIC-004 — Editing in the Music Lab
 
-**Status:** In Progress (code complete) · **Milestone:** MM0 · **Vision:** MD-16
+**Status:** Completed (2026-10-25) · **Milestone:** MM0 · **Vision:** MD-16
 
 **Objective.** Let the Music Lab repair, extend, join and restyle audio with the GPU server's editing endpoints, so round 2 can test them and later phases reuse the same code.
 
@@ -597,7 +597,7 @@ flowchart TD
 - [x] Storage, job, API, lab UI with measurements
 - [x] Trial helper can start editing cases
 - [x] Docs (`DATABASE_STRUCTURE.md`); standard checks
-- [ ] Owner runs one of each operation
+- [x] Owner runs one of each operation (repaint, cover, inpaint, transform ran on the real server in round-2 wave 1; the owner validated repaint and the other editing on 2026-10-25; Stable Audio Open transform was not run because it leaves the pipeline, MD-9)
 
 **Completion notes.**
 
@@ -624,13 +624,14 @@ flowchart TD
   - **Trial helper.** `--dry-run` printed the exact body of a run source and of a join source ("would join runs [1, 2]"), and a real run of three edit cases against the throwaway app made the join once and reused it.
   - **The lab page** was rendered once in a headless browser against the throwaway app: the panel, the run numbers and the measurement line appear.
 - **Standard checks.** `ruff check` and `ruff format --check` pass, `npm run lint` and `npm run typecheck` pass, migration `0063` upgrades, downgrades and upgrades again on a fresh database, and `alembic check` reports the same four existing `FLOAT` against `REAL` differences as before (none from this phase). `DATABASE_STRUCTURE.md` is updated. The running Docker app has **not** been rebuilt: it still runs the old code until the owner rebuilds it (`docker compose up --build -d`), which applies migrations `0062` and `0063` and installs the code.
+- **Update from MUSIC-005 (2026-10-24).** The outside-window comparison is now `GET /api/lab/music/runs/{id}/outside-window` and is shown on every repaint and inpaint card. The result is scaled by the best single gain before comparing, because the first real repaint came back 1.0 dB quieter than its source. **First real numbers (round-2 wave 1, the owner's go-ahead):** ACE-Step repaint of run 28, window 30 to 36 s (run 98): outside the window the result is the source at -1.0 dB and then identical, residual -90 dB, so the outside is **unchanged** (only the level moved). Stable Audio 3 inpaint of run 27, same window (run 99): gain +0.05 dB and residual **-23 dB**, so Stable Audio 3 **does alter the sound outside its window**. The -40 dB "unchanged" level separates the two cleanly and stays the threshold, now backed by a real repaint. One real run of ACE-Step cover (92 to 94), Stable Audio 3 transform (95 to 97), repaint (98) and inpaint (99) all succeeded; Stable Audio Open transform was not run (it no longer leaves the lab, MD-9).
 - **For the owner.** After the rebuild, run one of each operation from the Music lab (a repaint, a cover, an inpaint with a window and one that extends, a Stable Audio 3 transform, a Stable Audio Open transform), then say so, and the agent compares a repaint's outside with its source and closes the phase. Any finished run can be the source (Appendix C lists the round-1 runs); "Edit this run" on its card fills the panel.
 
 ---
 
 ### MUSIC-005 — Round-2 trials (manual)
 
-**Status:** Not Started · **Milestone:** MM0 · **Vision:** §4.5, MD-6
+**Status:** In Progress (review screen ready; wave 1 of 4 run; conversion cases deferred) · **Milestone:** MM0 · **Vision:** §4.5, MD-6
 
 **Objective.** Answer the questions the design depends on, using only ACE-Step and Stable Audio:
 
@@ -664,12 +665,21 @@ flowchart TD
 **Observable improvements.** The theme and join phases are built on tested methods.
 
 **Completion checklist.**
-- [ ] Cases and tracker prepared; run count stated
-- [ ] Owner ran and rated round 2
+- [x] Cases and review screen prepared; run count stated (87 GPU runs)
+- [ ] Runs started (after the owner's go-ahead) and rated by the owner
 - [ ] Decisions recorded in Appendix C (and §3 or §8 where they change something)
 - [ ] Round 2b (theme variations of the chosen theme) run and recorded
 
-**Completion notes.** _(fill in)_
+**Completion notes.**
+
+- **What was prepared (2026-10-24; the app was rebuilt, migrations 0062 to 0064 applied).** Instead of a tracker file, round 2 has a review screen: Lab > Music > **Round 2 trials**. Each of the 38 cases is a card with what to verify, the source audio, what was done and the prompt in plain words, every output with Good / Usable / Bad and a note, and the owner's Yes / Partly / No answer to the case's question (that answer is what fills the Appendix C results table). The cases live in `music_lab_trials/round2_cases.json` (guide text, prompts, steps) and are started and written to the app by `music_lab_trials/round2.py`. Nothing is started without `--go`.
+- **Backend.** Migration `0064` (table `lab_music_trial_case`, `DATABASE_STRUCTURE.md` §4.58); `services/music_trials.py`; `GET/PUT/PATCH /api/lab/music/trials`; `GET /api/lab/music/runs/{id}/outside-window` (case L3 and the number MUSIC-004 still needs: how far the audio outside a repaint or inpaint window differs from its source, after scaling the result by the best single gain; "unchanged" is -40 dB or lower). A join may now be one run plus a silent tail (K2) or two runs crossfaded (K3), `ffmpeg.join_audio(crossfade_s=...)`.
+- **Frontend.** `MusicTrialsPanel.tsx`, `musicTrialsView.ts`, and `MusicRunRating.tsx` (the verdict box, the measurement line and the new outside-the-window line, shared with the run list).
+- **Runs by wave (87 GPU runs).** Wave 0: the K3 crossfades (free, local). Wave 1, a smoke test of every kind of call (12): I1a, I2-fear, I3-fear, J4a, J4b. Wave 2 (50): the rest of I, J1 to J3, L1, L2. Wave 3 (10): K1, K2, K4. Wave 4 (15): M, plus the L3 summary (free). Round 2b (about 12 runs) waits for the owner's pick of an I1 theme and a winner between I2 and I3.
+- **Estimate.** From the 2026-10-23 round-1 jobs the median run took 61 s on ACE-Step and 49 s on Stable Audio 3, so the 37 ACE-Step and 50 Stable Audio 3 runs are about 80 minutes of GPU time one after the other. Editing and long runs may take longer; that is an estimate, not a measurement of these runs. All eight source runs (13, 14, 27 to 30, 74, 75) have audio.
+- **Wave 1 ran on 2026-10-24 (12 runs, all succeeded; I1a runs 88 to 91, I2-fear 92 to 94, I3-fear 95 to 97, J4a run 98, J4b run 99).** This is also the first real run of cover, transform, repaint and inpaint (see the MUSIC-004 notes for the outside-window numbers). The other 75 GPU runs are not started: the owner has to look at wave 1 first.
+- **Owner's reaction, corrected (2026-10-25).** On 2026-10-24 the owner said the wave-1 results seemed usable overall, including the tone changes; on 2026-10-25 the owner said they are **not sure a recording can actually be converted to horror or another mood yet**, and chose to **use fresh text-to-music for emotional versions to start with and iterate on top of it** (MD-6 and QM-4 changed; Appendix E). The earlier provisional line in Appendix C was replaced. Owner's wave-1 verdicts: I1a one good, three usable; I2-fear and I3-fear the 0.7 setting good, the others usable; J4b usable; J4a not yet rated. Because of the decision, the remaining conversion cases (I2 and I3 for grief, anger and tenderness, 18 runs) are moved out of wave 2 into a deferred wave 5 and are not started. MUSIC-006, 007 and 009 plan emotional theme versions as text-to-music (§4.2 and MUSIC-009's "cue built on a theme version" then means a text prompt that describes the theme); round 2b changes from "conversion of the chosen theme" to nothing for now.
+- **Not yet done.** Waves 2 to 4 and the owner's listening. The agent starts the runs only after the owner says so; then the agent fills the Appendix C results table from the owner's answers and notes.
 
 ---
 
@@ -1206,7 +1216,7 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 | QM-1 | Best model per kind; Stable Audio 3 or Open for short effects | 001, 009, 010 | **ACE-Step 1.5 for music; Stable Audio 3 for effects and ambience; Open, LTX and YuE2 not used** (MD-9). Evidence in Appendix B. | Answered 2026-10-24 (MUSIC-001) |
 | QM-2 | One long piece or per-scene pieces | 001, 008 | Not stated by the owner. Default: cues that follow dramatic turns, joined (§4.5). Round-1 verdicts for C1 against C2 are in Appendix B (both rated mostly good). | Open (decide with the first real cues) |
 | QM-3 | Does H3 add music or heavy ambience in tense scenes? Should the H3 prompt drop ambience under a bed? | 002, 012 | H3 makes good sound and music inside a shot; it fails across shots (MD-24). MD-17 stands (no prompt change for ambience). | Answered 2026-10-24 (MUSIC-002) |
-| QM-4 | Theme variation method and strengths (ACE-Step `cover` or Stable Audio 3 `transform`) | 005, 007 | None until round 2 | Open (MUSIC-005) |
+| QM-4 | Theme variation method and strengths (ACE-Step `cover` or Stable Audio 3 `transform`) | 005, 007 | **Fresh text-to-music** with the theme described in the prompt | **Answered for now (owner, 2026-10-25):** start from text; the owner is not sure a recording can be converted to another mood yet. `cover` and `transform` stay a later iteration |
 | QM-5 | Do `model_join` and `continuation` work, and with what windows? | 005, 013 | Default: `crossfade`, `under_cover`, `through_silence`, `hard_cut` only | Open (MUSIC-005) |
 | QM-6 | How many themes per story | 006 | Main theme plus at most two others; fewer for short stories | Open (MUSIC-006 planning) |
 | QM-7 | Takes per cue and theme candidates | 007, 010 | Planning decides (a setting) | Open |
@@ -1291,6 +1301,10 @@ The rules of `Implementation_phases.md` §6 apply, with this document's own tabl
 
 ## Appendix C — Round-2 trial plan (run by MUSIC-005)
 
+**How it is run (MUSIC-005):** the cases below are written out, with their prompts and plain-word guide text, in `music_lab_trials/round2_cases.json`; `music_lab_trials/round2.py` starts them and the owner reviews them on Lab > Music > Round 2 trials. Case ids there: I1a to I1d, I2-* and I3-* (fear, grief, anger, tenderness), J1a to J4b, K1a to K4, L1 to L3, M1a to M4c.
+
+**How it is run (MUSIC-005):** the cases below are written out, with their prompts and plain-word guide text, in `music_lab_trials/round2_cases.json`; `music_lab_trials/round2.py` starts them and the owner reviews them on Lab > Music > Round 2 trials. Case ids there: I1a to I1d, I2-* and I3-* (fear, grief, anger, tenderness), J1a to J4b, K1a to K4, L1 to L3, M1a to M4c.
+
 ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used). Seed 1717 unless a case says otherwise, as in round 1. Source runs are round-1 lab run ids. All runs are paid GPU jobs started by the owner. Run counts are approximate and are confirmed when the cases are prepared.
 
 **I. Music character**
@@ -1327,7 +1341,7 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 
 | Question | Decision | Evidence |
 |---|---|---|
-| Theme variation method and strengths per emotion (QM-4) | | |
+| Theme variation method and strengths per emotion (QM-4) | **Start with fresh text-to-music** (owner, 2026-10-25). The owner is not sure a recording can be turned into horror or another mood yet, so conversion is not the method for now; iterate later if needed. | Wave 1, fear only: ACE-Step `cover` runs 92 (0.3) usable, 93 (0.5) usable, 94 (0.7) good; Stable Audio 3 `transform` runs 95 (0.3) usable, 96 (0.5) usable, 97 (0.7) good. The other emotions (I2, I3: grief, anger, tenderness) are not run |
 | `model_join` works? Window length (QM-5) | | |
 | `continuation` works? Which model (QM-5) | | |
 | Endings reliable enough for back-timing | | |
@@ -1345,6 +1359,9 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 | 2026-10-24 | MUSIC-002 | Completed | The owner's findings: H3 sound and music work inside a shot, not across shots; rain-like sounds go to Stable Audio 3, timing-critical sounds such as thunder to H3 (MD-24). Per-shot table not filled. New open questions QM-15 and QM-16. |
 | 2026-10-24 | MUSIC-003 | In Progress (code complete) | Measurement service (`audio_measurements`, `audio_analysis`, `ffmpeg.scan_loudness`), table `audio_measurement` (migration `0062`) and `GET /api/lab/music/runs/{id}/measurements`. Checked on TTS, effects, an H3 clip and synthetic files. Waiting for the owner to confirm the change points and loudest moments of runs 13 to 16 by ear. Docker app not rebuilt. |
 | 2026-10-24 | MUSIC-004 | In Progress (code complete) | Five editing operations (ACE-Step repaint and cover, Stable Audio 3 inpaint and transform, Stable Audio Open transform) with three kinds of source (a run, an upload, a join of two runs). Migration `0063` (`lab_music_source`; `operation`, `source_run_id`, `source_id` on `lab_music_run`), `services/music_sources.py`, `ffmpeg.join_audio`, `POST /api/lab/music/edits` and the sources endpoints, `MusicEditPanel`, measurements on every card, trial helper edit cases. RM-12 closed. Checked offline against a stand-in GPU server. Waiting for the owner's run of each operation on the real server and the outside-window number of a real repaint. Docker app not rebuilt. |
+| 2026-10-24 | MUSIC-005 | In Progress (prepared) | 38 round-2 cases (Appendix C, 87 GPU runs, a few local) and the review screen Lab > Music > Round 2 trials: what to verify, source audio, what was done, outputs with Good/Usable/Bad, the owner's answer per case. Migration `0064` (`lab_music_trial_case`), `/api/lab/music/trials`, `/runs/{id}/outside-window`, joins with a crossfade or a silent tail, `music_lab_trials/round2.py` and `round2_cases.json`. Docker app rebuilt (revision 0064). Wave 1 (12 runs, all succeeded) started with the owner's go-ahead; waves 2 to 4 (75 runs) wait for the owner. |
+| 2026-10-25 | MUSIC-004 | Completed | The owner validated repaint and the other editing. Real runs in round-2 wave 1: ACE-Step repaint leaves the sound outside the window unchanged (only 1 dB quieter); Stable Audio 3 inpaint changes it (-23 dB). |
+| 2026-10-25 | MUSIC-005 | In Progress | The owner is not sure a recording can be converted to another mood yet, so emotional theme versions start as fresh text-to-music (MD-6, QM-4 changed). Conversion cases for grief, anger and tenderness (18 runs) deferred to wave 5. Waves 2 to 4 still wait for the owner. |
 
 ---
 
@@ -1352,5 +1369,6 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 
 | Date | Change | Reason |
 |---|---|---|
+| 2026-10-25 | **MD-6 changed, QM-4 answered for now:** emotional versions of a theme start as fresh text-to-music with the theme described in the prompt; `cover` and `transform` conversion is a later iteration. MUSIC-004 marked Completed. | The owner validated the editing operations but is not sure a recording can be converted to horror or another mood yet. |
 | 2026-10-24 | **MD-9 changed and MD-24 added from the owner's listening:** Stable Audio Open, LTX audio and YuE2 leave the pipeline; sound is routed by how far it reaches (inside one shot: H3; spans shots: Stable Audio 3; time-critical such as thunder: H3). MD-17 confirmed. MUSIC-001 and MUSIC-002 completed. MUSIC-008 notes the routing and the ordering problem it creates. QM-1 and QM-3 answered; QM-15 and QM-16 added. Round-2 trial M3 drops thunder; Stable Audio Open dropped from Appendix C. | Owner listened to round 1 and the H3 shots. |
 | 2026-10-23 | Initial version: decisions MD-1 to MD-16 from the owner's design discussion, and MD-17 to MD-23 added on re-evaluation; design §4; phases MUSIC-001 to MUSIC-016; round-2 trial plan. | Owner asked for a music-specific roadmap that follows the Opus plan, Sonnet execute workflow. |

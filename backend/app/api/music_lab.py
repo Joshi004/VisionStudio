@@ -34,7 +34,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Final, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from app.api.errors import ErrorResponse
@@ -45,7 +45,14 @@ from app.db.session import SessionDep
 from app.jobs import dispatcher, store
 from app.jobs.store import JobRow
 from app.providers import music_generator
-from app.services import audio_measurements, music_lab, music_models, music_sources
+from app.services import (
+    audio_measurements,
+    music_lab,
+    music_models,
+    music_outside_window,
+    music_sources,
+    music_trials,
+)
 from app.services.music_models import MusicKind, MusicModel
 from app.services.storage import StorageError, get_storage, media_url
 
@@ -159,11 +166,13 @@ class MusicEditCreate(BaseModel):
 class MusicSourceJoin(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Two finished runs, in the order they are put together.
-    run_ids: list[Id] = Field(min_length=2, max_length=2)
+    # Two finished runs, in the order they are put together, or one run to put silence after.
+    run_ids: list[Id] = Field(min_length=1, max_length=2)
     # Silence between the two, and after them, in seconds.
     gap_s: Annotated[float, Field(allow_inf_nan=False)] = 0.0
     tail_s: Annotated[float, Field(allow_inf_nan=False)] = 0.0
+    # Instead of a gap: how long the two overlap, fading one into the other, in seconds.
+    crossfade_s: Annotated[float, Field(allow_inf_nan=False)] = 0.0
 
 
 class FieldSpecOut(BaseModel):
@@ -246,6 +255,7 @@ class MusicSourceOut(BaseModel):
     parts: list[JoinPartOut] | None
     gap_s: float | None
     tail_s: float | None
+    crossfade_s: float | None
 
 
 class RunSourceOut(BaseModel):
@@ -360,6 +370,99 @@ class AudioMeasurementOut(BaseModel):
     # Where the sound changes character. None in the first and last 2 seconds.
     change_points: list[StrongPointOut]
     ending: EndingOut | None
+
+
+class TrialSourceRef(BaseModel):
+    """A recording the guide names as the source audio: an earlier run or a stored recording."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: Id | None = None
+    source_id: Id | None = None
+    label: StrictStr = Field(max_length=200)
+
+
+class TrialGuide(BaseModel):
+    """The text of a case on the review screen, in plain words."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The question the case answers.
+    question: StrictStr = Field(max_length=500)
+    # What to listen for, one sentence each.
+    verify: list[StrictStr] = Field(max_length=12)
+    # What was done, and the prompt, in simple words.
+    did: StrictStr = Field(max_length=1500)
+    prompt_plain: StrictStr = Field(max_length=1500)
+    sources: list[TrialSourceRef] = Field(default_factory=list, max_length=6)
+    # A short label for each run (keyed by run id) and for each local recording.
+    run_labels: dict[StrictStr, StrictStr] = Field(default_factory=dict, max_length=_MAX_KEYS * 2)
+    source_labels: dict[StrictStr, StrictStr] = Field(
+        default_factory=dict, max_length=_MAX_KEYS * 2
+    )
+
+
+class TrialCaseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trial_group: StrictStr = Field(min_length=1, max_length=2)
+    sort_order: StrictInt = Field(ge=0, le=100_000)
+    title: StrictStr = Field(min_length=1, max_length=300)
+    guide: TrialGuide
+    # The runs the case started, and the recordings it made locally, in the order to show them.
+    run_ids: list[Id] = Field(max_length=60)
+    source_ids: list[Id] = Field(max_length=20)
+
+
+class TrialAnswerUpdate(BaseModel):
+    """Only the fields that are sent are changed; `null` clears one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer: Literal["yes", "partly", "no"] | None = None
+    answer_note: StrictStr | None = None
+
+
+class TrialSourceOut(BaseModel):
+    label: str
+    type: Literal["run", "upload", "join"]
+    # The recording, to play it. None when its file is gone.
+    url: str | None
+    duration_s: float | None
+    run_id: int | None
+    source_id: int | None
+    seam_s: float | None
+
+
+class TrialCaseOut(BaseModel):
+    id: str
+    trial_group: str
+    sort_order: int
+    title: str
+    updated_at: datetime
+    guide: TrialGuide
+    # What the guide names as the source audio.
+    sources: list[TrialSourceOut]
+    runs: list[LabMusicRunOut]
+    # Recordings the case made without the GPU (crossfades), each with its label.
+    local_outputs: list[TrialSourceOut]
+    answer: Literal["yes", "partly", "no"] | None
+    answer_note: str | None
+
+
+class OutsideWindowOut(BaseModel):
+    window_start_s: float
+    window_end_s: float
+    margin_s: float
+    compared_s: float
+    # The difference from the source outside the window and inside it, in dB against the source's
+    # own level (-200: identical). The result is first scaled by the best single gain.
+    outside_db: float
+    inside_db: float | None
+    # The level of the result against the source outside the window, in dB (0: the same).
+    gain_db: float
+    unchanged: bool
+    threshold_db: float
 
 
 def _unprocessable(message: str) -> HTTPException:
@@ -487,6 +590,59 @@ def source_out(source: LabMusicSource) -> MusicSourceOut:
         else None,
         gap_s=recipe.get("gap_s") if recipe is not None else None,
         tail_s=recipe.get("tail_s") if recipe is not None else None,
+        crossfade_s=recipe.get("crossfade_s") if recipe is not None else None,
+    )
+
+
+def _trial_source_out(source: LabMusicSource, label: str | None = None) -> TrialSourceOut:
+    return TrialSourceOut(
+        label=label if label else source.label,
+        type="join" if source.kind == "join" else "upload",
+        url=media_url(source.path),
+        duration_s=source.duration_s,
+        run_id=None,
+        source_id=source.id,
+        seam_s=music_sources.seam_s(source),
+    )
+
+
+def trial_case_out(row: music_trials.CaseRow) -> TrialCaseOut:
+    case = row.case
+    guide = TrialGuide.model_validate(case.guide)
+    sources: list[TrialSourceOut] = []
+    for ref in guide.sources:
+        if ref.run_id is not None:
+            run = row.source_runs.get(ref.run_id)
+            sources.append(
+                TrialSourceOut(
+                    label=ref.label,
+                    type="run",
+                    url=media_url(run.path) if run is not None and run.path else None,
+                    duration_s=run.duration_s if run is not None else None,
+                    run_id=ref.run_id,
+                    source_id=None,
+                    seam_s=None,
+                )
+            )
+        elif ref.source_id is not None:
+            file = row.source_files.get(ref.source_id)
+            if file is not None:
+                sources.append(_trial_source_out(file, ref.label))
+    return TrialCaseOut(
+        id=case.id,
+        trial_group=case.trial_group,
+        sort_order=case.sort_order,
+        title=case.title,
+        updated_at=case.updated_at,
+        guide=guide,
+        sources=sources,
+        runs=[run_out(run_row) for run_row in row.runs],
+        local_outputs=[
+            _trial_source_out(file, guide.source_labels.get(str(file.id)))
+            for file in row.local_outputs
+        ],
+        answer=case.answer,  # type: ignore[arg-type]  # the database CHECK holds the three
+        answer_note=case.answer_note,
     )
 
 
@@ -623,11 +779,14 @@ async def upload_source(
     responses=_INVALID,
 )
 async def join_sources(body: MusicSourceJoin, session: SessionDep) -> MusicSourceOut:
-    """Puts two finished runs end to end, with silence between them and after them if asked, and
-    stores the result as a recording to edit. Free: nothing goes to the GPU server.
+    """Puts two finished runs end to end (with silence between them or a crossfade), or one run
+    with silence after it, and stores the result as a recording to edit. Free: nothing goes to
+    the GPU server.
     """
     try:
-        source = await music_sources.make_join(session, body.run_ids, body.gap_s, body.tail_s)
+        source = await music_sources.make_join(
+            session, body.run_ids, body.gap_s, body.tail_s, body.crossfade_s
+        )
     except music_sources.MusicSourceError as exc:
         raise _unprocessable(exc.message) from exc
     return source_out(source)
@@ -697,3 +856,108 @@ async def update_run(run_id: int, body: LabMusicRunUpdate, session: SessionDep) 
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
     return run_out(row)
+
+
+@router.get(
+    "/lab/music/runs/{run_id}/outside-window",
+    response_model=OutsideWindowOut,
+    responses={
+        **_NOT_FOUND,
+        409: {
+            "model": ErrorResponse,
+            "description": "The run is not a finished repaint or inpaint.",
+        },
+        422: {"model": ErrorResponse, "description": "The audio could not be compared."},
+    },
+)
+async def get_run_outside_window(run_id: int, session: SessionDep) -> OutsideWindowOut:
+    """How much a repaint or an inpaint changed the sound outside its window, in dB against the
+    source (-200 is identical). Computed when asked: the source and the result are decoded and
+    compared, a margin on each side of the window left out. Free: no GPU.
+    """
+    row = await music_lab.get_run(session, run_id) if 1 <= run_id <= _MAX_ID else None
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
+    run = row.run
+    if run.operation not in ("repaint", "inpaint"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Only a repaint or an inpaint has a window.")
+    if run.path is None or row.source is None or row.source.path is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The run or its source has no audio.")
+    fields = run.fields if isinstance(run.fields, dict) else {}
+    start_key, end_key = (
+        ("repaint_start", "repaint_end")
+        if run.operation == "repaint"
+        else ("mask_start", "mask_end")
+    )
+    start, end = fields.get(start_key), fields.get(end_key)
+    if not isinstance(start, int | float):
+        raise HTTPException(status.HTTP_409_CONFLICT, "The run has no window.")
+    try:
+        storage = get_storage()
+        result = await music_outside_window.compare(
+            storage.get_path(row.source.path),
+            storage.get_path(run.path),
+            float(start),
+            float(end) if isinstance(end, int | float) else None,
+        )
+    except (StorageError, music_outside_window.OutsideWindowError) as exc:
+        raise _unprocessable(str(exc)) from exc
+    return OutsideWindowOut(**result.__dict__)
+
+
+@router.get("/lab/music/trials", response_model=list[TrialCaseOut])
+async def list_trials(session: SessionDep) -> list[TrialCaseOut]:
+    """The cases of the trial round in screen order, each with its guide text, its source audio,
+    its runs and its answer."""
+    return [trial_case_out(row) for row in await music_trials.list_cases(session)]
+
+
+@router.put(
+    "/lab/music/trials/{case_id}",
+    response_model=TrialCaseOut,
+    responses=_INVALID,
+)
+async def save_trial(
+    case_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")],
+    body: TrialCaseIn,
+    session: SessionDep,
+) -> TrialCaseOut:
+    """Creates a case or rewrites its guide and its runs (used by the trial helper). The answer
+    already given is kept."""
+    try:
+        await music_trials.save_case(
+            session,
+            case_id,
+            trial_group=body.trial_group,
+            sort_order=body.sort_order,
+            title=body.title,
+            guide=body.guide.model_dump(),
+            run_ids=list(body.run_ids),
+            source_ids=list(body.source_ids),
+        )
+    except music_trials.TrialInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    rows = await music_trials.list_cases(session)
+    return trial_case_out(next(row for row in rows if row.case.id == case_id))
+
+
+@router.patch(
+    "/lab/music/trials/{case_id}",
+    response_model=TrialCaseOut,
+    responses={404: {"model": ErrorResponse, "description": "No case has this id."}, **_INVALID},
+)
+async def update_trial(
+    case_id: Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")],
+    body: TrialAnswerUpdate,
+    session: SessionDep,
+) -> TrialCaseOut:
+    """Records the answer and/or the note of a case. Only the fields in the body are changed."""
+    changes = {key: getattr(body, key) for key in body.model_fields_set}
+    try:
+        case = await music_trials.set_answer(session, case_id, changes)
+    except music_trials.TrialInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Case {case_id} does not exist.")
+    rows = await music_trials.list_cases(session)
+    return trial_case_out(next(row for row in rows if row.case.id == case_id))

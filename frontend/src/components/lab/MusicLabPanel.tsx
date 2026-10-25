@@ -1,5 +1,5 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
-import { Alert, Loader, Paper, Stack, Text } from "@mantine/core";
+import { Alert, Loader, Paper, SegmentedControl, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import {
@@ -12,6 +12,7 @@ import {
 import { MusicEditPanel } from "../musicLab/MusicEditPanel";
 import { MusicLabForm } from "../musicLab/MusicLabForm";
 import { MusicLabRunList } from "../musicLab/MusicLabRunList";
+import { MusicTrialsPanel } from "../musicLab/MusicTrialsPanel";
 import type { MusicEditFormState } from "../musicLab/musicEditView";
 import { briefRequest, selectedModels, toRequest, type MusicLabFormState } from "../musicLab/musicLabView";
 
@@ -36,6 +37,8 @@ export function MusicLabPanel({ form, onFormChange, editForm, onEditFormChange }
   const draft = useCreateMusicPromptDraft();
   const [starting, setStarting] = useState<MusicModel[]>([]);
   const [draftError, setDraftError] = useState<string | null>(null);
+  // "make": the forms and the runs. "trials": the round-2 review screen.
+  const [view, setView] = useState<"make" | "trials">("make");
 
   /** Has the language model write the fields of each of these models from the brief. */
   async function writeFields(models: MusicModel[]) {
@@ -89,49 +92,65 @@ export function MusicLabPanel({ form, onFormChange, editForm, onEditFormChange }
 
   return (
     <Stack gap="lg" maw={1100}>
-      <Text size="sm" c="dimmed">
-        Try the music and sound models of the GPU server on one brief and listen to them side by
-        side. Choose the kind of sound, describe it, and the models that make it. The language
-        model can write each model's fields in the way that model reads them, and you can edit
-        them before you run. Each run is a paid GPU job, and it belongs to no project.
-      </Text>
+      <SegmentedControl
+        w={360}
+        value={view}
+        onChange={(value) => setView(value as "make" | "trials")}
+        data={[
+          { value: "make", label: "Make and edit" },
+          { value: "trials", label: "Round 2 trials" },
+        ]}
+      />
 
-      <Paper withBorder p="md" radius="md">
-        <MusicLabForm
-          state={form}
-          onChange={onFormChange}
-          catalog={catalog.data}
-          onRun={() => create.mutate(toRequest(form, catalog.data))}
-          running={create.isPending}
-          onWrite={(models) => void writeFields(models)}
-          starting={starting}
-        />
-      </Paper>
+      {view === "trials" && <MusicTrialsPanel />}
 
-      {draftError !== null && (
-        <Alert color="red" title="The prompt was not started">
-          {draftError}
-        </Alert>
+      {view === "make" && (
+        <>
+          <Text size="sm" c="dimmed">
+            Try the music and sound models of the GPU server on one brief and listen to them side by
+            side. Choose the kind of sound, describe it, and the models that make it. The language
+            model can write each model's fields in the way that model reads them, and you can edit
+            them before you run. Each run is a paid GPU job, and it belongs to no project.
+          </Text>
+
+          <Paper withBorder p="md" radius="md">
+            <MusicLabForm
+              state={form}
+              onChange={onFormChange}
+              catalog={catalog.data}
+              onRun={() => create.mutate(toRequest(form, catalog.data))}
+              running={create.isPending}
+              onWrite={(models) => void writeFields(models)}
+              starting={starting}
+            />
+          </Paper>
+
+          {draftError !== null && (
+            <Alert color="red" title="The prompt was not started">
+              {draftError}
+            </Alert>
+          )}
+          {create.isError && (
+            <Alert color="red" title="The runs were not started">
+              {describeError(create.error)}
+            </Alert>
+          )}
+          {create.isSuccess && (
+            <Alert color="green" title="Started">
+              {count === 1 ? "The run is" : `${count} runs are`} waiting for a free GPU slot and will
+              appear below. You can leave this page: it keeps going.
+            </Alert>
+          )}
+
+          <Paper withBorder p="md" radius="md" id="music-edit">
+            <MusicEditPanel state={editForm} onChange={onEditFormChange} catalog={catalog.data} />
+          </Paper>
+
+          <Paper withBorder p="md" radius="md">
+            <MusicLabRunList onLoad={onFormChange} onEdit={editRun} />
+          </Paper>
+        </>
       )}
-      {create.isError && (
-        <Alert color="red" title="The runs were not started">
-          {describeError(create.error)}
-        </Alert>
-      )}
-      {create.isSuccess && (
-        <Alert color="green" title="Started">
-          {count === 1 ? "The run is" : `${count} runs are`} waiting for a free GPU slot and will
-          appear below. You can leave this page: it keeps going.
-        </Alert>
-      )}
-
-      <Paper withBorder p="md" radius="md" id="music-edit">
-        <MusicEditPanel state={editForm} onChange={onEditFormChange} catalog={catalog.data} />
-      </Paper>
-
-      <Paper withBorder p="md" radius="md">
-        <MusicLabRunList onLoad={onFormChange} onEdit={editRun} />
-      </Paper>
     </Stack>
   );
 }

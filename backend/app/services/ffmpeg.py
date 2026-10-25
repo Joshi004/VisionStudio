@@ -583,12 +583,14 @@ async def join_audio(
     *,
     gap_s: float = 0.0,
     tail_s: float = 0.0,
+    crossfade_s: float = 0.0,
     timeout_s: float = 300.0,
 ) -> str | None:
     """Puts the first audio stream of each file in `parts` end to end in a new FLAC at `dest`
     (48 kHz, stereo, 24-bit), with `gap_s` seconds of silence between neighbours and `tail_s`
-    seconds of silence at the end. Returns None on success, or a sentence for the user when
-    FFmpeg could not do it. Never raises.
+    seconds of silence at the end. With `crossfade_s` above 0 (exactly two parts, no gap) the
+    second part starts that long before the first ends and the two fade into each other.
+    Returns None on success, or a sentence for the user when FFmpeg could not do it. Never raises.
     """
     args = ["-hide_banner", "-nostdin", "-nostats", "-loglevel", "error", "-y"]
     for part in parts:
@@ -599,11 +601,14 @@ async def join_audio(
     graph: list[str] = []
     labels: list[str] = []
     for index in range(len(parts)):
-        if index > 0 and gap_s > 0:
+        if index > 0 and gap_s > 0 and crossfade_s <= 0:
             graph.append(silence.format(seconds=gap_s) + f"[gap{index}]")
             labels.append(f"[gap{index}]")
         graph.append(f"[{index}:a:0]{convert}[part{index}]")
         labels.append(f"[part{index}]")
+    if crossfade_s > 0 and len(parts) == 2:
+        graph.append(f"[part0][part1]acrossfade=d={crossfade_s:.6f}:c1=qsin:c2=qsin[faded]")
+        labels = ["[faded]"]
     if tail_s > 0:
         graph.append(silence.format(seconds=tail_s) + "[tail]")
         labels.append("[tail]")

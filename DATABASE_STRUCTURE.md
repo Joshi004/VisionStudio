@@ -130,6 +130,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (MUSIC-004 editing in the Music lab, 2026-10-24):** migration `0063`. **The Music lab can change a sound it already has.** Five edits (ACE-Step 1.5 repaint and cover, Stable Audio 3 inpaint and transform, Stable Audio Open transform) take a source sound, and the answer is a normal lab run. (1) **One new table, `lab_music_source`** (Section 4.57): an audio file made for editing, either a recording a person uploaded or two lab runs joined end to end (the recipe of the join is kept). (2) **Three new nullable columns on `lab_music_run`** (Section 4.57): `operation` (`repaint`, `cover`, `inpaint` or `transform`; NULL for a run made from text), `source_run_id` (FK to `lab_music_run.id`, `SET NULL`) and `source_id` (FK to `lab_music_source.id`, `SET NULL`). A `CHECK` says a run made from text has neither source, and an edit has exactly one of them. Every run made before the migration reads as a text run, so nothing is backfilled. (3) **No new job type**: an edit is a `lab_music` job whose input also carries `operation` and `source` (Section 4.57); the window or the strength is in the run's `fields`, the seed in `params`, as for every run. See Section 4.57.
 
+**Update (MUSIC-005 round-2 trials, 2026-10-24):** migration `0064`. **The Music lab has a review screen for the cases of a trial round.** (1) **One new table, `lab_music_trial_case`** (Section 4.58): one row per case, with the guide text the screen shows (what to verify, what was done, the prompt in plain words), the lab runs and the local recordings the case made, and the person's answer. No existing table or column changes, so nothing is backfilled. (2) **`lab_music_source.recipe` of a join gains two optional keys**, `crossfade_s` (the two parts overlap by this long, fading one into the other) and the join may have **one** part followed by a silent tail (Section 4.57). A recipe without these keys reads as before. See Section 4.58.
+
 **Update (MUSIC-003 audio measurements, 2026-10-24):** migration `0062`. **What is in a sound file is measured once and stored.** One new table, `audio_measurement` (Section 4.56), keyed by the file's `sha256` and the version of the analysis (`services/audio_analysis.ANALYSIS_VERSION`): the length, leading and trailing silence, silences inside the sound, integrated loudness, a short-term loudness curve, true peak and clipping, the loudest moment, sudden sounds, quiet points, places where the sound changes character, and whether the sound ends with a decay or is cut. The key is a content hash that `lab_music_run`, `speech_unit_audio` and `shot_take` already store, so no existing table changes and a later music take needs no migration. Nothing is stored on the file's own row, and nothing about staleness is stored: a file whose bytes change has a new hash, and a changed analysis has a new version, so the old row is simply not read. `GET /api/lab/music/runs/{id}/measurements` measures a lab run the first time it is asked for. No job type is added. See Section 4.56.
 
 **Update (PHASE-055 deleting projects and library items, 2026-10-24):** migration `0061`. **Projects, library characters and library environments can be deleted.** One new table, `project_missing_library_item` (Section 4.55): when a library character or environment is deleted, each project that used it gets one row, written before the library row goes (its links and cast rows then cascade away). The row lets the project show the entry as "deleted from the library" and stops the pipeline from quietly making a new item for it; linking the entry again clears it. No column is added or changed. Foreign keys that already existed do the rest: deleting a `project` row cascades to every story artifact and job, and deleting a `library_character` or `library_environment` row cascades to its versions, looks, takes, named looks, references, states, views, links and cast rows. The stored files are deleted by code, not by the database (`services/storage.delete_media`, `delete_project_dir`): a project's folder `media/<project_id>/`, and a library item's pictures, cut-outs, speech and clips under `media/lab/` only when no remaining row uses them. The "Never deleted" notes on `library_character`, `library_environment`, `lab_run`, `voice` and the stored files are therefore no longer true; a deletion is always the user's explicit choice.
@@ -2662,6 +2664,36 @@ CREATE TABLE audio_measurement (
 ```
 
 `request` is the body without the source: the GPU server's upload does not outlive 60 minutes, so the handler uploads `source.path` when the job starts (and again if the job is queued again), and adds `source_audio_asset_id` to a copy of `request`. Once the job has submitted, its input also records `uploads` (the assets uploaded) and `body` (the body as sent, with the asset id).
+
+**Join changes (MUSIC-005).** A join has one or two parts. With one part (a run and a silent `tail_s`) `parts` has one entry and there is no seam (`seam_s` is null). `recipe.crossfade_s` (optional, absent or 0 for no crossfade) means the second part starts `crossfade_s` before the first ends, and the two fade into each other over that time; it cannot be combined with `gap_s`. With a crossfade the second part's `start_s` is `parts[0].end_s - crossfade_s`, and the seam is the middle of the overlap.
+
+### 4.58 `lab_music_trial_case`
+
+*Added in MUSIC-005 (migration `0064`).* One case of a Music lab trial round (Appendix C of `Music_implementation_phases.md`). The trial helper (`music_lab_trials/trigger.py`) writes the row with `PUT /api/lab/music/trials/{id}` when it starts the case, and the person sets `answer` and `answer_note` on the review screen. The runs keep their own `verdict` and `note`. A case is never deleted.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | TEXT | NOT NULL | — | Primary key, a short name such as `I2-fear` |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `updated_at` | DATETIME | NOT NULL | now | Set when the helper rewrites the case or the answer changes |
+| `trial_group` | TEXT | NOT NULL | — | The group letter (`I`, `J`, `K`, `L`, `M`) |
+| `sort_order` | INTEGER | NOT NULL | — | The order on the screen. Indexed by `idx_lab_music_trial_case_order` |
+| `title` | TEXT | NOT NULL | — | |
+| `guide` | JSON | NOT NULL | — | The text of the screen (below) |
+| `run_ids` | JSON | NOT NULL | `[]` | The lab runs the case started, in the order to show them |
+| `source_ids` | JSON | NOT NULL | `[]` | The recordings the case made locally (crossfades), in the order to show them |
+| `answer` | TEXT | NULL | NULL | `yes`, `partly` or `no` (`CHECK`, `ck_lab_music_trial_case_answer_valid`) |
+| `answer_note` | TEXT | NULL | NULL | |
+
+```json
+{"question": "Is the melody still recognisable, and does the feeling change?",
+ "verify": ["Play the source first.", "Then play each output and compare."],
+ "did": "We gave ACE-Step the music box and asked for a fearful version.",
+ "prompt_plain": "Fearful, tense, the same tune.",
+ "sources": [{"run_id": 75, "source_id": null, "label": "The music box (run 75)"}],
+ "run_labels": {"101": "Strength 0.3"},
+ "source_labels": {"7": "2 s crossfade"}}
+```
 
 ---
 

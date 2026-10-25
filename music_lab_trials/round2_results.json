@@ -1,0 +1,157 @@
+{
+  "_joins": {
+    "{\"crossfade_s\": 2, \"gap_s\": 0, \"run_ids\": [28, 30], \"tail_s\": 0}": 1,
+    "{\"crossfade_s\": 4, \"gap_s\": 0, \"run_ids\": [28, 30], \"tail_s\": 0}": 2,
+    "{\"crossfade_s\": 6, \"gap_s\": 0, \"run_ids\": [28, 30], \"tail_s\": 0}": 3,
+    "{\"crossfade_s\": 2, \"gap_s\": 0, \"run_ids\": [27, 29], \"tail_s\": 0}": 4,
+    "{\"crossfade_s\": 4, \"gap_s\": 0, \"run_ids\": [27, 29], \"tail_s\": 0}": 5,
+    "{\"crossfade_s\": 6, \"gap_s\": 0, \"run_ids\": [27, 29], \"tail_s\": 0}": 6,
+    "{\"crossfade_s\": 0, \"gap_s\": 0, \"run_ids\": [28, 30], \"tail_s\": 0}": 7,
+    "{\"crossfade_s\": 0, \"gap_s\": 0, \"run_ids\": [27, 29], \"tail_s\": 0}": 8,
+    "{\"crossfade_s\": 0, \"gap_s\": 0, \"run_ids\": [28], \"tail_s\": 28}": 9
+  },
+  "cases": {
+    "K3a": {
+      "steps": {
+        "0": {
+          "kind": "local",
+          "source_id": 1,
+          "run_ids": []
+        },
+        "1": {
+          "kind": "local",
+          "source_id": 2,
+          "run_ids": []
+        },
+        "2": {
+          "kind": "local",
+          "source_id": 3,
+          "run_ids": []
+        }
+      }
+    },
+    "K3b": {
+      "steps": {
+        "0": {
+          "kind": "local",
+          "source_id": 4,
+          "run_ids": []
+        },
+        "1": {
+          "kind": "local",
+          "source_id": 5,
+          "run_ids": []
+        },
+        "2": {
+          "kind": "local",
+          "source_id": 6,
+          "run_ids": []
+        }
+      }
+    },
+    "I1a": {
+      "steps": {
+        "0": {
+          "kind": "runs",
+          "run_ids": [
+            88,
+            89,
+            90,
+            91
+          ],
+          "group_key": "8a34fe2212e9f325",
+          "operation": null,
+          "started_at": "2026-10-24T05:21:36+00:00"
+        }
+      }
+    },
+    "I2-fear": {
+      "steps": {
+        "0": {
+          "kind": "runs",
+          "run_ids": [
+            92
+          ],
+          "group_key": "b46ca29849311f24",
+          "operation": "cover",
+          "started_at": "2026-10-24T05:21:36+00:00"
+        },
+        "1": {
+          "kind": "runs",
+          "run_ids": [
+            93
+          ],
+          "group_key": "72417ad5d721c3fe",
+          "operation": "cover",
+          "started_at": "2026-10-24T05:21:36+00:00"
+        },
+        "2": {
+          "kind": "runs",
+          "run_ids": [
+            94
+          ],
+          "group_key": "145feed0c350d882",
+          "operation": "cover",
+          "started_at": "2026-10-24T05:21:36+00:00"
+        }
+      }
+    },
+    "I3-fear": {
+      "steps": {
+        "0": {
+          "kind": "runs",
+          "run_ids": [
+            95
+          ],
+          "group_key": "2aca6159a796561d",
+          "operation": "transform",
+          "started_at": "2026-10-24T05:21:36+00:00"
+        },
+        "1": {
+          "kind": "runs",
+          "run_ids": [
+            96
+          ],
+          "group_key": "792b474ea6daeae5",
+          "operation": "transform",
+          "started_at": "2026-10-24T05:21:37+00:00"
+        },
+        "2": {
+          "kind": "runs",
+          "run_ids": [
+            97
+          ],
+          "group_key": "9d9be5468d8ab8b8",
+          "operation": "transform",
+          "started_at": "2026-10-24T05:21:37+00:00"
+        }
+      }
+    },
+    "J4a": {
+      "steps": {
+        "0": {
+          "kind": "runs",
+          "run_ids": [
+            98
+          ],
+          "group_key": "e7695c2b7966e667",
+          "operation": "repaint",
+          "started_at": "2026-10-24T05:21:37+00:00"
+        }
+      }
+    },
+    "J4b": {
+      "steps": {
+        "0": {
+          "kind": "runs",
+          "run_ids": [
+            99
+          ],
+          "group_key": "80ea721d58adc2a2",
+          "operation": "inpaint",
+          "started_at": "2026-10-24T05:21:37+00:00"
+        }
+      }
+    }
+  }
+}

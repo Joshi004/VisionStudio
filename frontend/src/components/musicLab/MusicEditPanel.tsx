@@ -128,7 +128,7 @@ function JoinSource({ onDone }: { onDone: (source: MusicSource) => void }) {
           loading={join.isPending}
           onClick={() => {
             if (ready) {
-              join.mutate({ run_ids: [firstId, secondId], gap_s: gapS, tail_s: tailS }, { onSuccess: onDone });
+              join.mutate({ run_ids: [firstId, secondId], gap_s: gapS, tail_s: tailS, crossfade_s: 0 }, { onSuccess: onDone });
             }
           }}
         >

@@ -1,0 +1,2190 @@
+{
+  "defaults": {
+    "seed": 1717
+  },
+  "cases": [
+    {
+      "id": "I1a",
+      "group": "I",
+      "wave": 1,
+      "order": 10,
+      "title": "Candidate lullaby themes: music box, ACE-Step 1.5",
+      "guide": {
+        "question": "Is there a tune here you would be happy to keep as the mother's lullaby theme?",
+        "verify": [
+          "Play all four takes. They are the same request with four different random starts, so they are four different tunes.",
+          "Does each one sound like a simple lullaby a mother would hum: slow, easy to remember, singable?",
+          "Is it only a music box, with no extra backing, drums or pads?",
+          "Mark Good for a tune you would keep as a candidate. In the case note, say which take (by run number) you would pick as the theme, if any. Round 2b uses it."
+        ],
+        "did": "We asked ACE-Step 1.5 for a 25 second lullaby played by a music box alone, four times, each with a different random start (seeds 1717 to 1720).",
+        "prompt_plain": "A slow, simple, singable lullaby that a mother would hum, played by one music box alone, in a minor key, tender and a little fragile. No drums, no backing.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Mother's lullaby theme candidate, solo music box, 25 s",
+          "fields": {
+            "caption": "solo music box playing a gentle, simple, singable lullaby melody that a mother would hum, slow, in a minor key, tender and slightly fragile, nothing else, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "bpm": 60,
+            "keyscale": "A minor",
+            "time_signature": "3",
+            "duration": 25
+          },
+          "variants": 4,
+          "label": "Tune",
+          "duration_s": 25
+        }
+      ]
+    },
+    {
+      "id": "I1b",
+      "group": "I",
+      "wave": 2,
+      "order": 20,
+      "title": "Candidate lullaby themes: piano, ACE-Step 1.5",
+      "guide": {
+        "question": "Is there a tune here you would be happy to keep as the mother's lullaby theme?",
+        "verify": [
+          "Play all four takes. They are the same request with four different random starts, so they are four different tunes.",
+          "Does each one sound like a simple lullaby a mother would hum: slow, easy to remember, singable?",
+          "Is it only a piano, with no extra backing, drums or pads?",
+          "Mark Good for a tune you would keep as a candidate. In the case note, say which take (by run number) you would pick as the theme, if any. Round 2b uses it."
+        ],
+        "did": "We asked ACE-Step 1.5 for a 25 second lullaby played by a piano alone, four times, each with a different random start (seeds 1717 to 1720).",
+        "prompt_plain": "A slow, simple, singable lullaby that a mother would hum, played by one piano alone, in a minor key, tender and a little fragile. No drums, no backing.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Mother's lullaby theme candidate, solo piano, 25 s",
+          "fields": {
+            "caption": "solo soft felt piano playing a gentle, simple, singable lullaby melody that a mother would hum, slow, in a minor key, tender and slightly fragile, nothing else, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "bpm": 60,
+            "keyscale": "A minor",
+            "time_signature": "3",
+            "duration": 25
+          },
+          "variants": 4,
+          "label": "Tune",
+          "duration_s": 25
+        }
+      ]
+    },
+    {
+      "id": "I1c",
+      "group": "I",
+      "wave": 2,
+      "order": 30,
+      "title": "Candidate lullaby themes: music box, Stable Audio 3",
+      "guide": {
+        "question": "Is there a tune here you would be happy to keep as the mother's lullaby theme?",
+        "verify": [
+          "Play all four takes. They are the same request with four different random starts, so they are four different tunes.",
+          "Does each one sound like a simple lullaby a mother would hum: slow, easy to remember, singable?",
+          "Is it only a music box, with no extra backing, drums or pads?",
+          "Mark Good for a tune you would keep as a candidate. In the case note, say which take (by run number) you would pick as the theme, if any. Round 2b uses it."
+        ],
+        "did": "We asked Stable Audio 3 for a 25 second lullaby played by a music box alone, four times, each with a different random start (seeds 1717 to 1720).",
+        "prompt_plain": "A slow, simple, singable lullaby that a mother would hum, played by one music box alone, in a minor key, tender and a little fragile. No drums, no backing.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Mother's lullaby theme candidate, solo music box, 25 s",
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. A solo music box playing a gentle, simple, singable lullaby melody that a mother would hum, slow, in a minor key, tender and slightly fragile, at about 60 BPM, alone with nothing else, no backing, no drums, no pads.",
+            "duration": 25
+          },
+          "variants": 4,
+          "label": "Tune",
+          "duration_s": 25
+        }
+      ]
+    },
+    {
+      "id": "I1d",
+      "group": "I",
+      "wave": 2,
+      "order": 40,
+      "title": "Candidate lullaby themes: piano, Stable Audio 3",
+      "guide": {
+        "question": "Is there a tune here you would be happy to keep as the mother's lullaby theme?",
+        "verify": [
+          "Play all four takes. They are the same request with four different random starts, so they are four different tunes.",
+          "Does each one sound like a simple lullaby a mother would hum: slow, easy to remember, singable?",
+          "Is it only a piano, with no extra backing, drums or pads?",
+          "Mark Good for a tune you would keep as a candidate. In the case note, say which take (by run number) you would pick as the theme, if any. Round 2b uses it."
+        ],
+        "did": "We asked Stable Audio 3 for a 25 second lullaby played by a piano alone, four times, each with a different random start (seeds 1717 to 1720).",
+        "prompt_plain": "A slow, simple, singable lullaby that a mother would hum, played by one piano alone, in a minor key, tender and a little fragile. No drums, no backing.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Mother's lullaby theme candidate, solo piano, 25 s",
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Piano. A solo piano playing a gentle, simple, singable lullaby melody that a mother would hum, slow, in a minor key, tender and slightly fragile, at about 60 BPM, alone with nothing else, no backing, no drums, no pads.",
+            "duration": 25
+          },
+          "variants": 4,
+          "label": "Tune",
+          "duration_s": 25
+        }
+      ]
+    },
+    {
+      "id": "I2-fear",
+      "group": "I",
+      "wave": 1,
+      "order": 50,
+      "title": "Theme as fear: ACE-Step cover of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound afraid?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Strength 0.3 follows the source loosely, 0.5 is in between, 0.7 follows it closely.",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound afraid?",
+          "Mark Good only when both answers are yes. In the case note, write the lowest strength that still keeps the tune."
+        ],
+        "did": "We gave ACE-Step the music box lullaby (run 75) and asked it to restyle the whole thing as afraid, keeping the structure. Three times: strength 0.3 (loose), 0.5 (balanced), 0.7 (close to the source).",
+        "prompt_plain": "The same solo music box lullaby, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath. No vocals.",
+        "sources": [
+          {
+            "run": 75,
+            "label": "Source: the music box lullaby (run 75, ACE-Step, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as fear, strength 0.3",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.3
+          },
+          "variants": 1,
+          "label": "Strength 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as fear, strength 0.5",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.5
+          },
+          "variants": 1,
+          "label": "Strength 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as fear, strength 0.7",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.7
+          },
+          "variants": 1,
+          "label": "Strength 0.7"
+        }
+      ]
+    },
+    {
+      "id": "I2-grief",
+      "group": "I",
+      "wave": 5,
+      "order": 60,
+      "title": "Theme as grief: ACE-Step cover of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound grieving?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Strength 0.3 follows the source loosely, 0.5 is in between, 0.7 follows it closely.",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound grieving?",
+          "Mark Good only when both answers are yes. In the case note, write the lowest strength that still keeps the tune."
+        ],
+        "did": "We gave ACE-Step the music box lullaby (run 75) and asked it to restyle the whole thing as grieving, keeping the structure. Three times: strength 0.3 (loose), 0.5 (balanced), 0.7 (close to the source).",
+        "prompt_plain": "The same solo music box lullaby, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful. No vocals.",
+        "sources": [
+          {
+            "run": 75,
+            "label": "Source: the music box lullaby (run 75, ACE-Step, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as grief, strength 0.3",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.3
+          },
+          "variants": 1,
+          "label": "Strength 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as grief, strength 0.5",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.5
+          },
+          "variants": 1,
+          "label": "Strength 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as grief, strength 0.7",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.7
+          },
+          "variants": 1,
+          "label": "Strength 0.7"
+        }
+      ]
+    },
+    {
+      "id": "I2-anger",
+      "group": "I",
+      "wave": 5,
+      "order": 70,
+      "title": "Theme as anger: ACE-Step cover of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound angry?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Strength 0.3 follows the source loosely, 0.5 is in between, 0.7 follows it closely.",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound angry?",
+          "Mark Good only when both answers are yes. In the case note, write the lowest strength that still keeps the tune."
+        ],
+        "did": "We gave ACE-Step the music box lullaby (run 75) and asked it to restyle the whole thing as angry, keeping the structure. Three times: strength 0.3 (loose), 0.5 (balanced), 0.7 (close to the source).",
+        "prompt_plain": "The same solo music box lullaby, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive. No vocals.",
+        "sources": [
+          {
+            "run": 75,
+            "label": "Source: the music box lullaby (run 75, ACE-Step, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as anger, strength 0.3",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.3
+          },
+          "variants": 1,
+          "label": "Strength 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as anger, strength 0.5",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.5
+          },
+          "variants": 1,
+          "label": "Strength 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as anger, strength 0.7",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.7
+          },
+          "variants": 1,
+          "label": "Strength 0.7"
+        }
+      ]
+    },
+    {
+      "id": "I2-tenderness",
+      "group": "I",
+      "wave": 5,
+      "order": 80,
+      "title": "Theme as tenderness: ACE-Step cover of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound tender?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Strength 0.3 follows the source loosely, 0.5 is in between, 0.7 follows it closely.",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound tender?",
+          "Mark Good only when both answers are yes. In the case note, write the lowest strength that still keeps the tune."
+        ],
+        "did": "We gave ACE-Step the music box lullaby (run 75) and asked it to restyle the whole thing as tender, keeping the structure. Three times: strength 0.3 (loose), 0.5 (balanced), 0.7 (close to the source).",
+        "prompt_plain": "The same solo music box lullaby, but tender: warm, soft and gentle, caressing, comforting and loving. No vocals.",
+        "sources": [
+          {
+            "run": 75,
+            "label": "Source: the music box lullaby (run 75, ACE-Step, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as tenderness, strength 0.3",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but tender: warm, soft and gentle, caressing, comforting and loving, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.3
+          },
+          "variants": 1,
+          "label": "Strength 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as tenderness, strength 0.5",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but tender: warm, soft and gentle, caressing, comforting and loving, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.5
+          },
+          "variants": 1,
+          "label": "Strength 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "cover",
+          "model": "ace-step-1.5",
+          "kind": "stem",
+          "description": "Cover of run 75 as tenderness, strength 0.7",
+          "source": {
+            "run": 75
+          },
+          "fields": {
+            "caption": "solo music box playing the same simple lullaby melody, but tender: warm, soft and gentle, caressing, comforting and loving, instrumental, no vocals, no drums, no backing",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "cover_strength": 0.7
+          },
+          "variants": 1,
+          "label": "Strength 0.7"
+        }
+      ]
+    },
+    {
+      "id": "I3-fear",
+      "group": "I",
+      "wave": 1,
+      "order": 90,
+      "title": "Theme as fear: Stable Audio 3 transform of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound afraid?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Noise 0.3 stays close to the source, 0.5 is in between, 0.7 moves furthest away from it (the opposite of the ACE-Step strength).",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound afraid?",
+          "Mark Good only when both answers are yes. In the case note, write the highest noise level that still keeps the tune."
+        ],
+        "did": "We gave Stable Audio 3 the music box lullaby (run 74) and a prompt for afraid. Three times: noise level 0.3 (close to the source), 0.5, 0.7 (far from it).",
+        "prompt_plain": "The same solo music box lullaby, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath.",
+        "sources": [
+          {
+            "run": 74,
+            "label": "Source: the music box lullaby (run 74, Stable Audio 3, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as fear, noise 0.3",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.3,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as fear, noise 0.5",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.5,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as fear, noise 0.7",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but afraid: trembling and hesitant, sparse, cold and uneasy, as if holding its breath. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.7,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.7"
+        }
+      ]
+    },
+    {
+      "id": "I3-grief",
+      "group": "I",
+      "wave": 5,
+      "order": 100,
+      "title": "Theme as grief: Stable Audio 3 transform of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound grieving?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Noise 0.3 stays close to the source, 0.5 is in between, 0.7 moves furthest away from it (the opposite of the ACE-Step strength).",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound grieving?",
+          "Mark Good only when both answers are yes. In the case note, write the highest noise level that still keeps the tune."
+        ],
+        "did": "We gave Stable Audio 3 the music box lullaby (run 74) and a prompt for grieving. Three times: noise level 0.3 (close to the source), 0.5, 0.7 (far from it).",
+        "prompt_plain": "The same solo music box lullaby, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful.",
+        "sources": [
+          {
+            "run": 74,
+            "label": "Source: the music box lullaby (run 74, Stable Audio 3, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as grief, noise 0.3",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.3,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as grief, noise 0.5",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.5,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as grief, noise 0.7",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but grieving: slow and heavy, each note lingering and fading away, sorrowful and tearful. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.7,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.7"
+        }
+      ]
+    },
+    {
+      "id": "I3-anger",
+      "group": "I",
+      "wave": 5,
+      "order": 110,
+      "title": "Theme as anger: Stable Audio 3 transform of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound angry?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Noise 0.3 stays close to the source, 0.5 is in between, 0.7 moves furthest away from it (the opposite of the ACE-Step strength).",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound angry?",
+          "Mark Good only when both answers are yes. In the case note, write the highest noise level that still keeps the tune."
+        ],
+        "did": "We gave Stable Audio 3 the music box lullaby (run 74) and a prompt for angry. Three times: noise level 0.3 (close to the source), 0.5, 0.7 (far from it).",
+        "prompt_plain": "The same solo music box lullaby, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive.",
+        "sources": [
+          {
+            "run": 74,
+            "label": "Source: the music box lullaby (run 74, Stable Audio 3, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as anger, noise 0.3",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.3,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as anger, noise 0.5",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.5,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as anger, noise 0.7",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but angry: hard, harsh and insistent, forceful, sharp attacks, driving and aggressive. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.7,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.7"
+        }
+      ]
+    },
+    {
+      "id": "I3-tenderness",
+      "group": "I",
+      "wave": 5,
+      "order": 120,
+      "title": "Theme as tenderness: Stable Audio 3 transform of the music box",
+      "guide": {
+        "question": "Can the music box lullaby keep its tune and still sound tender?",
+        "verify": [
+          "Play the source first and keep the tune in your head.",
+          "Play the three outputs. Noise 0.3 stays close to the source, 0.5 is in between, 0.7 moves furthest away from it (the opposite of the ACE-Step strength).",
+          "Ask two separate questions of each: is the tune still recognisable, and does it now sound tender?",
+          "Mark Good only when both answers are yes. In the case note, write the highest noise level that still keeps the tune."
+        ],
+        "did": "We gave Stable Audio 3 the music box lullaby (run 74) and a prompt for tender. Three times: noise level 0.3 (close to the source), 0.5, 0.7 (far from it).",
+        "prompt_plain": "The same solo music box lullaby, but tender: warm, soft and gentle, caressing, comforting and loving.",
+        "sources": [
+          {
+            "run": 74,
+            "label": "Source: the music box lullaby (run 74, Stable Audio 3, 20 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as tenderness, noise 0.3",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but tender: warm, soft and gentle, caressing, comforting and loving. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.3,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.3"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as tenderness, noise 0.5",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but tender: warm, soft and gentle, caressing, comforting and loving. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.5,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.5"
+        },
+        {
+          "type": "edit",
+          "operation": "transform",
+          "model": "stable-audio-3",
+          "kind": "stem",
+          "description": "Transform of run 74 as tenderness, noise 0.7",
+          "source": {
+            "run": 74
+          },
+          "fields": {
+            "prompt": "TrackType: Instrument, Instruments: Music Box. The same solo music box lullaby, but tender: warm, soft and gentle, caressing, comforting and loving. Alone with nothing else, no backing, no drums, no pads.",
+            "init_noise_level": 0.7,
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Noise 0.7"
+        }
+      ]
+    },
+    {
+      "id": "J1a",
+      "group": "J",
+      "wave": 2,
+      "order": 130,
+      "title": "Start at full presence: ACE-Step 1.5",
+      "guide": {
+        "question": "Can the model start a cue at full presence, with no swell and no silence?",
+        "verify": [
+          "Listen to the first second of each output only. Does the sound start immediately at full level?",
+          "Look at the line under each player. If it says 'x s of silence first', the start was not immediate: no such part, or a tiny one, is what we want. A slow fade-in also means it failed.",
+          "Two different prompts were used on purpose, so one lucky result cannot decide. Does it work for both?"
+        ],
+        "did": "We asked ACE-Step 1.5 for two different 20 second cues that should start loud and complete from the first beat. One run for each prompt.",
+        "prompt_plain": "Prompt 1: an orchestral cue that is already full from the first beat. Prompt 2: a piano and strings piece that starts mid-phrase at full strength. Both: no intro, no fade-in, no build-up.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Start at full presence, prompt 1",
+          "fields": {
+            "caption": "a cinematic orchestral cue that starts immediately at full volume with strings, brass and drums all playing from the very first beat, no intro, no fade in, no swell, no silence at the start, instrumental, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Prompt 1",
+          "duration_s": 20
+        },
+        {
+          "type": "text",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Start at full presence, prompt 2",
+          "fields": {
+            "caption": "a dramatic piece for piano and strings that begins abruptly at full presence on its first note, as if cut in from the middle of a longer piece, no fade in, no build-up, no silence at the start, instrumental, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Prompt 2",
+          "duration_s": 20
+        }
+      ]
+    },
+    {
+      "id": "J1b",
+      "group": "J",
+      "wave": 2,
+      "order": 140,
+      "title": "Start at full presence: Stable Audio 3",
+      "guide": {
+        "question": "Can the model start a cue at full presence, with no swell and no silence?",
+        "verify": [
+          "Listen to the first second of each output only. Does the sound start immediately at full level?",
+          "Look at the line under each player. If it says 'x s of silence first', the start was not immediate: no such part, or a tiny one, is what we want. A slow fade-in also means it failed.",
+          "Two different prompts were used on purpose, so one lucky result cannot decide. Does it work for both?"
+        ],
+        "did": "We asked Stable Audio 3 for two different 20 second cues that should start loud and complete from the first beat. One run for each prompt.",
+        "prompt_plain": "Prompt 1: an orchestral cue that is already full from the first beat. Prompt 2: a piano and strings piece that starts mid-phrase at full strength. Both: no intro, no fade-in, no build-up.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Start at full presence, prompt 1",
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic. a cinematic orchestral cue that starts immediately at full volume with strings, brass and drums all playing from the very first beat, no intro, no fade in, no swell, no silence at the start.",
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Prompt 1",
+          "duration_s": 20
+        },
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Start at full presence, prompt 2",
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic. a dramatic piece for piano and strings that begins abruptly at full presence on its first note, as if cut in from the middle of a longer piece, no fade in, no build-up, no silence at the start.",
+            "duration": 20
+          },
+          "variants": 1,
+          "label": "Prompt 2",
+          "duration_s": 20
+        }
+      ]
+    },
+    {
+      "id": "J2a",
+      "group": "J",
+      "wave": 2,
+      "order": 150,
+      "title": "A clear ending at 30 s: ACE-Step 1.5",
+      "guide": {
+        "question": "Does the cue end with a real final chord, close to 30 seconds?",
+        "verify": [
+          "Listen to the last 5 seconds. Is there one clear final chord that rings out and dies away?",
+          "Check the length on the card against 30 s, and the end of the measurement line: we want 'ends by fading' (a natural decay), not 'ends cut off'.",
+          "Two different random starts were made. Does it work for both, or only sometimes? Only 'both' makes endings reliable enough to time backwards from."
+        ],
+        "did": "We asked ACE-Step 1.5 for a 30 second cue that must end on one clear final chord with a natural decay. Two runs with different random starts.",
+        "prompt_plain": "A calm piano and strings piece that ends with one clear final chord, ringing out and dying away to silence exactly at 30 seconds. Not a fade-out, not a sudden cut.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "A 30 s cue with a clear final chord",
+          "fields": {
+            "caption": "calm cinematic piano and strings instrumental, ends with one clear final chord that rings out and decays naturally to silence at 30 seconds, not a fade-out and not an abrupt cut, no vocals",
+            "lyrics": "[Intro]\n\n[Verse]\n\n[Outro - one final chord, natural decay]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "bpm": 70,
+            "keyscale": "C major",
+            "time_signature": "4",
+            "duration": 30
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 30
+        }
+      ]
+    },
+    {
+      "id": "J2b",
+      "group": "J",
+      "wave": 2,
+      "order": 160,
+      "title": "A clear ending at 30 s: Stable Audio 3",
+      "guide": {
+        "question": "Does the cue end with a real final chord, close to 30 seconds?",
+        "verify": [
+          "Listen to the last 5 seconds. Is there one clear final chord that rings out and dies away?",
+          "Check the length on the card against 30 s, and the end of the measurement line: we want 'ends by fading' (a natural decay), not 'ends cut off'.",
+          "Two different random starts were made. Does it work for both, or only sometimes? Only 'both' makes endings reliable enough to time backwards from."
+        ],
+        "did": "We asked Stable Audio 3 for a 30 second cue that must end on one clear final chord with a natural decay. Two runs with different random starts.",
+        "prompt_plain": "A calm piano and strings piece that ends with one clear final chord, ringing out and dying away to silence exactly at 30 seconds. Not a fade-out, not a sudden cut.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "A 30 s cue with a clear final chord",
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic. A calm 30 second piece for piano and strings that ends with one clear final chord that rings out and decays naturally to silence at 30 seconds, not a fade-out and not an abrupt cut.",
+            "duration": 30
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 30
+        }
+      ]
+    },
+    {
+      "id": "J3a",
+      "group": "J",
+      "wave": 2,
+      "order": 170,
+      "title": "No ending, keeps going: ACE-Step 1.5",
+      "guide": {
+        "question": "Can the model make a cue that just keeps going to the end, with no fade and no final chord?",
+        "verify": [
+          "Listen to the last 5 seconds. Does the music still sound as if it is in the middle of something, with no wrap-up?",
+          "The measurement line should say 'ends cut off' (it stops while still going). A fade or a final chord means it failed.",
+          "This matters because a cue we want to cut at an exact point needs spare music past the cut (a handle)."
+        ],
+        "did": "We asked ACE-Step 1.5 for a 30 second cue with no ending at all. Two runs with different random starts.",
+        "prompt_plain": "A steady piano and strings piece that never wraps up: no final chord, no fade-out, it just carries on until it stops.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "A 30 s cue with no ending",
+          "fields": {
+            "caption": "steady ambient piano and strings instrumental that keeps playing steadily right to the very last second with no ending, no final chord and no fade-out, as if it could carry on, so it can be cut anywhere, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "bpm": 70,
+            "keyscale": "C major",
+            "time_signature": "4",
+            "duration": 30
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 30
+        }
+      ]
+    },
+    {
+      "id": "J3b",
+      "group": "J",
+      "wave": 2,
+      "order": 180,
+      "title": "No ending, keeps going: Stable Audio 3",
+      "guide": {
+        "question": "Can the model make a cue that just keeps going to the end, with no fade and no final chord?",
+        "verify": [
+          "Listen to the last 5 seconds. Does the music still sound as if it is in the middle of something, with no wrap-up?",
+          "The measurement line should say 'ends cut off' (it stops while still going). A fade or a final chord means it failed.",
+          "This matters because a cue we want to cut at an exact point needs spare music past the cut (a handle)."
+        ],
+        "did": "We asked Stable Audio 3 for a 30 second cue with no ending at all. Two runs with different random starts.",
+        "prompt_plain": "A steady piano and strings piece that never wraps up: no final chord, no fade-out, it just carries on until it stops.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "A 30 s cue with no ending",
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Ambient. A steady 30 second piece for piano and strings that keeps playing steadily right to the very last second with no ending, no final chord and no fade-out, as if it could carry on, so it can be cut anywhere.",
+            "duration": 30
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 30
+        }
+      ]
+    },
+    {
+      "id": "J4a",
+      "group": "J",
+      "wave": 1,
+      "order": 190,
+      "title": "Repair the last 6 s into an ending: ACE-Step repaint",
+      "guide": {
+        "question": "Can a repaint turn the last 6 seconds of a cue into a proper ending?",
+        "verify": [
+          "Play the source and listen to how its last 6 seconds (30 s to 36 s) end.",
+          "Play the output. Does the first 30 seconds sound the same as the source? The line under the player says whether the part outside the window is unchanged.",
+          "Does the last 6 seconds now end with a clear final chord and a natural decay? Is the join at 30 s smooth?"
+        ],
+        "did": "We gave ACE-Step the 36 second scene 5 cue (run 28) and asked it to redo only 30 s to 36 s as a proper ending (repaint).",
+        "prompt_plain": "The same dark ambient horror cue, but the last 6 seconds end with a clear held chord of bowed strings and a natural decay.",
+        "sources": [
+          {
+            "run": 28,
+            "label": "Source: scene 5 cue (run 28, ACE-Step, 36 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Repaint 30-36 s of run 28 into a proper ending",
+          "source": {
+            "run": 28
+          },
+          "fields": {
+            "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, cold dry production, instrumental, no vocals, ends with a clear final held chord of bowed strings and a natural decay, a proper ending",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 30,
+            "repaint_end": 36
+          },
+          "variants": 1,
+          "label": "Repainted 30 to 36 s"
+        }
+      ]
+    },
+    {
+      "id": "J4b",
+      "group": "J",
+      "wave": 1,
+      "order": 200,
+      "title": "Repair the last 6 s into an ending: Stable Audio 3 inpaint",
+      "guide": {
+        "question": "Can an inpaint turn the last 6 seconds of a cue into a proper ending?",
+        "verify": [
+          "Play the source and listen to how its last 6 seconds (30 s to 36 s) end.",
+          "Play the output. Does the first 30 seconds sound the same as the source? The line under the player says whether the part outside the window is unchanged.",
+          "Does the last 6 seconds now end with a clear final chord and a natural decay? Is the join at 30 s smooth?"
+        ],
+        "did": "We gave Stable Audio 3 the 36 second scene 5 cue (run 27) and asked it to redo only 30 s to 36 s as a proper ending (inpaint).",
+        "prompt_plain": "The same dark ambient horror cue, but the last 6 seconds end with a clear held chord of bowed strings and a natural decay.",
+        "sources": [
+          {
+            "run": 27,
+            "label": "Source: scene 5 cue (run 27, Stable Audio 3, 36 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Inpaint 30-36 s of run 27 into a proper ending",
+          "source": {
+            "run": 27
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. The same horror cue, but the last 6 seconds end with a clear final held chord of bowed strings and a natural decay, a proper ending.",
+            "mask_start": 30,
+            "mask_end": 36,
+            "duration": 36
+          },
+          "variants": 1,
+          "label": "Inpainted 30 to 36 s"
+        }
+      ]
+    },
+    {
+      "id": "K1a",
+      "group": "K",
+      "wave": 3,
+      "order": 210,
+      "title": "Rewrite a seam: ACE-Step 1.5",
+      "guide": {
+        "question": "Can the model rewrite the join between two cues so they play as one piece?",
+        "verify": [
+          "Play the source: it is the scene 5 cue followed directly by the scene 6 cue, so there is an abrupt change at 36 s (the 'seam').",
+          "Play each output. Is the seam gone? Does it sound like one continuous piece?",
+          "Windows of 4, 8 and 12 seconds were centred on the seam. Which is the shortest window that works? Write it in the case note.",
+          "The line under each player says whether the sound outside the window stayed unchanged."
+        ],
+        "did": "We put two cues end to end with no gap (runs 28 + 30, 64 s in all, the seam at 36 s) and asked ACE-Step 1.5 to redo a window centred on the seam. Three window lengths: 4, 8 and 12 seconds.",
+        "prompt_plain": "One continuous dark ambient piece that flows smoothly from frozen fear on held strings into a wary, quiet piano figure, with the same instruments, tempo and key, no stop and no sudden change.",
+        "sources": [
+          {
+            "join": {
+              "runs": [
+                28,
+                30
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            },
+            "label": "Source: runs 28 + 30 joined with no gap (seam at 36 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Rewrite the seam at 36 s, 4 s window",
+          "source": {
+            "join": {
+              "runs": [
+                28,
+                30
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            }
+          },
+          "fields": {
+            "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, cold dry production, instrumental, no vocals, one continuous piece that flows smoothly from frozen fear on held strings into a wary, methodical quiet piano figure, same instruments, same tempo, same key, no stop and no abrupt change",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 34.0,
+            "repaint_end": 38.0
+          },
+          "variants": 1,
+          "label": "4 s window (34 to 38 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Rewrite the seam at 36 s, 8 s window",
+          "source": {
+            "join": {
+              "runs": [
+                28,
+                30
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            }
+          },
+          "fields": {
+            "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, cold dry production, instrumental, no vocals, one continuous piece that flows smoothly from frozen fear on held strings into a wary, methodical quiet piano figure, same instruments, same tempo, same key, no stop and no abrupt change",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 32.0,
+            "repaint_end": 40.0
+          },
+          "variants": 1,
+          "label": "8 s window (32 to 40 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Rewrite the seam at 36 s, 12 s window",
+          "source": {
+            "join": {
+              "runs": [
+                28,
+                30
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            }
+          },
+          "fields": {
+            "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, cold dry production, instrumental, no vocals, one continuous piece that flows smoothly from frozen fear on held strings into a wary, methodical quiet piano figure, same instruments, same tempo, same key, no stop and no abrupt change",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 30.0,
+            "repaint_end": 42.0
+          },
+          "variants": 1,
+          "label": "12 s window (30 to 42 s)"
+        }
+      ]
+    },
+    {
+      "id": "K1b",
+      "group": "K",
+      "wave": 3,
+      "order": 220,
+      "title": "Rewrite a seam: Stable Audio 3",
+      "guide": {
+        "question": "Can the model rewrite the join between two cues so they play as one piece?",
+        "verify": [
+          "Play the source: it is the scene 5 cue followed directly by the scene 6 cue, so there is an abrupt change at 36 s (the 'seam').",
+          "Play each output. Is the seam gone? Does it sound like one continuous piece?",
+          "Windows of 4, 8 and 12 seconds were centred on the seam. Which is the shortest window that works? Write it in the case note.",
+          "The line under each player says whether the sound outside the window stayed unchanged."
+        ],
+        "did": "We put two cues end to end with no gap (runs 27 + 29, 64 s in all, the seam at 36 s) and asked Stable Audio 3 to redo a window centred on the seam. Three window lengths: 4, 8 and 12 seconds.",
+        "prompt_plain": "One continuous dark ambient piece that flows smoothly from frozen fear on held strings into a wary, quiet piano figure, with the same instruments, tempo and key, no stop and no sudden change.",
+        "sources": [
+          {
+            "join": {
+              "runs": [
+                27,
+                29
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            },
+            "label": "Source: runs 27 + 29 joined with no gap (seam at 36 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Rewrite the seam at 36 s, 4 s window",
+          "source": {
+            "join": {
+              "runs": [
+                27,
+                29
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            }
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. One continuous piece that flows smoothly from frozen fear on held strings into a wary, methodical quiet piano figure over a thin drone, same instruments, same tempo, no stop and no abrupt change.",
+            "mask_start": 34.0,
+            "mask_end": 38.0,
+            "duration": 64
+          },
+          "variants": 1,
+          "label": "4 s window (34 to 38 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Rewrite the seam at 36 s, 8 s window",
+          "source": {
+            "join": {
+              "runs": [
+                27,
+                29
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            }
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. One continuous piece that flows smoothly from frozen fear on held strings into a wary, methodical quiet piano figure over a thin drone, same instruments, same tempo, no stop and no abrupt change.",
+            "mask_start": 32.0,
+            "mask_end": 40.0,
+            "duration": 64
+          },
+          "variants": 1,
+          "label": "8 s window (32 to 40 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Rewrite the seam at 36 s, 12 s window",
+          "source": {
+            "join": {
+              "runs": [
+                27,
+                29
+              ],
+              "gap_s": 0,
+              "tail_s": 0
+            }
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. One continuous piece that flows smoothly from frozen fear on held strings into a wary, methodical quiet piano figure over a thin drone, same instruments, same tempo, no stop and no abrupt change.",
+            "mask_start": 30.0,
+            "mask_end": 42.0,
+            "duration": 64
+          },
+          "variants": 1,
+          "label": "12 s window (30 to 42 s)"
+        }
+      ]
+    },
+    {
+      "id": "K2a",
+      "group": "K",
+      "wave": 3,
+      "order": 230,
+      "title": "Continue a cue past its end: Stable Audio 3 inpaint extension",
+      "guide": {
+        "question": "Can the model carry on a cue from where it stopped, in the mood of the next scene?",
+        "verify": [
+          "Play the source (36 s) and remember how it ends.",
+          "Play the output (64 s). Does the first 36 s sound the same as the source?",
+          "From 36 s on, does the music carry on naturally from the source, in a wary and then dreadful mood? Is there an audible join at 36 s?",
+          "Does it run all the way to 64 s?"
+        ],
+        "did": "We gave Stable Audio 3 the 36 second scene 5 cue (run 27) and asked it to carry on from 36 s to 64 s in the mood of scene 6 (inpaint starting at the end of the source).",
+        "prompt_plain": "The same horror cue carries on: wary and methodical with a slow piano over a thin drone, then cold dread as bowed strings creep in, ending in shaken disbelief on an unresolved held chord.",
+        "sources": [
+          {
+            "run": 27,
+            "label": "Source: scene 5 cue (run 27, Stable Audio 3, 36 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Extend run 27 from 36 s to 64 s in scene 6's mood",
+          "source": {
+            "run": 27
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Dark Ambient, Genre: Horror Cinematic, Instruments: Low Drone, Sparse Piano, Bowed Strings, Sub Bass, Music Box. The same cue carrying on: it turns wary and methodical with a slow quiet piano figure over a thin drone, then cold dread as bowed strings creep in, and ends in shaken disbelief with an unsettled, unresolved held chord.",
+            "mask_start": 36,
+            "mask_end": 64,
+            "duration": 64
+          },
+          "variants": 1,
+          "label": "Extended to 64 s"
+        }
+      ]
+    },
+    {
+      "id": "K2b",
+      "group": "K",
+      "wave": 3,
+      "order": 240,
+      "title": "Continue a cue past its end: ACE-Step repaint into silence",
+      "guide": {
+        "question": "Can the model carry on a cue from where it stopped, in the mood of the next scene?",
+        "verify": [
+          "Play the source: the scene 5 cue followed by 28 seconds of silence (64 s in all).",
+          "Play the output. Does the first 36 s sound the same as run 28?",
+          "From 36 s on, is the silence replaced by music that carries on naturally, in a wary and then dreadful mood? Is there an audible join at 36 s?",
+          "Does the music fill all the way to 64 s?"
+        ],
+        "did": "We added 28 seconds of silence after the 36 second scene 5 cue (run 28) and asked ACE-Step to repaint 36 s to 64 s with music in the mood of scene 6.",
+        "prompt_plain": "The same horror cue carries on: wary and methodical with a slow piano over a thin drone, then cold dread as bowed strings creep in, ending in shaken disbelief on an unresolved held chord.",
+        "sources": [
+          {
+            "join": {
+              "runs": [
+                28
+              ],
+              "gap_s": 0,
+              "tail_s": 28
+            },
+            "label": "Source: scene 5 cue (run 28) plus 28 s of silence"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Repaint 36-64 s of run 28 plus silence",
+          "source": {
+            "join": {
+              "runs": [
+                28
+              ],
+              "gap_s": 0,
+              "tail_s": 28
+            }
+          },
+          "fields": {
+            "caption": "dark ambient horror cue, low drone, sparse muted piano, bowed strings, sub bass, faint music box, cold dry production, instrumental, no vocals, the same cue carrying on: it turns wary and methodical with a slow quiet piano figure over a thin drone, then cold dread as bowed strings creep in, and ends in shaken disbelief with an unsettled, unresolved held chord",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 36,
+            "repaint_end": 64
+          },
+          "variants": 1,
+          "label": "Repainted 36 to 64 s"
+        }
+      ]
+    },
+    {
+      "id": "K3a",
+      "group": "K",
+      "wave": 0,
+      "order": 250,
+      "title": "Plain crossfades, no GPU: ACE-Step pair (runs 28 + 30)",
+      "guide": {
+        "question": "How long must a plain crossfade be before the change between the two cues stops being noticeable?",
+        "verify": [
+          "Play the two source cues first, one after the other, to know what the change sounds like.",
+          "Play the three crossfades (2, 4 and 6 seconds). Is the change smooth, with no click and no dip in the sound?",
+          "In the case note, write the shortest crossfade you would accept. This is the baseline the model-written joins (K1, K2) must beat."
+        ],
+        "did": "We made these on this computer with FFmpeg (no GPU, no cost): the second cue starts while the first is still ending, and the two fade into each other. Three overlap lengths.",
+        "prompt_plain": "No prompt: this is a plain crossfade of two existing cues.",
+        "sources": [
+          {
+            "run": 28,
+            "label": "Cue 1 (run 28)"
+          },
+          {
+            "run": 30,
+            "label": "Cue 2 (run 30)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              28,
+              30
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 2
+          },
+          "label": "2 s crossfade"
+        },
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              28,
+              30
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 4
+          },
+          "label": "4 s crossfade"
+        },
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              28,
+              30
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 6
+          },
+          "label": "6 s crossfade"
+        }
+      ]
+    },
+    {
+      "id": "K3b",
+      "group": "K",
+      "wave": 0,
+      "order": 260,
+      "title": "Plain crossfades, no GPU: Stable Audio 3 pair (runs 27 + 29)",
+      "guide": {
+        "question": "How long must a plain crossfade be before the change between the two cues stops being noticeable?",
+        "verify": [
+          "Play the two source cues first, one after the other, to know what the change sounds like.",
+          "Play the three crossfades (2, 4 and 6 seconds). Is the change smooth, with no click and no dip in the sound?",
+          "In the case note, write the shortest crossfade you would accept. This is the baseline the model-written joins (K1, K2) must beat."
+        ],
+        "did": "We made these on this computer with FFmpeg (no GPU, no cost): the second cue starts while the first is still ending, and the two fade into each other. Three overlap lengths.",
+        "prompt_plain": "No prompt: this is a plain crossfade of two existing cues.",
+        "sources": [
+          {
+            "run": 27,
+            "label": "Cue 1 (run 27)"
+          },
+          {
+            "run": 29,
+            "label": "Cue 2 (run 29)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              27,
+              29
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 2
+          },
+          "label": "2 s crossfade"
+        },
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              27,
+              29
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 4
+          },
+          "label": "4 s crossfade"
+        },
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              27,
+              29
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 6
+          },
+          "label": "6 s crossfade"
+        }
+      ]
+    },
+    {
+      "id": "K4",
+      "group": "K",
+      "wave": 3,
+      "order": 270,
+      "title": "Does context in the prompt make cues fit together? (ACE-Step)",
+      "guide": {
+        "question": "If we describe the previous cue's instruments, tempo, key and ending in the prompt, do two cues fit together better?",
+        "verify": [
+          "Play the two source cues: they are the original scene 5 cue (run 28) and the original scene 6 cue (run 30), made without knowing about each other.",
+          "Play the 'plain crossfade' of those two (the 4 s crossfade in case K3a) to hear how well the originals fit.",
+          "Play the new scene 6 pieces, then the two crossfades below: scene 5 followed by each new piece, 4 seconds.",
+          "Do the new pairs fit together better than the originals did? Same instruments, same feel, no jarring change? Answer yes only if it is clearly better."
+        ],
+        "did": "We generated scene 6 again with ACE-Step, but this time the prompt describes the scene 5 cue (its instruments, its tempo of 55 BPM, its key of A minor and its frozen-fear ending). Two runs with different random starts. Then we made a 4 second crossfade from scene 5 into each new piece.",
+        "prompt_plain": "A horror cue that carries straight on from a cue that ended in frozen fear on held strings, with the same instruments, tempo and key: wary at first, then cold dread, ending in shaken disbelief on an unresolved chord.",
+        "sources": [
+          {
+            "run": 28,
+            "label": "Scene 5 cue (run 28)"
+          },
+          {
+            "run": 30,
+            "label": "Original scene 6 cue (run 30), made without context"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Scene 6 again, with scene 5's context described",
+          "fields": {
+            "caption": "dark ambient horror cue continuing straight on from a previous cue that ended in frozen fear on held strings, same instruments: low drone, sparse muted piano, bowed strings, sub bass, faint music box, same tempo and key, starts wary and methodical, turns to cold dread, ends in shaken disbelief with an unsettled, unresolved held chord, cold dry production, instrumental, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "bpm": 55,
+            "keyscale": "A minor",
+            "time_signature": "4",
+            "duration": 28
+          },
+          "variants": 2,
+          "label": "New scene 6",
+          "duration_s": 28
+        },
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              28,
+              {
+                "case_run": [
+                  "K4",
+                  0
+                ]
+              }
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 4
+          },
+          "label": "Scene 5, then new scene 6 (take 1), 4 s crossfade"
+        },
+        {
+          "type": "join",
+          "join": {
+            "runs": [
+              28,
+              {
+                "case_run": [
+                  "K4",
+                  1
+                ]
+              }
+            ],
+            "gap_s": 0,
+            "tail_s": 0,
+            "crossfade_s": 4
+          },
+          "label": "Scene 5, then new scene 6 (take 2), 4 s crossfade"
+        }
+      ]
+    },
+    {
+      "id": "L1",
+      "group": "L",
+      "wave": 2,
+      "order": 280,
+      "title": "Repair a missing swell: both models",
+      "guide": {
+        "question": "Can a repair add the bright swell that the first attempt missed, without disturbing the rest?",
+        "verify": [
+          "Play the source and find 0:24. In round 1 the bright swell asked for there did not happen.",
+          "Play the output. Is there now a clear bright swell around 0:24?",
+          "Is the rest of the piece unchanged? The line under the player says whether the sound outside the window stayed the same.",
+          "Are the edges of the repaired part smooth, with no click or jump where it starts and ends?"
+        ],
+        "did": "We took the two 60 second First Light pieces from round 1 (run 14 ACE-Step, run 13 Stable Audio 3) and asked each model to redo only 0:20 to 0:28 with the bright swell.",
+        "prompt_plain": "Rising tension that then bursts into a sudden bright swell: a burst of bells and light as the sound opens up.",
+        "sources": [
+          {
+            "run": 14,
+            "label": "Source A: run 14 (ACE-Step, 60 s)"
+          },
+          {
+            "run": 13,
+            "label": "Source B: run 13 (Stable Audio 3, 60 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Repaint 20-28 s of run 14 asking for the bright swell",
+          "source": {
+            "run": 14
+          },
+          "fields": {
+            "caption": "cinematic ambient instrumental, rising tension that then bursts into a sudden bright swell with a burst of bells and light, strings, bells, synth pads, sub bass, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 20,
+            "repaint_end": 28
+          },
+          "variants": 1,
+          "label": "ACE-Step repaint of run 14, 20 to 28 s"
+        },
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Inpaint 20-28 s of run 13 asking for the bright swell",
+          "source": {
+            "run": 13
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic, Genre: Ambient, Instruments: Sub Bass, Synth Pad, Strings, Bells. Tension rises steadily and then there is a sudden bright swell, a burst of bells and light as the sound opens up.",
+            "mask_start": 20,
+            "mask_end": 28,
+            "duration": 60
+          },
+          "variants": 1,
+          "label": "Stable Audio 3 inpaint of run 13, 20 to 28 s"
+        }
+      ]
+    },
+    {
+      "id": "L2a",
+      "group": "L",
+      "wave": 2,
+      "order": 290,
+      "title": "How short can a repair be: ACE-Step 1.5",
+      "guide": {
+        "question": "How short can a repair be before its edges start to show?",
+        "verify": [
+          "Play the source, then the three outputs (windows of 2, 6 and 10 seconds around 0:24).",
+          "Listen at the start and end of each repaired part for a click, a jump in loudness, or a change of sound.",
+          "In the case note, write the shortest window whose edges you cannot hear. Also say whether the short ones still add the swell at all."
+        ],
+        "did": "We repeated the swell repair on run 14 with ACE-Step 1.5, with three window lengths centred on 0:24: 2, 6 and 10 seconds.",
+        "prompt_plain": "Rising tension that then bursts into a sudden bright swell: a burst of bells and light as the sound opens up.",
+        "sources": [
+          {
+            "run": 14,
+            "label": "Source: run 14 (ACE-Step 1.5, 60 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Repair 2 s window around 0:24 of run 14",
+          "source": {
+            "run": 14
+          },
+          "fields": {
+            "caption": "cinematic ambient instrumental, rising tension that then bursts into a sudden bright swell with a burst of bells and light, strings, bells, synth pads, sub bass, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 23.0,
+            "repaint_end": 25.0
+          },
+          "variants": 1,
+          "label": "2 s window (23 to 25 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Repair 6 s window around 0:24 of run 14",
+          "source": {
+            "run": 14
+          },
+          "fields": {
+            "caption": "cinematic ambient instrumental, rising tension that then bursts into a sudden bright swell with a burst of bells and light, strings, bells, synth pads, sub bass, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 21.0,
+            "repaint_end": 27.0
+          },
+          "variants": 1,
+          "label": "6 s window (21 to 27 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "repaint",
+          "model": "ace-step-1.5",
+          "kind": "score",
+          "description": "Repair 10 s window around 0:24 of run 14",
+          "source": {
+            "run": 14
+          },
+          "fields": {
+            "caption": "cinematic ambient instrumental, rising tension that then bursts into a sudden bright swell with a burst of bells and light, strings, bells, synth pads, sub bass, no vocals",
+            "lyrics": "[Instrumental]",
+            "instrumental": true,
+            "vocal_language": "unknown",
+            "repaint_start": 19.0,
+            "repaint_end": 29.0
+          },
+          "variants": 1,
+          "label": "10 s window (19 to 29 s)"
+        }
+      ]
+    },
+    {
+      "id": "L2b",
+      "group": "L",
+      "wave": 2,
+      "order": 300,
+      "title": "How short can a repair be: Stable Audio 3",
+      "guide": {
+        "question": "How short can a repair be before its edges start to show?",
+        "verify": [
+          "Play the source, then the three outputs (windows of 2, 6 and 10 seconds around 0:24).",
+          "Listen at the start and end of each repaired part for a click, a jump in loudness, or a change of sound.",
+          "In the case note, write the shortest window whose edges you cannot hear. Also say whether the short ones still add the swell at all."
+        ],
+        "did": "We repeated the swell repair on run 13 with Stable Audio 3, with three window lengths centred on 0:24: 2, 6 and 10 seconds.",
+        "prompt_plain": "Rising tension that then bursts into a sudden bright swell: a burst of bells and light as the sound opens up.",
+        "sources": [
+          {
+            "run": 13,
+            "label": "Source: run 13 (Stable Audio 3, 60 s)"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Repair 2 s window around 0:24 of run 13",
+          "source": {
+            "run": 13
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic, Genre: Ambient, Instruments: Sub Bass, Synth Pad, Strings, Bells. Tension rises steadily and then there is a sudden bright swell, a burst of bells and light as the sound opens up.",
+            "mask_start": 23.0,
+            "mask_end": 25.0,
+            "duration": 60
+          },
+          "variants": 1,
+          "label": "2 s window (23 to 25 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Repair 6 s window around 0:24 of run 13",
+          "source": {
+            "run": 13
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic, Genre: Ambient, Instruments: Sub Bass, Synth Pad, Strings, Bells. Tension rises steadily and then there is a sudden bright swell, a burst of bells and light as the sound opens up.",
+            "mask_start": 21.0,
+            "mask_end": 27.0,
+            "duration": 60
+          },
+          "variants": 1,
+          "label": "6 s window (21 to 27 s)"
+        },
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "score",
+          "description": "Repair 10 s window around 0:24 of run 13",
+          "source": {
+            "run": 13
+          },
+          "fields": {
+            "prompt": "TrackType: Music, VocalType: Instrumental, Genre: Cinematic, Genre: Ambient, Instruments: Sub Bass, Synth Pad, Strings, Bells. Tension rises steadily and then there is a sudden bright swell, a burst of bells and light as the sound opens up.",
+            "mask_start": 19.0,
+            "mask_end": 29.0,
+            "duration": 60
+          },
+          "variants": 1,
+          "label": "10 s window (19 to 29 s)"
+        }
+      ]
+    },
+    {
+      "id": "L3",
+      "group": "L",
+      "wave": 4,
+      "order": 310,
+      "title": "Does an edit leave the sound outside its window alone? (no GPU)",
+      "guide": {
+        "question": "Outside the repaired window, is the audio the same as the source?",
+        "verify": [
+          "This case gathers every repaint and inpaint of the round (J4, K1, L1 and L2). Nothing new was generated.",
+          "Under each player, 'Outside the window' shows the difference from the source in dB: about -200 means identical, and a number below -40 counts as unchanged.",
+          "Look for any run where it is not unchanged, and in the case note say whether it is a problem you can hear. Answer yes if every edit leaves the outside alone."
+        ],
+        "did": "The app decoded each result and its source and compared them sample by sample, leaving a 1 second margin on each side of the window.",
+        "prompt_plain": "No prompt: this is a measurement.",
+        "sources": []
+      },
+      "steps": [],
+      "runs_from": [
+        "J4a",
+        "J4b",
+        "K1a",
+        "K1b",
+        "L1",
+        "L2a",
+        "L2b"
+      ]
+    },
+    {
+      "id": "M1a",
+      "group": "M",
+      "wave": 4,
+      "order": 320,
+      "title": "A 120 s rain bed in one go (Stable Audio 3)",
+      "guide": {
+        "question": "Does a 120 second rain bed stay steady, without an audible loop?",
+        "verify": [
+          "Play the whole thing, listening for a short pattern that repeats like a loop.",
+          "Does the rain stay even from start to end, with no sudden change?",
+          "Check the length on the card is about 120 s."
+        ],
+        "did": "We asked Stable Audio 3 for 120 seconds of steady rain in one go.",
+        "prompt_plain": "Steady rain on a rooftop and a street, continuous and even, no thunder, no music, no voices.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "ambience",
+          "description": "A 120 s steady rain bed",
+          "fields": {
+            "prompt": "TrackType: SFX. Steady rain falling on a rooftop and a street, continuous and even, no thunder, no music, no voices.",
+            "duration": 120
+          },
+          "variants": 1,
+          "label": "120 s rain bed",
+          "duration_s": 120
+        }
+      ]
+    },
+    {
+      "id": "M1b",
+      "group": "M",
+      "wave": 4,
+      "order": 330,
+      "title": "A 60 s rain bed extended to 120 s (Stable Audio 3)",
+      "guide": {
+        "question": "Can a rain bed be extended smoothly, without a join you can hear?",
+        "verify": [
+          "Play the 60 second bed first, then the 120 second extension.",
+          "Does the first minute sound the same? Is there an audible join at 60 s?",
+          "Does the added minute sound like the same rain? Compare with the 120 s bed made in one go (case M1a) and say which is better in the case note."
+        ],
+        "did": "We made 60 seconds of rain, then asked Stable Audio 3 to carry it on from 60 s to 120 s (inpaint starting at the end of the source).",
+        "prompt_plain": "Steady rain on a rooftop and a street, continuous and even, no thunder, no music, no voices.",
+        "sources": [
+          {
+            "case_run": [
+              "M1b",
+              0
+            ],
+            "label": "Source: the 60 s rain bed"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "ambience",
+          "description": "A 60 s steady rain bed (to be extended)",
+          "fields": {
+            "prompt": "TrackType: SFX. Steady rain falling on a rooftop and a street, continuous and even, no thunder, no music, no voices.",
+            "duration": 60
+          },
+          "variants": 1,
+          "label": "60 s rain bed",
+          "duration_s": 60
+        },
+        {
+          "type": "edit",
+          "operation": "inpaint",
+          "model": "stable-audio-3",
+          "kind": "ambience",
+          "description": "Extend the 60 s rain bed to 120 s",
+          "source": {
+            "case_run": [
+              "M1b",
+              0
+            ]
+          },
+          "fields": {
+            "prompt": "TrackType: SFX. Steady rain falling on a rooftop and a street, continuous and even, no thunder, no music, no voices.",
+            "mask_start": 60,
+            "mask_end": 120,
+            "duration": 120
+          },
+          "variants": 1,
+          "label": "Extended to 120 s"
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "group": "M",
+      "wave": 4,
+      "order": 340,
+      "title": "Rain that grows from light to heavy over 60 s (Stable Audio 3)",
+      "guide": {
+        "question": "Can the model make a sound that steadily grows over a minute?",
+        "verify": [
+          "Does it start as light rain and end as a heavy downpour?",
+          "Does it grow steadily, not in one jump? The 'loudest at' part of the measurement line should be near the end.",
+          "Two runs with different random starts. Does it work for both?"
+        ],
+        "did": "We asked Stable Audio 3 for 60 seconds of rain that gets heavier all the way. Two runs.",
+        "prompt_plain": "Rain that starts as a very light sprinkle and grows steadily into a heavy downpour over one minute, louder and denser all the way, no thunder.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "ambience",
+          "description": "Rain growing from light to heavy over 60 s",
+          "fields": {
+            "prompt": "TrackType: SFX. Rain that starts as a very light sprinkle and grows steadily into a heavy downpour over 60 seconds, getting louder and denser all the way, no thunder, no music, no voices.",
+            "duration": 60
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 60
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "group": "M",
+      "wave": 4,
+      "order": 350,
+      "title": "A distant fox howl, four takes (Stable Audio 3)",
+      "guide": {
+        "question": "Do the takes put the loudest moment in a place we can predict?",
+        "verify": [
+          "Does each take sound like a single distant fox howl, with no music and no other animals?",
+          "Read 'loudest at' in the measurement line of each take. Is the loudest moment in a similar place in all four, or does it jump around?",
+          "In the case note, write the range of times. Answer yes if it is predictable enough to line up with a picture."
+        ],
+        "did": "We asked Stable Audio 3 for a 5 second distant fox howl, four times, each with a different random start.",
+        "prompt_plain": "A single long, eerie fox howl, far away across a quiet field at night. No music, no other animals.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "sfx",
+          "description": "A distant fox howl, 5 s",
+          "fields": {
+            "prompt": "TrackType: SFX. A single long eerie fox howl, far away across a quiet field at night, distant and faint, no music, no other animals.",
+            "duration": 5
+          },
+          "variants": 4,
+          "label": "Take",
+          "duration_s": 5
+        }
+      ]
+    },
+    {
+      "id": "M4a",
+      "group": "M",
+      "wave": 4,
+      "order": 360,
+      "title": "A low impact: where is the peak? (Stable Audio 3)",
+      "guide": {
+        "question": "Does the effect peak where we need it to?",
+        "verify": [
+          "Is there one clear hit near the start, and is it where the 'loudest at' part of the measurement line says?",
+          "Two runs with different random starts. Do both put the peak in a similar place?",
+          "In the case note, write the peak times. Answer yes if they are predictable enough to line up with a picture."
+        ],
+        "did": "We asked Stable Audio 3 for a low impact of 3 seconds, two runs.",
+        "prompt_plain": "One deep, low, heavy boom with a short rumble tail.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "sfx",
+          "description": "A low impact, 3 s",
+          "fields": {
+            "prompt": "TrackType: SFX. A single deep low cinematic impact, a heavy boom with a short low rumble tail, no music, no voices.",
+            "duration": 3
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 3
+        }
+      ]
+    },
+    {
+      "id": "M4b",
+      "group": "M",
+      "wave": 4,
+      "order": 370,
+      "title": "A riser into a hit: where is the peak? (Stable Audio 3)",
+      "guide": {
+        "question": "Does the effect peak where we need it to?",
+        "verify": [
+          "Does it build up and peak at the very end (near 4 s)? The 'loudest at' time should be close to the end.",
+          "Two runs with different random starts. Do both put the peak in a similar place?",
+          "In the case note, write the peak times. Answer yes if they are predictable enough to line up with a picture."
+        ],
+        "did": "We asked Stable Audio 3 for a riser into a hit of 4 seconds, two runs.",
+        "prompt_plain": "A sound that rises in pitch and intensity for four seconds and ends exactly on a big hit.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "sfx",
+          "description": "A riser into a hit, 4 s",
+          "fields": {
+            "prompt": "TrackType: SFX. A rising cinematic riser that builds in pitch and intensity for four seconds and ends exactly on a big impact hit, no music, no voices.",
+            "duration": 4
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 4
+        }
+      ]
+    },
+    {
+      "id": "M4c",
+      "group": "M",
+      "wave": 4,
+      "order": 380,
+      "title": "A cymbal swell: where is the peak? (Stable Audio 3)",
+      "guide": {
+        "question": "Does the effect peak where we need it to?",
+        "verify": [
+          "Does it grow and peak late? Where is 'loudest at'?",
+          "Two runs with different random starts. Do both put the peak in a similar place?",
+          "In the case note, write the peak times. Answer yes if they are predictable enough to line up with a picture."
+        ],
+        "did": "We asked Stable Audio 3 for a cymbal swell of 4 seconds, two runs.",
+        "prompt_plain": "A cymbal that starts quiet and swells to a bright crash over four seconds.",
+        "sources": []
+      },
+      "steps": [
+        {
+          "type": "text",
+          "model": "stable-audio-3",
+          "kind": "sfx",
+          "description": "A cymbal swell, 4 s",
+          "fields": {
+            "prompt": "TrackType: SFX. A cymbal swell that starts quiet and grows to a bright crash at its peak over four seconds, no music, no voices.",
+            "duration": 4
+          },
+          "variants": 2,
+          "label": "Take",
+          "duration_s": 4
+        }
+      ]
+    }
+  ]
+}

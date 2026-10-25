@@ -6,7 +6,8 @@ An edit (`music_lab.create_edits`) has exactly one source:
 - an uploaded recording (`lab_music_source`, kind `upload`): received, checked with ffprobe (the
   type is what ffprobe finds, never the file name: WAV, MP3, M4A or FLAC, audio only) and stored
   under `media/lab/`;
-- two finished lab runs put end to end, with silence between them and after them if asked
+- two finished lab runs put end to end (with silence between them, or crossfaded), or one run
+  with silence after it, and silence after them if asked
   (`lab_music_source`, kind `join`): made once with FFmpeg and stored, so it can be played and
   used by many edits. The recipe keeps where each part sits in the joined file, so the seam is
   known (a seam test repaints a window centred on it).
@@ -168,15 +169,28 @@ def _silence(name: str, value: object) -> float:
 
 
 async def make_join(
-    session: AsyncSession, run_ids: list[int], gap_s: object, tail_s: object
+    session: AsyncSession,
+    run_ids: list[int],
+    gap_s: object,
+    tail_s: object,
+    crossfade_s: object = 0.0,
 ) -> LabMusicSource:
-    """Puts two finished lab runs end to end, `gap_s` seconds of silence between them and
-    `tail_s` after them, and saves the result as a source. Commits.
+    """Puts one or two finished lab runs end to end, `gap_s` seconds of silence between two of
+    them and `tail_s` after them, and saves the result as a source. With `crossfade_s` above 0
+    (two runs, no gap) the second run starts that long before the first ends and the two fade
+    into each other. Commits.
     """
-    if len(run_ids) != 2:
-        raise MusicSourceError(422, "A join takes exactly two runs.")
+    if len(run_ids) not in (1, 2):
+        raise MusicSourceError(422, "A join takes one run (with silence after it) or two runs.")
     gap = _silence("gap", gap_s)
     tail = _silence("silence at the end", tail_s)
+    crossfade = _silence("crossfade", crossfade_s)
+    if crossfade > 0 and len(run_ids) != 2:
+        raise MusicSourceError(422, "A crossfade needs two runs.")
+    if crossfade > 0 and gap > 0:
+        raise MusicSourceError(422, "Use a gap or a crossfade, not both.")
+    if gap > 0 and len(run_ids) != 2:
+        raise MusicSourceError(422, "A gap needs two runs.")
 
     storage = get_storage()
     paths: list[Path] = []
@@ -196,7 +210,9 @@ async def make_join(
         paths.append(path)
         durations.append(run.duration_s)
 
-    expected = sum(durations) + gap + tail
+    if crossfade > 0 and crossfade > min(durations):
+        raise MusicSourceError(422, "The crossfade is longer than one of the runs.")
+    expected = sum(durations) + gap + tail - crossfade
     if expected > SOURCE_MAX_S:
         raise MusicSourceError(
             422,
@@ -206,7 +222,9 @@ async def make_join(
 
     temp_path = storage.new_temp_path("flac")
     try:
-        problem = await ffmpeg.join_audio(paths, temp_path, gap_s=gap, tail_s=tail)
+        problem = await ffmpeg.join_audio(
+            paths, temp_path, gap_s=gap, tail_s=tail, crossfade_s=crossfade
+        )
         if problem is not None:
             raise MusicSourceError(422, problem)
         probed = await ffmpeg.probe(temp_path)
@@ -223,18 +241,24 @@ async def make_join(
         raise
 
     first_end = durations[0]
-    second_start = first_end + gap
-    recipe: dict[str, Any] = {
-        "parts": [
-            {"run_id": run_ids[0], "start_s": 0.0, "end_s": first_end},
-            {"run_id": run_ids[1], "start_s": second_start, "end_s": second_start + durations[1]},
-        ],
-        "gap_s": gap,
-        "tail_s": tail,
-    }
+    parts: list[dict[str, Any]] = [{"run_id": run_ids[0], "start_s": 0.0, "end_s": first_end}]
+    if len(run_ids) == 2:
+        second_start = first_end + gap - crossfade
+        parts.append(
+            {"run_id": run_ids[1], "start_s": second_start, "end_s": second_start + durations[1]}
+        )
+    recipe: dict[str, Any] = {"parts": parts, "gap_s": gap, "tail_s": tail}
+    if crossfade > 0:
+        recipe["crossfade_s"] = crossfade
+    if len(run_ids) == 1:
+        label = f"Run {run_ids[0]} + {tail:g} s of silence"
+    elif crossfade > 0:
+        label = f"Run {run_ids[0]} + run {run_ids[1]}, {crossfade:g} s crossfade"
+    else:
+        label = f"Run {run_ids[0]} + run {run_ids[1]}"
     source = LabMusicSource(
         kind="join",
-        label=f"Run {run_ids[0]} + run {run_ids[1]}",
+        label=label,
         path=stored.relative_path,
         size_bytes=temp.size_bytes,
         sha256=temp.sha256,
@@ -260,8 +284,8 @@ async def make_join(
 
 
 def seam_s(source: LabMusicSource) -> float | None:
-    """The middle of the join of two runs, in seconds from the start of the joined file. None
-    for a source that is not a join."""
+    """The middle of the join of two runs (the middle of the gap, or of the crossfade), in
+    seconds from the start of the joined file. None for a source that is not a join of two."""
     recipe = source.recipe
     if source.kind != "join" or not isinstance(recipe, dict):
         return None
@@ -272,6 +296,9 @@ def seam_s(source: LabMusicSource) -> float | None:
     end = parts[0].get("end_s")
     if not isinstance(end, int | float) or not isinstance(gap, int | float):
         return None
+    crossfade = recipe.get("crossfade_s")
+    if isinstance(crossfade, int | float) and crossfade > 0:
+        return float(end) - float(crossfade) / 2
     return float(end) + float(gap) / 2
 
 

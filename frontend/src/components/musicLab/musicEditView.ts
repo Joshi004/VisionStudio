@@ -6,6 +6,7 @@ import type {
   MusicEditOperation,
   MusicKind,
   MusicSource,
+  OutsideWindow,
   RunSource,
 } from "../../api/musicLab";
 import {
@@ -184,6 +185,20 @@ export function sourceLine(source: RunSource): string {
   const length = source.duration_s === null ? "" : ` (${secondsText(source.duration_s)})`;
   const seam = source.seam_s === null ? "" : `, joined at ${secondsText(source.seam_s)}`;
   return `Edit of the ${source.type === "join" ? "join" : "recording"} "${source.label}"${length}${seam}`;
+}
+
+/** Whether a repaint or an inpaint left the sound outside its window alone, as a short line. */
+export function outsideWindowLine(comparison: OutsideWindow): string {
+  const window = `${secondsText(comparison.window_start_s)} to ${secondsText(comparison.window_end_s)}`;
+  const level = `${comparison.outside_db.toFixed(0)} dB`;
+  const louder = comparison.gain_db >= 0 ? "louder" : "quieter";
+  const gain =
+    Math.abs(comparison.gain_db) >= 0.3
+      ? `, ${Math.abs(comparison.gain_db).toFixed(1)} dB ${louder} than the source`
+      : "";
+  return comparison.unchanged
+    ? `Outside the window (${window}): unchanged (${level}${gain})`
+    : `Outside the window (${window}): changed (${level}${gain}; ${comparison.threshold_db.toFixed(0)} dB or lower counts as unchanged)`;
 }
 
 /** What was measured in a run, as a short line for its card. */

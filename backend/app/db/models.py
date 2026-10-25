@@ -1192,6 +1192,38 @@ class LabMusicSource(Base):
     recipe: Mapped[Any | None] = mapped_column(JSON, default=None)
 
 
+class LabMusicTrialCase(Base):
+    """One case of a Music lab trial round, with the guide text the review screen shows
+    (MUSIC-005, revision 0064).
+
+    The case's content is written by the trial helper (`music_lab_trials/trigger.py`), which also
+    starts the runs: `guide` is what to verify, what was done and the prompt in plain words (its
+    shape is in `DATABASE_STRUCTURE.md`), `run_ids` are the lab runs the case started and
+    `source_ids` the recordings it made locally (crossfades). `answer` and `answer_note` are the
+    person's answer to the case's question. The runs keep their own verdicts and notes.
+    """
+
+    __tablename__ = "lab_music_trial_case"
+    __table_args__ = (
+        CheckConstraint("answer IS NULL OR answer IN ('yes', 'partly', 'no')", name="answer_valid"),
+        Index("idx_lab_music_trial_case_order", "sort_order"),
+    )
+
+    # A short name such as `I2-fear`.
+    id: Mapped[str] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    # The letter of the group of cases (I, J, K, L, M).
+    trial_group: Mapped[str]
+    sort_order: Mapped[int]
+    title: Mapped[str]
+    guide: Mapped[Any] = mapped_column(JSON)
+    run_ids: Mapped[Any] = mapped_column(JSON)
+    source_ids: Mapped[Any] = mapped_column(JSON)
+    answer: Mapped[str | None] = mapped_column(default=None)
+    answer_note: Mapped[str | None] = mapped_column(default=None)
+
+
 class AudioMeasurement(Base):
     """What was measured in one audio file (MUSIC-003, `services/audio_measurements.py`).
 

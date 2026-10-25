@@ -1384,8 +1384,9 @@ export interface paths {
         put?: never;
         /**
          * Join Sources
-         * @description Puts two finished runs end to end, with silence between them and after them if asked, and
-         *     stores the result as a recording to edit. Free: nothing goes to the GPU server.
+         * @description Puts two finished runs end to end (with silence between them or a crossfade), or one run
+         *     with silence after it, and stores the result as a recording to edit. Free: nothing goes to
+         *     the GPU server.
          */
         post: operations["join_sources_api_lab_music_sources_join_post"];
         delete?: never;
@@ -1435,6 +1436,74 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/runs/{run_id}/outside-window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Outside Window
+         * @description How much a repaint or an inpaint changed the sound outside its window, in dB against the
+         *     source (-200 is identical). Computed when asked: the source and the result are decoded and
+         *     compared, a margin on each side of the window left out. Free: no GPU.
+         */
+        get: operations["get_run_outside_window_api_lab_music_runs__run_id__outside_window_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/trials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Trials
+         * @description The cases of the trial round in screen order, each with its guide text, its source audio,
+         *     its runs and its answer.
+         */
+        get: operations["list_trials_api_lab_music_trials_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/music/trials/{case_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Trial
+         * @description Creates a case or rewrites its guide and its runs (used by the trial helper). The answer
+         *     already given is kept.
+         */
+        put: operations["save_trial_api_lab_music_trials__case_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Trial
+         * @description Records the answer and/or the note of a case. Only the fields in the body are changed.
+         */
+        patch: operations["update_trial_api_lab_music_trials__case_id__patch"];
         trace?: never;
     };
     "/api/lab/characters": {
@@ -6740,6 +6809,11 @@ export interface components {
              * @default 0
              */
             tail_s: number;
+            /**
+             * Crossfade S
+             * @default 0
+             */
+            crossfade_s: number;
         };
         /**
          * MusicSourceOut
@@ -6778,6 +6852,8 @@ export interface components {
             gap_s: number | null;
             /** Tail S */
             tail_s: number | null;
+            /** Crossfade S */
+            crossfade_s: number | null;
         };
         /**
          * NamedLookOut
@@ -6968,6 +7044,27 @@ export interface components {
             discovery_version: number;
             /** Discovery Id */
             discovery_id: string;
+        };
+        /** OutsideWindowOut */
+        OutsideWindowOut: {
+            /** Window Start S */
+            window_start_s: number;
+            /** Window End S */
+            window_end_s: number;
+            /** Margin S */
+            margin_s: number;
+            /** Compared S */
+            compared_s: number;
+            /** Outside Db */
+            outside_db: number;
+            /** Inside Db */
+            inside_db: number | null;
+            /** Gain Db */
+            gain_db: number;
+            /** Unchanged */
+            unchanged: boolean;
+            /** Threshold Db */
+            threshold_db: number;
         };
         /** PendingChangeOut */
         PendingChangeOut: {
@@ -10744,6 +10841,113 @@ export interface components {
             /** Version */
             version?: string | null;
         };
+        /**
+         * TrialAnswerUpdate
+         * @description Only the fields that are sent are changed; `null` clears one.
+         */
+        TrialAnswerUpdate: {
+            /** Answer */
+            answer?: ("yes" | "partly" | "no") | null;
+            /** Answer Note */
+            answer_note?: string | null;
+        };
+        /** TrialCaseIn */
+        TrialCaseIn: {
+            /** Trial Group */
+            trial_group: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Title */
+            title: string;
+            guide: components["schemas"]["TrialGuide"];
+            /** Run Ids */
+            run_ids: number[];
+            /** Source Ids */
+            source_ids: number[];
+        };
+        /** TrialCaseOut */
+        TrialCaseOut: {
+            /** Id */
+            id: string;
+            /** Trial Group */
+            trial_group: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            guide: components["schemas"]["TrialGuide"];
+            /** Sources */
+            sources: components["schemas"]["TrialSourceOut"][];
+            /** Runs */
+            runs: components["schemas"]["LabMusicRunOut"][];
+            /** Local Outputs */
+            local_outputs: components["schemas"]["TrialSourceOut"][];
+            /** Answer */
+            answer: ("yes" | "partly" | "no") | null;
+            /** Answer Note */
+            answer_note: string | null;
+        };
+        /**
+         * TrialGuide
+         * @description The text of a case on the review screen, in plain words.
+         */
+        TrialGuide: {
+            /** Question */
+            question: string;
+            /** Verify */
+            verify: string[];
+            /** Did */
+            did: string;
+            /** Prompt Plain */
+            prompt_plain: string;
+            /** Sources */
+            sources?: components["schemas"]["TrialSourceRef"][];
+            /** Run Labels */
+            run_labels?: {
+                [key: string]: string;
+            };
+            /** Source Labels */
+            source_labels?: {
+                [key: string]: string;
+            };
+        };
+        /** TrialSourceOut */
+        TrialSourceOut: {
+            /** Label */
+            label: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "run" | "upload" | "join";
+            /** Url */
+            url: string | null;
+            /** Duration S */
+            duration_s: number | null;
+            /** Run Id */
+            run_id: number | null;
+            /** Source Id */
+            source_id: number | null;
+            /** Seam S */
+            seam_s: number | null;
+        };
+        /**
+         * TrialSourceRef
+         * @description A recording the guide names as the source audio: an earlier run or a stored recording.
+         */
+        TrialSourceRef: {
+            /** Run Id */
+            run_id?: number | null;
+            /** Source Id */
+            source_id?: number | null;
+            /** Label */
+            label: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -14207,6 +14411,154 @@ export interface operations {
                 };
             };
             /** @description The audio could not be measured. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_outside_window_api_lab_music_runs__run_id__outside_window_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutsideWindowOut"];
+                };
+            };
+            /** @description No run has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run is not a finished repaint or inpaint. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The audio could not be compared. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_trials_api_lab_music_trials_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrialCaseOut"][];
+                };
+            };
+        };
+    };
+    save_trial_api_lab_music_trials__case_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrialCaseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrialCaseOut"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_trial_api_lab_music_trials__case_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrialAnswerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrialCaseOut"];
+                };
+            };
+            /** @description No case has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
             422: {
                 headers: {
                     [name: string]: unknown;

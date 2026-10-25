@@ -1,90 +1,16 @@
-import { useState } from "react";
-import { Alert, Badge, Button, Group, Loader, Paper, SegmentedControl, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
+import { Alert, Badge, Button, Group, Loader, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
-import {
-  useMusicCatalog,
-  useMusicLabRuns,
-  useRunMeasurements,
-  useUpdateMusicRun,
-  type LabMusicRun,
-  type MusicCatalog,
-  type MusicVerdict,
-} from "../../api/musicLab";
+import { useMusicCatalog, useMusicLabRuns, type LabMusicRun, type MusicCatalog } from "../../api/musicLab";
 import { isJobActive } from "../../api/polling";
 import { useNow } from "../../hooks/useNow";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobActions } from "../jobs/JobActions";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { LicenseBadge } from "./MusicLicense";
-import { measurementLine, sourceLine } from "./musicEditView";
+import { Measurements, OutsideWindowLine, Verdict } from "./MusicRunRating";
+import { sourceLine } from "./musicEditView";
 import { groupRuns, paramsLine, sentLines, stateFromRun, type MusicLabFormState } from "./musicLabView";
-
-const VERDICTS: { value: MusicVerdict; label: string }[] = [
-  { value: "good", label: "Good" },
-  { value: "usable", label: "Usable" },
-  { value: "bad", label: "Bad" },
-];
-
-/** What you decided after listening, and a note to yourself. Saved as soon as you choose. */
-function Verdict({ run }: { run: LabMusicRun }) {
-  const update = useUpdateMusicRun();
-  const [note, setNote] = useState(run.note ?? "");
-
-  function saveNote() {
-    const trimmed = note.trim();
-    if (trimmed !== (run.note ?? "")) {
-      update.mutate({ runId: run.id, body: { note: trimmed === "" ? null : trimmed } });
-    }
-  }
-
-  return (
-    <Stack gap={4}>
-      <Group gap="xs" wrap="nowrap">
-        <SegmentedControl
-          size="xs"
-          // Nothing is selected while there is no verdict: "none" matches no button.
-          value={run.verdict ?? "none"}
-          onChange={(value) => {
-            // Pressing the chosen button again clears the verdict.
-            const verdict = value === run.verdict ? null : (value as MusicVerdict);
-            update.mutate({ runId: run.id, body: { verdict } });
-          }}
-          data={[{ value: "none", label: "?", disabled: true }, ...VERDICTS]}
-        />
-        <TextInput
-          size="xs"
-          placeholder="A note: what you heard"
-          value={note}
-          onChange={(event) => setNote(event.currentTarget.value)}
-          onBlur={saveNote}
-          maxLength={1000}
-          style={{ flex: 1 }}
-        />
-      </Group>
-      {update.isError && (
-        <Text size="xs" c="red">
-          {describeError(update.error)}
-        </Text>
-      )}
-    </Stack>
-  );
-}
-
-/** What was measured in the sound (its length, its silences, its loudest moment, its ending). */
-function Measurements({ run }: { run: LabMusicRun }) {
-  const measurement = useRunMeasurements(run.id, run.url !== null);
-  if (run.url === null) {
-    return null;
-  }
-  return (
-    <Text size="xs" c="dimmed">
-      {measurement.isLoading && "Measuring the sound…"}
-      {measurement.isError && "The sound could not be measured."}
-      {measurement.data && measurementLine(measurement.data)}
-    </Text>
-  );
-}
 
 type RunCardProps = {
   run: LabMusicRun;
@@ -143,6 +69,7 @@ function RunCard({ run, now, catalog, onLoad, onEdit }: RunCardProps) {
         )}
 
         <Measurements run={run} />
+        <OutsideWindowLine run={run} />
 
         {run.source !== null && (
           <Stack gap={2}>

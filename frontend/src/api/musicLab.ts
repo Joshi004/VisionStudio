@@ -25,6 +25,10 @@ export type MusicSource = components["schemas"]["MusicSourceOut"];
 export type MusicSourceJoin = components["schemas"]["MusicSourceJoin"];
 export type RunSource = components["schemas"]["RunSourceOut"];
 export type AudioMeasurement = components["schemas"]["AudioMeasurementOut"];
+export type OutsideWindow = components["schemas"]["OutsideWindowOut"];
+export type MusicTrialCase = components["schemas"]["TrialCaseOut"];
+export type MusicTrialSource = components["schemas"]["TrialSourceOut"];
+export type TrialAnswer = NonNullable<MusicTrialCase["answer"]>;
 
 /** The backend's own limit. The server stays the judge; this only avoids a pointless upload. */
 export const SOURCE_UPLOAD_MAX_MB = 200;
@@ -34,6 +38,7 @@ const PAGE_SIZE = 20;
 /** Every Music lab query starts with this key. */
 export const MUSIC_LAB_KEY = ["lab", "music"] as const;
 const runsKey = [...MUSIC_LAB_KEY, "runs"] as const;
+const trialsKey = [...MUSIC_LAB_KEY, "trials"] as const;
 
 async function fetchCatalog() {
   const { data, response } = await api.GET("/api/lab/music/models");
@@ -143,7 +148,12 @@ export function useUpdateMusicRun() {
       }
       return data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: runsKey }),
+    // The same run is shown in the trial cases too.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: runsKey }),
+        queryClient.invalidateQueries({ queryKey: trialsKey }),
+      ]),
   });
 }
 
@@ -252,5 +262,78 @@ export function useRunMeasurements(runId: number, enabled: boolean) {
       }
       return data;
     },
+  });
+}
+
+/**
+ * How much a repaint or an inpaint changed the sound outside its window. Computed by the server
+ * when asked and kept here: a run's audio never changes.
+ */
+export function useRunOutsideWindow(runId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: [...MUSIC_LAB_KEY, "outside-window", runId],
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/lab/music/runs/{run_id}/outside-window", {
+        params: { path: { run_id: runId } },
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not compare the run (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+  });
+}
+
+/**
+ * The cases of the round-2 trials with their guide text, source audio, runs and answers. Loaded
+ * again every few seconds while any run is waiting or running.
+ */
+export function useMusicTrials() {
+  return useQuery({
+    queryKey: trialsKey,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/lab/music/trials");
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not load the trial cases (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    refetchInterval: (query) =>
+      query.state.data?.some((trial) => trial.runs.some((run) => isJobActive(run.job)))
+        ? ACTIVE_POLL_MS
+        : false,
+  });
+}
+
+/** Records the answer and/or the note of a trial case. Only the fields that are sent change. */
+export function useUpdateMusicTrial() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      caseId: string;
+      body: { answer?: TrialAnswer | null; answer_note?: string | null };
+    }) => {
+      const { data, error, response } = await api.PATCH("/api/lab/music/trials/{case_id}", {
+        params: { path: { case_id: input.caseId } },
+        body: input.body,
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `The answer was not saved (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: trialsKey }),
   });
 }
