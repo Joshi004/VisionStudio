@@ -79,6 +79,9 @@ class SceneDefinitionOut(BaseModel):
     environment_state: str
     time: SceneTimeOut
     characters: list[str]
+    # The characters who are only heard in the scene and never seen. Empty for a definition
+    # written before this field existed.
+    off_screen: list[str] = []
     # Requests in the model's own words, by character id, resolved later (PHASE-016).
     character_looks: dict[str, str]
     mood: SceneMoodOut
@@ -187,6 +190,7 @@ class SceneDefinitionIn(BaseModel):
     environment_state: str = _Text
     time: SceneTimeIn
     characters: list[str] = Field(max_length=200)
+    off_screen: list[str] = Field(default_factory=list, max_length=200)
     character_looks: dict[str, str] = Field(max_length=200)
     mood: SceneMoodIn
     dramatic_goal: str = _Text

@@ -79,6 +79,7 @@ _ANSWER_FORM: Final = json.dumps(
         "environment_state": "night",
         "time": {"time_of_day": "late afternoon", "lighting_state": "low sun through dusty glass"},
         "characters": ["an id from CHARACTERS"],
+        "off_screen": ["an id from characters"],
         "character_looks": {"an id from characters": "wet raincoat"},
         "mood": {"start": "tense", "middle": "uneasy", "end": "resigned"},
         "dramatic_goal": "Shows that the two can no longer share the house.",
@@ -115,6 +116,9 @@ different from the definition, not the place itself.
 - "characters": the ids of the characters who appear in the scene or are heard in it (a voice \
 from another room counts), each exactly as listed in CHARACTERS, each once. Use an empty list \
 when nobody appears. Never invent an id.
+- "off_screen": the ids from "characters" who are only heard in this scene and never seen (a \
+voice on the phone, through a door or from another room). Each id must also be in \
+"characters", each once. Use an empty list when everyone in the scene is seen.
 - "character_looks": for a character whose clothing or appearance in this scene differs from \
 their default definition, the key is the character's id (it must be in "characters") and the \
 value is a short name or phrase for the look needed, at most {LOOK_MAX_CHARS} characters (for \
@@ -317,6 +321,21 @@ def check_definition(
             raise ValueError(f'The "characters" listed "{character_id}" twice.')
         characters.append(character_id)
 
+    raw_off_screen = answer.get("off_screen")
+    if raw_off_screen is None:
+        raw_off_screen = []
+    if not isinstance(raw_off_screen, list):
+        raise ValueError('The "off_screen" was not a list.')
+    for character_id in raw_off_screen:
+        if not isinstance(character_id, str) or character_id not in characters:
+            raise ValueError(
+                'The "off_screen" named someone who is not one of the scene\'s characters.'
+            )
+    if len(set(raw_off_screen)) != len(raw_off_screen):
+        raise ValueError('The "off_screen" listed the same character twice.')
+    # Kept in the order of the scene's characters.
+    off_screen = [character_id for character_id in characters if character_id in raw_off_screen]
+
     return {
         "id": scene_id,
         "story_context": {
@@ -343,6 +362,7 @@ def check_definition(
             ),
         },
         "characters": characters,
+        "off_screen": off_screen,
         "character_looks": _character_map(
             answer, "character_looks", characters, LOOK_MAX_CHARS, warnings
         ),

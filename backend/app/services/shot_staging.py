@@ -88,8 +88,12 @@ def for_shot(
             allowed.append(GROUP)
         if allowed:
             shown.append({**view, "allowed_for": allowed})
+    # Left out when nobody is off screen, so a shot made before the field existed keeps the
+    # staging it was judged against.
+    off_screen = staging.get("off_screen") or []
     return {
         "characters": characters,
+        **({"off_screen": off_screen} if off_screen else {}),
         "axis": staging["axis"],
         "group_side": staging["group_side"],
         "views": shown,
@@ -132,8 +136,8 @@ def apply_to_characters(
     characters: list[dict[str, str]], staging: dict[str, Any]
 ) -> list[dict[str, str]]:
     """The visible characters with the placement code knows added: `zone`, `screen_side` and
-    `background_side`, after the model's own fields. A character the staging does not place
-    (cannot happen for a scene's character) keeps what the model wrote.
+    `background_side`, after the model's own fields. A character the staging does not place (one
+    who is only heard, `off_screen`) keeps what the model wrote.
     """
     result: list[dict[str, str]] = []
     for character in characters:
@@ -157,6 +161,7 @@ def planner_block(staging: dict[str, Any], names: dict[str, str]) -> dict[str, A
     at the start, the line the camera keeps to, the side seen behind the group, and who moves
     after which event. Names are added so the planner reads people, not ids.
     """
+    off_screen = staging.get("off_screen") or []
     return {
         "characters": [
             {
@@ -166,6 +171,11 @@ def planner_block(staging: dict[str, Any], names: dict[str, str]) -> dict[str, A
             }
             for item in staging["placements"]
         ],
+        **(
+            {"off_screen": [{"id": item, "name": names.get(item, item)} for item in off_screen]}
+            if off_screen
+            else {}
+        ),
         "axis": staging["axis"],
         "group_side": staging["group_side"],
         "moves": [

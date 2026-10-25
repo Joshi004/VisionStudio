@@ -142,7 +142,9 @@ stands, which side of the screen they are on and what is behind them, and which 
 the camera keeps on opposite sides of the screen. Plan shots that suit it: a conversation can be \
 cut between a shot of each speaker, each with their own background, or shown together in a \
 shot of the group. Never plan a shot that needs two characters on the same side of the screen \
-or on the same background. Do not describe the staging in the shots' descriptions.
+or on the same background. Do not describe the staging in the shots' descriptions. When it \
+has an "off_screen" list, those characters are only heard in the scene: never plan a shot that \
+shows them.
 
 If the user message also holds PREVIOUS SHOTS and TIMELINE PROBLEMS, an earlier plan of this \
 same scene was checked by code and had the problems listed. Plan the whole scene again so that \

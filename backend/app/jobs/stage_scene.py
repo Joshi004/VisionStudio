@@ -122,6 +122,7 @@ class StageSceneHandler(JobHandler):
         character_ids: list[str],
         event_ids: list[str],
         spatial_plan: dict[str, Any],
+        off_screen: list[str],
         warnings: list[str],
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
@@ -138,6 +139,7 @@ class StageSceneHandler(JobHandler):
                 character_ids=character_ids,
                 event_ids=event_ids,
                 spatial_plan=spatial_plan,
+                fixed_off_screen=off_screen,
                 warnings=found,
             )
         except ValueError as exc:
@@ -198,7 +200,13 @@ class StageSceneHandler(JobHandler):
             target,
             body,
             lambda result: self._read(
-                result, scene_id, read.character_ids, read.event_ids, read.spatial_plan, warnings
+                result,
+                scene_id,
+                read.character_ids,
+                read.event_ids,
+                read.spatial_plan,
+                scene_staging.off_screen_of(read.scene_definition),
+                warnings,
             ),
             timeout_s=REQUEST_TIMEOUT_S,
         )

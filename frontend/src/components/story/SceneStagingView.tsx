@@ -38,6 +38,11 @@ export function SceneStagingView({ staging, characterNames }: SceneStagingViewPr
           ))}
         </Table.Tbody>
       </Table>
+      {(staging.off_screen ?? []).length > 0 && (
+        <Text size="sm" c="dimmed">
+          Only heard, not placed: {(staging.off_screen ?? []).map(name).join(", ")}
+        </Text>
+      )}
       <Group gap="xs">
         <Badge variant="light" color="gray">
           Group background: {staging.group_side}

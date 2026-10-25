@@ -12,10 +12,12 @@ scene and the scene's environment with its **spatial plan** (`environment_defini
 what is ahead, to the left, to the right and behind the master picture's camera, and the zones
 people can stand in. It answers with:
 
-- `placements`: one for each character of the scene: `zone`, `posture`, `faces`, `screen_side`
-  and `background_side`;
+- `placements`: one for each character of the scene who is seen: `zone`, `posture`, `faces`,
+  `screen_side` and `background_side`;
+- `off_screen`: the characters who are only heard in the scene (a voice on the phone, through a
+  door), who have no placement. Every character is either placed or off screen;
 - `axis`: the two characters of the main conversation and the half of the place the camera
-  stays in (the 180-degree rule); empty when the scene has fewer than two characters;
+  stays in (the 180-degree rule); empty when fewer than two characters are placed;
 - `group_side`: the side seen behind the group in a two-shot or a wide shot;
 - `moves`: a character who walks somewhere after an event, with the placement they have from
   then on.
@@ -64,6 +66,7 @@ _ANSWER_FORM: Final = json.dumps(
                 "background_side": "ahead",
             }
         ],
+        "off_screen": ["a character id who is only heard"],
         "axis": {
             "between": ["a character id", "another character id"],
             "camera_half": "ahead",
@@ -101,8 +104,13 @@ behind a character when the camera looks at their face.
 
 Rules:
 - Write everything in English, in plain concrete words.
-- Give exactly one placement to each character under CHARACTERS IN THE SCENE, in that order, \
-and none to anyone else (a voice from off screen has no placement).
+- Every character under CHARACTERS IN THE SCENE is either placed or off screen, never both. \
+A character who is only heard in the scene (a voice on the phone, through a door, from another \
+room, or an unseen presence) is never seen, so they get NO placement and their id goes in \
+"off_screen". The SCENE DEFINITION may already list such characters under "off_screen": \
+every one of them must be in your "off_screen". Use an empty list when everybody is seen.
+- Give exactly one placement to each other character, in the order of CHARACTERS IN THE SCENE, \
+and none to anyone else. Never invent a position for a character who is only heard.
 - "zone" is an id from the environment's zones. Spread the characters over different zones \
 and, when the scene has a conversation, over different sides, so each speaker has their own \
 background. Choose the zones that suit what the scene says and does; never move a character \
@@ -111,27 +119,27 @@ somewhere the story does not allow.
 leaning forward": how the person stands or sits. Not a sentence, and nothing about their mood \
 or what they say.
 - "faces" is what the person looks toward: one side (ahead, left, right or behind), a zone id, \
-or the id of another character of the scene.
+or the id of another character of the scene who is placed (never one who is off screen).
 - "screen_side" is the side of the frame the person appears on in a shot that shows them \
 with their partner: "left", "right" or "center".
 - "background_side" is the side of the place seen behind the person. It is never the side \
 the person faces: a person who looks toward the window does not have the window behind them.
-- "axis" is the 180-degree rule. When the scene has two or more characters, "between" is the \
-two characters of the scene's main conversation (the people who speak to each other most), \
-and the camera stays on one side of the line between them, so they keep opposite screen \
-sides, one "left" and one "right", for the whole scene. "camera_half" is the side of the \
-place the camera stays in; it is not a side where either of those two characters stands. \
-"note" is one short line on how the conversation is covered. \
-With fewer than two characters, "between" is an empty list, "camera_half" is null and "note" \
-says that nobody is on the line.
+- "axis" is the 180-degree rule. When two or more characters are placed, "between" is the \
+two placed characters of the scene's main conversation (the people who speak to each other \
+most, never one who is off screen), and the camera stays on one side of the line between \
+them, so they keep opposite screen sides, one "left" and one "right", for the whole scene. \
+"camera_half" is the side of the place the camera stays in; it is not a side where either of \
+those two characters stands. "note" is one short line on how the conversation is covered. \
+With fewer than two placed characters, "between" is an empty list, "camera_half" is null \
+and "note" says that nobody is on the line.
 - "group_side" is the side of the place seen behind the whole group in a two-shot or a wide \
 shot.
 - "moves" lists changes: a character who walks somewhere after an event. Each move has \
 "after_event_id" (an id from EVENTS: the move starts after that event), the character, and \
 the new "zone", "faces", "screen_side" and "background_side". List them in event order. Make \
-a move only when the events or the scene's definition say that someone changes place; most \
-scenes have none, so use an empty list. The two characters of the axis keep opposite screen \
-sides after every move. At most {MAX_MOVES} moves.
+a move only when the events or the scene's definition say that someone who is placed changes \
+place; most scenes have none, so use an empty list. The two characters of the axis keep \
+opposite screen sides after every move. At most {MAX_MOVES} moves.
 - Everything must agree with the scene's definition and with the events: who is where at the \
 start comes from "continuity_start" of the scene definition.
 
@@ -247,17 +255,23 @@ def _check_placing(
     path: str,
     *,
     character_ids: list[str],
+    off_screen: list[str],
     zones: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     """The fields every placement and move shares: the character, the zone, what it faces, the
     screen side and the background. `faces` is checked against the others later, because it may
-    name another character.
+    name another character. A character who is only heard (`off_screen`) has no placement, so
+    neither a placement or move nor a `faces` may name one.
     """
     if not isinstance(raw, dict):
         raise ValueError(f'The "{path}" of the model\'s answer was not an object.')
     character_id = raw.get("character_id")
     if character_id not in character_ids:
         raise ValueError(f'The "{path}.character_id" of the model\'s answer was not a character.')
+    if character_id in off_screen:
+        raise ValueError(
+            f"{character_id} is only heard in this scene, so they get no placement and no move."
+        )
     zone = raw.get("zone")
     zone = zone.strip() if isinstance(zone, str) else zone
     if zone not in zones:
@@ -274,6 +288,10 @@ def _check_placing(
         )
     if faces == character_id:
         raise ValueError(f'The "{path}.faces" of the model\'s answer was the character itself.')
+    if faces in off_screen:
+        raise ValueError(
+            f"{character_id} faces {faces}, who is only heard in this scene and has no place."
+        )
     return {
         "character_id": character_id,
         "zone": zone,
@@ -317,6 +335,7 @@ def check_answer(
     character_ids: list[str],
     event_ids: list[str],
     spatial_plan: dict[str, Any],
+    fixed_off_screen: list[str] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the staging that is stored. Raises ValueError, with a
@@ -325,13 +344,32 @@ def check_answer(
     (a staging a person edited), it is refused.
 
     `character_ids` are the characters of the scene, in order; `event_ids` the scene's events,
-    in order; `spatial_plan` the environment's. The scene id is set here, never read from the
-    model. Only the fields asked for are kept, in a fixed order, and the placements follow the
-    order of `character_ids`.
+    in order; `spatial_plan` the environment's. `fixed_off_screen` are the characters the scene's
+    definition says are only heard: they are off screen whatever the answer says, and the answer
+    may add others. Every character is placed or off screen, never both. The scene id is set
+    here, never read from the model. Only the fields asked for are kept, in a fixed order, and
+    the placements follow the order of `character_ids`.
     """
     if not isinstance(answer, dict):
         raise ValueError("The model's answer was not a JSON object.")
     zones = {zone["id"]: zone for zone in spatial_plan["zones"]}
+
+    raw_off_screen = answer.get("off_screen")
+    if raw_off_screen is None:
+        raw_off_screen = []
+    if not isinstance(raw_off_screen, list):
+        raise ValueError('The "off_screen" of the model\'s answer was not a list.')
+    for item in raw_off_screen:
+        if item not in character_ids:
+            raise ValueError(
+                'The "off_screen" of the model\'s answer named someone who is not a character.'
+            )
+    if len(set(raw_off_screen)) != len(raw_off_screen):
+        raise ValueError('The "off_screen" of the model\'s answer named a character twice.')
+    heard_only = set(raw_off_screen) | set(fixed_off_screen or [])
+    # In the order of the scene's characters.
+    off_screen = [item for item in character_ids if item in heard_only]
+    placed_ids = [item for item in character_ids if item not in heard_only]
 
     raw_placements = answer.get("placements")
     if not isinstance(raw_placements, list):
@@ -339,7 +377,11 @@ def check_answer(
     placed: dict[str, dict[str, Any]] = {}
     for position, raw in enumerate(raw_placements, start=1):
         placing = _check_placing(
-            raw, f"placements[{position}]", character_ids=character_ids, zones=zones
+            raw,
+            f"placements[{position}]",
+            character_ids=character_ids,
+            off_screen=off_screen,
+            zones=zones,
         )
         if placing["character_id"] in placed:
             raise ValueError(
@@ -349,9 +391,13 @@ def check_answer(
             raw, "posture", f"placements[{position}].posture", POSTURE_MAX_CHARS, warnings
         )
         placed[placing["character_id"]] = {**placing, "posture": posture}
-    missing = [item for item in character_ids if item not in placed]
+    missing = [item for item in placed_ids if item not in placed]
     if missing:
-        raise ValueError("The model's answer left out the placement of " + ", ".join(missing) + ".")
+        raise ValueError(
+            "The model's answer left out the placement of "
+            + ", ".join(missing)
+            + '. Place them, or list them in "off_screen" if they are only heard in this scene.'
+        )
     placements = [
         {
             "character_id": item,
@@ -361,7 +407,7 @@ def check_answer(
             "screen_side": placed[item]["screen_side"],
             "background_side": placed[item]["background_side"],
         }
-        for item in character_ids
+        for item in placed_ids
     ]
 
     raw_axis = answer.get("axis")
@@ -370,15 +416,15 @@ def check_answer(
     between_value = raw_axis.get("between")
     between = list(between_value) if isinstance(between_value, list) else []
     camera_half: str | None = None
-    if len(character_ids) >= 2:
+    if len(placed_ids) >= 2:
         if (
             len(between) != 2
             or between[0] == between[1]
-            or any(item not in character_ids for item in between)
+            or any(item not in placed_ids for item in between)
         ):
             raise ValueError(
                 'The "axis.between" of the model\'s answer must name two different characters '
-                "of the scene."
+                "of the scene who are placed (not one who is only heard)."
             )
         camera_half = _choice(raw_axis.get("camera_half"), SPATIAL_SIDES, "axis.camera_half")
         standing = {zones[placed[item]["zone"]]["side"] for item in between}
@@ -398,7 +444,7 @@ def check_answer(
 
     group_side = _choice(answer.get("group_side"), SPATIAL_SIDES, "group_side")
 
-    state = {item: dict(placed[item]) for item in character_ids}
+    state = {item: dict(placed[item]) for item in placed_ids}
     _check_state(state, zones, between, "at the start")
 
     raw_moves = answer.get("moves")
@@ -411,7 +457,9 @@ def check_answer(
     last_index = -1
     for position, raw in enumerate(raw_moves, start=1):
         path = f"moves[{position}]"
-        placing = _check_placing(raw, path, character_ids=character_ids, zones=zones)
+        placing = _check_placing(
+            raw, path, character_ids=character_ids, off_screen=off_screen, zones=zones
+        )
         after = raw.get("after_event_id")
         if after not in event_ids:
             raise ValueError(
@@ -430,6 +478,7 @@ def check_answer(
     return {
         "scene_id": scene_id,
         "placements": placements,
+        "off_screen": off_screen,
         "axis": {"between": between, "camera_half": camera_half, "note": note},
         "group_side": group_side,
         "moves": moves,

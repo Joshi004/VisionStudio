@@ -71,6 +71,8 @@ export function SceneStagingEditor({
   const save = () =>
     onSave({
       placements,
+      // Who is only heard is decided by the scene's definition and the model; it is kept as it is.
+      off_screen: initial.off_screen ?? [],
       axis: { between, camera_half: between.length === 2 ? cameraHalf : null, note },
       group_side: groupSide,
       moves,
@@ -130,6 +132,11 @@ export function SceneStagingEditor({
           </Stack>
         </Paper>
       ))}
+      {(initial.off_screen ?? []).length > 0 && (
+        <Text size="sm" c="dimmed">
+          Only heard, not placed: {(initial.off_screen ?? []).map(nameOf).join(", ")}
+        </Text>
+      )}
       <Group gap="xs" align="flex-end" grow>
         <Select
           label="Group background"

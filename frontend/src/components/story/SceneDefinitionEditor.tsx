@@ -18,7 +18,7 @@ type SceneDefinitionEditorProps = {
 };
 
 /** What the user edits. The scene's id is not here: it is the scene's own. */
-type Draft = SceneDefinitionInput;
+type Draft = SceneDefinitionInput & { off_screen: string[] };
 
 function toDraft(definition: SceneDefinition): Draft {
   return {
@@ -27,6 +27,7 @@ function toDraft(definition: SceneDefinition): Draft {
     environment_state: definition.environment_state,
     time: { ...definition.time },
     characters: [...definition.characters],
+    off_screen: [...(definition.off_screen ?? [])],
     character_looks: { ...definition.character_looks },
     mood: { ...definition.mood },
     dramatic_goal: definition.dramatic_goal,
@@ -162,7 +163,21 @@ export function SceneDefinitionEditor({
         data={characterOptions}
         value={draft.characters}
         searchable
-        onChange={(value) => change({ characters: value })}
+        onChange={(value) =>
+          change({
+            characters: value,
+            // Someone who leaves the scene cannot be "only heard" in it.
+            off_screen: draft.off_screen.filter((id) => value.includes(id)),
+          })
+        }
+      />
+      <MultiSelect
+        label="Only heard (not seen)"
+        description="Characters who are a voice in this scene, such as on the phone or behind a door. They get no place on screen."
+        data={characterOptions.filter((option) => draft.characters.includes(option.value))}
+        value={draft.off_screen}
+        searchable
+        onChange={(value) => change({ off_screen: value })}
       />
       {draft.characters.map((id) => (
         <Stack key={id} gap={4}>

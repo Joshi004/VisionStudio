@@ -51,6 +51,11 @@ function Characters({ definition }: { definition: SceneDefinition }) {
       <Text size="sm" fw={600}>
         Characters
       </Text>
+      {(definition.off_screen ?? []).length > 0 && (
+        <Text size="sm" c="dimmed">
+          Only heard: {(definition.off_screen ?? []).join(", ")}
+        </Text>
+      )}
       <List size="sm" spacing={4}>
         {definition.characters.map((id) => (
           <List.Item key={id}>

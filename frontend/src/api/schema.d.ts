@@ -9564,6 +9564,8 @@ export interface components {
             time: components["schemas"]["SceneTimeIn"];
             /** Characters */
             characters: string[];
+            /** Off Screen */
+            off_screen?: string[];
             /** Character Looks */
             character_looks: {
                 [key: string]: string;
@@ -9592,6 +9594,11 @@ export interface components {
             time: components["schemas"]["SceneTimeOut"];
             /** Characters */
             characters: string[];
+            /**
+             * Off Screen
+             * @default []
+             */
+            off_screen: string[];
             /** Character Looks */
             character_looks: {
                 [key: string]: string;
@@ -11539,6 +11546,11 @@ export interface components {
             scene_id: string;
             /** Placements */
             placements: components["schemas"]["PlacementOut"][];
+            /**
+             * Off Screen
+             * @default []
+             */
+            off_screen: string[];
             axis: components["schemas"]["AxisOut"];
             /**
              * Group Side
@@ -11614,6 +11626,8 @@ export interface components {
         StagingSaveIn: {
             /** Placements */
             placements: components["schemas"]["PlacementIn"][];
+            /** Off Screen */
+            off_screen?: string[];
             axis: components["schemas"]["AxisIn"];
             /** Group Side */
             group_side: string;

@@ -84,6 +84,9 @@ class AxisOut(BaseModel):
 class StagingContentOut(BaseModel):
     scene_id: str
     placements: list[PlacementOut]
+    # The characters who are only heard in the scene and have no placement. Empty for a staging
+    # written before this field existed.
+    off_screen: list[str] = []
     axis: AxisOut
     group_side: Side
     moves: list[MoveOut]
@@ -203,6 +206,7 @@ class StagingSaveIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     placements: list[PlacementIn] = Field(max_length=50)
+    off_screen: list[str] = Field(default_factory=list, max_length=50)
     axis: AxisIn
     group_side: str = Field(max_length=20)
     moves: list[MoveIn] = Field(default_factory=list, max_length=50)

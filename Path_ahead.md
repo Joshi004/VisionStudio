@@ -900,6 +900,8 @@ Example:
 }
 ```
 
+A scene definition lists in `off_screen` the characters who are only heard in the scene and never seen (a voice on the phone, through a door); they stay in `characters`, so their voice and looks work as for anyone else. A definition written before this field existed has none.
+
 A scene definition still does not contain shots.
 
 It establishes the dramatic context in which later events and shots exist.
@@ -2506,6 +2508,8 @@ That structured planning layer is what will turn Vision Studio from a collection
 A place has more than one side. The environment definition carries a **spatial plan**: what is ahead of, to the left of, to the right of and behind the master picture's camera (the master picture is the `ahead` view), and the zones people can stand in.
 
 **Scene Staging** (one call per scene, after events) decides where each visible character stands, which way they face, which side of the screen they appear on and which side of the place is behind them, plus an axis for the main conversation, a group background and moves keyed to events. Code checks it against the plan.
+
+A character who is only heard (the scene definition's `off_screen`, to which the staging model may add others) gets no placement: the staging stores them in its own `off_screen` list instead. Every character of the scene is placed or off screen, never both, and only placed characters can be faced, be on the axis or move. The axis is needed when two or more characters are placed. Shots receive the `off_screen` list so they never show these characters.
 
 **Environment views** are camera-direction pictures of one place. A view planner reads the stagings of the scenes that use the place and chooses the views (at most 12); each view's edit prompt is written by a model and the picture is an edit of the master picture. A view in a state is an edit of the view picture and the state's master picture. Views belong to the library environment, like states.
 

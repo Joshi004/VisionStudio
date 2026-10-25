@@ -74,6 +74,14 @@ class SceneStagingError(ValueError):
     """A request that cannot be done. The message is meant to be shown to the user."""
 
 
+def off_screen_of(definition: dict[str, Any]) -> list[str]:
+    """The characters a scene definition says are only heard and never seen. A definition written
+    before the field existed has none.
+    """
+    value = definition.get("off_screen")
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 @dataclass(frozen=True)
 class SceneEntry:
     """One entry of the newest list of scenes and where its staging stands."""
@@ -409,6 +417,21 @@ def _recorded(inputs: dict[str, Any], kind: str) -> dict[str, Any] | None:
     return None
 
 
+def _characters_changed(staging: dict[str, Any], definition: dict[str, Any]) -> bool:
+    """Whether the characters of the scene no longer match the staging: the placed characters,
+    in order, must be the definition's characters without the staging's off-screen ones, and
+    everyone the definition says is only heard must be off screen in the staging.
+    """
+    off_screen = staging.get("off_screen") or []
+    placed = [item["character_id"] for item in staging.get("placements", [])]
+    expected = [item for item in definition["characters"] if item not in off_screen]
+    return (
+        placed != expected
+        or not set(off_screen_of(definition)) <= set(off_screen)
+        or not set(off_screen) <= set(definition["characters"])
+    )
+
+
 def _out_of_date_reasons(row: SceneStaging, loaded: _Loaded, scene_id: str) -> list[str]:
     """Why a staging written for this scene is no longer current, one sentence each."""
     inputs = row.inputs
@@ -435,8 +458,7 @@ def _out_of_date_reasons(row: SceneStaging, loaded: _Loaded, scene_id: str) -> l
             reasons.append("The definition of the scene is out of date.")
         if not provenance.same_row(_recorded(inputs, SCENE_DEFINITION_KIND), definition.row):
             reasons.append("The scene has been defined again since this staging was made.")
-        placed = [item["character_id"] for item in row.content.get("placements", [])]
-        if placed != definition.row.content["characters"]:
+        if _characters_changed(row.content, definition.row.content):
             reasons.append("The characters of the scene have changed.")
 
     events = loaded.events.get(scene_id)
@@ -637,6 +659,7 @@ async def save_manual(
             character_ids=[item["id"] for item in prepared.characters],
             event_ids=[event["id"] for event in prepared.events],
             spatial_plan=prepared.spatial_plan,
+            fixed_off_screen=off_screen_of(prepared.definition),
         )
     except ValueError as exc:
         raise SceneStagingError(str(exc)) from exc

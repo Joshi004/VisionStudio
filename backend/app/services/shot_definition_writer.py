@@ -205,7 +205,9 @@ they face, the side of the screen they are on ("screen_side") and which side of 
 behind them ("background_side"). It is decided for the whole scene: do not change it, and do not \
 write it (zone, screen side and background side are filled in for you). Write each character's \
 "pose", "gaze" and the "action" so they agree with it: a character on the left of the screen \
-looks toward the right of the screen when they look at a partner who is on the right.
+looks toward the right of the screen when they look at a partner who is on the right. When it \
+has an "off_screen" list, those characters are only heard in the scene (a voice on the phone, \
+through a door): they have no place, so never show them in a shot.
 - VIEWS lists the views of the place you may show behind the shot. Each has an "id", a "side" \
 and "description" of what it shows, and "allowed_for": the characters it may stand behind, and \
 "group" when it may stand behind the whole group. "composition.view" is exactly one id from \
@@ -299,6 +301,7 @@ def staging_blocks(staging: dict[str, Any]) -> list[str]:
         "characters": staging["characters"],
         "axis": staging["axis"],
         "group_side": staging["group_side"],
+        **({"off_screen": staging["off_screen"]} if staging.get("off_screen") else {}),
     }
     return [
         "STAGING AT THIS SHOT (JSON):\n" + json.dumps(placed, ensure_ascii=False, indent=2),
