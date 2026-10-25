@@ -34,6 +34,7 @@ from app.services import (
     music_bible,
     music_cues,
     music_plan,
+    music_takes,
     music_themes,
     project_cast,
     scene_definitions,
@@ -392,6 +393,21 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                         view.reasons,
                         acceptable=False,
                         discovery_id=view.cue["id"],
+                    ),
+                )
+
+    # The chosen take of each music cue (MUSIC-010): made for a detail the cue no longer has.
+    if project.music_enabled:
+        for view in (await music_takes.state(session, project)).items:
+            if view.out_of_date:
+                found.add(
+                    "music_generation",
+                    Item(
+                        "music_generation",
+                        str(view.cue_view.cue["summary"]),
+                        view.reasons,
+                        acceptable=False,
+                        discovery_id=view.item_id,
                     ),
                 )
 

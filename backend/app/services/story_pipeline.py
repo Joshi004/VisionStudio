@@ -144,6 +144,9 @@ STEPS: Final[tuple[Step, ...]] = (
         "Detail the music cues",
         ("music_plan", "music_themes", "shot_definitions"),
     ),
+    # MUSIC-010: a recording (a take) of each prompt of each cue, checked, and the first that
+    # passes selected. A target for each item. Skipped when music is off.
+    Step("music_generation", "Generate the music", ("music_cues",)),
     Step("shot_continuity", "Check shot continuity", ("shot_definitions",)),
     Step(
         "references",

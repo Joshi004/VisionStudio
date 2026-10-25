@@ -149,6 +149,10 @@ SAVING_MUSIC_PLAN: Final = "saving the music plan"
 # (once per call: the cue's detail, then one call per prompt to write; or the audit).
 SAVING_MUSIC_CUES: Final = "saving the music cues"
 
+# --- Running: music takes (MUSIC-010) ----------------------------------------------------
+# `rewrite_music_prompt` also uses PREPARING_PROMPT and `asking_model` from above.
+SAVING_MUSIC_TAKE: Final = "saving the new prompt and starting its recording"
+
 # --- Running: character and environment discovery (PHASE-005) ----------------------------
 # `discover_characters` and `discover_environments` also use PREPARING_PROMPT and
 # `asking_model` from above.

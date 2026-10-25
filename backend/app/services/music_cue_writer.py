@@ -1076,3 +1076,133 @@ def apply_fixes(items: list[dict[str, Any]], fixes: list[dict[str, Any]]) -> lis
         wording["warnings"] = fix["warnings"]
         wording["audit"] = {"problem": fix["problem"]}
     return changed
+
+
+# --- Feedback: rewriting the prompt of a rejected take (MUSIC-010, MD-23) -------------------
+
+NOTE_MAX_CHARS: Final = 1000
+
+_FEEDBACK_RULES: Final = """
+
+The user message also holds a take that the owner listened to and rejected, with the prompt that \
+made it, facts measured from its sound (written as text: you cannot hear it) and the owner's \
+note. You write exactly one new wording that answers the note. Change what the note asks for \
+and keep what it does not mention (the mood, the theme and the Bible's sound world). It must \
+not be the rejected text reworded: it must change the sound in the way the note asks."""
+
+
+def lane_neighbours(
+    plan: dict[str, Any], cue: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]]]:
+    """The cues before and after a cue in its lane as plan lines, and the joins at its edges
+    (what `span_context` shows level 2). A point or a hit has no lane.
+    """
+    previous: dict[str, Any] | None = None
+    following: dict[str, Any] | None = None
+    if cue["kind"] in plan_writer.LANE_KINDS:
+        lane = [item for item in plan["cues"] if item["kind"] == cue["kind"]]
+        place = next(index for index, item in enumerate(lane) if item["id"] == cue["id"])
+        previous = cue_line(lane[place - 1]) if place > 0 else None
+        following = cue_line(lane[place + 1]) if place + 1 < len(lane) else None
+    joins = [
+        {key: boundary[key] for key in ("from", "to", "join", "reason")}
+        for boundary in plan["boundaries"]
+        if cue["id"] in (boundary["from"], boundary["to"])
+    ]
+    return previous, following, joins
+
+
+def facts_text(check: dict[str, Any] | None) -> list[str]:
+    """What was measured about a take, as sentences for the model (it takes no audio, MD-10)."""
+    if not isinstance(check, dict):
+        return ["Nothing was measured."]
+    lines: list[str] = []
+    facts = check.get("facts")
+    if isinstance(facts, dict):
+        if facts.get("duration_s") is not None:
+            lines.append(f"It is {facts['duration_s']:g} s long.")
+        if facts.get("integrated_lufs") is not None:
+            lines.append(f"Its integrated loudness is {facts['integrated_lufs']:g} LUFS.")
+        if facts.get("loudest_moment_s") is not None:
+            lines.append(f"Its loudest moment is at {facts['loudest_moment_s']:g} s.")
+        if facts.get("leading_silence_s"):
+            lines.append(f"It starts with {facts['leading_silence_s']:g} s of silence.")
+        if facts.get("trailing_silence_s"):
+            lines.append(f"It ends with {facts['trailing_silence_s']:g} s of silence.")
+        if facts.get("ending_kind"):
+            lines.append(
+                "It ends with a natural decay."
+                if facts["ending_kind"] == "decay"
+                else "It is cut off at its end."
+            )
+    problems = check.get("problems")
+    if isinstance(problems, list):
+        lines.extend(str(problem) for problem in problems)
+    return lines or ["Nothing was measured."]
+
+
+def build_feedback_request(
+    item: dict[str, Any],
+    *,
+    bible: dict[str, Any],
+    cue: dict[str, Any],
+    detail: dict[str, Any],
+    previous: dict[str, Any] | None,
+    following: dict[str, Any] | None,
+    joins: list[dict[str, Any]],
+    rejected_fields: dict[str, Any],
+    facts: list[str],
+    note: str,
+    model: str,
+) -> dict[str, Any]:
+    """The exact request body of the call that rewrites a rejected take's prompt: the usual
+    level 3 material for the item, plus the rejected prompt, what was measured and the owner's
+    note. It asks for one wording.
+    """
+    base = build_wording_request(
+        item,
+        bible=bible,
+        cue=cue,
+        detail=detail,
+        previous=previous,
+        following=following,
+        joins=joins,
+        count=1,
+        model=model,
+    )
+    creative = CREATIVE_FIELDS[item["model"]]
+    rejected = {key: rejected_fields.get(key) for key in creative if key in rejected_fields}
+    messages = base["messages"]
+    system = messages[0]["content"] + _FEEDBACK_RULES
+    user = (
+        messages[1]["content"]
+        + "\n\nTHE REJECTED TAKE:\n"
+        + _json(
+            {
+                "prompt_fields": rejected,
+                "measured_facts": facts,
+                "owner_note": note,
+            }
+        )
+    )
+    return plan_writer.request_body(system, user, model)
+
+
+def check_feedback(
+    answer: dict[str, Any],
+    item: dict[str, Any],
+    *,
+    avoid: list[str],
+    rejected_fields: dict[str, Any],
+) -> dict[str, Any]:
+    """The rewritten wording, as `{fields, warnings, audit}`. It must be one wording the music
+    model's server accepts, and must not be the rejected text once case and punctuation are
+    ignored. Raises ValueError, with a message fit for the user.
+    """
+    wording = check_wordings(answer, item, count=1, avoid=avoid)[0]
+    model: MusicModel = item["model"]
+    if _normal(main_text(wording["fields"], model)) == _normal(main_text(rejected_fields, model)):
+        raise ValueError(
+            "The new wording is the rejected text: write one that changes what the note asks."
+        )
+    return wording

@@ -116,7 +116,8 @@ class Job(Base):
         # the staging of a scene, since revision 0058, and the planning of an environment's views
         # and the writing of a view's prompt, since revision 0059, and the Music Bible, since
         # revision 0065, and the writing of a theme's prompt, since revision 0066, and the music
-        # plan, since revision 0067, and the cue detail and its audit, since revision 0068.
+        # plan, since revision 0067, and the cue detail and its audit, since revision 0068, and
+        # the rewrite of a rejected take's prompt, since revision 0069.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -130,7 +131,7 @@ class Job(Base):
             "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
-            "'audit_music_cues')",
+            "'audit_music_cues', 'rewrite_music_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -319,6 +320,67 @@ class MusicCueAudit(Base):
     inputs: Mapped[Any] = mapped_column(JSON)
     findings: Mapped[Any] = mapped_column(JSON)
     result_row_ids: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicTake(Base):
+    """One take of one thing a music plan's cue needs generated (MUSIC-010, revision 0069).
+
+    `item_id` is the id of an item of the cue's detail (`music_cue.items`): the cue itself
+    (`cue_3`) or one of its hits (`cue_3/hit_1`). The audio is the Music lab run `lab_run_id`.
+    `fields` are the prompt fields as sent, `check_result` the technical check with the measured
+    facts, and `cue_snapshot` what lock matching reads. `detail_sha256` is the version of the
+    cue's detail the take was made for. `round` is 1 for the first takes, and one more for the
+    takes made after a rejection with a note (`feedback`) or after a fresh start. `retry_of_id`
+    is the failed take a retry replaces. The selected take of an item is its take that is not
+    rejected and has the newest `selected_at`; `locked_at` can only be set on a selected take.
+    Nothing else about a stored take changes.
+    """
+
+    __tablename__ = "music_take"
+    __table_args__ = (
+        CheckConstraint(
+            "selected_by IS NULL OR selected_by IN ('auto', 'owner')", name="selected_by_valid"
+        ),
+        CheckConstraint(
+            "locked_at IS NULL OR selected_at IS NOT NULL", name="lock_needs_selection"
+        ),
+        Index("idx_music_take_item", "plan_id", "cue_id", "item_id"),
+        Index("idx_music_take_run", "lab_run_id"),
+        Index("idx_music_take_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    plan_id: Mapped[int] = mapped_column(ForeignKey("music_plan.id", ondelete="CASCADE"))
+    cue_id: Mapped[str]
+    item_id: Mapped[str]
+    cue_row_id: Mapped[int | None] = mapped_column(
+        ForeignKey("music_cue.id", ondelete="SET NULL"), default=None
+    )
+    detail_sha256: Mapped[str]
+    round: Mapped[int]
+    # The wording (1-based) of the cue row's item this take was made from; NULL for a take made
+    # from a rewritten prompt.
+    wording: Mapped[int | None] = mapped_column(default=None)
+    retry_of_id: Mapped[int | None] = mapped_column(
+        ForeignKey("music_take.id", ondelete="SET NULL"), default=None
+    )
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_music_run.id", ondelete="SET NULL"), default=None
+    )
+    seed: Mapped[int]
+    fields: Mapped[Any] = mapped_column(JSON)
+    requested_s: Mapped[float]
+    cue_snapshot: Mapped[Any] = mapped_column(JSON)
+    # `{of_take_id, note, job_id, rejected_at, claim}` for a take made after a rejection.
+    feedback: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    check_result: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    selected_at: Mapped[datetime | None] = mapped_column(default=None)
+    selected_by: Mapped[str | None] = mapped_column(default=None)
+    rejected_at: Mapped[datetime | None] = mapped_column(default=None)
+    reject_note: Mapped[str | None] = mapped_column(default=None)
+    locked_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

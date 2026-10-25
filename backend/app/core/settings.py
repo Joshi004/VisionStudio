@@ -129,6 +129,9 @@ MUSIC_PLAN_CRITIC_ROUNDS_KEY = "music_plan_critic_rounds"
 MUSIC_CUE_WORDINGS_KEY = "music_cue_wordings"
 MUSIC_CUE_HANDLES_KEY = "music_cue_handles_s"
 MUSIC_CUE_PUSHBACK_ROUNDS_KEY = "music_cue_pushback_rounds"
+# How many times a take of a cue that fails its technical check is made again, with the same
+# prompt and a new seed, in one round (MUSIC-010).
+MUSIC_TAKE_MAX_RETRIES_KEY = "music_take_max_retries"
 
 # How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
 # estimated from its word count at a speaking pace; one above the limit is still saved.
@@ -695,6 +698,21 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=1,
         min_value=0,
         max_value=3,
+    ),
+    SettingSpec(
+        key=MUSIC_TAKE_MAX_RETRIES_KEY,
+        group=GROUP_MUSIC,
+        label="Retries of a music take that fails its check",
+        help=(
+            "When a take of a cue fails its technical check (too short, clipping, a long "
+            "silence, no real ending where one was planned), another take is made with the "
+            "same prompt and a new seed, until one passes. This is the most retries for one "
+            "cue or hit in one round. 0 never retries. Each retry is a paid GPU run."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=5,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

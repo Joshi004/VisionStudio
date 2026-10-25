@@ -1,4 +1,14 @@
-import { Alert, Anchor, Badge, Button, Group, Loader, Stack, Text, Title } from "@mantine/core";
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  Loader,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
 import { Link, useParams } from "react-router";
 
 import { ApiError, describeError } from "../api/errors";
@@ -21,6 +31,7 @@ import { SceneEventsPanel } from "../components/story/SceneEventsPanel";
 import { MusicBiblePanel } from "../components/music/MusicBiblePanel";
 import { MusicCuesPanel } from "../components/music/MusicCuesPanel";
 import { MusicPlanPanel } from "../components/music/MusicPlanPanel";
+import { MusicTakesPanel } from "../components/music/MusicTakesPanel";
 import { MusicThemesPanel } from "../components/music/MusicThemesPanel";
 import { SceneStagingPanel } from "../components/story/SceneStagingPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
@@ -56,7 +67,10 @@ export function ProjectPage() {
   const projectId = Number(params.projectId);
   const { data: project, isLoading, isError, error } = useProject(projectId);
 
-  if (!isValidProjectId(projectId) || (error instanceof ApiError && error.status === 404)) {
+  if (
+    !isValidProjectId(projectId) ||
+    (error instanceof ApiError && error.status === 404)
+  ) {
     return <ProjectNotFound />;
   }
 
@@ -83,11 +97,16 @@ export function ProjectPage() {
                 <Badge variant="light">{capitalise(project.orientation)}</Badge>
               </Group>
               <Text size="sm" c="dimmed">
-                Generation size {project.gen_width} x {project.gen_height}. The final video is{" "}
-                {project.out_width} x {project.out_height} at {project.fps} fps.
+                Generation size {project.gen_width} x {project.gen_height}. The
+                final video is {project.out_width} x {project.out_height} at{" "}
+                {project.fps} fps.
               </Text>
             </Stack>
-            <Button variant="default" component={Link} to={`/projects/${project.id}/settings`}>
+            <Button
+              variant="default"
+              component={Link}
+              to={`/projects/${project.id}/settings`}
+            >
               Project settings
             </Button>
           </Group>
@@ -96,7 +115,10 @@ export function ProjectPage() {
           <CastPanel projectId={project.id} />
           <StoryPipelinePanel projectId={project.id} />
           <StalenessPanel projectId={project.id} />
-          <StoryBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
+          <StoryBiblePanel
+            projectId={project.id}
+            hasStory={project.script_text !== null}
+          />
           <div id="pipeline-step-character_discovery">
             <DiscoveryPanel
               projectId={project.id}
@@ -110,8 +132,12 @@ export function ProjectPage() {
           <div id="pipeline-step-character_images">
             <CharacterImagesPanel projectId={project.id} />
           </div>
-          {project.speech_mode !== "no_dialogue" && <CharacterVoicesPanel projectId={project.id} />}
-          {project.speech_mode !== "no_narration" && <NarratorVoicePanel projectId={project.id} />}
+          {project.speech_mode !== "no_dialogue" && (
+            <CharacterVoicesPanel projectId={project.id} />
+          )}
+          {project.speech_mode !== "no_narration" && (
+            <NarratorVoicePanel projectId={project.id} />
+          )}
           <div id="pipeline-step-environment_discovery">
             <DiscoveryPanel
               projectId={project.id}
@@ -121,7 +147,10 @@ export function ProjectPage() {
           </div>
           <EnvironmentLinksPanel projectId={project.id} />
           <div id="pipeline-step-scene_discovery">
-            <ScenesPanel projectId={project.id} hasStory={project.script_text !== null} />
+            <ScenesPanel
+              projectId={project.id}
+              hasStory={project.script_text !== null}
+            />
           </div>
           <div id="pipeline-step-environment_definitions">
             <EnvironmentDefinitionsPanel projectId={project.id} />
@@ -130,10 +159,16 @@ export function ProjectPage() {
             <SceneDefinitionsPanel projectId={project.id} />
           </div>
           <div id="pipeline-step-events">
-            <SceneEventsPanel projectId={project.id} speechMode={project.speech_mode} />
+            <SceneEventsPanel
+              projectId={project.id}
+              speechMode={project.speech_mode}
+            />
           </div>
           <div id="pipeline-step-music_bible">
-            <MusicBiblePanel projectId={project.id} hasStory={project.script_text !== null} />
+            <MusicBiblePanel
+              projectId={project.id}
+              hasStory={project.script_text !== null}
+            />
           </div>
           <div id="pipeline-step-music_themes">
             <MusicThemesPanel projectId={project.id} />
@@ -156,6 +191,9 @@ export function ProjectPage() {
           <ShotDefinitionsPanel projectId={project.id} />
           <div id="pipeline-step-music_cues">
             <MusicCuesPanel projectId={project.id} />
+          </div>
+          <div id="pipeline-step-music_generation">
+            <MusicTakesPanel projectId={project.id} />
           </div>
           <ShotReferencesPanel projectId={project.id} />
           <GenerationRequestsPanel projectId={project.id} />

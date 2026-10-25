@@ -43,8 +43,10 @@ from app.services import (
     look_state_images,
     look_state_resolution,
     music_bible,
+    music_cue_writer,
     music_cues,
     music_plan,
+    music_takes,
     music_themes,
     review_points,
     scene_definitions,
@@ -104,6 +106,9 @@ _MANUAL_MUSIC_BIBLE: Final = (
 _MANUAL_MUSIC_PLAN: Final = (
     "The newest music plan was written by you, and planning the music again adds a version from "
     "the model."
+)
+_MANUAL_MUSIC_TAKE: Final = (
+    "You chose the take of this cue, and making it again replaces your choice."
 )
 _MANUAL_MUSIC_THEME: Final = (
     "You chose the canonical recording of this theme, and recording it again replaces your choice."
@@ -1057,6 +1062,63 @@ async def _start_music_cues(
     return await _start_each(session, targets, deadline, make)
 
 
+# --- The music takes (MUSIC-010) ------------------------------------------------------------
+
+# Named for the plan version, so that a new plan starts its takes with fresh tries.
+_TAKE_PREFIX: Final = "take"
+
+
+async def _evaluate_music_generation(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # With music switched off nothing is made (MD-21): one target that is already done.
+    if not project.music_enabled:
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await music_takes.state(session, project)
+    if state.plan is None or state.blocked_reason is not None:
+        return _blocked_project(state.blocked_reason or music_cues.NO_PLAN_MESSAGE)
+    if not state.items:
+        return StepView([Target(PROJECT_KEY, "", True)])  # no cue makes audio
+
+    targets: list[Target] = []
+    for view in state.items:
+        label = str(view.cue_view.cue["summary"])
+        if view.item["role"] == music_cue_writer.ROLE_HIT:
+            label += " (hit)"
+        targets.append(
+            Target(
+                f"{_TAKE_PREFIX}:v{state.plan.version}:{view.item_id}",
+                label,
+                view.done,
+                active=view.active,
+                block=None if view.done or view.active else view.blocked_reason or view.last_error,
+                consent=_MANUAL_MUSIC_TAKE if view.needs_confirmation and not view.done else None,
+                last_error=view.last_error,
+                ref=(view.item_id,),
+                stale=view.out_of_date,
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_music_generation(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        return await music_takes.start_run(
+            session,
+            project,
+            item_id=target.ref[0],
+            confirm_replace_owner=options.confirm_overwrite,
+        )
+
+    return await _start_each(session, targets, deadline, make)
+
+
 # --- Scene staging and environment views (PHASE-051, PHASE-052) ------------------------------
 
 
@@ -1947,6 +2009,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "music_themes": Adapter(_evaluate_music_themes, _start_music_themes),
     "music_plan": Adapter(_evaluate_music_plan, _project_start(_call_music_plan)),
     "music_cues": Adapter(_evaluate_music_cues, _start_music_cues),
+    "music_generation": Adapter(_evaluate_music_generation, _start_music_generation),
     "resolution": Adapter(_evaluate_resolution, _project_start(_call_resolution)),
     "scene_staging": Adapter(_evaluate_scene_staging, _start_scene_staging),
     "environment_views": Adapter(_evaluate_environment_views, _start_environment_views),
@@ -1985,6 +2048,7 @@ _CONSENT_STEPS: Final[tuple[str, ...]] = (
     "music_bible",
     "music_themes",
     "music_plan",
+    "music_generation",
     "scene_staging",
     "speech_units",
     "shot_plans",

@@ -398,6 +398,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/music-takes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Music Takes */
+        get: operations["get_music_takes_api_projects__project_id__music_takes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-takes/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Music Takes
+         * @description Queues the takes of every item that has none for its cue's current detail, or of the item
+         *     named by `item_id`. One take is made for each wording, all at once. Paid GPU calls start only
+         *     from here (or from a pipeline run), never by themselves.
+         */
+        post: operations["run_music_takes_api_projects__project_id__music_takes_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-takes/{take_id}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select Music Take
+         * @description Selects a take, also one that failed its check. The item's automatic retries stop.
+         */
+        post: operations["select_music_take_api_projects__project_id__music_takes__take_id__select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-takes/{take_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Music Take
+         * @description Rejects a take with a note. The model rewrites the cue's prompt from the note (a paid
+         *     language model call) and a new take is made from it.
+         */
+        post: operations["reject_music_take_api_projects__project_id__music_takes__take_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-takes/{take_id}/lock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lock Music Take
+         * @description Locks the selected take: it is never regenerated, and carries over to a matching cue of a
+         *     later plan version.
+         */
+        post: operations["lock_music_take_api_projects__project_id__music_takes__take_id__lock_post"];
+        /**
+         * Unlock Music Take
+         * @description Removes the lock of a take.
+         */
+        delete: operations["unlock_music_take_api_projects__project_id__music_takes__take_id__lock_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/discovery/{kind}/run": {
         parameters: {
             query?: never;
@@ -6314,7 +6419,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt";
             /**
              * Status
              * @enum {string}
@@ -6367,7 +6472,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt";
             /**
              * Kind
              * @enum {string}
@@ -6406,7 +6511,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt";
             /**
              * Status
              * @enum {string}
@@ -7834,6 +7939,140 @@ export interface components {
             /** Crossfade S */
             crossfade_s: number | null;
         };
+        /**
+         * MusicTakeItemOut
+         * @description One thing to generate and where its takes stand.
+         */
+        MusicTakeItemOut: {
+            /** Id */
+            id: string;
+            /** Cue Id */
+            cue_id: string;
+            /** Role */
+            role: string;
+            /** Kind */
+            kind: string;
+            /** Model */
+            model: string;
+            /** Summary */
+            summary: string;
+            /** Span S */
+            span_s: number | null;
+            /** Requested S */
+            requested_s: number | null;
+            /** Takes */
+            takes: components["schemas"]["MusicTakeOut"][];
+            /** Selected Take Id */
+            selected_take_id: number | null;
+            /** Locked */
+            locked: boolean;
+            /** Round */
+            round: number;
+            /** Retries Used */
+            retries_used: number;
+            rewrite_job: components["schemas"]["RewriteJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Done */
+            done: boolean;
+            /** Active */
+            active: boolean;
+            /** Action */
+            action: ("generate" | "regenerate" | "retry") | null;
+            /** Last Error */
+            last_error: string | null;
+        };
+        /** MusicTakeOut */
+        MusicTakeOut: {
+            /** Id */
+            id: number;
+            /** Round */
+            round: number;
+            /** Wording */
+            wording: number | null;
+            /** Seed */
+            seed: number;
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
+            /** Requested S */
+            requested_s: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "generating" | "checking" | "passed" | "check_failed" | "failed";
+            run: components["schemas"]["LabMusicRunOut"] | null;
+            check: components["schemas"]["TakeCheckOut"] | null;
+            /** Problems */
+            problems: string[];
+            /** Selected */
+            selected: boolean;
+            /** Selected By */
+            selected_by: ("auto" | "owner") | null;
+            /** Rejected */
+            rejected: boolean;
+            /** Reject Note */
+            reject_note: string | null;
+            /** Locked */
+            locked: boolean;
+            /** Inherited */
+            inherited: boolean;
+            /** Current */
+            current: boolean;
+            /** Of Take Id */
+            of_take_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** MusicTakeRejectIn */
+        MusicTakeRejectIn: {
+            /** Note */
+            note: string;
+        };
+        /** MusicTakeRejectOut */
+        MusicTakeRejectOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** MusicTakesRun */
+        MusicTakesRun: {
+            /** Job Ids */
+            job_ids: number[];
+        };
+        /** MusicTakesRunIn */
+        MusicTakesRunIn: {
+            /**
+             * Confirm Replace Owner
+             * @default false
+             */
+            confirm_replace_owner: boolean;
+        };
+        /** MusicTakesState */
+        MusicTakesState: {
+            /** Plan Version */
+            plan_version: number | null;
+            /** Items */
+            items: components["schemas"]["MusicTakeItemOut"][];
+            /** Music Enabled */
+            music_enabled: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Max Retries */
+            max_retries: number;
+            /** Wordings */
+            wordings: number;
+        };
         /** MusicThemeChooseIn */
         MusicThemeChooseIn: {
             /** Candidate Id */
@@ -8454,7 +8693,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt";
             /** Running */
             running: number;
             /** Queued */
@@ -9162,6 +9401,23 @@ export interface components {
             key: string;
             /** Label */
             label: string;
+        };
+        /**
+         * RewriteJobOut
+         * @description The newest `rewrite_music_prompt` job of the item, whatever its status.
+         */
+        RewriteJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
         };
         /** RoundOut */
         RoundOut: {
@@ -11836,6 +12092,20 @@ export interface components {
             duration_s: number | null;
         };
         /**
+         * TakeCheckOut
+         * @description The technical check of a take (`music_takes.check_take`).
+         */
+        TakeCheckOut: {
+            /** Passed */
+            passed: boolean;
+            /** Problems */
+            problems: string[];
+            /** Facts */
+            facts: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
          * TakeDialogueOut
          * @description The speech-recognition check of a take with dialogue (PHASE-031): what Parakeet heard in
          *     the clip next to the shot's lines. `similarity` and `threshold` are percents.
@@ -13658,6 +13928,254 @@ export interface operations {
                 };
             };
             /** @description Music is off, the plan or the shots are not ready, or nothing can be run. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_music_takes_api_projects__project_id__music_takes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicTakesState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_music_takes_api_projects__project_id__music_takes_run_post: {
+        parameters: {
+            query?: {
+                item_id?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["MusicTakesRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicTakesRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, the cues are not ready, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    select_music_take_api_projects__project_id__music_takes__take_id__select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, the cues are not ready, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reject_music_take_api_projects__project_id__music_takes__take_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicTakeRejectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicTakeRejectOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, the cues are not ready, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    lock_music_take_api_projects__project_id__music_takes__take_id__lock_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, the cues are not ready, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unlock_music_take_api_projects__project_id__music_takes__take_id__lock_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                take_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, the cues are not ready, or the request cannot be done now. */
             422: {
                 headers: {
                     [name: string]: unknown;
