@@ -14,7 +14,9 @@ say "clip", although the file is audio.)
 
 `_check_and_store` reads the downloaded file with ffprobe, stores it under `media/lab/` (FLAC, or
 WAV for LTX), and writes the result on the `lab_music_run` row in one transaction with the
-finished job. The job belongs to no project (`job.project_id` is NULL).
+finished job. A lab job belongs to no project (`job.project_id` is NULL); the recordings of a
+story's music themes (MUSIC-007) are the same job with the project set, and `_continue_music_theme`
+checks them once stored.
 
 The request is built and checked by `services/music_lab.py`, so a bad form starts nothing. This
 module only submits what the job recorded, and refuses an endpoint that is not the one its model
@@ -34,12 +36,12 @@ from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Job, LabMusicRun
 from app.db.session import SessionLocal
-from app.jobs import phases, store
+from app.jobs import dispatcher, phases, store
 from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import gpu_server, music_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import ffmpeg, music_lab, music_models
+from app.services import ffmpeg, music_lab, music_models, music_themes
 from app.services.music_models import EditOperation, MusicModel
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -253,7 +255,21 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
             stream.sample_rate,
         )
 
+        await self._continue_music_theme(job.id, plan.run_id)
+
         # Best effort: a failure here is recorded and never fails the audio.
         purge = await self._purge(base_url, job.provider_job_id)
         async with SessionLocal() as session:
             await store.merge_output(session, job.id, {"purge": purge})
+
+    @staticmethod
+    async def _continue_music_theme(job_id: int, run_id: int) -> None:
+        """Checks the recording when it belongs to a music theme, and lets the first candidate
+        that passes become the theme's canonical recording (MUSIC-007). Best effort: a failure
+        never fails the audio (it is stored), and the owner can choose a candidate by hand.
+        """
+        try:
+            if await music_themes.on_audio_stored(run_id):
+                dispatcher.nudge()
+        except Exception:
+            _logger.exception("job %d: the music theme could not continue", job_id)

@@ -314,6 +314,7 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 - In progress: MUSIC-003 (code complete 2026-10-24; the owner's check of the change points and loudest moments of round-1 runs 13 to 16 by ear is still open)
 - MUSIC-005 (review screen ready, wave 1 of 4 run, waves 2 to 4 waiting for the owner)
 - MUSIC-006 (code complete 2026-10-25; the owner's S2 run with the real model is still open)
+- MUSIC-007 (code complete 2026-10-25; the owner's S2 run with the real model and listening are still open)
 - Deferred: MUSIC-016 (singing characters, until the owner decides)
 
 | ID | Title | Milestone | Hard dependencies | Status |
@@ -324,7 +325,7 @@ Status values and their meaning are those of `Implementation_phases.md` §6.1. *
 | MUSIC-004 | Editing in the Music Lab | MM0 | 003 | Completed |
 | MUSIC-005 | Round-2 trials (manual) | MM0 | 004 (001 recommended) | In Progress (wave 1 run; waves 2 to 4 waiting) |
 | MUSIC-006 | Music Bible: four directions, a choice, the Bible | MM1 | 001; PHASE-014, PHASE-015, PHASE-030 | In Progress (code complete; S2 run waiting for the owner) |
-| MUSIC-007 | Themes and their emotional versions | MM1 | 005, 006 | Not Started |
+| MUSIC-007 | Themes and their emotional versions | MM1 | 006 (005 no longer needed, MD-6) | In Progress (code complete; S2 run and listening waiting for the owner) |
 | MUSIC-008 | Music plan with critics | MM2 | 006; PHASE-021 | Not Started |
 | MUSIC-009 | Cue detail and prompts | MM2 | 007, 008; PHASE-022 | Not Started |
 | MUSIC-010 | Cue generation, takes and selection | MM3 | 003, 004, 009 | Not Started |
@@ -751,38 +752,52 @@ flowchart TD
 
 ### MUSIC-007 — Themes and their emotional versions
 
-**Status:** Not Started · **Milestone:** MM1 · **Vision:** MD-6, §4.2
+**Status:** In Progress (code complete; S2 run and listening waiting for the owner) · **Milestone:** MM1 · **Vision:** MD-6, §4.2
 
-**Objective.** Record each theme of the Bible once, as a canonical recording, and make the emotional versions the story needs from that recording.
+**Objective.** Record each theme of the Bible once, as a canonical recording, and make the emotional versions the story needs as fresh text-to-music that describes the theme (MD-6, changed 2026-10-25).
 
-**Current state.** The Character Lab's pattern of candidates, a chosen master and derived variants is the model (PHASE-010, PHASE-016, PHASE-017). The editing operations exist (MUSIC-004). The method comes from round 2 (MUSIC-005).
+**Current state.** The Character Lab's pattern of candidates and a chosen master is the model (PHASE-010, PHASE-016, PHASE-017). Recordings are Music lab runs (`lab_music_run`, `lab_music` job). The measurements exist (MUSIC-003). The conversion operations (MUSIC-004) are **not** used for versions.
 
 **Scope.**
-- Per theme: GLM writes the solo-theme prompt from the Bible (level 3 profile). Several candidates are generated (a setting; **Planning decides** the default). The first passing candidate is chosen in automatic runs (MD-10), or the owner picks.
-- Per theme and emotion listed in the Bible, a version is made from the canonical recording with the round-2 method and strength. GLM writes the restyle caption. Later cues may ask for an emotion not listed, which is then made during cue generation (010).
+- Per theme: GLM writes the ACE-Step fields of the solo theme from the Bible (level 3 profile). Several candidates are generated (a setting; **Planning decides** the default). The first passing candidate is chosen in automatic runs (MD-10), or the owner picks.
+- Per theme and emotion listed in the Bible, a version is made as **fresh text-to-music**: GLM writes a caption for the emotion from the canonical fields, and the recording keeps the canonical tempo, key, time signature and length. Later cues may ask for an emotion not listed, which is then made during cue generation (010).
 - A `music_themes` pipeline step and adapter.
 - A panel: each theme, its candidates (play, choose), its versions (play, regenerate one).
 
-**Out of scope.** Cues (009, 010). A theme library shared across projects.
+**Out of scope.** Cues (009, 010). A theme library shared across projects. Conversion of the canonical recording with `cover` or `transform` (a later improvement, MD-6).
 
-**Dependencies.** MUSIC-005 (method), MUSIC-006.
+**Dependencies.** MUSIC-006. (MUSIC-005's conversion cases no longer gate this phase.)
 
-**Expected outcome.** S2's mother theme exists as a music-box recording, plus fear and grief versions that the owner recognises as the same melody.
+**Expected outcome.** S2's mother theme exists as a music-box recording, plus fear and grief versions that the owner judges to be the same theme in a different feeling (a text description cannot promise the same melody; see the notes).
 
 **Verification criteria.**
-- The owner recognises the melody in every version.
+- The owner judges every version to be the same theme in its emotion.
 - Choosing another candidate makes the versions out of date, and they are made again from it.
 - Standard checks (`Implementation_phases.md` §3.5).
 
 **Observable improvements.** The story has a music character.
 
 **Completion checklist.**
-- [ ] Theme prompts, candidates, choice
-- [ ] Emotional versions from the canonical recording
-- [ ] Pipeline step and adapter; panel; docs; standard checks
-- [ ] Owner listens on S2
+- [x] Theme prompts, candidates, choice
+- [x] Emotional versions (text-to-music, MD-6)
+- [x] Pipeline step and adapter; panel; docs; standard checks
+- [ ] Owner runs S2 with the real model and listens
 
-**Completion notes.** _(fill in)_
+**Completion notes.**
+
+- **Not marked Completed, and why.** Three Verification criteria need the real story model and the GPU server, which are paid calls the agent does not make without the owner's go-ahead, and a judgment only the owner can make by ear. Everything else was checked offline (below). To finish: rebuild with `docker compose up --build -d` (the container applies migration `0066` itself), make sure the Music Bible of S2 exists, then press **Record the themes** in the Music themes panel. Tell the agent how the candidates and versions sound, and mark the phase Completed.
+- **How "Planning decides" was settled.** (1) The number of candidates is a **global setting**, `music_theme_candidates` (group `Music`, whole number 1 to 4, default 3; the owner chose 3). (2) The length of a recording is a global setting, `music_theme_duration_s` (whole seconds, 10 to 60, default 30; ACE-Step makes nothing under 10 s). Both apply the next time a theme is made. (3) Storage reuses the Music lab (the owner's choice): every candidate and version is a `lab_music_run` with a `lab_music` job, so the lab's player, measurements and rating apply, and the runs also show in the Music lab list, grouped as `theme:<id>`.
+- **Storage (migration `0066`).** `music_theme` (one immutable row per recording of one theme: `fields`, `inputs` with `theme_sha256`, `chosen_candidate_id`, `chosen_by` = `auto` or `owner`), `music_theme_candidate` (`position`, `lab_run_id`, `seed`, `check_result`) and `music_theme_version` (`candidate_id`, `emotion`, `method` = `text`, `fields`, `lab_run_id`, `seed`, `check_result`). Job type `write_music_theme_prompt` was added to the `job.type` CHECK. `DATABASE_STRUCTURE.md` Sections 4.60 to 4.62 have every field.
+- **The method (MD-6).** The theme call writes `caption`, `bpm`, `keyscale` and optionally `time_signature`; code sets `instrumental` (true), the lyrics (`[Instrumental]`), the language (`unknown`) and the length, and refuses an answer with no tempo or key or a caption outside 20 to 512 characters. The versions call writes one caption per missing emotion; each version is the canonical fields with that caption, so tempo, key, time signature and length cannot change. A fresh recording from text will keep the tempo and key and the described instrument, but **not** the exact melody: the owner's "recognises the melody" test of the old criteria became "judges it the same theme in its emotion".
+- **Technical check and automatic choice.** When a `lab_music` job stores its audio, the recording is measured (MUSIC-003) and checked: at least 90% of the length asked for, no more than 1 s of silence at the start, no silence longer than 3 s inside, no clipping. The first candidate of the newest recording of a theme that passes is made canonical with an atomic `UPDATE ... WHERE chosen_candidate_id IS NULL`, so two recordings stored together cannot both win and an owner's choice is never replaced. If every candidate fails, the step shows the failure and a run records more candidates (no new model call), up to the pipeline's usual tries.
+- **Out of date.** Never stored. A theme row is out of date when the hash of its Bible theme and the Bible's sound world changed (`theme_sha256`; the emotions and the main flag are not in it, so a new emotion only makes a version missing). A version is out of date when it was made from a candidate that is no longer canonical. Choosing another candidate queues the versions job at once. Recording over a canonical recording the owner chose asks for confirmation (`confirm_replace_owner`, 422 without it).
+- **Modules.** `services/music_theme_writer.py` (prompts, request builders, `check_theme_answer`, `check_versions_answer`; pure), `services/music_themes.py` (state, `start_run`, `choose`, `regenerate_version`, `save_theme`, `save_versions`, `check_recording`, `on_audio_stored`), `jobs/write_music_theme_prompt.py` (`WriteMusicThemePromptHandler`, provider `llm`, restart rule `never_rerun`, story model, one call, rows saved and the job finished in one transaction), `api/music_themes.py`. `services/music_lab.py` gained `add_run` (one run and its job, used by `create_runs` and by the themes) and `generation_partition`. `jobs/generate_lab_music.py` calls `music_themes.on_audio_stored` once the audio is stored (best effort; an exception is logged and never fails the lab job).
+- **Endpoints.** `GET /api/projects/{id}/music-themes` (each theme with its fields, candidates, versions, newest job, `out_of_date`, `reasons`, `needs_confirmation`, `done`, `active`, `action`, `missing_emotions`, and the settings in use), `POST .../music-themes/run` (202; body `confirm_replace_owner`; query `theme_id` for one theme), `POST .../music-themes/{theme_id}/choose` (202; body `candidate_id`) and `POST .../music-themes/{theme_id}/versions/{emotion}/regenerate` (202; a new seed, no model call). Each returns the ids of the jobs it queued.
+- **Pipeline.** Step `music_themes` ("Record the themes") sits right after `music_bible`; the pipeline now has **28 steps**. It has one target per theme (`theme:<id>`), done when the theme is chosen and every emotion has a recording, `active` while the prompt job or a recording runs. With music off it is one done target. It asks for consent before replacing an owner's choice (`_CONSENT_STEPS`). The staleness screen lists a changed theme but does not offer to accept it.
+- **UI.** `components/music/MusicThemesPanel.tsx` (Record the themes, one card per theme with its status, the fields that were sent, candidate cards with player, measurements, check result and **Choose this one**, version cards with **Make this again**, and a confirmation before replacing an owner's choice) in `#pipeline-step-music_themes` on the project page; hooks in `api/musicThemes.ts`; the job label "Music theme prompt" in `jobFormat.ts`. The lab's rating control (`Verdict`) is **not** shown there: it refreshes only the Music lab's own lists, so on this panel it would not update; rate a theme recording in the Music lab, where it also appears.
+- **Checks run.** `uv run ruff check . && uv run ruff format --check .` pass. `npm run lint && npm run typecheck` pass (`schema.d.ts` regenerated from the app's OpenAPI document). Migration `0066` upgrade, downgrade to `0065` and upgrade again on a throwaway database (`DATA_DIR` a temporary folder; the real database was never opened), with `PRAGMA foreign_key_check` empty, integrity ok, and `alembic check` showing only the four older `FLOAT` against `REAL` differences. An offline run of the whole flow through the HTTP API on a throwaway database, with a stand-in for the model's answers and sine-wave files for the sound (no GPU server, no model): both themes need a prompt job; a second press queues nothing; saving gives three candidates each; a 5 s candidate fails its check ("It is 5.0 s long, and 30 s were asked for."); the first passing candidate is chosen automatically and a later one does not replace it; versions are written and recorded and the theme is done; an owner's choice of another candidate makes the versions out of date and queues new ones; they are made again and the theme is done; one version made again adds one run and no model call; an unknown candidate or theme answers 422; a changed Bible theme is out of date and needs consent (422 without it, a job with it); the pipeline target shows it; with music off the step is one done target and a run answers 422; the staleness screen lists the theme. No automated tests were added (D-11).
+- **Not done here, on purpose.** No real model or GPU call. The Docker app was not rebuilt. The shared Music lab rating control is not on the panel (above).
+- **For the next phases.** Read the newest `music_theme` row of each theme: `fields` (the canonical recording's ACE-Step fields), `chosen_candidate_id` and its `lab_run_id` for the canonical recording, and `music_theme_version` rows whose `candidate_id` equals the chosen one for the versions (`emotion`, `lab_run_id`, `fields`). MUSIC-009's "cue built on a theme version" is a text prompt that reuses a version's `fields` (MD-6). Check `project.music_enabled` first.
 
 ---
 
@@ -1378,6 +1393,7 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 | 2026-10-25 | MUSIC-004 | Completed | The owner validated repaint and the other editing. Real runs in round-2 wave 1: ACE-Step repaint leaves the sound outside the window unchanged (only 1 dB quieter); Stable Audio 3 inpaint changes it (-23 dB). |
 | 2026-10-25 | MUSIC-005 | In Progress | The owner is not sure a recording can be converted to another mood yet, so emotional theme versions start as fresh text-to-music (MD-6, QM-4 changed). Conversion cases for grief, anger and tenderness (18 runs) deferred to wave 5. Waves 2 to 4 still wait for the owner. |
 | 2026-10-25 | MUSIC-006 | In Progress (code complete) | Music Bible: four directions, a choice with reasons and the Bible (three calls, or only the Bible when the owner chooses another direction). Table `music_bible` and `project.music_enabled` (migration `0065`), job type `write_music_bible`, setting `music_max_themes`, `/api/projects/{id}/music-bible`, pipeline step `music_bible` (27 steps), `MusicBiblePanel`, a Music switch on the project settings. Checked offline; no paid call made. Docker app not rebuilt. Waiting for the owner to run S2 with the real model. |
+| 2026-10-25 | MUSIC-007 | In Progress (code complete) | Themes and emotional versions as fresh text-to-music (MD-6). Tables `music_theme`, `music_theme_candidate` and `music_theme_version` (migration `0066`), job type `write_music_theme_prompt`, settings `music_theme_candidates` (3) and `music_theme_duration_s` (30), `/api/projects/{id}/music-themes`, pipeline step `music_themes` (28 steps), `MusicThemesPanel`. Recordings are Music lab runs. Checked offline against stand-ins; no paid call made. Docker app not rebuilt. Waiting for the owner to run S2 with the real model and listen. |
 
 ---
 
@@ -1386,6 +1402,7 @@ ACE-Step 1.5 and Stable Audio 3 only (MD-9; Stable Audio Open is no longer used)
 | Date | Change | Reason |
 |---|---|---|
 | 2026-10-25 | **QM-6 and QM-14 answered; MUSIC-006 code complete.** Theme cap is a setting (`music_max_themes`, default 3); music is on by default and can be switched off per project. | The owner chose both during MUSIC-006 planning. |
+| 2026-10-25 | **MUSIC-007 code complete.** Candidates per theme (default 3) and recording length (default 30 s) are settings; theme recordings reuse the Music lab; emotional versions are text-to-music, so the owner's check is "the same theme in its emotion", not "the same melody". | The owner chose the storage and the candidate count during MUSIC-007 planning; MD-6 was changed earlier the same day. |
 | 2026-10-25 | **MD-6 changed, QM-4 answered for now:** emotional versions of a theme start as fresh text-to-music with the theme described in the prompt; `cover` and `transform` conversion is a later iteration. MUSIC-004 marked Completed. | The owner validated the editing operations but is not sure a recording can be converted to horror or another mood yet. |
 | 2026-10-24 | **MD-9 changed and MD-24 added from the owner's listening:** Stable Audio Open, LTX audio and YuE2 leave the pipeline; sound is routed by how far it reaches (inside one shot: H3; spans shots: Stable Audio 3; time-critical such as thunder: H3). MD-17 confirmed. MUSIC-001 and MUSIC-002 completed. MUSIC-008 notes the routing and the ordering problem it creates. QM-1 and QM-3 answered; QM-15 and QM-16 added. Round-2 trial M3 drops thunder; Stable Audio Open dropped from Appendix C. | Owner listened to round 1 and the H3 shots. |
 | 2026-10-23 | Initial version: decisions MD-1 to MD-16 from the owner's design discussion, and MD-17 to MD-23 added on re-evaluation; design §4; phases MUSIC-001 to MUSIC-016; round-2 trial plan. | Owner asked for a music-specific roadmap that follows the Opus plan, Sonnet execute workflow. |

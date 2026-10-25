@@ -115,7 +115,7 @@ class Job(Base):
         # language model, since revision 0052, and the two Music lab jobs, since revision 0057, and
         # the staging of a scene, since revision 0058, and the planning of an environment's views
         # and the writing of a view's prompt, since revision 0059, and the Music Bible, since
-        # revision 0065.
+        # revision 0065, and the writing of a theme's prompt, since revision 0066.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -127,7 +127,8 @@ class Job(Base):
             "'compile_shot_prompt', 'generate_shot', 'render_story', 'check_shot_takes', "
             "'story_pipeline', 'check_take_dialogue', 'select_shot_references', "
             "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
-            "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible')",
+            "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
+            "'write_music_theme_prompt')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -224,6 +225,105 @@ class MusicBible(Base):
     directions: Mapped[Any] = mapped_column(JSON)
     choice: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicTheme(Base):
+    """One generation of one theme of a project's Music Bible (MUSIC-007, revision 0066).
+
+    `theme_id` is the Bible's id (`theme_1`, ...). `fields` are the ACE-Step fields the model
+    wrote for the theme's canonical recording, `inputs` is what the row was made from (the Bible
+    row and a hash of the theme's own entry), and the chosen candidate (`chosen_candidate_id`)
+    is the canonical recording: `chosen_by` is `auto` (the first one that passed the check) or
+    `owner`. A stored row is never changed except for the choice; making the theme again adds
+    a row with the next `version`.
+    """
+
+    __tablename__ = "music_theme"
+    __table_args__ = (
+        CheckConstraint(
+            "chosen_by IS NULL OR chosen_by IN ('auto', 'owner')", name="chosen_by_valid"
+        ),
+        UniqueConstraint("project_id", "theme_id", "version"),
+        Index("idx_music_theme_project", "project_id", "theme_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    bible_id: Mapped[int] = mapped_column(ForeignKey("music_bible.id", ondelete="CASCADE"))
+    theme_id: Mapped[str]
+    version: Mapped[int]
+    # The `write_music_theme_prompt` job that wrote the fields.
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    fields: Mapped[Any] = mapped_column(JSON)
+    inputs: Mapped[Any] = mapped_column(JSON)
+    # `use_alter`: `music_theme_candidate.theme_row_id` points back at this table, the intended
+    # cycle.
+    chosen_candidate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("music_theme_candidate.id", ondelete="SET NULL", use_alter=True), default=None
+    )
+    chosen_by: Mapped[str | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicThemeCandidate(Base):
+    """One candidate recording of a theme (MUSIC-007). A link to the `lab_music_run` that made
+    it: the audio, its status and its measurements are read from that run. `check_result` is the
+    technical check (`services/music_themes.check_recording`), NULL until the audio exists.
+    """
+
+    __tablename__ = "music_theme_candidate"
+    __table_args__ = (
+        UniqueConstraint("theme_row_id", "position"),
+        Index("idx_music_theme_candidate_run", "lab_run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    theme_row_id: Mapped[int] = mapped_column(ForeignKey("music_theme.id", ondelete="CASCADE"))
+    # 1, 2, 3, ... in the order they were made.
+    position: Mapped[int]
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_music_run.id", ondelete="SET NULL"), default=None
+    )
+    seed: Mapped[int]
+    check_result: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicThemeVersion(Base):
+    """One emotional version of a theme (MUSIC-007), made from the candidate that was the
+    canonical recording then (`candidate_id`). `method` is `text` (fresh text-to-music with the
+    theme described in the prompt, MD-6); a later method adds a value. The newest row per
+    (theme row, candidate, emotion) is the current one. `lab_run_id` is the recording.
+    """
+
+    __tablename__ = "music_theme_version"
+    __table_args__ = (
+        CheckConstraint("method IN ('text')", name="method_valid"),
+        Index("idx_music_theme_version_theme", "theme_row_id"),
+        Index("idx_music_theme_version_run", "lab_run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    theme_row_id: Mapped[int] = mapped_column(ForeignKey("music_theme.id", ondelete="CASCADE"))
+    candidate_id: Mapped[int] = mapped_column(
+        ForeignKey("music_theme_candidate.id", ondelete="CASCADE")
+    )
+    emotion: Mapped[str]
+    method: Mapped[str]
+    # The `write_music_theme_prompt` job that wrote the caption. NULL for a regeneration, which
+    # reuses the fields of the version it replaces.
+    prompt_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    fields: Mapped[Any] = mapped_column(JSON)
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_music_run.id", ondelete="SET NULL"), default=None
+    )
+    seed: Mapped[int]
+    check_result: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

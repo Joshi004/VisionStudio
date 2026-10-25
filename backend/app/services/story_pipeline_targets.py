@@ -43,6 +43,7 @@ from app.services import (
     look_state_images,
     look_state_resolution,
     music_bible,
+    music_themes,
     review_points,
     scene_definitions,
     scene_events,
@@ -97,6 +98,9 @@ _MANUAL_EVENTS: Final = (
 _MANUAL_MUSIC_BIBLE: Final = (
     "The newest Music Bible was written or chosen by you, and writing it again adds a version "
     "from the model."
+)
+_MANUAL_MUSIC_THEME: Final = (
+    "You chose the canonical recording of this theme, and recording it again replaces your choice."
 )
 _MANUAL_UNITS: Final = (
     "The newest speech units of this scene were written by you, and planning them again "
@@ -859,6 +863,68 @@ async def _evaluate_music_bible(
 async def _call_music_bible(session: AsyncSession, project: Project, options: RunOptions) -> Job:
     return await music_bible.start_run(
         session, project, confirm_replace_manual=options.confirm_overwrite
+    )
+
+
+# --- The music themes (MUSIC-007) -------------------------------------------------------------
+
+
+def _theme_last_error(view: music_themes.ThemeView) -> str | None:
+    """Why the work of a theme did not get anywhere: its prompt job failed, or no candidate could
+    be chosen (each one failed its check or its job).
+    """
+    failure = _failure(view.job)
+    if failure is not None:
+        return failure
+    if view.action == "candidates" and view.candidates:
+        return "no recording of the theme passed its check"
+    return None
+
+
+async def _evaluate_music_themes(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # With music switched off nothing is made (MD-21): one target that is already done.
+    if not project.music_enabled:
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await music_themes.state(session, project)
+    if not state.themes:
+        return _blocked_project(state.blocked_reason or "The Music Bible has no themes.")
+    targets: list[Target] = []
+    for view in state.themes:
+        theme_id = view.theme["id"]
+        targets.append(
+            Target(
+                f"theme:{theme_id}",
+                str(view.theme.get("name", theme_id)),
+                view.done,
+                active=view.active,
+                consent=_MANUAL_MUSIC_THEME if view.needs_confirmation and not view.done else None,
+                last_error=_theme_last_error(view),
+                ref=(theme_id,),
+                stale=view.row is not None and view.out_of_date,
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_music_themes(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    return await _start_each(
+        session,
+        targets,
+        deadline,
+        lambda target: music_themes.start_run(
+            session,
+            project,
+            theme_id=target.ref[0],
+            confirm_replace_owner=_options_for(options, target).confirm_overwrite,
+        ),
     )
 
 
@@ -1749,6 +1815,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "scene_definitions": Adapter(_evaluate_scene_definitions, _start_scene_definitions),
     "events": Adapter(_evaluate_events, _start_events),
     "music_bible": Adapter(_evaluate_music_bible, _project_start(_call_music_bible)),
+    "music_themes": Adapter(_evaluate_music_themes, _start_music_themes),
     "resolution": Adapter(_evaluate_resolution, _project_start(_call_resolution)),
     "scene_staging": Adapter(_evaluate_scene_staging, _start_scene_staging),
     "environment_views": Adapter(_evaluate_environment_views, _start_environment_views),
@@ -1785,6 +1852,7 @@ _CONSENT_STEPS: Final[tuple[str, ...]] = (
     "scene_definitions",
     "events",
     "music_bible",
+    "music_themes",
     "scene_staging",
     "speech_units",
     "shot_plans",

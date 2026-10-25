@@ -32,6 +32,7 @@ from app.services import (
     look_state_images,
     look_state_resolution,
     music_bible,
+    music_themes,
     project_cast,
     scene_definitions,
     scene_events,
@@ -345,8 +346,8 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                 ),
             )
 
-    # The Music Bible (MUSIC-006). It cannot be accepted as it is yet: that comes with the music
-    # review points (MUSIC-014).
+    # The Music Bible and the theme recordings (MUSIC-006, MUSIC-007). They cannot be accepted as
+    # they are yet: that comes with the music review points (MUSIC-014).
     if project.music_enabled:
         bible = await music_bible.state(session, project)
         if bible.latest is not None and bible.out_of_date:
@@ -354,6 +355,18 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                 "music_bible",
                 Item("music_bible", "Music Bible", bible.reasons, acceptable=False),
             )
+        for theme in (await music_themes.state(session, project)).themes:
+            if theme.row is not None and theme.out_of_date:
+                found.add(
+                    "music_themes",
+                    Item(
+                        "music_themes",
+                        str(theme.theme["name"]),
+                        theme.reasons,
+                        acceptable=False,
+                        discovery_id=theme.theme["id"],
+                    ),
+                )
 
     resolution = await look_state_resolution.state(session, project)
     if resolution.version is not None and resolution.reasons:

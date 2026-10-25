@@ -315,41 +315,89 @@ async def create_runs(session: AsyncSession, form: MusicLabForm) -> list[RunRow]
     group_key = secrets.token_hex(8)
     rows: list[RunRow] = []
     for item, fields, seed, body in planned:
-        endpoint = music_generator.ENDPOINTS[item.model]
-        run = LabMusicRun(
-            group_key=group_key,
-            kind=form.kind,
-            model=item.model,
-            endpoint=endpoint,
-            brief=brief,
-            fields=fields,
-            params={"seed": seed},
-            prompt_job_id=item.prompt_job_id,
+        rows.append(
+            await add_run(
+                session,
+                model=item.model,
+                kind=form.kind,
+                brief=brief,
+                fields=fields,
+                seed=seed,
+                body=body,
+                group_key=group_key,
+                prompt_job_id=item.prompt_job_id,
+            )
         )
-        session.add(run)
-        await session.flush()
-        job, _created = await store.create_job(
-            session,
-            project_id=None,
-            type=RUN_JOB,
-            provider="gpu",
-            input={
-                "requested": "lab_music",
-                "run_id": run.id,
-                "model": item.model,
-                "endpoint": endpoint,
-                "request": body,
-            },
-            commit=False,
-            dedupe=False,
-        )
-        run.job_id = job.id
-        rows.append(RunRow(run=run, job=job))
     await session.commit()
     _logger.info(
         "lab music runs started: group=%s kind=%s runs=%d", group_key, form.kind, len(rows)
     )
     return rows
+
+
+async def add_run(
+    session: AsyncSession,
+    *,
+    model: MusicModel,
+    kind: MusicKind,
+    brief: dict[str, Any],
+    fields: dict[str, Any],
+    seed: int,
+    body: dict[str, Any],
+    group_key: str,
+    prompt_job_id: int | None = None,
+    project_id: int | None = None,
+) -> RunRow:
+    """Adds one text-to-audio run and its `lab_music` job, and flushes. Does not commit, so a
+    caller can start several runs, or save something else with them, in one transaction. `body`
+    is the request the job submits (`music_generator.build_body`) and `fields` are what it was
+    made from. `project_id` is None for a lab run; the story pipeline's runs (MUSIC-007) name
+    their project, so the Activity page shows whose they are.
+    """
+    endpoint = music_generator.ENDPOINTS[model]
+    run = LabMusicRun(
+        group_key=group_key,
+        kind=kind,
+        model=model,
+        endpoint=endpoint,
+        brief=brief,
+        fields=fields,
+        params={"seed": seed},
+        prompt_job_id=prompt_job_id,
+    )
+    session.add(run)
+    await session.flush()
+    job, _created = await store.create_job(
+        session,
+        project_id=project_id,
+        type=RUN_JOB,
+        provider="gpu",
+        input={
+            "requested": "lab_music",
+            "run_id": run.id,
+            "model": model,
+            "endpoint": endpoint,
+            "request": body,
+        },
+        commit=False,
+        dedupe=False,
+    )
+    run.job_id = job.id
+    return RunRow(run=run, job=job)
+
+
+async def generation_partition(session: AsyncSession, model: MusicModel) -> str:
+    """The GPU partition to send a story run to, after checking that the newest recorded GPU API
+    has the model's text-to-audio endpoint (the check `create_runs` makes). Raises
+    MusicLabInputError.
+    """
+    bodies = await contract_guard.latest_bodies(session)
+    spec = next((body for body in bodies if api_contract.is_openapi(body)), None)
+    try:
+        music_generator.check_endpoint(spec, music_generator.ENDPOINTS[model])
+    except ValueError as exc:
+        raise MusicLabInputError(str(exc)) from exc
+    return await settings_service.get_str(session, PARTITION_KEY)
 
 
 # --- Edits --------------------------------------------------------------------------------

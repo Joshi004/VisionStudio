@@ -133,6 +133,12 @@ SAVING_STORY_BIBLE: Final = "saving the Story Bible"
 # `write_music_bible` also uses PREPARING_PROMPT and `asking_model` from above (once per call).
 SAVING_MUSIC_BIBLE: Final = "saving the Music Bible"
 
+# --- Running: the music themes (MUSIC-007) -----------------------------------------------
+# `write_music_theme_prompt` also uses PREPARING_PROMPT and `asking_model` from above. It saves
+# the theme's fields (and starts its candidate recordings) or the captions of its versions.
+SAVING_MUSIC_THEME: Final = "saving the theme and starting its recordings"
+SAVING_MUSIC_THEME_VERSIONS: Final = "saving the versions and starting their recordings"
+
 # --- Running: character and environment discovery (PHASE-005) ----------------------------
 # `discover_characters` and `discover_environments` also use PREPARING_PROMPT and
 # `asking_model` from above.

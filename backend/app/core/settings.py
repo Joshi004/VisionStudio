@@ -115,6 +115,10 @@ GROUP_LIMITS = "Limits"
 # model decides how many the story needs and is asked for fewer in a short story; code refuses
 # an answer above this.
 MUSIC_MAX_THEMES_KEY = "music_max_themes"
+# How many candidate recordings each theme gets, and how long each recording is (MUSIC-007). The
+# length is whole seconds; ACE-Step makes nothing under 10 s.
+MUSIC_THEME_CANDIDATES_KEY = "music_theme_candidates"
+MUSIC_THEME_DURATION_KEY = "music_theme_duration_s"
 
 # How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
 # estimated from its word count at a speaking pace; one above the limit is still saved.
@@ -595,6 +599,34 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=3,
         min_value=1,
         max_value=5,
+    ),
+    SettingSpec(
+        key=MUSIC_THEME_CANDIDATES_KEY,
+        group=GROUP_MUSIC,
+        label="Candidate recordings per music theme",
+        help=(
+            "How many recordings of each theme are made for the first one that passes the "
+            "technical check to become the theme's canonical recording (you can choose another). "
+            "Each is a paid GPU run of about a minute. It applies the next time a theme is made."
+        ),
+        value_type="integer",
+        default=3,
+        min_value=1,
+        max_value=4,
+    ),
+    SettingSpec(
+        key=MUSIC_THEME_DURATION_KEY,
+        group=GROUP_MUSIC,
+        label="Length of a theme recording (seconds)",
+        help=(
+            "How long each candidate and each emotional version of a music theme is, in whole "
+            "seconds. The music model makes nothing shorter than 10 seconds. It applies the "
+            "next time a theme is made."
+        ),
+        value_type="integer",
+        default=30,
+        min_value=10,
+        max_value=60,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

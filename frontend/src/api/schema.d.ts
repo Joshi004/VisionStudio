@@ -200,6 +200,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/music-themes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Music Themes */
+        get: operations["get_music_themes_api_projects__project_id__music_themes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-themes/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Music Themes
+         * @description Starts what is missing or out of date: the model's prompt for a theme, more candidates when
+         *     none could be chosen, or the versions of the emotions that have none. Paid GPU and model
+         *     calls start only from here (or from a pipeline run), never by themselves.
+         */
+        post: operations["run_music_themes_api_projects__project_id__music_themes_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-themes/{theme_id}/choose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose Music Theme Candidate
+         * @description Makes the candidate the theme's canonical recording. The versions of its emotions are made
+         *     again from it, so the ones made from the old choice read as out of date until they are.
+         */
+        post: operations["choose_music_theme_candidate_api_projects__project_id__music_themes__theme_id__choose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-themes/{theme_id}/versions/{emotion}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate Music Theme Version
+         * @description Makes one emotional version again: the same fields with a new seed. No model call.
+         */
+        post: operations["regenerate_music_theme_version_api_projects__project_id__music_themes__theme_id__versions__emotion__regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/discovery/{kind}/run": {
         parameters: {
             query?: never;
@@ -5819,7 +5899,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
             /**
              * Status
              * @enum {string}
@@ -5872,7 +5952,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
             /**
              * Kind
              * @enum {string}
@@ -5911,7 +5991,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
             /**
              * Status
              * @enum {string}
@@ -7123,6 +7203,85 @@ export interface components {
             /** Crossfade S */
             crossfade_s: number | null;
         };
+        /** MusicThemeChooseIn */
+        MusicThemeChooseIn: {
+            /** Candidate Id */
+            candidate_id: number;
+        };
+        /**
+         * MusicThemeOut
+         * @description One theme of the newest Music Bible and where its recordings stand.
+         */
+        MusicThemeOut: {
+            /** Theme Id */
+            theme_id: string;
+            /** Name */
+            name: string;
+            /** Main */
+            main: boolean;
+            stands_for: components["schemas"]["StandsFor"];
+            /** Signature Instrument */
+            signature_instrument: string;
+            /** Emotions */
+            emotions: string[];
+            /** Version */
+            version: number | null;
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            } | null;
+            /** Chosen Candidate Id */
+            chosen_candidate_id: number | null;
+            /** Chosen By */
+            chosen_by: ("auto" | "owner") | null;
+            /** Candidates */
+            candidates: components["schemas"]["ThemeCandidateOut"][];
+            /** Versions */
+            versions: components["schemas"]["ThemeVersionOut"][];
+            job: components["schemas"]["ThemeJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            /** Done */
+            done: boolean;
+            /** Active */
+            active: boolean;
+            /** Action */
+            action: ("theme" | "candidates" | "versions") | null;
+            /** Missing Emotions */
+            missing_emotions: string[];
+        };
+        /** MusicThemesRun */
+        MusicThemesRun: {
+            /** Job Ids */
+            job_ids: number[];
+        };
+        /** MusicThemesRunIn */
+        MusicThemesRunIn: {
+            /**
+             * Confirm Replace Owner
+             * @default false
+             */
+            confirm_replace_owner: boolean;
+        };
+        /** MusicThemesState */
+        MusicThemesState: {
+            /** Bible Version */
+            bible_version: number | null;
+            /** Themes */
+            themes: components["schemas"]["MusicThemeOut"][];
+            /** Music Enabled */
+            music_enabled: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Candidates Per Theme */
+            candidates_per_theme: number;
+            /** Duration S */
+            duration_s: number;
+        };
         /** MusicalFeel */
         MusicalFeel: {
             /** Tempo */
@@ -7631,7 +7790,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
             /** Running */
             running: number;
             /** Queued */
@@ -11141,6 +11300,33 @@ export interface components {
             /** Next Before Id */
             next_before_id: number | null;
         };
+        /** ThemeCandidateOut */
+        ThemeCandidateOut: {
+            /** Id */
+            id: number;
+            /** Position */
+            position: number;
+            /** Seed */
+            seed: number;
+            /** Chosen */
+            chosen: boolean;
+            run: components["schemas"]["LabMusicRunOut"] | null;
+            check: components["schemas"]["ThemeCheckOut"] | null;
+        };
+        /**
+         * ThemeCheckOut
+         * @description The technical check of a recording (`music_themes.check_recording`).
+         */
+        ThemeCheckOut: {
+            /** Passed */
+            passed: boolean;
+            /** Problems */
+            problems: string[];
+            /** Duration S */
+            duration_s: number | null;
+            /** Leading Silence S */
+            leading_silence_s: number | null;
+        };
         /**
          * ThemeIn
          * @description A theme as edited. Its `id` is not sent: code sets `theme_1`, `theme_2`, ... with the
@@ -11157,6 +11343,25 @@ export interface components {
             /** Emotions */
             emotions: string[];
         };
+        /**
+         * ThemeJobOut
+         * @description The newest `write_music_theme_prompt` job of the theme, whatever its status.
+         */
+        ThemeJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+            /** Requested */
+            requested: string | null;
+        };
         /** ThemeOut */
         ThemeOut: {
             /** Id */
@@ -11170,6 +11375,24 @@ export interface components {
             signature_instrument: string;
             /** Emotions */
             emotions: string[];
+        };
+        /** ThemeVersionOut */
+        ThemeVersionOut: {
+            /** Id */
+            id: number;
+            /** Emotion */
+            emotion: string;
+            /**
+             * Method
+             * @constant
+             */
+            method: "text";
+            /** Seed */
+            seed: number;
+            /** Current */
+            current: boolean;
+            run: components["schemas"]["LabMusicRunOut"] | null;
+            check: components["schemas"]["ThemeCheckOut"] | null;
         };
         /** TimelineProblemOut */
         TimelineProblemOut: {
@@ -12155,6 +12378,179 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_music_themes_api_projects__project_id__music_themes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicThemesState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_music_themes_api_projects__project_id__music_themes_run_post: {
+        parameters: {
+            query?: {
+                theme_id?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["MusicThemesRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicThemesRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, there is no Music Bible, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    choose_music_theme_candidate_api_projects__project_id__music_themes__theme_id__choose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                theme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicThemeChooseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicThemesRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, there is no Music Bible, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    regenerate_music_theme_version_api_projects__project_id__music_themes__theme_id__versions__emotion__regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                theme_id: string;
+                emotion: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicThemesRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, there is no Music Bible, or the request cannot be done now. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
