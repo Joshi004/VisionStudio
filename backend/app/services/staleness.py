@@ -32,6 +32,7 @@ from app.services import (
     look_state_images,
     look_state_resolution,
     music_bible,
+    music_plan,
     music_themes,
     project_cast,
     scene_definitions,
@@ -367,6 +368,15 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                         discovery_id=theme.theme["id"],
                     ),
                 )
+
+    # The music plan (MUSIC-008). It comes after the shot plans, so a re-planned scene lands here.
+    if project.music_enabled:
+        plan = await music_plan.state(session, project)
+        if plan.latest is not None and plan.out_of_date:
+            found.add(
+                "music_plan",
+                Item("music_plan", "Music plan", plan.reasons, acceptable=False),
+            )
 
     resolution = await look_state_resolution.state(session, project)
     if resolution.version is not None and resolution.reasons:

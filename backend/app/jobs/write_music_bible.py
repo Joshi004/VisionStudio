@@ -203,7 +203,13 @@ class WriteMusicBibleHandler(JobHandler):
             async with SessionLocal() as session:
                 await store.update_input(session, job_id, job_input)
             outcome = await llm_call.ask_model(
-                job_id, target, body, read, timeout_s=REQUEST_TIMEOUT_S, keep={"calls": dict(calls)}
+                job_id,
+                target,
+                body,
+                read,
+                timeout_s=REQUEST_TIMEOUT_S,
+                keep={"calls": dict(calls)},
+                correct=True,
             )
             calls[name] = outcome.record()
             _add_usage(usage, outcome.usage)

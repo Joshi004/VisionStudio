@@ -139,6 +139,11 @@ SAVING_MUSIC_BIBLE: Final = "saving the Music Bible"
 SAVING_MUSIC_THEME: Final = "saving the theme and starting its recordings"
 SAVING_MUSIC_THEME_VERSIONS: Final = "saving the versions and starting their recordings"
 
+# --- Running: the music plan (MUSIC-008) -------------------------------------------------
+# `write_music_plan` also uses PREPARING_PROMPT and `asking_model` from above (once per call: the
+# plan, then four critics and a reviser per round).
+SAVING_MUSIC_PLAN: Final = "saving the music plan"
+
 # --- Running: character and environment discovery (PHASE-005) ----------------------------
 # `discover_characters` and `discover_environments` also use PREPARING_PROMPT and
 # `asking_model` from above.

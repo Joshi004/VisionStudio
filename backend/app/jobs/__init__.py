@@ -17,7 +17,7 @@
   `select_shot_references.py`), the run of the whole story pipeline (`story_pipeline.py`)
   and the environment library
   (`write_environment_prompt.py`), the Music Bible (`write_music_bible.py`) and the music themes
-  (`write_music_theme_prompt.py`).
+  (`write_music_theme_prompt.py`) and the music plan (`write_music_plan.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -73,6 +73,7 @@ def register_handlers() -> None:
     from app.jobs.write_lab_music_prompt import WriteLabMusicPromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
     from app.jobs.write_music_bible import WriteMusicBibleHandler
+    from app.jobs.write_music_plan import WriteMusicPlanHandler
     from app.jobs.write_music_theme_prompt import WriteMusicThemePromptHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
 
@@ -113,3 +114,4 @@ def register_handlers() -> None:
     handlers.register(WriteEnvironmentViewPromptHandler())
     handlers.register(WriteMusicBibleHandler())
     handlers.register(WriteMusicThemePromptHandler())
+    handlers.register(WriteMusicPlanHandler())

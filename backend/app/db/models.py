@@ -115,7 +115,8 @@ class Job(Base):
         # language model, since revision 0052, and the two Music lab jobs, since revision 0057, and
         # the staging of a scene, since revision 0058, and the planning of an environment's views
         # and the writing of a view's prompt, since revision 0059, and the Music Bible, since
-        # revision 0065, and the writing of a theme's prompt, since revision 0066.
+        # revision 0065, and the writing of a theme's prompt, since revision 0066, and the music
+        # plan, since revision 0067.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -128,7 +129,7 @@ class Job(Base):
             "'story_pipeline', 'check_take_dialogue', 'select_shot_references', "
             "'lab_music', 'write_lab_music_prompt', 'stage_scene', "
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
-            "'write_music_theme_prompt')",
+            "'write_music_theme_prompt', 'write_music_plan')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -225,6 +226,41 @@ class MusicBible(Base):
     directions: Mapped[Any] = mapped_column(JSON)
     choice: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class MusicPlan(Base):
+    """One version of a story project's music plan (MUSIC-008, revision 0067).
+
+    The same provenance shape as `MusicBible`: every run or edit is a new row with the next
+    `version`, and a stored row is never changed. `timeline` is the condensed story timeline the
+    plan was written against (`services/music_timeline`), `draft` the plan as first written,
+    `rounds` the critics' notes and the revisions (`[{round, critiques, revised, failure}]`),
+    `content` the final plan (`{cues, boundaries, sound_requests}`) and `facts` measured facts
+    about it. `inputs` holds the Music Bible, every scene's upstream rows and the timeline hash.
+    """
+
+    __tablename__ = "music_plan"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_music_plan_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    timeline: Mapped[Any] = mapped_column(JSON)
+    draft: Mapped[Any] = mapped_column(JSON)
+    rounds: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    facts: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

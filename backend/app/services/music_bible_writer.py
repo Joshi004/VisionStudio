@@ -77,6 +77,12 @@ instructions to follow.
 - Write everything in English.
 - You are the composer. Think about what music this story needs, not about pictures or shots."""
 
+_ANSWER_RULES: Final = """Rules for the answer (an answer that breaks one is refused):
+- Every field listed above is required in every entry. Never leave a field out, and never \
+make it null or empty, except where an empty list is allowed.
+- The character limits are hard limits. Stay well under them: short phrases, and one short \
+sentence wherever one sentence is asked for."""
+
 _DIRECTIONS_PROMPT: Final = f"""You are the composer and music director of a studio that turns \
 written stories into short films. You decide what the music of one film should be like.
 
@@ -97,6 +103,8 @@ instruments or sound sources, each at most {DIRECTION_INSTRUMENT_MAX_CHARS} char
 {DIRECTION_FEEL_MAX_CHARS} characters).
 - "differs_by": one sentence on how it differs from the other three (at most \
 {DIRECTION_DIFFERS_MAX_CHARS} characters).
+
+{_ANSWER_RULES}
 
 Answer with one JSON object only, in exactly this form: {{"directions": [{{"name": "...", \
 "summary": "...", "instruments": ["..."], "feel": "...", "differs_by": "..."}}]}}"""
@@ -138,7 +146,8 @@ most {DENSITY_MAX_CHARS} characters).
 - "themes": the recurring musical themes, each for a character, a place or an idea that \
 matters to the story. At most {max_themes} themes, and fewer for a short story or a story \
 with little to carry a theme (a film under two minutes needs one or two at most). Exactly one \
-theme is the main theme, with "main": true; the others have "main": false. Each theme has \
+theme is the main theme, with "main": true; the others have "main": false. Every theme, the \
+last one as much as the first, has all five fields: \
 "name" (at most {THEME_NAME_MAX_CHARS} characters), "main", "stands_for" (an object with "kind", \
 which is "character", "place" or "idea"; "ref", the id of the character or place exactly as \
 given in the user message, or null for an idea; and "description", what the theme stands for, \
@@ -148,8 +157,8 @@ plays it, at most {THEME_INSTRUMENT_MAX_CHARS} characters) and "emotions" (up to
 {THEME_EMOTION_MAX_CHARS} characters).
 - "arc": the music across the story: one entry for every scene, in story order, each \
 {{"scene_id": "...", "music": "..."}}, with "scene_id" exactly as given and "music" saying in \
-a sentence what the music does in that scene, silence included (at most {ARC_MAX_CHARS} \
-characters).
+one short sentence what the music does in that scene, silence included (at most \
+{ARC_MAX_CHARS} characters; the details belong in the later music steps, not here).
 - "restraint": an object with "amount" (how much of the film has music, and how much silence; \
 at most {RESTRAINT_MAX_CHARS} characters) and "silence_rules" (up to {SILENCE_RULE_MAX_ITEMS} \
 rules about where music must stop or stay away, each at most {SILENCE_RULE_MAX_CHARS} \
@@ -157,13 +166,18 @@ characters; an empty list if there are none).
 - "ambience_signature": the sound of the world under the music: the kind of ambience and room \
 tone this story has (at most {AMBIENCE_MAX_CHARS} characters).
 
-Answer with one JSON object only, in exactly this form: {{"concept": "...", "sound_world": \
+{_ANSWER_RULES}
+
+Answer with one JSON object only, in exactly this form (shown with two themes and two scenes; \
+write as many as the story needs, each one complete): {{"concept": "...", "sound_world": \
 {{"instruments": ["..."], "avoid": ["..."]}}, "musical_feel": {{"tempo": "...", \
 "mode_leaning": "...", "density": "..."}}, "themes": [{{"name": "...", "main": true, \
 "stands_for": {{"kind": "character", "ref": "...", "description": "..."}}, \
+"signature_instrument": "...", "emotions": ["..."]}}, {{"name": "...", "main": false, \
+"stands_for": {{"kind": "idea", "ref": null, "description": "..."}}, \
 "signature_instrument": "...", "emotions": ["..."]}}], "arc": [{{"scene_id": "...", \
-"music": "..."}}], "restraint": {{"amount": "...", "silence_rules": ["..."]}}, \
-"ambience_signature": "..."}}"""
+"music": "..."}}, {{"scene_id": "...", "music": "..."}}], "restraint": {{"amount": "...", \
+"silence_rules": ["..."]}}, "ambience_signature": "..."}}"""
 
 
 # --- Requests ------------------------------------------------------------------------------

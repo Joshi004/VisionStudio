@@ -280,6 +280,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/music-plan/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Music Plan
+         * @description Starts the job that writes the music plan and reviews it. If one is already waiting or
+         *     running for the project, its id is returned and no second job is made.
+         */
+        post: operations["run_music_plan_api_projects__project_id__music_plan_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Music Plan */
+        get: operations["get_music_plan_api_projects__project_id__music_plan_get"];
+        /**
+         * Save Music Plan
+         * @description Saves the whole edited plan as the next version, written by the owner.
+         */
+        put: operations["save_music_plan_api_projects__project_id__music_plan_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/music-plan/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Music Plan Version */
+        get: operations["get_music_plan_version_api_projects__project_id__music_plan_versions__version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/discovery/{kind}/run": {
         parameters: {
             query?: never;
@@ -4112,6 +4171,39 @@ export interface components {
             /** Project Ids */
             project_ids: number[];
         };
+        /** AnchorIn */
+        AnchorIn: {
+            /** Ref */
+            ref: string;
+            /** Edge */
+            edge: string;
+            /** Relation */
+            relation: string;
+            /** Strict */
+            strict: string;
+        };
+        /** AnchorOut */
+        AnchorOut: {
+            /** Ref */
+            ref: string;
+            /**
+             * Edge
+             * @enum {string}
+             */
+            edge: "start" | "end";
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "before" | "just_before" | "on" | "after" | "under";
+            /**
+             * Strict
+             * @enum {string}
+             */
+            strict: "tight" | "loose";
+            /** Seconds */
+            seconds: number;
+        };
         /** ApproveRequest */
         ApproveRequest: {
             /** Expected */
@@ -4256,6 +4348,36 @@ export interface components {
             baseline: string;
             /** Gesture Style */
             gesture_style: string;
+        };
+        /** BoundaryIn */
+        BoundaryIn: {
+            /** From Cue */
+            from_cue: string;
+            /** To Cue */
+            to_cue: string;
+            /** Join */
+            join: string;
+            /** Reason */
+            reason: string;
+        };
+        /** BoundaryOut */
+        BoundaryOut: {
+            /** From Cue */
+            from_cue: string;
+            /** To Cue */
+            to_cue: string;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "score" | "bed";
+            /**
+             * Join
+             * @enum {string}
+             */
+            join: "crossfade" | "under_cover" | "through_silence" | "hard_cut";
+            /** Reason */
+            reason: string;
         };
         /** CastMemberIn */
         CastMemberIn: {
@@ -4780,6 +4902,86 @@ export interface components {
             sources: components["schemas"]["SourceCheckOut"][];
             /** Message */
             message: string | null;
+        };
+        /** CritiqueOut */
+        CritiqueOut: {
+            /** Lens */
+            lens: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "ok" | "change" | "failed";
+            /** Notes */
+            notes: components["schemas"]["NoteOut"][];
+            /** Failure */
+            failure: string | null;
+        };
+        /**
+         * CueIn
+         * @description A cue as edited. Its `id` is a label that boundaries use; code sets `cue_1`, `cue_2`, ...
+         *     in time order. `maker` only matters for a point sound.
+         */
+        CueIn: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Summary */
+            summary: string;
+            /** Purpose */
+            purpose: string;
+            /** Reason */
+            reason: string;
+            /** Intensity */
+            intensity: number;
+            /** Theme Id */
+            theme_id?: string | null;
+            /** Emotion */
+            emotion?: string | null;
+            /** Maker */
+            maker?: string | null;
+            start?: components["schemas"]["AnchorIn"] | null;
+            end?: components["schemas"]["AnchorIn"] | null;
+            at?: components["schemas"]["AnchorIn"] | null;
+            /** Start Style */
+            start_style?: string | null;
+            /** End Style */
+            end_style?: string | null;
+            sound_request?: components["schemas"]["SoundRequestIn"] | null;
+        };
+        /** CueOut */
+        CueOut: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "score" | "bed" | "point" | "hit" | "silence";
+            /** Maker */
+            maker: ("ace_step" | "stable_audio_3" | "h3") | null;
+            /** Summary */
+            summary: string;
+            /** Purpose */
+            purpose: string;
+            /** Theme Id */
+            theme_id: string | null;
+            /** Emotion */
+            emotion: string | null;
+            /** Intensity */
+            intensity: number;
+            start: components["schemas"]["AnchorOut"] | null;
+            end: components["schemas"]["AnchorOut"] | null;
+            at: components["schemas"]["AnchorOut"] | null;
+            /** Start Style */
+            start_style: string | null;
+            /** End Style */
+            end_style: string | null;
+            sound_request: components["schemas"]["SoundRequestOut"] | null;
+            rerouted: components["schemas"]["ReroutedOut"] | null;
+            /** Reason */
+            reason: string;
         };
         /** CurrentLookIn */
         CurrentLookIn: {
@@ -5590,6 +5792,48 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** EventSpanOut */
+        EventSpanOut: {
+            /** Ref */
+            ref: string;
+            /** Scene Id */
+            scene_id: string;
+            /** Type */
+            type: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /**
+             * Time From
+             * @enum {string}
+             */
+            time_from: "unit" | "shot";
+            /** Shots */
+            shots: string[];
+            /** Description */
+            description?: string | null;
+            /** Units */
+            units?: string[] | null;
+        };
+        /** FactsOut */
+        FactsOut: {
+            /** Total S */
+            total_s: number;
+            /** Score Coverage Pct */
+            score_coverage_pct: number;
+            /** Bed Coverage Pct */
+            bed_coverage_pct: number;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Silences */
+            silences: components["schemas"]["PlanSilenceOut"][];
+            longest_without_score: components["schemas"]["StretchOut"] | null;
+            /** Rerouted */
+            rerouted: string[];
+        };
         /** FailedAngleOut */
         FailedAngleOut: {
             /**
@@ -5643,6 +5887,17 @@ export interface components {
             id: number;
             /** Url */
             url: string | null;
+        };
+        /** GapOut */
+        GapOut: {
+            /** After */
+            after: string;
+            /** Before */
+            before: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
         };
         /** GenerationPlannedOut */
         GenerationPlannedOut: {
@@ -5899,7 +6154,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan";
             /**
              * Status
              * @enum {string}
@@ -5952,7 +6207,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan";
             /**
              * Kind
              * @enum {string}
@@ -5991,7 +6246,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan";
             /**
              * Status
              * @enum {string}
@@ -6824,6 +7079,15 @@ export interface components {
             /** Prompt Job Id */
             prompt_job_id?: number | null;
         };
+        /** MoodOut */
+        MoodOut: {
+            /** Start */
+            start: string;
+            /** Middle */
+            middle: string;
+            /** End */
+            end: string;
+        };
         /** MoveIn */
         MoveIn: {
             /** After Event Id */
@@ -7129,6 +7393,110 @@ export interface components {
             /** Fields */
             fields: components["schemas"]["FieldSpecOut"][];
         };
+        /**
+         * MusicPlanJobOut
+         * @description The newest `write_music_plan` job of the project, whatever its status.
+         */
+        MusicPlanJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** MusicPlanOut */
+        MusicPlanOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            content: components["schemas"]["PlanContent"];
+            facts: components["schemas"]["FactsOut"];
+            /** Rounds */
+            rounds: components["schemas"]["RoundOut"][];
+            timeline: components["schemas"]["TimelineOut"];
+        };
+        /** MusicPlanRun */
+        MusicPlanRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** MusicPlanRunIn */
+        MusicPlanRunIn: {
+            /**
+             * Confirm Replace Manual
+             * @default false
+             */
+            confirm_replace_manual: boolean;
+        };
+        /**
+         * MusicPlanSaveIn
+         * @description The plan as the owner edited it. What is allowed is checked by
+         *     `music_plan_writer.check_plan`; these limits only keep a request from being huge.
+         */
+        MusicPlanSaveIn: {
+            /** Cues */
+            cues: components["schemas"]["CueIn"][];
+            /** Boundaries */
+            boundaries: components["schemas"]["BoundaryIn"][];
+        };
+        /** MusicPlanState */
+        MusicPlanState: {
+            latest: components["schemas"]["MusicPlanOut"] | null;
+            /** Versions */
+            versions: components["schemas"]["MusicPlanVersionOut"][];
+            job: components["schemas"]["MusicPlanJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Music Enabled */
+            music_enabled: boolean;
+            /** Critic Rounds */
+            critic_rounds: number;
+            timeline: components["schemas"]["TimelineOut"] | null;
+            /** Themes */
+            themes: components["schemas"]["ThemeRef"][];
+        };
+        /** MusicPlanVersionOut */
+        MusicPlanVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** MusicPromptDraftCreate */
         MusicPromptDraftCreate: {
             /**
@@ -7411,6 +7779,15 @@ export interface components {
             /** Needs Confirmation */
             needs_confirmation: boolean;
             job: components["schemas"]["DiscoveryJobOut"] | null;
+        };
+        /** NoteOut */
+        NoteOut: {
+            /** Target */
+            target: string;
+            /** Problem */
+            problem: string;
+            /** Suggestion */
+            suggestion: string;
         };
         /** OpenApiChangesOut */
         OpenApiChangesOut: {
@@ -7734,12 +8111,30 @@ export interface components {
              */
             background_side: "ahead" | "left" | "right" | "behind";
         };
+        /** PlanContent */
+        PlanContent: {
+            /** Cues */
+            cues: components["schemas"]["CueOut"][];
+            /** Boundaries */
+            boundaries: components["schemas"]["BoundaryOut"][];
+            /** Sound Requests */
+            sound_requests: components["schemas"]["SoundRequestListOut"][];
+        };
         /** PlanRunAllOut */
         PlanRunAllOut: {
             /** Job Ids */
             job_ids: number[];
             /** Skipped */
             skipped: components["schemas"]["app__api__environment_views__SkippedOut"][];
+        };
+        /** PlanSilenceOut */
+        PlanSilenceOut: {
+            /** Cue Id */
+            cue_id: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
         };
         /** PlanVersionOut */
         PlanVersionOut: {
@@ -7790,7 +8185,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan";
             /** Running */
             running: number;
             /** Queued */
@@ -8399,6 +8794,11 @@ export interface components {
             /** Duration Seconds */
             duration_seconds: number;
         };
+        /** ReroutedOut */
+        ReroutedOut: {
+            /** Reason */
+            reason: string;
+        };
         /**
          * RerunIn
          * @description Edited prompt text(s). Only a text this take needs can be sent; sending one clears what
@@ -8477,6 +8877,17 @@ export interface components {
             key: string;
             /** Label */
             label: string;
+        };
+        /** RoundOut */
+        RoundOut: {
+            /** Round */
+            round: number;
+            /** Critiques */
+            critiques: components["schemas"]["CritiqueOut"][];
+            /** Revised */
+            revised: boolean;
+            /** Failure */
+            failure: string | null;
         };
         /** RunAllOut */
         RunAllOut: {
@@ -9079,6 +9490,20 @@ export interface components {
             description: string;
             /** Shots */
             shots: components["schemas"]["ShotTakesEntryOut"][];
+        };
+        /** SceneSpanOut */
+        SceneSpanOut: {
+            /** Ref */
+            ref: string;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            mood: components["schemas"]["MoodOut"];
         };
         /** SceneStagingOut */
         SceneStagingOut: {
@@ -10061,6 +10486,23 @@ export interface components {
             /** Start Seconds */
             start_seconds: number | null;
         };
+        /** ShotSpanOut */
+        ShotSpanOut: {
+            /** Ref */
+            ref: string;
+            /** Scene Id */
+            scene_id: string;
+            /** Type */
+            type: string | null;
+            /** Description */
+            description: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Event Ids */
+            event_ids: string[];
+        };
         /**
          * ShotStagingOut
          * @description Where the characters stand at the start of the shot, and the views allowed behind it.
@@ -10216,6 +10658,29 @@ export interface components {
             start_s: number;
             /** End S */
             end_s: number;
+        };
+        /** SoundRequestIn */
+        SoundRequestIn: {
+            /** Shot */
+            shot: string;
+            /** Event */
+            event: string;
+        };
+        /** SoundRequestListOut */
+        SoundRequestListOut: {
+            /** Cue Id */
+            cue_id: string;
+            /** Shot */
+            shot: string;
+            /** Event */
+            event: string;
+        };
+        /** SoundRequestOut */
+        SoundRequestOut: {
+            /** Shot */
+            shot: string;
+            /** Event */
+            event: string;
         };
         /** SoundWorld */
         SoundWorld: {
@@ -11026,6 +11491,15 @@ export interface components {
             /** Narration */
             narration: string;
         };
+        /** StretchOut */
+        StretchOut: {
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Length S */
+            length_s: number;
+        };
         /**
          * StrongPointOut
          * @description A sudden sound or a change of character. `strength` is how many standard deviations the
@@ -11376,6 +11850,13 @@ export interface components {
             /** Emotions */
             emotions: string[];
         };
+        /** ThemeRef */
+        ThemeRef: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
         /** ThemeVersionOut */
         ThemeVersionOut: {
             /** Id */
@@ -11393,6 +11874,24 @@ export interface components {
             current: boolean;
             run: components["schemas"]["LabMusicRunOut"] | null;
             check: components["schemas"]["ThemeCheckOut"] | null;
+        };
+        /**
+         * TimelineOut
+         * @description The condensed story timeline, in seconds from the start of the story.
+         */
+        TimelineOut: {
+            /** Total S */
+            total_s: number;
+            /** Scenes */
+            scenes: components["schemas"]["SceneSpanOut"][];
+            /** Shots */
+            shots: components["schemas"]["ShotSpanOut"][];
+            /** Units */
+            units: components["schemas"]["UnitSpanOut"][];
+            /** Events */
+            events: components["schemas"]["EventSpanOut"][];
+            /** Gaps */
+            gaps: components["schemas"]["GapOut"][];
         };
         /** TimelineProblemOut */
         TimelineProblemOut: {
@@ -11553,6 +12052,28 @@ export interface components {
             source_id?: number | null;
             /** Label */
             label: string;
+        };
+        /** UnitSpanOut */
+        UnitSpanOut: {
+            /** Ref */
+            ref: string;
+            /** Scene Id */
+            scene_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "narration" | "dialogue";
+            /** Speaker */
+            speaker: string | null;
+            /** Off Screen */
+            off_screen: boolean;
+            /** Text */
+            text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -12551,6 +13072,175 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_music_plan_api_projects__project_id__music_plan_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["MusicPlanRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPlanRun"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, the shots are not ready, or the plan breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_music_plan_api_projects__project_id__music_plan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPlanState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_music_plan_api_projects__project_id__music_plan_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicPlanSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPlanState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Music is off, the shots are not ready, or the plan breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_music_plan_version_api_projects__project_id__music_plan_versions__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicPlanOut"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

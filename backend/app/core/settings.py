@@ -119,6 +119,9 @@ MUSIC_MAX_THEMES_KEY = "music_max_themes"
 # length is whole seconds; ACE-Step makes nothing under 10 s.
 MUSIC_THEME_CANDIDATES_KEY = "music_theme_candidates"
 MUSIC_THEME_DURATION_KEY = "music_theme_duration_s"
+# How many rounds of critics and reviser the music plan gets at most (MUSIC-008, QM-9). 0 skips
+# the review.
+MUSIC_PLAN_CRITIC_ROUNDS_KEY = "music_plan_critic_rounds"
 
 # How a story's length is estimated and when it is flagged as long (PHASE-003, D-13). A story is
 # estimated from its word count at a speaking pace; one above the limit is still saved.
@@ -627,6 +630,21 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=30,
         min_value=10,
         max_value=60,
+    ),
+    SettingSpec(
+        key=MUSIC_PLAN_CRITIC_ROUNDS_KEY,
+        group=GROUP_MUSIC,
+        label="Critic rounds for the music plan",
+        help=(
+            "How many times the music plan is reviewed and revised. A round is four reviewers "
+            "(one per lens) and, when any asks for a change, one reviser, all paid language-model "
+            "calls. A round that asks for no change ends the review early. 0 keeps the plan as "
+            "first written. It applies the next time the plan is made."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=3,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

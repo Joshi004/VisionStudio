@@ -19,6 +19,7 @@ import { SceneDefinitionsPanel } from "../components/story/SceneDefinitionsPanel
 import { EnvironmentViewsPanel } from "../components/story/EnvironmentViewsPanel";
 import { SceneEventsPanel } from "../components/story/SceneEventsPanel";
 import { MusicBiblePanel } from "../components/music/MusicBiblePanel";
+import { MusicPlanPanel } from "../components/music/MusicPlanPanel";
 import { MusicThemesPanel } from "../components/music/MusicThemesPanel";
 import { SceneStagingPanel } from "../components/story/SceneStagingPanel";
 import { ScenesPanel } from "../components/story/ScenesPanel";
@@ -147,6 +148,9 @@ export function ProjectPage() {
           <SpeechUnitsPanel projectId={project.id} />
           <div id="pipeline-step-shot_plans">
             <ShotPlansPanel projectId={project.id} />
+          </div>
+          <div id="pipeline-step-music_plan">
+            <MusicPlanPanel projectId={project.id} />
           </div>
           <ShotDefinitionsPanel projectId={project.id} />
           <ShotReferencesPanel projectId={project.id} />

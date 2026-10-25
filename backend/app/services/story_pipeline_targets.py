@@ -43,6 +43,7 @@ from app.services import (
     look_state_images,
     look_state_resolution,
     music_bible,
+    music_plan,
     music_themes,
     review_points,
     scene_definitions,
@@ -98,6 +99,10 @@ _MANUAL_EVENTS: Final = (
 _MANUAL_MUSIC_BIBLE: Final = (
     "The newest Music Bible was written or chosen by you, and writing it again adds a version "
     "from the model."
+)
+_MANUAL_MUSIC_PLAN: Final = (
+    "The newest music plan was written by you, and planning the music again adds a version from "
+    "the model."
 )
 _MANUAL_MUSIC_THEME: Final = (
     "You chose the canonical recording of this theme, and recording it again replaces your choice."
@@ -925,6 +930,41 @@ async def _start_music_themes(
             theme_id=target.ref[0],
             confirm_replace_owner=_options_for(options, target).confirm_overwrite,
         ),
+    )
+
+
+# --- The music plan (MUSIC-008) --------------------------------------------------------------
+
+
+async def _evaluate_music_plan(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # With music switched off nothing is made (MD-21): the step has one target that is already
+    # done, so a run reports it as skipped.
+    if not project.music_enabled:
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await music_plan.state(session, project)
+    done = state.latest is not None and not state.out_of_date
+    active = _active(state.job)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                consent=_MANUAL_MUSIC_PLAN if state.needs_confirmation and not done else None,
+                last_error=_failure(state.job),
+                stale=state.latest is not None and not done,
+            )
+        ]
+    )
+
+
+async def _call_music_plan(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await music_plan.start_run(
+        session, project, confirm_replace_manual=options.confirm_overwrite
     )
 
 
@@ -1816,6 +1856,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "events": Adapter(_evaluate_events, _start_events),
     "music_bible": Adapter(_evaluate_music_bible, _project_start(_call_music_bible)),
     "music_themes": Adapter(_evaluate_music_themes, _start_music_themes),
+    "music_plan": Adapter(_evaluate_music_plan, _project_start(_call_music_plan)),
     "resolution": Adapter(_evaluate_resolution, _project_start(_call_resolution)),
     "scene_staging": Adapter(_evaluate_scene_staging, _start_scene_staging),
     "environment_views": Adapter(_evaluate_environment_views, _start_environment_views),
@@ -1853,6 +1894,7 @@ _CONSENT_STEPS: Final[tuple[str, ...]] = (
     "events",
     "music_bible",
     "music_themes",
+    "music_plan",
     "scene_staging",
     "speech_units",
     "shot_plans",

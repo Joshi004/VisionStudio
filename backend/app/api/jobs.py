@@ -66,6 +66,7 @@ JobType = Literal[
     "write_environment_view_prompt",
     "write_music_bible",
     "write_music_theme_prompt",
+    "write_music_plan",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]
