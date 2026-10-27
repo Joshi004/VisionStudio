@@ -279,6 +279,7 @@ def _placement_out(item: dict[str, Any]) -> PlacedSoundOut:
         {
             **fields,
             "slide_reason": item.get("slide_reason"),
+            "moment": item.get("moment"),
             "join_in": _partner(item.get("join_in")),
             "join_out": _partner(item.get("join_out")),
         }
@@ -286,7 +287,9 @@ def _placement_out(item: dict[str, Any]) -> PlacedSoundOut:
 
 
 def _join_out(item: dict[str, Any]) -> PlacementJoinOut:
-    return PlacementJoinOut.model_validate({**item, "from_cue": item["from"], "to_cue": item["to"]})
+    return PlacementJoinOut.model_validate(
+        {"made_as": item["type"], **item, "from_cue": item["from"], "to_cue": item["to"]}
+    )
 
 
 def _content_out(content: dict[str, Any]) -> MusicPlacementContent:

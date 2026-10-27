@@ -668,6 +668,9 @@ def master_filters(norm: Normalization | None) -> list[str]:
         f":measured_thresh={m.input_thresh:.2f}:offset={m.target_offset:.2f}:linear=true",
         # loudnorm works at 192 kHz inside and hands that rate on.
         f"aresample={SAMPLE_RATE}",
+        # In its dynamic mode, loudnorm stamps its last block as a full 100 ms, so the file
+        # would claim a length rounded up to 0.1 s. The samples themselves are right.
+        "asetpts=N/SR/TB",
         _FLOAT_STEREO,
     ]
 

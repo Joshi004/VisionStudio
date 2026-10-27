@@ -1008,6 +1008,7 @@ class _Placer:
                     "from": boundary.from_id,
                     "to": boundary.to_id,
                     "type": boundary.join,
+                    "made_as": boundary.join,
                     "point_s": round((earlier.end_t + later.start_t) / 2, 3),
                     "length_s": round(max(0.0, later.start_t - earlier.end_t), 3),
                     "ladder_step": max(
@@ -1238,6 +1239,7 @@ class _Placer:
                 "match_gain_db": gain,
                 "start": _edge_out(cue.start_edge),
                 "end": _edge_out(cue.end_edge),
+                "moment": None,
                 "join_in": cue.join_in,
                 "join_out": cue.join_out,
                 "slide_s": cue.slide_s,
