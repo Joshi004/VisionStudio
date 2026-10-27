@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Project
 from app.services import review_points
+from app.services.project_kinds import KIND_EXPLAINER, KIND_STORY, KINDS
 
 LANDSCAPE = "landscape"
 PORTRAIT = "portrait"
@@ -36,6 +37,17 @@ SPEECH_BOTH: Final = "both"
 SPEECH_NO_DIALOGUE: Final = "no_dialogue"
 SPEECH_NO_NARRATION: Final = "no_narration"
 SPEECH_MODES: Final = (SPEECH_BOTH, SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION)
+# What the event and shot prompts branch on (EXPLAINER-004): the project's speech mode, or
+# `explainer` for an explainer project (whose speech mode is always `both`). It is never stored
+# on the project; it is worked out by `prompt_mode` and copied onto a job's input.
+SPEECH_EXPLAINER: Final = "explainer"
+PROMPT_MODES: Final = (*SPEECH_MODES, SPEECH_EXPLAINER)
+
+
+def prompt_mode(project: Project) -> str:
+    """The mode the event extraction and shot planning prompts are written for."""
+    return SPEECH_EXPLAINER if project.kind == KIND_EXPLAINER else project.speech_mode
+
 
 NAME_MAX_CHARS: Final = 200
 SCRIPT_MAX_CHARS: Final = 100_000
@@ -156,13 +168,32 @@ def _normalise_script(value: str | None) -> str | None:
 
 
 async def create_project(
-    session: AsyncSession, name: str, orientation: str, speech_mode: str = SPEECH_BOTH
+    session: AsyncSession,
+    name: str,
+    orientation: str,
+    speech_mode: str = SPEECH_BOTH,
+    kind: str = KIND_STORY,
+    presenter_character_id: int | None = None,
+    set_environment_id: int | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
-    The speech mode is set here and never changed afterwards.
+    The speech mode and the kind are set here and never changed afterwards.
+
+    An explainer (EXPLAINER-002) needs a presenter from the Character Lab and may have a set
+    from the Environment Lab. Both go into the project's cast as `as_is`, in the same commit as
+    the project, and its speech mode is always `both`. A story takes neither.
     """
     if orientation not in ORIENTATION_DEFAULTS:
         raise ProjectValidationError("Orientation must be landscape or portrait.")
+    if kind not in KINDS:
+        raise ProjectValidationError("Kind must be story or explainer.")
+    if kind == KIND_EXPLAINER:
+        speech_mode = SPEECH_BOTH
+        if presenter_character_id is None:
+            raise ProjectValidationError("An explainer needs a presenter from the Character Lab.")
+        await _check_explainer_cast(session, presenter_character_id, set_environment_id)
+    elif presenter_character_id is not None or set_environment_id is not None:
+        raise ProjectValidationError("Only an explainer has a presenter or a set.")
     if speech_mode not in SPEECH_MODES:
         raise ProjectValidationError("Speech mode must be both, no_dialogue or no_narration.")
     sizes = ORIENTATION_DEFAULTS[orientation]
@@ -178,14 +209,37 @@ async def create_project(
         out_height=sizes.out_height,
         fps=DEFAULT_FPS,
         speech_mode=speech_mode,
+        kind=kind,
         review_points=[],
         music_enabled=True,
         ambience_enabled=True,
     )
     validate_project(project)
     session.add(project)
+    if kind == KIND_EXPLAINER:
+        # The cast rows need the project's id, and are saved with it in one commit.
+        from app.services import explainer
+
+        assert presenter_character_id is not None  # checked above
+        await session.flush()
+        explainer.add_cast(session, project.id, presenter_character_id, set_environment_id)
     await session.commit()
     return project
+
+
+async def _check_explainer_cast(
+    session: AsyncSession, presenter_character_id: int, set_environment_id: int | None
+) -> None:
+    """Checks the presenter and the set of a new explainer. Raises ProjectValidationError."""
+    # Imported here: the explainer module reaches the Character Lab, which reaches this module.
+    from app.services import explainer
+
+    try:
+        await explainer.check_presenter(session, presenter_character_id)
+        if set_environment_id is not None:
+            await explainer.check_set(session, set_environment_id)
+    except explainer.ExplainerError as exc:
+        raise ProjectValidationError(str(exc)) from exc
 
 
 async def get_project(session: AsyncSession, project_id: int) -> Project | None:

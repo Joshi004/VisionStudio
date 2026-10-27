@@ -55,6 +55,7 @@ from app.services import (
     story_bible,
     user_feedback,
 )
+from app.services.projects import prompt_mode
 
 _logger = logging.getLogger(__name__)
 
@@ -466,7 +467,7 @@ async def _queue(
             "story_bible_id": bible.id,
             "story_bible_version": bible.version,
             # The project's speech mode: `no_narration` adds a line to the instructions.
-            "speech_mode": project.speech_mode,
+            "speech_mode": prompt_mode(project),
             "scene_id": item["id"],
             "scene": {
                 "index": item["index"],
@@ -1152,7 +1153,11 @@ async def save_manual(
     prepared = _prepare(project, loaded, scene)
     try:
         content = shot_planning_writer.check_answer(
-            {"shots": shots}, scene_id, prepared.events, prepared.units
+            {"shots": shots},
+            scene_id,
+            prepared.events,
+            prepared.units,
+            speech_mode=prompt_mode(project),
         )
     except ValueError as exc:
         raise ShotPlansError(str(exc)) from exc

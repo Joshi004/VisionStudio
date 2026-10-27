@@ -656,14 +656,17 @@ async def _inputs_of_request(
                 "Make it again."
             )
         # What the job needs of the audio, copied now: a later change moves nothing for it.
-        audios.append(
-            {
-                "source": "speech_unit",
-                "id": speech.id,
-                "path": speech.path,
-                "mime": AUDIO_MIME,
-            }
-        )
+        entry: dict[str, Any] = {
+            "source": "speech_unit",
+            "id": speech.id,
+            "path": speech.path,
+            "mime": AUDIO_MIME,
+        }
+        if audio.get("marker") == generation_planner.AUDIO_MARKER_EXPLAINER:
+            # A `fully_copy` audio is the clip's whole soundtrack (EXPLAINER-005): the job sends
+            # it placed at its start inside silence as long as the clip.
+            entry["place_start_s"] = audio["starts_in_shot_seconds"]
+        audios.append(entry)
     return references, audios
 
 

@@ -15,6 +15,7 @@ import {
 
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
+import { projectKindLabel } from "./projectKinds";
 import { speechModeLabel } from "./speechModes";
 import { changedFields, initialDraft, type Draft, type NUMBER_FIELDS } from "./settingsDraft";
 
@@ -93,13 +94,27 @@ export function ProjectSettingsForm({
 
         <Paper withBorder p="md" radius="md">
           <Group gap="sm">
-            <Title order={4}>Speech</Title>
-            <Badge variant="light">{speechModeLabel(project.speech_mode)}</Badge>
+            <Title order={4}>Kind</Title>
+            <Badge variant="light">{projectKindLabel(project.kind)}</Badge>
             <Text size="xs" c="dimmed">
-              The speech mode is fixed after creation.
+              The kind is fixed after creation.
+              {project.kind === "explainer" &&
+                " The presenter and the set are chosen when the project is created."}
             </Text>
           </Group>
         </Paper>
+
+        {project.kind === "story" && (
+          <Paper withBorder p="md" radius="md">
+            <Group gap="sm">
+              <Title order={4}>Speech</Title>
+              <Badge variant="light">{speechModeLabel(project.speech_mode)}</Badge>
+              <Text size="xs" c="dimmed">
+                The speech mode is fixed after creation.
+              </Text>
+            </Group>
+          </Paper>
+        )}
 
         <Paper withBorder p="md" radius="md">
           <Stack gap="xs">

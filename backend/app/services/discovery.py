@@ -35,7 +35,8 @@ from app.db.models import (
     StoryBible,
 )
 from app.jobs import store
-from app.services import project_cast, story_bible
+from app.services import explainer, project_cast, story_bible
+from app.services.project_kinds import KIND_EXPLAINER
 
 SOURCE_AI: Final = "ai"
 SOURCE_MANUAL: Final = "manual"
@@ -111,6 +112,18 @@ async def start_run(
         "story_bible_id": bible.id,
         "story_bible_version": bible.version,
     }
+    if explainer.is_explainer(project):
+        # EXPLAINER-003: the presenter and the set are known from the start. They are stored
+        # without asking the model, and the scenes and a designed studio are told the script is
+        # an explainer.
+        job_input["project_kind"] = KIND_EXPLAINER
+        if kind in ("characters", "environments"):
+            try:
+                fixed = await explainer.fixed_discovery(session, project.id, kind)
+            except explainer.ExplainerError as exc:
+                raise DiscoveryError(str(exc)) from exc
+            if fixed is not None:
+                job_input["fixed_content"] = fixed
     cast_kind = cast_kind_of(kind)
     if cast_kind is not None:
         # The library items the user put in the project's cast (PHASE-048). The model is shown

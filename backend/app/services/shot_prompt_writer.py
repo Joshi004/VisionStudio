@@ -100,6 +100,14 @@ DESCRIPTION: Final = lab_prompt_writer.H3_DESCRIPTION
 GENERATE_SOUNDSCAPE: Final = lab_prompt_writer.H3_SOUNDSCAPE
 
 MARKER: Final = "partially_copy"
+# EXPLAINER-005: the presenter's line is the clip's whole soundtrack (`generation_planner`).
+FULLY_COPY: Final = "fully_copy"
+_MARKERS: Final = (MARKER, FULLY_COPY)
+# The soundscape the app writes when the speech is the clip's whole soundtrack (EXPLAINER-005),
+# as in `character_take_prompt_writer`.
+_COPY_ALL_SOUNDSCAPE: Final = (
+    "No ambience or effects are added: the only sound is the speech copied from <Audio 1>."
+)
 NOBODY_SPEAKS: Final = "Nobody speaks, and every mouth stays closed."
 _ENVIRONMENT: Final = "environment"
 
@@ -172,6 +180,8 @@ class Speaker:
     visible: bool
     subject: int | None
     start_s: float
+    # How the audio is used: `partially_copy`, or `fully_copy` in an explainer.
+    marker: str = MARKER
 
     @property
     def speaker(self) -> str:
@@ -220,10 +230,19 @@ class Layout:
     # PHASE-043: the internal shots of a rapid exchange, one for each line, in order. Empty for
     # every other shot.
     cuts: list[Cut] = field(default_factory=list)
+    # EXPLAINER-005: the request is an explainer's. Its text-only shots are B-roll.
+    explainer: bool = False
 
     @property
     def exchange(self) -> bool:
         return bool(self.cuts)
+
+    @property
+    def copy_all(self) -> bool:
+        """True when every audio is copied whole: the speech is then the clip's entire
+        soundtrack, so the prompt has no soundscape.
+        """
+        return bool(self.speakers) and all(item.marker == FULLY_COPY for item in self.speakers)
 
     def subject_for_speaker(self, speaker: Speaker) -> Subject | None:
         return next((item for item in self.subjects if item.number == speaker.subject), None)
@@ -442,6 +461,9 @@ def layout(request: dict[str, Any]) -> Layout:
             )
         start = audio.get("starts_in_shot_seconds")
         order = audio.get("order")
+        marker = audio.get("marker", MARKER)
+        if marker not in _MARKERS:
+            raise ShotPromptError("The generation request of this shot cannot be read.")
         if (
             isinstance(start, bool)
             or not isinstance(start, int | float)
@@ -459,6 +481,7 @@ def layout(request: dict[str, Any]) -> Layout:
                 visible=visible,
                 subject=subject.number if visible and subject is not None else None,
                 start_s=float(start),
+                marker=marker,
             )
         )
     cuts = _read_cuts(request.get("exchange"), route, anchor_use, speakers)
@@ -474,6 +497,7 @@ def layout(request: dict[str, Any]) -> Layout:
         anchor_from=anchor_from,
         anchor_picture=anchor_picture,
         cuts=cuts,
+        explainer=request.get("explainer") is True,
     )
 
 
@@ -703,7 +727,32 @@ says, in the speech copied from <Audio 2>, <d>...</d>").
 definition's "ambient" and "sound_events". No speech, no music.
 """
 
+# EXPLAINER-005. With `fully_copy` the speech is the whole soundtrack of the clip: the app writes
+# the soundscape, and the model writes none and adds no sound of its own.
+_SOUNDSCAPE_RULE: Final = """\
+- "soundscape": one to four sentences of ambience and physical sounds, from the shot \
+definition's "ambient" and "sound_events". No speech, no music.
+"""
+_COPY_ALL_RULE: Final = """\
+- Sound. The speech of the audio is the whole soundtrack of the clip, so there is no "soundscape" \
+piece. Write no ambience, no sound effect and no non-verbal sound anywhere, not even a breath or \
+a footstep.
+"""
+assert _SOUNDSCAPE_RULE in _REFERENCE_RULES
+_REFERENCE_COPY_ALL_RULES: Final = _REFERENCE_RULES.replace(_SOUNDSCAPE_RULE, _COPY_ALL_RULE)
+
+# EXPLAINER-005: a text-only shot of an explainer is B-roll that illustrates the presenter's
+# voice-over. The set is not sent, so nothing of the presenter's studio can leak into it.
+_BROLL_RULES: Final = """\
+
+This shot is B-roll of an explainer: the audience hears a presenter's voice over it, and the \
+shot only illustrates what is said. The presenter and the presenter's set never appear in it. \
+Show no written word, caption, label, logo, number, chart or diagram anywhere in the picture. \
+Describe only what the SHOT DEFINITION shows, in the style of the StoryBible.
+"""
+
 REFERENCE_INSTRUCTIONS: Final = _COMMON_RULES + _REFERENCE_RULES
+REFERENCE_COPY_ALL_INSTRUCTIONS: Final = _COMMON_RULES + _REFERENCE_COPY_ALL_RULES
 EXCHANGE_INSTRUCTIONS: Final = _common_rules(_EXCHANGE_SHOT_RULE) + _EXCHANGE_RULES
 GENERATE_INSTRUCTIONS: Final = _COMMON_RULES + _GENERATE_RULES
 
@@ -723,7 +772,8 @@ def answer_form(shot_layout: Layout) -> dict[str, str]:
             form[f"{SHOT_PREFIX}{cut.number}"] = "..."
     else:
         form[SHOT] = "..."
-    form[SOUNDSCAPE] = "..."
+    if not shot_layout.copy_all:
+        form[SOUNDSCAPE] = "..."
     return form
 
 
@@ -779,10 +829,13 @@ def build_request(
             if isinstance(entry, dict) and "id" in entry
         }
     shown = [character for character in characters if character.get("id") in wanted]
+    broll = shot_layout.explainer and shot_layout.format == FORMAT_GENERATE
     if shot_layout.format == FORMAT_GENERATE:
-        instructions = GENERATE_INSTRUCTIONS
+        instructions = GENERATE_INSTRUCTIONS + (_BROLL_RULES if broll else "")
     elif shot_layout.exchange:
         instructions = EXCHANGE_INSTRUCTIONS
+    elif shot_layout.copy_all:
+        instructions = REFERENCE_COPY_ALL_INSTRUCTIONS
     else:
         instructions = REFERENCE_INSTRUCTIONS
     if shot_layout.anchor_use == ANCHOR_FIRST_FRAME:
@@ -794,7 +847,7 @@ def build_request(
         "SCENE (JSON):\n" + _dump(scene),
         "SHOT DEFINITION (JSON):\n" + _dump(shot_definition),
         "CHARACTERS (JSON):\n" + _dump(shown),
-        "ENVIRONMENT (JSON):\n" + _dump(environment),
+        *([] if broll else ["ENVIRONMENT (JSON):\n" + _dump(environment)]),
         "LABELS (JSON):\n" + _dump(shot_layout.for_model()),
     ]
     if shot_layout.anchor_use is not None:
@@ -830,6 +883,13 @@ def _piece(answer: dict[str, Any], key: str) -> str:
 
 
 def _audio_definition(speaker: Speaker) -> str:
+    if speaker.marker == FULLY_COPY and speaker.visible:
+        # Port of `character_take_prompt_writer._audio_definition` (the guide, 2.4).
+        return (
+            f"{speaker.audio_label} is the recorded speech of <Subject {speaker.subject}> "
+            f"({speaker.speaker}), which is copied as the complete audio track of the target "
+            "video."
+        )
     if speaker.visible:
         return (
             f"{speaker.audio_label} is the recorded speech of <Subject {speaker.subject}> "
@@ -843,6 +903,11 @@ def _audio_definition(speaker: Speaker) -> str:
 
 
 def _audio_retention(speaker: Speaker) -> str:
+    if speaker.marker == FULLY_COPY:
+        return (
+            f"{speaker.audio_label}: {FULLY_COPY} - {speaker.audio_label} is reused 1:1 as the "
+            "target video's complete final audio track."
+        )
     return (
         f"{speaker.audio_label}: {MARKER} - the spoken layer of {speaker.audio_label} is copied "
         "with its words, timing and pauses, and other sound is added around it."
@@ -943,12 +1008,13 @@ def _assemble_reference(pieces: dict[str, str], shot_layout: Layout) -> str:
         )
     else:
         detailed = f"[Shot 1] {' '.join([pieces[SHOT], *extra])}"
+    soundscape = _COPY_ALL_SOUNDSCAPE if shot_layout.copy_all else pieces[SOUNDSCAPE]
     sections = [
         "subject_definitions:\n" + "\n".join(definitions),
         f"summary:\n{tag} {pieces[SUMMARY]}",
         "retention_analysis:\n" + "\n".join(retention),
         f"detailed_description:\n{pieces[STYLE]}\n{detailed}",
-        f"overall_soundscape:\n{pieces[SOUNDSCAPE]}",
+        f"overall_soundscape:\n{soundscape}",
         f"non_diegetic_music:\n{NO_MUSIC}",
     ]
     return "\n\n".join(sections)
@@ -1159,7 +1225,7 @@ def check_answer(answer: Any, shot_layout: Layout) -> dict[str, Any]:
         warning = _word_warning("description", words, H3_GENERATE_MIN_WORDS, H3_GENERATE_MAX_WORDS)
     if warning:
         warnings.append(warning)
-    soundscape = pieces[SOUNDSCAPE if reference else GENERATE_SOUNDSCAPE]
+    soundscape = pieces.get(SOUNDSCAPE if reference else GENERATE_SOUNDSCAPE, "")
     if _MUSIC_WORDS.search(soundscape):
         warnings.append("The soundscape mentions music. The clip is made without any.")
     warnings += _name_warnings(model_text, shot_layout)

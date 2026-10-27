@@ -44,8 +44,9 @@ from typing import Any, Final
 
 from app.services import discovery_writer, scene_discovery_writer
 from app.services.projects import (
+    PROMPT_MODES,
     SPEECH_BOTH,
-    SPEECH_MODES,
+    SPEECH_EXPLAINER,
     SPEECH_NO_DIALOGUE,
     SPEECH_NO_NARRATION,
 )
@@ -61,13 +62,22 @@ REASONING_EFFORT: Final = "high"
 EVENT_TYPES: Final = ("narration", "dialogue", "action", "sound_event", "pause")
 
 
+# The types an explainer uses (EXPLAINER-004): the presenter's words (on camera, or as a
+# voice-over) and the pauses between them. There are no actions or sounds to list: what is shown
+# is decided from the words.
+EXPLAINER_TYPES: Final = ("narration", "dialogue", "pause")
+
+
 def allowed_types(speech_mode: str) -> tuple[str, ...]:
     """The event types a project's speech mode allows (PHASE-049): all five for `both`, no
     `dialogue` for `no_dialogue` (a narrator reads every line) and no `narration` for
-    `no_narration`. Raises ValueError for a mode that does not exist.
+    `no_narration`; for an explainer, `narration`, `dialogue` and `pause`. Raises ValueError
+    for a mode that does not exist.
     """
-    if speech_mode not in SPEECH_MODES:
+    if speech_mode not in PROMPT_MODES:
         raise ValueError(f'The speech mode "{speech_mode}" does not exist.')
+    if speech_mode == SPEECH_EXPLAINER:
+        return EXPLAINER_TYPES
     forbidden = {SPEECH_NO_DIALOGUE: "dialogue", SPEECH_NO_NARRATION: "narration"}.get(speech_mode)
     return tuple(kind for kind in EVENT_TYPES if kind != forbidden)
 
@@ -169,6 +179,34 @@ _PAUSE: Final = """\
 - "pause": a meaningful silence at that point of the story. Give no other field. It has no \
 duration."""
 
+# An explainer's two kinds of speech (EXPLAINER-004). `narration` is the presenter's voice over
+# B-roll; `dialogue` is the presenter on camera.
+_NARRATION_EXPLAINER: Final = f"""\
+- "narration": words the presenter speaks as a voice-over, while the audience sees something \
+else that illustrates them (an example, a description, a scene, data). Give "text": the words \
+copied from the scene text exactly as written there, without changing, shortening, rephrasing or \
+translating them, at most {SPEECH_MAX_CHARS} characters."""
+
+_DIALOGUE_EXPLAINER: Final = f"""\
+- "dialogue": words the presenter speaks ON CAMERA, to the viewer. Give "speaker_id": the id of \
+the presenter, the one character listed in CHARACTERS. Give "text": the spoken words copied from \
+the scene text exactly as written, at most {SPEECH_MAX_CHARS} characters. You may give \
+"delivery": {{"emotion": "warm, confident"}}, a short phrase of at most {EMOTION_MAX_CHARS} \
+characters for how the line is spoken, when the script makes it clear."""
+
+_EXPLAINER_NOTE: Final = """This is not a story: it is an explainer script that one presenter \
+speaks from start to finish. Every word of the scene text is the presenter's, so every sentence \
+becomes either a "dialogue" event (the presenter is seen speaking to camera) or a "narration" \
+event (the presenter is heard, and something else is shown). Decide for each passage which it is:
+- On camera ("dialogue"): the opening and the greeting, a question or direct address to the \
+viewer, a transition from one section to the next, a key takeaway, and the closing. Keep each \
+on-camera event to one or two sentences.
+- Voice-over ("narration"): examples, descriptions, scenarios, comparisons, numbers and facts, \
+anything that is clearer when it is shown.
+Alternate between the two so that the presenter is not on screen for the whole scene, and not \
+absent from it either. Use "pause" only for a deliberate silence the script marks. The scene text \
+has no quotation marks and no "he said": copy the words as they are."""
+
 _NO_NARRATION_NOTE: Final = """There is no narrator in this story. Nothing is read aloud except \
 what the characters say, so the audience must understand the story from what it sees and hears. \
 Time that passes, a change of place, and what the scene text only tells must be shown with \
@@ -178,7 +216,9 @@ a sound that fits the place). Show only what the scene text says or clearly impl
 
 def _type_descriptions(speech_mode: str) -> str:
     """The list of the allowed types, each described, for the speech mode."""
-    if speech_mode == SPEECH_NO_DIALOGUE:
+    if speech_mode == SPEECH_EXPLAINER:
+        items = [_NARRATION_EXPLAINER, _DIALOGUE_EXPLAINER, _PAUSE]
+    elif speech_mode == SPEECH_NO_DIALOGUE:
         items = [_NARRATION_NO_DIALOGUE, _ACTION_NO_DIALOGUE, _SOUND_EVENT, _PAUSE]
     elif speech_mode == SPEECH_NO_NARRATION:
         items = [_DIALOGUE, _ACTION_NO_NARRATION, _SOUND_EVENT, _PAUSE]
@@ -191,7 +231,17 @@ def _rules(speech_mode: str) -> str:
     """The rules, which differ between the modes in what may be added and in how speech is
     listed.
     """
-    if speech_mode == SPEECH_NO_NARRATION:
+    if speech_mode == SPEECH_EXPLAINER:
+        order_rule = (
+            "- List the events in the order of the scene text. Do not reorder, and do not add "
+            "anything the scene text does not say."
+        )
+        speech_rule = (
+            '- Every sentence of the scene text must appear in exactly one "dialogue" or '
+            '"narration" event, and the events must follow the order of the scene text. A long '
+            "passage may be given as several events."
+        )
+    elif speech_mode == SPEECH_NO_NARRATION:
         order_rule = (
             "- List the events in the order they happen in the scene text. Do not reorder. Do "
             "not add plot, characters or places the scene text does not have: the only things "
@@ -241,7 +291,10 @@ def instructions(speech_mode: str = SPEECH_BOTH) -> str:
     used before PHASE-049. Raises ValueError for a mode that does not exist.
     """
     allowed = allowed_types(speech_mode)
-    note = f"\n\n{_NO_NARRATION_NOTE}" if speech_mode == SPEECH_NO_NARRATION else ""
+    note = {SPEECH_NO_NARRATION: _NO_NARRATION_NOTE, SPEECH_EXPLAINER: _EXPLAINER_NOTE}.get(
+        speech_mode
+    )
+    note = f"\n\n{note}" if note else ""
     return (
         f"{_INTRO}{note}\n\n"
         f'Every event has a "type", one of: {", ".join(allowed)}.\n'

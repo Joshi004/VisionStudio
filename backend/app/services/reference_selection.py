@@ -270,6 +270,23 @@ def select(content: dict[str, Any], catalog: list[CatalogPicture]) -> Selection:
     )
 
 
+def broll(content: dict[str, Any]) -> Selection:
+    """The selection of an explainer's B-roll shot (EXPLAINER-005): no pictures at all, so the
+    shot is made by the video model from its prompt alone. Raises ReferenceSelectionError.
+    """
+    shot_size = (content.get("composition") or {}).get("shot_size")
+    if not isinstance(shot_size, str):
+        raise ReferenceSelectionError("The shot has no shot size.")
+    return Selection(
+        shot_size=shot_size,
+        framing=framing_for(shot_size),
+        focus_character_id=None,
+        pictures=[],
+        fallbacks=[],
+        notes=["B-roll of an explainer: the shot is made from its prompt, with no reference."],
+    )
+
+
 def manual(
     content: dict[str, Any], catalog: list[CatalogPicture], image_ids: list[int]
 ) -> Selection:

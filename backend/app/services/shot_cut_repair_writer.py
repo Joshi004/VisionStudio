@@ -227,6 +227,7 @@ def check_answer(
                 dialogue=shot["dialogue"],
                 exchange=shot.get("exchange") is True,
                 staging=shot.get("staging"),
+                explainer=shot.get("explainer") is True,
                 warnings=warnings,
             )
         except ValueError as exc:

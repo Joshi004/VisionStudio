@@ -228,6 +228,26 @@ SHOT's "axis"): never flip who is on the left or the right.
 Answer with one JSON object only, in exactly this form (the values here are only examples of the \
 type): {_ANSWER_FORM}"""
 
+# An explainer (EXPLAINER-004): the presenter is visible only in a shot that carries their line.
+_EXPLAINER_NOTE: Final = """This is an explainer with one presenter. When SPEECH lists a line of \
+dialogue, the shot shows the presenter speaking it to the camera: the presenter is the only \
+entry in "characters", looks straight into the lens, stands in the set and is framed from the \
+chest up or closer, and the camera is steady. When SPEECH lists only narration, or nothing, the \
+shot is B-roll that illustrates the words: "characters" is an empty list, the picture does not \
+show the presenter or the set, and it holds no written words, labels, captions, logos, charts or \
+diagrams. Describe B-roll as something a camera could film, in the style of the StoryBible."""
+
+
+def instructions(explainer: bool = False) -> str:
+    """The system message: the same for every project except an explainer's, which has a note
+    added after the rules.
+    """
+    if not explainer:
+        return _INSTRUCTIONS
+    marker = "\n\n" + length_rule(LIMITS)
+    head, tail = _INSTRUCTIONS.split(marker, 1)
+    return f"{head}\n\n{_EXPLAINER_NOTE}{marker}{tail}"
+
 
 def build_request(
     *,
@@ -244,6 +264,7 @@ def build_request(
     model: str,
     feedback: user_feedback.Feedback | None = None,
     staging: dict[str, Any] | None = None,
+    explainer: bool = False,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
@@ -261,6 +282,8 @@ def build_request(
     `staging` is the result of `shot_staging.for_shot` (PHASE-054) or None: it adds `STAGING AT
     THIS SHOT` (the placements and the axis) and `VIEWS` (the views of the place with whom each
     may stand behind).
+
+    `explainer` adds the explainer note to the instructions (EXPLAINER-004).
     """
     parts = [
         "STORY BIBLE (JSON):\n" + json.dumps(bible_content, ensure_ascii=False, indent=2),
@@ -281,7 +304,7 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": _INSTRUCTIONS},
+            {"role": "system", "content": instructions(explainer)},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
@@ -511,6 +534,24 @@ def _view(
     return view
 
 
+def _check_explainer_characters(
+    characters: list[dict[str, str]], dialogue: list[dict[str, str]]
+) -> None:
+    """An explainer's shot shows the presenter when, and only when, it carries their line."""
+    shown = {character["id"] for character in characters}
+    speakers = {line["speaker_id"] for line in dialogue}
+    if shown != speakers:
+        if speakers:
+            raise ValueError(
+                "This shot carries the presenter's line, so the presenter, and nobody else, "
+                'must be the one entry in "characters".'
+            )
+        raise ValueError(
+            'This shot is B-roll, so "characters" must be an empty list: the presenter is only '
+            "visible in the shots that carry their own line."
+        )
+
+
 def check_answer(
     answer: Any,
     *,
@@ -521,6 +562,7 @@ def check_answer(
     dialogue: list[dict[str, str]],
     exchange: bool = False,
     staging: dict[str, Any] | None = None,
+    explainer: bool = False,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the specification that is stored. Raises ValueError,
@@ -536,6 +578,9 @@ def check_answer(
     `exchange` is true for a rapid exchange (PHASE-043): every speaker of the shot's dialogue
     must then be one of the visible `characters`, because each speaks to the camera in a cut of
     their own and needs a reference picture.
+
+    `explainer` is true for an explainer project (EXPLAINER-004): a shot with a line of dialogue
+    shows exactly its speaker, the presenter, and any other shot (B-roll) shows no character.
 
     `shot_id`, `scene_id`, `duration` and `audio_intent.dialogue` are set here from what code
     knows and are never read from the model. `scene_character_ids` are the ids of the scene's
@@ -559,6 +604,9 @@ def check_answer(
                 "This shot is a rapid exchange, so every speaker must be visible, but "
                 f'"characters" has no entry for: {", ".join(missing)}.'
             )
+
+    if explainer:
+        _check_explainer_characters(characters, dialogue)
 
     shot_composition = {
         "shot_size": _shot_size(composition),

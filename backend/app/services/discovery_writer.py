@@ -97,6 +97,23 @@ when the story spends time in it (for example "Arjun's Apartment" and "Arjun's B
 Answer with one JSON object only, in exactly this form: {{"environments": [{{"id": "...", \
 "name": "...", "description": "..."}}]}}"""
 
+# An explainer's studio (EXPLAINER-003): used instead of the story prompt, for the environments
+# of an explainer that was not given a set. It lists exactly one place.
+EXPLAINER_ENVIRONMENTS_PROMPT: Final = f"""You are the art director of a studio that turns \
+written explainer scripts into short videos. A presenter explains the script on camera. You read \
+one complete script and design the one studio where the presenter stands to explain it.
+
+List exactly ONE environment: the presenter's studio or set, a place that suits the script's \
+topic, audience and tone and the StoryBible's visual style (for example a bright modern desk and \
+screen setup for a technology topic, or a calm office for a finance topic). Do not list the \
+places, objects or scenes that the script merely talks about: those are shown by other shots.
+
+{_COMMON_RULES}
+- List exactly one item.
+
+Answer with one JSON object only, in exactly this form: {{"environments": [{{"id": "...", \
+"name": "...", "description": "..."}}]}}"""
+
 _PROMPTS: Final[dict[Kind, str]] = {
     "characters": _CHARACTERS_PROMPT,
     "environments": _ENVIRONMENTS_PROMPT,
@@ -182,14 +199,18 @@ def build_request(
     *,
     model: str,
     cast: list[dict[str, Any]] | None = None,
+    explainer: bool = False,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
 
     `cast` is the project's cast of this kind (`project_cast.prompt_entries`). With a cast, the
     user message lists it and the instructions explain `library_id`; without one, the request
-    is the same as it was before the cast existed.
+    is the same as it was before the cast existed. `explainer` (EXPLAINER-003) asks for the one
+    studio of an explainer; the characters of an explainer are never asked for.
     """
+    if explainer and kind == "environments":
+        return build_body(EXPLAINER_ENVIRONMENTS_PROMPT, story_text, bible_content, model=model)
     if not cast:
         return build_body(_PROMPTS[kind], story_text, bible_content, model=model)
     cast_section = f"{_CAST_HEADINGS[kind]}:\n{json.dumps(cast, ensure_ascii=False, indent=2)}"

@@ -1,9 +1,13 @@
 import { useState } from "react";
-import { Alert, Button, Group, Modal, Radio, Stack, Text, TextInput } from "@mantine/core";
+import { Alert, Button, Group, Modal, Radio, Select, Stack, Text, TextInput } from "@mantine/core";
 import { useNavigate } from "react-router";
 
+import { useLibraryCharacters } from "../../api/characterLab";
+import { useLibraryEnvironments } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
+import { PROJECT_KINDS, isProjectKind } from "./projectKinds";
+import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
 import type { SpeechMode } from "./speechModes";
 
@@ -18,22 +22,114 @@ function isOrientation(value: string): value is Orientation {
   return ORIENTATIONS.some((option) => option.value === value);
 }
 
+/**
+ * The presenter and the set of an explainer, chosen from the libraries. A character can present
+ * only with a saved voice, a visible mouth and a finished look; the server checks the rest.
+ */
+function PresenterFields({
+  presenterId,
+  setId,
+  onPresenter,
+  onSet,
+}: {
+  presenterId: string | null;
+  setId: string | null;
+  onPresenter: (value: string | null) => void;
+  onSet: (value: string | null) => void;
+}) {
+  const characters = useLibraryCharacters(false);
+  const environments = useLibraryEnvironments(false);
+  const characterItems = (characters.data?.pages ?? []).flatMap((page) => page.characters);
+  const environmentItems = (environments.data?.pages ?? []).flatMap((page) => page.environments);
+
+  return (
+    <>
+      <Select
+        label="4. Presenter"
+        description="A character from the Character Lab with a saved voice and a finished look. It speaks on camera and as the voice-over. It cannot be changed later."
+        placeholder="Choose a character"
+        searchable
+        value={presenterId}
+        onChange={onPresenter}
+        data={characterItems.map((character) => ({
+          value: String(character.id),
+          label: character.name,
+          disabled:
+            character.voice === null ||
+            !character.has_visible_mouth ||
+            character.current_look?.status !== "ready",
+        }))}
+        error={characters.isError ? describeError(characters.error) : undefined}
+        nothingFoundMessage="No characters"
+      />
+      {characters.hasNextPage && (
+        <Button
+          variant="subtle"
+          size="xs"
+          loading={characters.isFetchingNextPage}
+          onClick={() => void characters.fetchNextPage()}
+        >
+          Load more characters
+        </Button>
+      )}
+      <Select
+        label="5. Set (optional)"
+        description="An environment from the Environment Lab to speak in. Without one, a studio is designed from the script."
+        placeholder="Design a studio from the script"
+        clearable
+        searchable
+        value={setId}
+        onChange={onSet}
+        data={environmentItems.map((environment) => ({
+          value: String(environment.id),
+          label: environment.name,
+          disabled: environment.image === null,
+        }))}
+        error={environments.isError ? describeError(environments.error) : undefined}
+        nothingFoundMessage="No environments"
+      />
+      {environments.hasNextPage && (
+        <Button
+          variant="subtle"
+          size="xs"
+          loading={environments.isFetchingNextPage}
+          onClick={() => void environments.fetchNextPage()}
+        >
+          Load more environments
+        </Button>
+      )}
+    </>
+  );
+}
+
 /** Lives inside the modal, so closing the modal throws the form state away. */
 function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const create = useCreateProject();
   const [orientation, setOrientation] = useState<Orientation | null>(null);
   const [speechMode, setSpeechMode] = useState<SpeechMode>("both");
+  const [kind, setKind] = useState<ProjectKind>("story");
+  const [presenterId, setPresenterId] = useState<string | null>(null);
+  const [setId, setSetId] = useState<string | null>(null);
   const [name, setName] = useState("");
 
-  const canCreate = orientation !== null && name.trim() !== "";
+  const canCreate =
+    orientation !== null && name.trim() !== "" && (kind === "story" || presenterId !== null);
 
   function submit() {
     if (orientation === null) {
       return;
     }
+    const explainer = kind === "explainer";
     create.mutate(
-      { name, orientation, speech_mode: speechMode },
+      {
+        name,
+        orientation,
+        speech_mode: explainer ? "both" : speechMode,
+        kind,
+        presenter_character_id: explainer && presenterId !== null ? Number(presenterId) : null,
+        set_environment_id: explainer && setId !== null ? Number(setId) : null,
+      },
       {
         onSuccess: (project) => {
           onClose();
@@ -89,17 +185,17 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         />
 
         <Radio.Group
-          label="3. Speech"
-          description="How the story is spoken. It cannot be changed later."
-          value={speechMode}
+          label="3. Kind"
+          description="What the project makes. It cannot be changed later."
+          value={kind}
           onChange={(value) => {
-            if (isSpeechMode(value)) {
-              setSpeechMode(value);
+            if (isProjectKind(value)) {
+              setKind(value);
             }
           }}
         >
           <Stack mt="xs" gap="xs">
-            {SPEECH_MODES.map((option) => (
+            {PROJECT_KINDS.map((option) => (
               <Radio.Card key={option.value} value={option.value} p="md" radius="md">
                 <Group wrap="nowrap" align="flex-start">
                   <Radio.Indicator />
@@ -114,6 +210,43 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
             ))}
           </Stack>
         </Radio.Group>
+
+        {kind === "story" ? (
+          <Radio.Group
+            label="4. Speech"
+            description="How the story is spoken. It cannot be changed later."
+            value={speechMode}
+            onChange={(value) => {
+              if (isSpeechMode(value)) {
+                setSpeechMode(value);
+              }
+            }}
+          >
+            <Stack mt="xs" gap="xs">
+              {SPEECH_MODES.map((option) => (
+                <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                  <Group wrap="nowrap" align="flex-start">
+                    <Radio.Indicator />
+                    <Stack gap={2}>
+                      <Text fw={500}>{option.label}</Text>
+                      <Text size="sm" c="dimmed">
+                        {option.description}
+                      </Text>
+                    </Stack>
+                  </Group>
+                </Radio.Card>
+              ))}
+            </Stack>
+          </Radio.Group>
+
+        ) : (
+          <PresenterFields
+            presenterId={presenterId}
+            setId={setId}
+            onPresenter={setPresenterId}
+            onSet={setSetId}
+          />
+        )}
 
         {create.isError && <Alert color="red">{describeError(create.error)}</Alert>}
 

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project, StoryBible
 from app.jobs import store
 from app.services import provenance, story_bible_writer
+from app.services.project_kinds import KIND_EXPLAINER
 
 JOB_TYPE: Final = "write_story_bible"
 SOURCE_AI: Final = "ai"
@@ -61,12 +62,16 @@ async def start_run(
     newest = await latest(session, project.id)
     if newest is not None and newest.source == SOURCE_MANUAL and not confirm_replace_manual:
         raise StoryBibleError(MANUAL_REPLACE_MESSAGE)
+    job_input: dict[str, Any] = {"story_text": story, "story_sha256": story_sha256(story)}
+    if project.kind == KIND_EXPLAINER:
+        # The writer reads the script as an explainer (EXPLAINER-004).
+        job_input["project_kind"] = KIND_EXPLAINER
     job, _created = await store.create_job(
         session,
         project_id=project.id,
         type=JOB_TYPE,
         provider="llm",
-        input={"story_text": story, "story_sha256": story_sha256(story)},
+        input=job_input,
     )
     return job
 

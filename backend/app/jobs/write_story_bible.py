@@ -32,6 +32,7 @@ from app.providers import llm
 from app.services import llm_target, story_bible
 from app.services import story_bible_writer as writer
 from app.services.llm_target import STORY_MODEL_KEY
+from app.services.project_kinds import KIND_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -82,7 +83,9 @@ class WriteStoryBibleHandler(JobHandler):
             return
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        body = writer.build_request(story, model=target.model)
+        body = writer.build_request(
+            story, model=target.model, explainer=job_input.get("project_kind") == KIND_EXPLAINER
+        )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),

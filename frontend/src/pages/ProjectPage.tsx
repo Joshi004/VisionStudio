@@ -22,6 +22,7 @@ import { CharacterVoicesPanel } from "../components/story/CharacterVoicesPanel";
 import { DiscoveryPanel } from "../components/story/DiscoveryPanel";
 import { EnvironmentDefinitionsPanel } from "../components/story/EnvironmentDefinitionsPanel";
 import { EnvironmentLinksPanel } from "../components/story/EnvironmentLinksPanel";
+import { ExplainerCastPanel } from "../components/story/ExplainerCastPanel";
 import { LookStateImagesPanel } from "../components/story/LookStateImagesPanel";
 import { LooksAndStatesPanel } from "../components/story/LooksAndStatesPanel";
 import { NarratorVoicePanel } from "../components/story/NarratorVoicePanel";
@@ -113,7 +114,11 @@ export function ProjectPage() {
           </Group>
 
           <StoryEditor project={project} />
-          <CastPanel projectId={project.id} />
+          {project.kind === "explainer" ? (
+            <ExplainerCastPanel projectId={project.id} />
+          ) : (
+            <CastPanel projectId={project.id} />
+          )}
           <StoryPipelinePanel projectId={project.id} />
           <StalenessPanel projectId={project.id} />
           <StoryBiblePanel
@@ -136,7 +141,7 @@ export function ProjectPage() {
           {project.speech_mode !== "no_dialogue" && (
             <CharacterVoicesPanel projectId={project.id} />
           )}
-          {project.speech_mode !== "no_narration" && (
+          {project.speech_mode !== "no_narration" && project.kind === "story" && (
             <NarratorVoicePanel projectId={project.id} />
           )}
           <div id="pipeline-step-environment_discovery">

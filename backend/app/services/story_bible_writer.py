@@ -91,14 +91,37 @@ and the length, never copy them): {{"title": "The Last Lamp", \
 "world_rules": ["The ghost can only appear in mirrors."]}}"""
 
 
-def build_request(story_text: str, *, model: str) -> dict[str, Any]:
+# Added for an explainer (EXPLAINER-004). The fields of the StoryBible stay the same, so every
+# later step reads it as it always did; the note says what each one means for an explainer.
+_EXPLAINER_NOTE: Final = """EXPLAINER SCRIPT
+The text is not a story: it is a script that one presenter explains to an audience, on camera and \
+as a voice-over over B-roll. Fill the same fields, read this way:
+- "title": the title of the explainer.
+- "genre": the subject area and format (for example "personal finance explainer", "AI explainer").
+- "tone": how the presenter comes across (for example "clear", "friendly", "authoritative").
+- "visual_style": how the B-roll and the studio should look (for example "clean modern \
+photorealistic, bright natural light"). B-roll shows what the words describe with real-looking \
+people, objects and places, and never shows written words, numbers, charts or logos.
+- "time_period": the time the explainer is set in (usually "present day").
+- "storytelling_style.narration": how the presenter speaks (pace, warmth, authority).
+- "world_rules": rules every later step must keep, for example that the B-roll shows no \
+on-screen text, that nothing is added to what the script says, and any rule the script itself \
+states about its subject. Use an empty list if there are none."""
+
+
+def instructions(explainer: bool = False) -> str:
+    """The system message: the story's, or the explainer's (the same, with the note added)."""
+    return f"{_SYSTEM_PROMPT}\n\n{_EXPLAINER_NOTE}" if explainer else _SYSTEM_PROMPT
+
+
+def build_request(story_text: str, *, model: str, explainer: bool = False) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
     """
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": instructions(explainer)},
             {"role": "user", "content": story_text},
         ],
         "max_tokens": MAX_TOKENS,

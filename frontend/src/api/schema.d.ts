@@ -9205,6 +9205,16 @@ export interface components {
              * @enum {string}
              */
             speech_mode: "both" | "no_dialogue" | "no_narration";
+            /**
+             * Kind
+             * @default story
+             * @enum {string}
+             */
+            kind: "story" | "explainer";
+            /** Presenter Character Id */
+            presenter_character_id?: number | null;
+            /** Set Environment Id */
+            set_environment_id?: number | null;
         };
         /**
          * ProjectDeleteIn
@@ -9249,6 +9259,11 @@ export interface components {
              * @enum {string}
              */
             speech_mode: "both" | "no_dialogue" | "no_narration";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "story" | "explainer";
             /**
              * Created At
              * Format: date-time
@@ -9322,8 +9337,8 @@ export interface components {
         };
         /**
          * ProjectUpdate
-         * @description Only the fields that are sent are changed. The orientation and the speech mode cannot be
-         *     changed.
+         * @description Only the fields that are sent are changed. The orientation, the speech mode and the kind
+         *     cannot be changed.
          */
         ProjectUpdate: {
             /** Name */

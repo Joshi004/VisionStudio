@@ -39,6 +39,7 @@ from app.services import (
     environment_definitions,
     environment_links,
     environment_views,
+    explainer,
     generation_requests,
     look_state_images,
     look_state_resolution,
@@ -695,7 +696,23 @@ async def _evaluate_voices(
                 stale=entry.status == "out_of_date",
             )
         )
-    if needs_narrator:
+    if needs_narrator and explainer.is_explainer(project):
+        # EXPLAINER-003: the narrator is the presenter. It is set from the presenter's voice in
+        # the run itself (no job, nothing to wait for), and again when that voice changes.
+        wanted = await explainer.presenter_voice_id(session, project.id)
+        newest = (await story_voices.narrator_state(session, project)).version
+        presenter_done = newest is not None and wanted is not None and newest.voice_id == wanted
+        targets.append(
+            Target(
+                _NARRATOR_KEY,
+                "Narrator (the presenter's voice)",
+                presenter_done,
+                block=None if wanted is not None else "The presenter has no saved voice.",
+                ref=(_NARRATOR_KEY,),
+                stale=newest is not None and not presenter_done,
+            )
+        )
+    elif needs_narrator:
         narrator = await story_voices.narrator_state(session, project)
         narrator_done = narrator.status == "ready"
         narrator_active = narrator.status == "in_progress"
@@ -727,6 +744,9 @@ async def _start_voices(
     deadline: float,
 ) -> list[Started]:
     async def make(target: Target) -> tuple[int, ...]:
+        if target.ref == (_NARRATOR_KEY,) and explainer.is_explainer(project):
+            await story_voices.use_presenter_voice(session, project)
+            return ()
         if target.ref == (_NARRATOR_KEY,):
             return await _ids_of(
                 story_voices.start_narrator(

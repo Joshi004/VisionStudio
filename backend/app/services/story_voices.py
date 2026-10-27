@@ -63,6 +63,7 @@ from app.services import (
     character_definitions,
     character_looks,
     character_versions,
+    explainer,
     project_cast,
     story_bible,
     voice_design_writer,
@@ -84,6 +85,11 @@ NARRATOR_TARGET: Final = "narrator"
 # Why "Make voices for all" leaves a voice alone in a project with no narration or no dialogue.
 NO_NARRATION_REASON: Final = "This project has no narration."
 NO_DIALOGUE_REASON: Final = "This project has no dialogue."
+# An explainer's narrator is always its presenter, so nothing else may make or choose one
+# (EXPLAINER-003).
+EXPLAINER_NARRATOR_REASON: Final = (
+    "The narrator of an explainer is its presenter: the presenter's voice is used."
+)
 
 # How many of a project's newest voice jobs are read to find each voice's newest one.
 _JOB_LOOKBACK: Final = 500
@@ -497,6 +503,10 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         if project.speech_mode == SPEECH_NO_NARRATION
         else _narrator_skip_reason(narrator)
     )
+    presenter_is_narrator = explainer.is_explainer(project)
+    if presenter_is_narrator:
+        # The narrator is the presenter: set it from the presenter's voice, with no job.
+        narrator_reason = EXPLAINER_NARRATOR_REASON
     if result.discovery_version is None and narrator_reason is not None:
         raise StoryVoiceError("Find the characters first: there is nothing to give a voice yet.")
 
@@ -517,6 +527,8 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         else:
             skipped.append(Skipped(entry_id, name, "Already being made."))
 
+    if presenter_is_narrator:
+        await use_presenter_voice(session, project)
     if narrator_reason is not None:
         skipped.append(Skipped(NARRATOR_TARGET, "Narrator", narrator_reason))
     else:
@@ -694,6 +706,8 @@ async def start_narrator(
     False. A narrator chosen by hand is replaced only when `confirm_replace_manual` is true.
     Raises StoryVoiceError.
     """
+    if explainer.is_explainer(project):
+        raise StoryVoiceError(EXPLAINER_NARRATOR_REASON)
     narrator = await narrator_state(session, project)
     if narrator.status == "in_progress" and narrator.job is not None:
         return narrator.job, False
@@ -724,6 +738,17 @@ async def choose_narrator(session: AsyncSession, project: Project, voice_id: int
         "project %d: narrator voice chosen: voice=%d version=%d", project.id, voice_id, row.version
     )
     return row
+
+
+async def use_presenter_voice(session: AsyncSession, project: Project) -> NarratorVoice:
+    """Makes the voice of an explainer's presenter the narrator's (EXPLAINER-003), as a `manual`
+    version, and commits. The voice-over and the presenter on camera then sound alike. Choosing
+    the voice the narrator already has changes nothing. Raises StoryVoiceError.
+    """
+    voice_id = await explainer.presenter_voice_id(session, project.id)
+    if voice_id is None:
+        raise StoryVoiceError("The presenter has no saved voice, so it cannot be the narrator.")
+    return await choose_narrator(session, project, voice_id)
 
 
 async def _add_narrator_version(

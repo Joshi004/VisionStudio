@@ -38,7 +38,7 @@ from app.api.voice_lab import VoiceOut, voice_out
 from app.db.models import Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import story_voices
+from app.services import explainer, story_voices
 from app.services.story_voices import EntryVoice, NarratorState
 
 router = APIRouter()
@@ -361,6 +361,8 @@ async def choose_narrator_voice(
 ) -> NarratorVoiceOut:
     """Makes a saved voice the narrator's, as a new version chosen by hand."""
     project = await load_project(session, project_id)
+    if explainer.is_explainer(project):
+        raise _refused(story_voices.StoryVoiceError(story_voices.EXPLAINER_NARRATOR_REASON))
     try:
         await story_voices.choose_narrator(session, project, body.voice_id)
     except story_voices.StoryVoiceError as exc:

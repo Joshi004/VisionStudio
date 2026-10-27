@@ -24,9 +24,16 @@ class DiscoverScenesHandler(DiscoveryHandler):
     saving_phase = phases.SAVING_SCENES
 
     def build_body(
-        self, story: str, bible_content: dict[str, Any], model: str, library_cast: object
+        self,
+        story: str,
+        bible_content: dict[str, Any],
+        model: str,
+        library_cast: object,
+        explainer: bool = False,
     ) -> dict[str, Any]:
-        return scene_discovery_writer.build_request(story, bible_content, model=model)
+        return scene_discovery_writer.build_request(
+            story, bible_content, model=model, explainer=explainer
+        )
 
     def check(
         self, content: str, story: str, library_cast: object, warnings: list[str]

@@ -21,8 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
 from app.api.projects import load_project
+from app.db.models import Project
 from app.db.session import SessionDep
-from app.services import project_cast
+from app.services import explainer, project_cast
 from app.services.project_cast import CastMember, Kind, Mode
 
 router = APIRouter()
@@ -81,6 +82,15 @@ async def _cast_out(session: AsyncSession, project_id: int) -> CastOut:
     )
 
 
+def _require_story(project: Project) -> None:
+    """The cast of an explainer is its presenter and its set, fixed when it is created."""
+    if explainer.is_explainer(project):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The cast of an explainer is chosen when it is created and cannot be changed.",
+        )
+
+
 def _refused(exc: project_cast.CastError) -> HTTPException:
     if isinstance(exc, project_cast.CastMemberNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
@@ -107,6 +117,7 @@ async def put_cast_member(
 ) -> CastOut:
     """Puts a library item in the cast with this mode, or changes the mode of one already in it."""
     project = await load_project(session, project_id)
+    _require_story(project)
     mode: Mode = body.mode
     try:
         await project_cast.add_member(session, project.id, kind, library_id, mode)
@@ -125,6 +136,7 @@ async def delete_cast_member(
 ) -> Response:
     """Takes the library item out of the cast. The item itself stays in its lab."""
     project = await load_project(session, project_id)
+    _require_story(project)
     try:
         await project_cast.remove_member(session, project.id, kind, library_id)
     except project_cast.CastError as exc:

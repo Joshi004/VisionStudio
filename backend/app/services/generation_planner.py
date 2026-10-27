@@ -33,6 +33,11 @@ The rules:
   line (`exchange.cuts`): the first at 0, each later one at the start of its line. The prompt
   compiler writes one `[Shot n]` for each cut.
 
+- **Explainer (EXPLAINER-005):** with `explainer` set, each dialogue audio is `fully_copy`: the
+  presenter's line is the clip's whole soundtrack, and the job sends it placed at its start
+  inside silence as long as the clip (`speech_audio.place_in_silence`). A B-roll shot has an
+  empty manifest, so it takes the text route on its own.
+
 Nothing here chooses a seed or a partition: those are decided when the request is sent.
 """
 
@@ -65,6 +70,9 @@ CHARACTER_PICTURE_KIND: Final = "character"
 # How every dialogue audio is used: the model copies its spoken layer, and the rest of the clip
 # is made by the model.
 AUDIO_MARKER: Final = "partially_copy"
+# EXPLAINER-005: in an explainer the presenter's line is copied whole and is the clip's entire
+# soundtrack, so H3's own sound is gone from those clips.
+AUDIO_MARKER_EXPLAINER: Final = "fully_copy"
 # What the GPU server's guide documents as the longest audio reference.
 H3_MAX_AUDIO_SECONDS: Final = 15.0
 # Rounding noise allowed when an audio is compared with the length of its shot.
@@ -116,10 +124,13 @@ class GenerationPlan:
     # PHASE-043: set for a rapid exchange, `{cuts: [{shot, audio, speaker_id, at_s}]}`, one cut
     # for each line, in order. None for every other shot.
     exchange: dict[str, Any] | None = None
+    # EXPLAINER-005: set for the shot of an explainer project. Stored only when true, so the
+    # requests of other projects keep their content.
+    explainer: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """The `content` of a stored generation request."""
-        return {
+        content = {
             "shot_id": self.shot_id,
             "scene_id": self.scene_id,
             "model": self.model,
@@ -139,6 +150,9 @@ class GenerationPlan:
             "anchor": self.anchor,
             "exchange": self.exchange,
         }
+        if self.explainer:
+            content["explainer"] = True
+        return content
 
 
 def _picture(entry: dict[str, Any], number: int) -> dict[str, Any]:
@@ -245,12 +259,14 @@ def plan(
     visible_character_ids: list[str],
     continues_from: str | None = None,
     exchange: bool = False,
+    explainer: bool = False,
 ) -> GenerationPlan:
     """The generation request of one shot. `pictures` are the manifest's `references` (each has
     `order`, `lab_image_id`, `kind`, `subject_id`, `subject_name`, `view` and `variant`) and
     `dialogue` the lines the shot carries, both in the order they are sent. `continues_from` is
     the id of the shot before it when this is a continuity shot (PHASE-032); `exchange` is true
-    when the shot plan marks the shot as a rapid exchange (PHASE-043). Raises
+    when the shot plan marks the shot as a rapid exchange (PHASE-043); `explainer` is true for a
+    shot of an explainer project, whose dialogue audio is `fully_copy` (EXPLAINER-005). Raises
     GenerationPlanError.
     """
     sizes = video_generator.H3_SIZES.get(orientation)
@@ -361,7 +377,7 @@ def plan(
                 "audio_key": line.audio_key,
                 "duration_s": round(seconds, 3),
                 "starts_in_shot_seconds": round(max(0.0, line.start_in_shot_s), 3),
-                "marker": AUDIO_MARKER,
+                "marker": AUDIO_MARKER_EXPLAINER if explainer else AUDIO_MARKER,
             }
         )
 
@@ -393,4 +409,5 @@ def plan(
         notes=notes,
         anchor=anchor,
         exchange=exchange_content,
+        explainer=explainer,
     )

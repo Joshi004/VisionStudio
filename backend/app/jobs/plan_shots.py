@@ -60,7 +60,7 @@ from app.services import (
     user_feedback,
 )
 from app.services.llm_target import STORY_MODEL_KEY
-from app.services.projects import SPEECH_BOTH, SPEECH_MODES
+from app.services.projects import PROMPT_MODES, SPEECH_BOTH
 
 _logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     if not replan_ok or not feedback_ok or not (staging is None or isinstance(staging, dict)):
         return None
     if (
-        speech_mode not in SPEECH_MODES
+        speech_mode not in PROMPT_MODES
         or not isinstance(scene, dict)
         or not isinstance(scene.get("id"), str)
         or not isinstance(scene.get("title"), str)
@@ -210,6 +210,7 @@ class PlanShotsHandler(JobHandler):
         events: list[dict[str, Any]],
         units: list[dict[str, Any]],
         warnings: list[str],
+        speech_mode: str,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
         What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
@@ -219,7 +220,9 @@ class PlanShotsHandler(JobHandler):
         found: list[str] = []
         try:
             answer = shot_planning_writer.parse_answer(result.content)
-            content = shot_planning_writer.check_answer(answer, scene_id, events, units, found)
+            content = shot_planning_writer.check_answer(
+                answer, scene_id, events, units, found, speech_mode
+            )
         except ValueError as exc:
             return str(exc), None
         warnings[:] = found
@@ -298,7 +301,9 @@ class PlanShotsHandler(JobHandler):
             job_id,
             target,
             body,
-            lambda result: self._read(result, scene_id, read.events, read.units, warnings),
+            lambda result: self._read(
+                result, scene_id, read.events, read.units, warnings, read.speech_mode
+            ),
             timeout_s=REQUEST_TIMEOUT_S,
         )
         content: dict[str, Any] | None = outcome.value

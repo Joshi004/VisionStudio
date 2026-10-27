@@ -42,6 +42,7 @@ from app.services import (
     speech_synthesis,
 )
 from app.services.duration_policy import DurationPolicy
+from app.services.project_kinds import KIND_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -461,6 +462,7 @@ def _plan_inputs(
             visible_character_ids=visible,
             continues_from=continues_from(plan_entry.row.content, shot_id),
             exchange=exchange_of(plan_entry.row.content, shot_id),
+            explainer=ctx.project.kind == KIND_EXPLAINER,
         )
     except generation_planner.GenerationPlanError as exc:
         raise GenerationRequestsError(str(exc)) from exc

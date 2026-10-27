@@ -61,6 +61,7 @@ from app.services import (
     scene_definitions,
     shot_definitions,
 )
+from app.services.project_kinds import KIND_EXPLAINER
 from app.services.reference_selection import CatalogPicture
 
 _logger = logging.getLogger(__name__)
@@ -721,9 +722,14 @@ async def _add(
     """
     definition = entry.row
     assert definition is not None  # the callers refused otherwise
-    catalog, artifacts = await _catalog(session, ctx, scene_id, definition.content)
+    catalog: list[CatalogPicture] = []
+    artifacts: list[dict[str, Any]] = []
     try:
-        selection = reference_selection.select(definition.content, catalog)
+        if _is_broll(project, definition.content):
+            selection = reference_selection.broll(definition.content)
+        else:
+            catalog, artifacts = await _catalog(session, ctx, scene_id, definition.content)
+            selection = reference_selection.select(definition.content, catalog)
     except reference_selection.ReferenceSelectionError as exc:
         raise ShotReferencesError(str(exc)) from exc
     return await save_manifest(
@@ -739,6 +745,21 @@ async def _add(
         job_id=None,
         inputs=_inputs(project.id, scene_id, entry.shot["id"], definition, ctx, artifacts),
     )
+
+
+def _is_broll(project: Project, definition_content: dict[str, Any]) -> bool:
+    """Whether the shot is B-roll of an explainer (EXPLAINER-005): it shows no character, so it
+    has no reference picture, not even the set's, and goes to the video model's text route.
+    """
+    return project.kind == KIND_EXPLAINER and not reference_selection.visible_characters(
+        definition_content
+    )
+
+
+def _content_of(entry: shot_definitions.ShotEntry) -> dict[str, Any]:
+    """The specification of a shot whose callers refused a missing one."""
+    assert entry.row is not None
+    return entry.row.content
 
 
 def _inputs(
@@ -939,7 +960,7 @@ async def _select_entries(
             result.skipped.append(Skipped(scene_id, shot_id, title, SKIPPED_MANUAL))
         elif shot.blocked_reason is not None:
             result.skipped.append(Skipped(scene_id, shot_id, title, shot.blocked_reason))
-        elif use_model:
+        elif use_model and not _is_broll(project, _content_of(by_id[shot_id])):
             try:
                 job, created = await _queue(session, project, ctx, scene_id, by_id[shot_id])
             except ShotReferencesError as exc:
@@ -1004,7 +1025,7 @@ async def select_shot(
         raise ShotReferencesError(MANUAL_REPLACE_MESSAGE)
     definitions = next(entry for entry in ctx.definitions.entries if entry.item["id"] == scene_id)
     definition = next(entry for entry in definitions.shots if entry.shot["id"] == shot_id)
-    if await _use_model(session):
+    if await _use_model(session) and not _is_broll(project, _content_of(definition)):
         job, created = await _queue(session, project, ctx, scene_id, definition)
         if created:
             result.queued.append(Queued(scene_id, shot_id, job.id))

@@ -46,6 +46,7 @@ from app.services import (
     scene_definitions,
     story_bible,
 )
+from app.services.projects import prompt_mode
 
 _logger = logging.getLogger(__name__)
 
@@ -354,7 +355,7 @@ async def _queue(
             "story_bible_id": bible.id,
             "story_bible_version": bible.version,
             # The project's speech mode, which decides the event types the model may use.
-            "speech_mode": project.speech_mode,
+            "speech_mode": prompt_mode(project),
             "scene_id": scene["id"],
             "scene": {
                 "index": scene["index"],
@@ -710,7 +711,7 @@ async def save_manual(
             scene_id,
             prepared.scene["text"],
             {item["id"] for item in _character_items(loaded)},
-            project.speech_mode,
+            prompt_mode(project),
         )
     except ValueError as exc:
         raise SceneEventsError(str(exc)) from exc

@@ -93,6 +93,7 @@ class _Input:
                 "dialogue": shot["dialogue"],
                 "exchange": shot["shot"].get("rapid_exchange") is True,
                 "staging": shot.get("staging"),
+                "explainer": shot.get("explainer") is True,
             }
             for shot in self.shots
             if shot["shot_id"] in self.cut["editable_shots"]

@@ -42,6 +42,7 @@ class Project(Base):
         CheckConstraint(
             "speech_mode IN ('both', 'no_dialogue', 'no_narration')", name="speech_mode_valid"
         ),
+        CheckConstraint("kind IN ('story', 'explainer')", name="kind_valid"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -57,6 +58,9 @@ class Project(Base):
     # Chosen when the project is created and never changed: `both`, `no_dialogue` (only a
     # narrator speaks) or `no_narration` (nobody narrates).
     speech_mode: Mapped[str] = mapped_column(default="both", server_default=text("'both'"))
+    # Chosen when the project is created and never changed: `story` or `explainer` (a presenter
+    # from the Character Lab speaks the script on camera or as a voice-over over B-roll).
+    kind: Mapped[str] = mapped_column(default="story", server_default=text("'story'"))
     # The keys of the review points the project has enabled (`services/review_points.py`), in
     # the order of the pipeline. A run of the story pipeline waits for the user at each one.
     review_points: Mapped[Any] = mapped_column(JSON, default=list, server_default=text("'[]'"))

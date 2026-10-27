@@ -46,6 +46,7 @@ from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
 from app.services import ffmpeg, frame_images, speech_audio, video_lab
+from app.services.frame_counts import H3_FPS
 from app.services.storage import StorageError, TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -80,6 +81,9 @@ class _AudioInput:
     id: int
     path: str
     mime: str
+    # EXPLAINER-005: where the speech starts inside the clip, when it is sent placed in silence as
+    # long as the clip (a `fully_copy` audio). None for every other audio.
+    place_start_s: float | None = None
 
 
 def _audio_input(value: object) -> _AudioInput | None:
@@ -96,7 +100,16 @@ def _audio_input(value: object) -> _AudioInput | None:
         and isinstance(path, str)
         and isinstance(mime, str)
     ):
-        return _AudioInput(source=str(source), id=audio_id, path=path, mime=mime)
+        start = value.get("place_start_s")
+        if start is not None and (isinstance(start, bool) or not isinstance(start, int | float)):
+            return None
+        return _AudioInput(
+            source=str(source),
+            id=audio_id,
+            path=path,
+            mime=mime,
+            place_start_s=float(start) if start is not None else None,
+        )
     return None
 
 
@@ -307,11 +320,17 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
         return remote_ids
 
     @staticmethod
-    async def _upload_audio_reference(base_url: str, audio: _AudioInput) -> tuple[str, str]:
+    async def _upload_audio_reference(
+        base_url: str, audio: _AudioInput, request: dict[str, Any], temps: list[Path]
+    ) -> tuple[str, str]:
         """Uploads the audio reference of a MiniMax H3 reference clip exactly as it is stored.
         Unlike the speech of an LTX lip-sync clip it is not padded: H3 reads 2 to 15 seconds of
         it as a reference and makes its own soundtrack. Returns the file name sent and the
         server's asset id. Raises AudioUnavailable and GpuCallError.
+
+        The exception is a `fully_copy` audio (an explainer's presenter, EXPLAINER-005): it is
+        the clip's whole soundtrack, so it is sent placed at its start inside silence that lasts
+        exactly as long as the clip. The placed WAV is added to `temps` for the caller to remove.
         """
         try:
             path = get_storage().get_path(audio.path)
@@ -322,6 +341,18 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
         filename = (
             f"lab-reference-audio-{audio.source}-{audio.id}{Path(audio.path).suffix or '.wav'}"
         )
+        if audio.place_start_s is not None:
+            # An H3 body has no `frame_rate`: the model runs at a fixed 24 fps.
+            clip_s = float(request["num_frames"]) / H3_FPS
+            placed = get_storage().new_temp_path("wav")
+            temps.append(placed)
+            try:
+                await speech_audio.place_in_silence(path, placed, audio.place_start_s, clip_s)
+            except speech_audio.PadError as exc:
+                raise AudioUnavailable(str(exc)) from exc
+            filename = f"lab-reference-audio-placed-{audio.source}-{audio.id}.wav"
+            remote_id = await video_generator.upload_audio(base_url, placed, filename, "audio/wav")
+            return filename, remote_id
         remote_id = await video_generator.upload_audio(base_url, path, filename, audio.mime)
         return filename, remote_id
 
@@ -371,7 +402,7 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
                         await self._phase(job.id, phases.UPLOADING_VOICE)
                     for audio in plan.audios:
                         filename, audio_remote_id = await self._upload_audio_reference(
-                            base_url, audio
+                            base_url, audio, plan.request, temps
                         )
                         audio_remote_ids.append(audio_remote_id)
                         uploads.append({"filename": filename, "remote_asset_id": audio_remote_id})

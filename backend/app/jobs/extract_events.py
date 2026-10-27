@@ -38,7 +38,7 @@ from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import discovery, event_extraction_writer, llm_target, scene_events
 from app.services.llm_target import STORY_MODEL_KEY
-from app.services.projects import SPEECH_BOTH, SPEECH_MODES
+from app.services.projects import PROMPT_MODES, SPEECH_BOTH
 
 _logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     # A job queued before PHASE-049 has no speech mode: it is a `both` project.
     speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
     if (
-        speech_mode not in SPEECH_MODES
+        speech_mode not in PROMPT_MODES
         or not isinstance(scene, dict)
         or not isinstance(scene.get("id"), str)
         or not isinstance(scene.get("title"), str)

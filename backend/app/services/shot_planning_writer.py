@@ -42,7 +42,7 @@ import math
 from typing import Any, Final
 
 from app.services import discovery_writer, user_feedback
-from app.services.projects import SPEECH_BOTH, SPEECH_NO_NARRATION
+from app.services.projects import SPEECH_BOTH, SPEECH_EXPLAINER, SPEECH_NO_NARRATION
 from app.services.text_limits import fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
@@ -165,12 +165,29 @@ _NO_NARRATION_NOTE: Final = """This story has no narrator. Nothing explains the 
 the shots alone must carry it: show what the events show clearly, and give a silent action shot \
 (one with no speech) enough time to be read before the next shot."""
 
+# An explainer (EXPLAINER-004): the presenter is on screen only in a shot of their own speech.
+_EXPLAINER_NOTE: Final = """This is an explainer: one presenter speaks the whole script, and \
+the shots alternate between the presenter and B-roll.
+- A speech unit of kind "dialogue" is the presenter speaking ON CAMERA. Give it a shot of its \
+own, of type "dialogue", that lists that one unit and no other, with "rapid_exchange" false. The \
+description says that the presenter is speaking to the viewer, in the set, and nothing more.
+- A speech unit of kind "narration" is the presenter's voice over B-roll. The shots that carry it \
+show what the words are about (an example, a place, an object, a person, a scene), never the \
+presenter, and their type is never "dialogue". Use "establishing", "action" or "insert". Several \
+B-roll shots may follow one another while one narration unit plays. Every B-roll shot is a \
+picture that makes sense without the presenter and that needs no one's speech to be understood.
+- Do not show on-screen text, charts or diagrams: only what a camera could film or a video model \
+could draw."""
+
 
 def instructions(speech_mode: str = SPEECH_BOTH) -> str:
-    """The system message for a project's speech mode. For every mode except `no_narration` it is
-    what every project used before PHASE-049.
+    """The system message for a project's speech mode. For every mode except `no_narration` and
+    `explainer` it is what every project used before PHASE-049.
     """
-    note = f"\n\n{_NO_NARRATION_NOTE}" if speech_mode == SPEECH_NO_NARRATION else ""
+    note = {SPEECH_NO_NARRATION: _NO_NARRATION_NOTE, SPEECH_EXPLAINER: _EXPLAINER_NOTE}.get(
+        speech_mode
+    )
+    note = f"\n\n{note}" if note else ""
     return f"{_BODY}{note}\n\n{_ANSWER_TAIL}"
 
 
@@ -454,11 +471,33 @@ def _check_exchanges(shots: list[dict[str, Any]], units: list[dict[str, Any]]) -
             )
 
 
+def _check_explainer_shots(shots: list[dict[str, Any]], units: list[dict[str, Any]]) -> None:
+    """Checks an explainer's shots (EXPLAINER-004): the presenter is shown only in a shot of
+    type `dialogue`, which carries one line of the presenter's dialogue and nothing else; every
+    other shot is B-roll. Raises ValueError.
+    """
+    kinds = {unit["id"]: unit["kind"] for unit in units}
+    for position, shot in enumerate(shots, start=1):
+        carried = [kinds[unit_id] for unit_id in shot["speech_unit_ids"]]
+        if "dialogue" in carried:
+            if len(carried) != 1 or shot["type"] != "dialogue":
+                raise ValueError(
+                    f"Shot {position} carries a line of the presenter's dialogue. It must be a "
+                    'shot of type "dialogue" that carries that one line and nothing else.'
+                )
+        elif shot["type"] == "dialogue":
+            raise ValueError(
+                f'Shot {position} has the type "dialogue" but carries no line of dialogue. '
+                "B-roll must use another type."
+            )
+
+
 def check_shots(
     answer: Any,
     events: list[dict[str, Any]],
     units: list[dict[str, Any]],
     warnings: list[str] | None = None,
+    speech_mode: str = SPEECH_BOTH,
 ) -> list[dict[str, Any]]:
     """The answer's shots checked and cleaned, without their ids. Raises ValueError, with a
     message fit for the user, for the first problem found. With `warnings` (a model's answer),
@@ -466,7 +505,8 @@ def check_shots(
 
     `events` is the scene's stored events (each has an `id`); `units` is its speech units in
     order (each has `id`, `event_id`, `kind` and, for dialogue, `speaker_id`). Only the fields
-    of a shot are kept, in a fixed order.
+    of a shot are kept, in a fixed order. For an explainer (`speech_mode` is `explainer`) the
+    presenter's dialogue shots are checked as well.
     """
     if not isinstance(answer, dict):
         raise ValueError("The shots were not a JSON object.")
@@ -514,6 +554,8 @@ def check_shots(
     _check_event_cover(spans, len(event_ids))
     _check_speech_placement(shots, units, event_ids)
     _check_exchanges(shots, units)
+    if speech_mode == SPEECH_EXPLAINER:
+        _check_explainer_shots(shots, units)
     return shots
 
 
@@ -523,6 +565,7 @@ def check_answer(
     events: list[dict[str, Any]],
     units: list[dict[str, Any]],
     warnings: list[str] | None = None,
+    speech_mode: str = SPEECH_BOTH,
 ) -> dict[str, Any]:
     """Runs `check_shots` and returns the content that is stored: `{scene_id, shots}`, each
     shot `{id, scene_id, source_event_ids, speech_unit_ids, type, target_duration,
@@ -530,7 +573,7 @@ def check_answer(
     the scene id set here, never read from the model. Raises ValueError, with a message fit for
     the user, for the first problem found.
     """
-    checked = check_shots(answer, events, units, warnings)
+    checked = check_shots(answer, events, units, warnings, speech_mode)
     shots = [
         {"id": f"shot_{position}", "scene_id": scene_id, **shot}
         for position, shot in enumerate(checked, start=1)

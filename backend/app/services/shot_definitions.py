@@ -61,6 +61,7 @@ from app.services import (
     story_bible,
     user_feedback,
 )
+from app.services.project_kinds import KIND_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -199,6 +200,8 @@ class _Loaded:
     staging: dict[str, scene_staging.SceneEntry]
     views: dict[str, environment_views.EnvironmentEntry]
     blocked_reason: str | None
+    # An explainer project (EXPLAINER-004): its shots are the presenter's or B-roll.
+    explainer: bool = False
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -235,6 +238,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         staging={entry.item["id"]: entry for entry in staging.entries},
         views={entry.discovery_id: entry for entry in views.entries},
         blocked_reason=_blocked_reason(project.script_text, bible, plans.blocked_reason),
+        explainer=project.kind == KIND_EXPLAINER,
     )
 
 
@@ -715,6 +719,7 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         "characters": characters,
         "environment": environment,
         "staging": staging,
+        "explainer": loaded.explainer,
         # Written onto the version the job makes (D-3).
         "inputs": inputs,
     }
@@ -1323,6 +1328,7 @@ async def save_manual(
             dialogue=fields["dialogue"],
             exchange=fields["shot"].get("rapid_exchange") is True,
             staging=fields["staging"],
+            explainer=fields["explainer"],
         )
     except ValueError as exc:
         raise ShotDefinitionsError(str(exc)) from exc

@@ -40,6 +40,7 @@ from app.providers import llm
 from app.services import discovery, llm_target
 from app.services import discovery_writer as writer
 from app.services.llm_target import STORY_MODEL_KEY
+from app.services.project_kinds import KIND_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -61,10 +62,16 @@ class DiscoveryHandler(JobHandler):
     saving_phase: ClassVar[str]
 
     def build_body(
-        self, story: str, bible_content: dict[str, Any], model: str, library_cast: object
+        self,
+        story: str,
+        bible_content: dict[str, Any],
+        model: str,
+        library_cast: object,
+        explainer: bool = False,
     ) -> dict[str, Any]:
         """The request body sent to the model. Characters and environments by default.
         `library_cast` is the cast the job was started with (PHASE-048); scenes ignore it.
+        `explainer` is true for an explainer project (EXPLAINER-003).
         """
         return writer.build_request(
             cast(writer.Kind, self.kind),
@@ -72,6 +79,7 @@ class DiscoveryHandler(JobHandler):
             bible_content,
             model=model,
             cast=library_cast if isinstance(library_cast, list) else None,
+            explainer=explainer,
         )
 
     def check(
@@ -90,10 +98,16 @@ class DiscoveryHandler(JobHandler):
         )
 
     def _read(
-        self, result: llm.ChatResult, story: str, library_cast: object, warnings: list[str]
+        self,
+        result: llm.ChatResult,
+        story: str,
+        library_cast: object,
+        warnings: list[str],
+        exactly_one: bool = False,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
         What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+        `exactly_one` refuses a list that does not hold exactly one item (an explainer's studio).
         """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
@@ -102,6 +116,12 @@ class DiscoveryHandler(JobHandler):
             content = self.check(result.content, story, library_cast, found)
         except ValueError as exc:
             return str(exc), None
+        if exactly_one and len(content[self.kind]) != 1:
+            return (
+                f"The answer listed {len(content[self.kind])} {self.kind}; list exactly one: "
+                "the presenter's studio.",
+                None,
+            )
         warnings[:] = found
         return None, content
 
@@ -140,29 +160,59 @@ class DiscoveryHandler(JobHandler):
         if not isinstance(cast_sha256, str):
             cast_sha256 = None
 
-        await self._phase(job_id, phases.PREPARING_PROMPT)
-        body = self.build_body(story, bible_content, target.model, library_cast)
-        job_input.update(
-            instructions_sha256=llm_call.instructions_sha256(body),
-            server_url=docker_mapped(target.base_url),
-            endpoint=llm_target.endpoint(target),
-            request=body,
-        )
-        async with SessionLocal() as session:
-            await store.update_input(session, job_id, job_input)
-
+        explainer = job_input.get("project_kind") == KIND_EXPLAINER
+        fixed = job_input.get("fixed_content")
         warnings: list[str] = []
-        outcome = await llm_call.ask_model(
-            job_id,
-            target,
-            body,
-            lambda result: self._read(result, story, library_cast, warnings),
-            timeout_s=REQUEST_TIMEOUT_S,
-        )
-        content: dict[str, Any] | None = outcome.value
-        if content is None:
-            await self._fail(job_id, f"The {self.kind} could not be found: {outcome.failure}")
-            return
+        record: dict[str, Any]
+        usage: dict[str, int] | None = None
+        content: dict[str, Any] | None
+        if isinstance(fixed, dict):
+            # EXPLAINER-003: the presenter or the set is already known, so no model is asked.
+            # The list goes through the same check as a model's answer.
+            try:
+                content = writer.check_items(
+                    cast(writer.Kind, self.kind),
+                    fixed,
+                    writer.cast_library_ids(library_cast),
+                    warnings,
+                )
+            except ValueError as exc:
+                await self._fail(job_id, f"The {self.kind} could not be set: {exc}")
+                return
+            record = {
+                "attempts": 0,
+                "answer": None,
+                "answer_usable": True,
+                "content": None,
+                "usage": None,
+            }
+        else:
+            await self._phase(job_id, phases.PREPARING_PROMPT)
+            body = self.build_body(story, bible_content, target.model, library_cast, explainer)
+            job_input.update(
+                instructions_sha256=llm_call.instructions_sha256(body),
+                server_url=docker_mapped(target.base_url),
+                endpoint=llm_target.endpoint(target),
+                request=body,
+            )
+            async with SessionLocal() as session:
+                await store.update_input(session, job_id, job_input)
+
+            # An explainer's studio is exactly one place (EXPLAINER-003).
+            exactly_one = explainer and self.kind == "environments"
+            outcome = await llm_call.ask_model(
+                job_id,
+                target,
+                body,
+                lambda result: self._read(result, story, library_cast, warnings, exactly_one),
+                timeout_s=REQUEST_TIMEOUT_S,
+            )
+            content = outcome.value
+            if content is None:
+                await self._fail(job_id, f"The {self.kind} could not be found: {outcome.failure}")
+                return
+            record = outcome.record()
+            usage = outcome.usage
 
         await self._phase(job_id, self.saving_phase)
         async with SessionLocal() as session:
@@ -178,7 +228,7 @@ class DiscoveryHandler(JobHandler):
                 cast_sha256=cast_sha256,
             )
             output = {
-                **outcome.record(),
+                **record,
                 "content": None,
                 "warnings": warnings,
                 "discovery_id": row.id,
@@ -200,7 +250,7 @@ class DiscoveryHandler(JobHandler):
             row.version,
             project_id,
             len(content[self.kind]),
-            outcome.usage,
+            usage,
         )
 
     # --- Small helpers ------------------------------------------------------------------
