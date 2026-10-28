@@ -14,11 +14,12 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import get_config
+from app.db import activity, state_memo  # noqa: F401  (activity: registers its session listeners)
 
 engine = create_async_engine(get_config().async_database_url)
 
@@ -45,10 +46,19 @@ def _set_sqlite_pragmas(dbapi_connection: object, _record: object) -> None:
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def get_session() -> AsyncGenerator[AsyncSession]:
-    """FastAPI dependency: one session per request, always closed afterwards."""
+async def get_session(request: Request) -> AsyncGenerator[AsyncSession]:
+    """FastAPI dependency: one session per request, always closed afterwards.
+
+    A GET request only reads, so each stage's `state()` is computed once per project in it
+    (`app/db/state_memo.py`). Any write on the session drops what was kept.
+    """
     async with SessionLocal() as session:
-        yield session
+        if request.method == "GET":
+            state_memo.enable(session)
+        try:
+            yield session
+        finally:
+            state_memo.disable(session)
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]

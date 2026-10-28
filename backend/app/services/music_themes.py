@@ -49,6 +49,7 @@ from app.db.models import (
     Project,
 )
 from app.db.session import SessionLocal
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.providers import music_generator
 from app.services import (
@@ -406,6 +407,7 @@ def _view(
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> MusicThemesState:
     """The project's themes with where their recordings stand. Worked out on every read."""
     bible = await music_bible.latest(session, project.id)

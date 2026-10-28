@@ -56,6 +56,7 @@ from app.db.models import (
     SceneStaging,
 )
 from app.db.session import SessionLocal
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
@@ -181,8 +182,12 @@ class EnvironmentEntry:
 
     @property
     def pictures_status(self) -> ViewStatus:
-        """The pictures of the plan's views taken together."""
+        """The pictures of the plan's views taken together. A plan with no views besides the
+        implicit `establishing` one (the master picture) has nothing to draw: it is ready.
+        """
         if not self.views:
+            if self.plan is not None and not self.plan.content["views"]:
+                return "ready"
             return "none"
         statuses = {item.status for item in self.views}
         if statuses == {"ready"}:
@@ -518,6 +523,7 @@ async def _master_image_id(
     return version.reference_image_id if version is not None else None
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ViewsState:
     """The environments scenes are set in, each with its view plan and where its views stand.
     Worked out on every read; nothing here is stored.

@@ -49,6 +49,7 @@ from app.db.models import (
     SceneDiscovery,
     StoryBible,
 )
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     character_definitions,
@@ -668,6 +669,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> De
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> DefinitionsState:
     """The newest list of scenes with where each definition stands. Worked out on every read;
     nothing here is stored.

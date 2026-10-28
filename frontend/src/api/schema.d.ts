@@ -4230,6 +4230,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Activity */
+        get: operations["get_activity_api_projects__project_id__activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/pipeline-board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pipeline Board */
+        get: operations["get_pipeline_board_api_projects__project_id__pipeline_board_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/cast": {
         parameters: {
             query?: never;
@@ -4401,6 +4435,19 @@ export interface components {
             scene_id?: string | null;
             /** Shot Id */
             shot_id?: string | null;
+        };
+        /** ActivityOut */
+        ActivityOut: {
+            /** Revision */
+            revision: string;
+            /** Queued */
+            queued: number;
+            /** Running */
+            running: number;
+            /** Paused */
+            paused: number;
+            /** Pipeline Active */
+            pipeline_active: boolean;
         };
         /**
          * AdoptIn
@@ -4607,6 +4654,52 @@ export interface components {
             baseline: string;
             /** Gesture Style */
             gesture_style: string;
+        };
+        /** BoardRunOut */
+        BoardRunOut: {
+            /** Job Id */
+            job_id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Paused At */
+            paused_at: string | null;
+            /** Review At */
+            review_at: string | null;
+        };
+        /** BoardStepOut */
+        BoardStepOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Group */
+            group: string;
+            /** Needs */
+            needs: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "off" | "running" | "attention" | "out_of_date" | "done" | "waiting" | "ready";
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /** Active */
+            active: number;
+            /** Stale */
+            stale: number;
+            /** Failed */
+            failed: number;
+            /** Blocked By */
+            blocked_by: string[];
+            /** Blocked Reason */
+            blocked_reason: string | null;
         };
         /** BoundaryIn */
         BoundaryIn: {
@@ -8681,6 +8774,27 @@ export interface components {
             project_name: string;
             /** Discovery Id */
             discovery_id: string;
+        };
+        /** PipelineBoardOut */
+        PipelineBoardOut: {
+            /** Revision */
+            revision: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "pipeline_review" | "pipeline_paused" | "pipeline_running" | "manual_running" | "idle";
+            run: components["schemas"]["BoardRunOut"] | null;
+            /** Queued */
+            queued: number;
+            /** Running */
+            running: number;
+            /** Paused */
+            paused: number;
+            /** Next Keys */
+            next_keys: string[];
+            /** Steps */
+            steps: components["schemas"]["BoardStepOut"][];
         };
         /** PipelineConfirmationOut */
         PipelineConfirmationOut: {
@@ -22908,6 +23022,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_activity_api_projects__project_id__activity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pipeline_board_api_projects__project_id__pipeline_board_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineBoardOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

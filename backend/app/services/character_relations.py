@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CharacterDiscovery, CharacterRelations, Job, Project, StoryBible
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import character_relation_writer as writer
 from app.services import discovery, provenance, story_bible
@@ -342,6 +343,7 @@ def _split(
     return standing, dropped
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> RelationsState:
     """The newest list of characters with the newest relations and where they stand. Worked out
     on every read; nothing here is stored.

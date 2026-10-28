@@ -67,6 +67,7 @@ from app.db.models import (
     Project,
 )
 from app.db.session import SessionLocal
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     character_definitions,
@@ -510,6 +511,7 @@ def _with_relations(
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ImagesState:
     """The newest list of characters with where each one's images stand. Worked out on every
     read; nothing here is stored.

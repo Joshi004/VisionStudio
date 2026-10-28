@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Job, Project, SceneDiscovery, ShotPlan, SpeechUnits, StoryBible
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     discovery,
@@ -986,6 +987,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ShotPlansState:
     """The newest list of scenes with where each scene's shot plan stands. Worked out on every
     read; nothing here is stored.

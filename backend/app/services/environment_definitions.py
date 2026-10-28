@@ -69,6 +69,7 @@ from app.db.models import (
     SceneDiscovery,
     StoryBible,
 )
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
@@ -708,6 +709,7 @@ async def _picture_state(
     return PictureState(status, stage, error, None, blocked is None, blocked)
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> DefinitionsState:
     """The newest list of environments with where each definition and picture stands. Worked
     out on every read; nothing here is stored.

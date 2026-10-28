@@ -46,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Job, Project, ShotContinuityCheck
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     provenance,
@@ -415,6 +416,7 @@ def _scene_state(
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ShotContinuityState:
     """The newest list of scenes with where each scene's continuity stands. Worked out on every
     read; nothing here is stored.

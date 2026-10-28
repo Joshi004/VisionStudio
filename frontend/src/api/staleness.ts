@@ -1,9 +1,10 @@
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction, useJobs } from "./jobs";
-import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { SLOW_POLL_MS, isJobActive } from "./polling";
 import { PROJECTS_KEY, isValidProjectId } from "./projects";
 import type { components } from "./schema";
 
@@ -38,18 +39,34 @@ async function fetchStaleness(projectId: number) {
 }
 
 /**
- * Everything out of date in the project, by step, with the reasons. It is loaded again every few
- * seconds while a job of the project is waiting or running, because a job changes what is
- * current.
+ * Everything out of date in the project, by step, with the reasons. The answer is expensive to
+ * compute, so it is loaded only while something shows it (`enabled`), again every 30 seconds
+ * while a job of the project is waiting or running (a job changes what is current), and once
+ * more when the last job ends.
  */
-export function useStaleness(projectId: number) {
+export function useStaleness(projectId: number, { enabled = true }: { enabled?: boolean } = {}) {
+  const queryClient = useQueryClient();
   const jobs = useJobs(isValidProjectId(projectId) ? projectId : undefined);
   const anyJobActive = jobs.data?.some(isJobActive) ?? false;
+
+  const wasActive = useRef(false);
+  useEffect(() => {
+    const before = wasActive.current;
+    wasActive.current = anyJobActive;
+    if (before && !anyJobActive) {
+      // Without cancelRefetch, a request already being computed is not started over.
+      void queryClient.invalidateQueries(
+        { queryKey: stalenessKey(projectId) },
+        { cancelRefetch: false },
+      );
+    }
+  }, [anyJobActive, projectId, queryClient]);
+
   return useQuery({
     queryKey: stalenessKey(projectId),
     queryFn: () => fetchStaleness(projectId),
-    enabled: isValidProjectId(projectId),
-    refetchInterval: anyJobActive ? ACTIVE_POLL_MS : false,
+    enabled: enabled && isValidProjectId(projectId),
+    refetchInterval: anyJobActive ? SLOW_POLL_MS : false,
   });
 }
 

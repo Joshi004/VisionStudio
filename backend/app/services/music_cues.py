@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Job, MusicBible, MusicCue, MusicCueAudit, MusicPlan, Project
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     music_bible,
@@ -529,6 +530,7 @@ def revision_allowed(loaded: Loaded) -> bool:
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> MusicCuesState:
     """The project's cue details with where they stand. Worked out on every read."""
     loaded = await load(session, project)

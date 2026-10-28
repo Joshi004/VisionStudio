@@ -53,6 +53,7 @@ from app.db.models import (
     Project,
     ShotReferenceManifest,
 )
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     look_state_resolution,
@@ -699,6 +700,7 @@ def _build(
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ShotReferencesState:
     """The newest list of scenes with where each shot's manifest stands. Worked out on every
     read; nothing here is stored.

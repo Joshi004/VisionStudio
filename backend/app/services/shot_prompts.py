@@ -36,6 +36,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import GenerationRequest, Job, Project, ShotDefinition, ShotPrompt
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     generation_requests,
@@ -222,6 +223,7 @@ def _refusal(request: GenerationRequest | None, request_status: str) -> str | No
     return None
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ShotPromptsState:
     """The newest list of scenes with where each shot's prompt stands. Worked out on every
     read; nothing here is stored.

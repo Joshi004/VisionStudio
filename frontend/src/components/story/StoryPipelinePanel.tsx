@@ -83,12 +83,13 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
   const [showPauses, setShowPauses] = useState(false);
   const [allowOverwrite, setAllowOverwrite] = useState(false);
   const [scope, setScope] = useState<PipelineScope>("all");
-  const staleness = useStaleness(projectId);
+  const regenerating = scope === "out_of_date";
+  // What is out of date is expensive to work out; it is asked only when this choice needs it.
+  const staleness = useStaleness(projectId, { enabled: regenerating });
   const outOfDateCount = staleness.data?.count ?? 0;
 
   const run = data?.run ?? null;
   const active = isJobActive(run);
-  const regenerating = scope === "out_of_date";
   const confirmations =
     (regenerating ? data?.regenerate_confirmations : data?.confirmations) ?? [];
   const needsConsent = confirmations.length > 0 && !allowOverwrite;
@@ -227,9 +228,11 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
             />
             {regenerating && (
               <Text size="xs" c="dimmed">
-                {outOfDateCount === 0
-                  ? "Nothing is out of date."
-                  : `${outOfDateCount} out of date (see the list below).`}
+                {staleness.isLoading
+                  ? "Checking what is out of date..."
+                  : outOfDateCount === 0
+                    ? "Nothing is out of date."
+                    : `${outOfDateCount} out of date (open "What is out of date" below to see the list).`}
               </Text>
             )}
           </Group>

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Project, SpeechUnits
+from app.db.state_memo import memoized_state
 from app.services import duration_policy, provenance, scene_events, speech_unit_planner
 from app.services.speech_unit_planner import SpeechRules
 
@@ -208,6 +209,7 @@ async def _newest_rows(session: AsyncSession, project_id: int) -> dict[str, Spee
     return newest
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> SpeechState:
     """The newest list of scenes with where each scene's speech units stand. Worked out on
     every read; nothing here is stored.

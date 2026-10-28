@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Job, MusicPlacement, MusicPlan, Project, ShotTake, SpeechUnitAudio
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     audio_analysis,
@@ -741,6 +742,7 @@ class MusicPlacementState:
         return self.job is not None and self.job.status in store.ACTIVE_STATUSES
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> MusicPlacementState:
     """The project's music placement with where it stands. Worked out on every read; nothing
     here is stored and no sound is measured.

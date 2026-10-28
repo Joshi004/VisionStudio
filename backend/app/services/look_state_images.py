@@ -57,6 +57,7 @@ from app.db.models import (
     ProjectEnvironmentLink,
 )
 from app.db.session import SessionLocal
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
@@ -563,6 +564,7 @@ async def _view_state_item(
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ImagesState:
     """The new looks and states of the newest resolution, with where each one's pictures stand.
     Worked out on every read; nothing here is stored.

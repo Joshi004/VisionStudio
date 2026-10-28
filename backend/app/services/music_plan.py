@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Job, MusicBible, MusicPlan, Project
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     music_bible,
@@ -521,6 +522,7 @@ class MusicPlanState:
     themes: list[dict[str, str]]
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> MusicPlanState:
     """The project's music plan with where it stands. Worked out on every read; nothing here
     is stored.

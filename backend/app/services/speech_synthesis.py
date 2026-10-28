@@ -43,6 +43,7 @@ from app.db.models import (
     SpeechUnitAudio,
     Voice,
 )
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.providers import speech_synthesizer
 from app.services import character_links, speech_chunks, speech_units, story_voices
@@ -384,6 +385,7 @@ def _scene_refusal(entry: speech_units.SceneEntry) -> str | None:
     return None
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> AudioState:
     """The newest list of scenes with the audio of each unit. Worked out on every read; nothing
     here is stored.

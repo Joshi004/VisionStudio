@@ -5,7 +5,7 @@ import { ApiError, describeError } from "../api/errors";
 import { isValidProjectId, useProject, useUpdateProject } from "../api/projects";
 import { ProjectSettingsForm } from "../components/projects/ProjectSettingsForm";
 import { settingsKey } from "../components/projects/settingsDraft";
-import { ProjectNotFound } from "./ProjectPage";
+import { ProjectNotFound } from "../components/projects/ProjectNotFound";
 
 export function ProjectSettingsPage() {
   const params = useParams();

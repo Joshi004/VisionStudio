@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Job, Project, SpeechUnitAudio, StoryRender
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import provenance, shot_plans, shot_takes, speech_synthesis, story_render_plan
 from app.services.storage import StorageError, get_storage
@@ -398,6 +399,7 @@ async def _jobs_of(session: AsyncSession, rows: list[StoryRender]) -> dict[int, 
     return {job.id: job for job in (await session.execute(statement)).scalars()}
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     """Whether the story can be rendered now, what the render would warn about, the newest
     render job and every finished render. Worked out on every read; nothing here is stored.

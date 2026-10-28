@@ -46,6 +46,7 @@ from app.db.models import (
     SceneDiscovery,
     StoryBible,
 )
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     character_definitions,
@@ -655,6 +656,7 @@ def _item(
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ResolutionState:
     """The newest list of scenes with what the newest resolution says for each. Worked out on
     every read; nothing here is stored.

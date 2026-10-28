@@ -36,6 +36,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, Project, SceneDiscovery, SceneEvents, StoryBible
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     character_definitions,
@@ -614,6 +615,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Ev
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> EventsState:
     """The newest list of scenes with where each scene's events stand. Worked out on every
     read; nothing here is stored.

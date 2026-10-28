@@ -56,6 +56,7 @@ from app.db.models import (
     ProjectCharacterLink,
     StoryBible,
 )
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
@@ -465,6 +466,7 @@ async def _newest_jobs(session: AsyncSession, project_id: int) -> dict[str, Job]
     return newest
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> DefinitionsState:
     """The newest list of characters with where each definition stands. Worked out on every
     read; nothing here is stored.

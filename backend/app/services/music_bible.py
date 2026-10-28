@@ -36,6 +36,7 @@ from app.db.models import (
     SceneDiscovery,
     StoryBible,
 )
+from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     discovery,
@@ -589,6 +590,7 @@ class MusicBibleState:
     places: list[dict[str, str]]
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> MusicBibleState:
     """The project's Music Bible with where it stands. Worked out on every read; nothing here
     is stored.

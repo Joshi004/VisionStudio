@@ -45,6 +45,7 @@ from sqlalchemy.orm import aliased
 from app.core import settings as settings_service
 from app.db.models import Job, LabMusicRun, MusicCue, MusicPlan, MusicTake, Project
 from app.db.session import SessionLocal
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.jobs import store
 from app.providers import music_generator
@@ -613,6 +614,7 @@ def _build_item(
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> MusicTakesState:
     """The project's takes with where they stand. Worked out on every read."""
     cues = await music_cues.state(session, project)

@@ -57,6 +57,7 @@ from app.db.models import (
     Voice,
 )
 from app.db.session import SessionLocal
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
@@ -333,6 +334,7 @@ async def _reused_voice(
     return await session.get(Voice, version.voice_id)
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> VoicesState:
     """The newest list of characters with where each one's voice stands. Worked out on every
     read; nothing here is stored.

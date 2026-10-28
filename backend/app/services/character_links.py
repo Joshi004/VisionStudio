@@ -48,6 +48,7 @@ from app.db.models import (
     ProjectCharacterLink,
     ProjectMissingLibraryItem,
 )
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.services import (
     character_library,
@@ -165,6 +166,7 @@ async def _link_infos(session: AsyncSession, links: list[ProjectCharacterLink]) 
     ]
 
 
+@memoized_state
 async def state(session: AsyncSession, project_id: int) -> LinksState:
     """The newest discovered list with each entry's link, and the links that are no longer in
     the list. Worked out on every read.

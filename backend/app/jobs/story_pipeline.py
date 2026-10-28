@@ -44,6 +44,7 @@ from typing import Any, Final, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import state_memo
 from app.db.models import Job, Project
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, phases, store
@@ -282,7 +283,10 @@ class StoryPipelineHandler(JobHandler):
         if waiting["paused_at"] is not None or waiting["review_at"] is not None:
             await session.commit()  # waiting for Continue: nothing to read or make
             return _Outcome(stopped=True)
-        result = await self._evaluate(session, run, project)
+        # Evaluating writes nothing, so each stage's state is worked out once. Starting jobs
+        # (`_apply`) writes, and reads fresh data.
+        async with state_memo.reading(session):
+            result = await self._evaluate(session, run, project)
         return await self._apply(session, run, project, result)
 
     @staticmethod

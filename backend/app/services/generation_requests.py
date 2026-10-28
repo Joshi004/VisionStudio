@@ -33,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import GenerationRequest, Project, ShotDefinition
+from app.db.state_memo import memoized_state
 from app.services import (
     duration_policy,
     generation_planner,
@@ -351,6 +352,7 @@ def _build(ctx: _Context, rows: dict[str, GenerationRequest]) -> GenerationReque
     )
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> GenerationRequestsState:
     """The newest list of scenes with where each shot's request stands. Worked out on every
     read; nothing here is stored.

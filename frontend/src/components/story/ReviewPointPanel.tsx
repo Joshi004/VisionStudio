@@ -10,6 +10,7 @@ import {
 } from "@mantine/core";
 
 import type { PipelineReview, RejectedTarget } from "../../api/storyPipeline";
+import { useProjectPanels } from "./projectPanels";
 
 type ReviewPointPanelProps = {
   review: PipelineReview;
@@ -22,8 +23,8 @@ function answerKey(step: string, target: string): string {
   return JSON.stringify([step, target]);
 }
 
-/** Moves the page to the stage panel that shows a step's work. */
-function showStep(stepKey: string) {
+/** Moves the page to the stage panel that shows a step's work (it is opened first). */
+function scrollToStep(stepKey: string) {
   document
     .getElementById(`pipeline-step-${stepKey}`)
     ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -41,6 +42,13 @@ export function ReviewPointPanel({
   onContinue,
 }: ReviewPointPanelProps) {
   const [rejected, setRejected] = useState<Record<string, boolean>>({});
+  const { openPanel } = useProjectPanels();
+
+  function showStep(stepKey: string) {
+    openPanel(stepKey);
+    // The panel is rendered by the next frame, so the scroll lands on its final position.
+    requestAnimationFrame(() => scrollToStep(stepKey));
+  }
 
   const rejectedTargets: RejectedTarget[] = review.steps.flatMap((step) =>
     step.targets

@@ -58,6 +58,7 @@ from app.db.models import (
     ShotTake,
     SpeechUnitAudio,
 )
+from app.db.state_memo import memoized_state
 from app.db.types import utcnow
 from app.jobs import store
 from app.providers import contract_guard, video_generator
@@ -477,6 +478,7 @@ async def dialogue_lines(session: AsyncSession, row: ShotTake) -> list[dialogue_
     return _dialogue_of(row, request_row.content if request_row is not None else None)
 
 
+@memoized_state
 async def state(session: AsyncSession, project: Project) -> ShotTakesState:
     """The newest list of scenes with where each shot's generation stands. Worked out on every
     read; nothing here is stored.
