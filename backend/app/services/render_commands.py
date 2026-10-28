@@ -30,6 +30,7 @@ plain file and never a protocol or an option.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -675,6 +676,23 @@ def master_filters(norm: Normalization | None) -> list[str]:
     ]
 
 
+_FILTER_SAFE_PATH: Final = re.compile(r"[A-Za-z0-9/_.\-]+")
+
+
+def subtitles_filter(subtitles: Path, fonts_dir: Path) -> str:
+    """The `subtitles` filter that burns an ASS file into the picture, with the fonts of
+    `fonts_dir` (and no other font file) loaded for it (EXPLAINER-008).
+
+    The two paths are written inside a filtergraph, where `:`, `,`, `'` and `\\` mean something,
+    so only paths made of letters, digits and `/ _ . -` are accepted. The render's temp files
+    and the app's fonts folder always are. Raises ValueError for any other path.
+    """
+    names = [str(subtitles.resolve()), str(fonts_dir.resolve())]
+    if not all(_FILTER_SAFE_PATH.fullmatch(name) for name in names):
+        raise ValueError("A caption file path has a character a filter cannot take.")
+    return f"subtitles=filename='{names[0]}':fontsdir='{names[1]}'"
+
+
 def final_encode_args(
     list_path: Path,
     premaster: Path,
@@ -682,11 +700,20 @@ def final_encode_args(
     *,
     fps: int,
     norm: Normalization | None,
+    captions: tuple[Path, Path] | None = None,
 ) -> list[str]:
     """The last stage: the joined shots' picture and the normalized pre-master, encoded as the
     finished H.264 and AAC video. The picture is the first input and the pre-master the second.
+
+    `captions` is `(ASS file, fonts folder)` for an explainer with captions: the picture then
+    goes through the `subtitles` filter. Without it the commands are exactly what they were
+    before captions, so a story is rendered as it always was.
     """
     graph = "[1:a:0]" + ",".join(master_filters(norm)) + "[out]"
+    picture = "0:v:0"
+    if captions is not None:
+        graph = f"[0:v:0]{subtitles_filter(*captions)}[v];{graph}"
+        picture = "[v]"
     return [
         *_BASE,
         "-f",
@@ -702,7 +729,7 @@ def final_encode_args(
         "-filter_complex",
         graph,
         "-map",
-        "0:v:0",
+        picture,
         "-map",
         "[out]",
         "-c:v",

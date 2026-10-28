@@ -42,13 +42,14 @@ _INVALID = {
 }
 
 Status = Literal["current", "out_of_date"]
-WarningCode = Literal["take_out_of_date", "take_without_sound"]
+WarningCode = Literal["take_out_of_date", "take_without_sound", "caption_timing_estimated"]
 
 
 class RenderWarningOut(BaseModel):
     code: WarningCode
-    scene_id: str
-    shot_id: str
+    # The shot the warning is about. None for a warning about the whole render (the captions).
+    scene_id: str | None = None
+    shot_id: str | None = None
     message: str
 
 

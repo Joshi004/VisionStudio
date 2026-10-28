@@ -20,6 +20,9 @@ changes nothing in a render that has started.
   refused without one (`render_music.gate`); the placement is read by id and recorded on the
   render, and a newer placement makes the render out of date. The mix and loudness settings are
   recorded on the render too.
+- **Captions (EXPLAINER-008).** An explainer with `captions` on reads the word timing of each
+  speech (`speech_word_timing`) and its render has word-synced captions. A speech with no stored
+  timing gets estimated times, which the plan warns about. A story never reads the timings.
 """
 
 from __future__ import annotations
@@ -32,10 +35,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Job, Project, SpeechUnitAudio, StoryRender
+from app.db.models import Job, Project, SpeechUnitAudio, SpeechWordTiming, StoryRender
 from app.db.state_memo import memoized_state
 from app.jobs import store
-from app.services import provenance, shot_plans, shot_takes, speech_synthesis, story_render_plan
+from app.services import (
+    caption_plan,
+    provenance,
+    shot_plans,
+    shot_takes,
+    speech_synthesis,
+    story_render_plan,
+    word_timings,
+)
+from app.services.project_kinds import KIND_EXPLAINER
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -112,14 +124,80 @@ def _recorded_audio(plan_inputs: Any) -> dict[str, dict[str, Any]]:
     return recorded
 
 
+def captions_wanted(project: Project) -> bool:
+    """Whether the render draws captions: an explainer with its captions switch on. A story
+    never does (E-10).
+    """
+    return project.kind == KIND_EXPLAINER and project.captions
+
+
+async def _caption_timings(
+    session: AsyncSession, project: Project
+) -> dict[int, SpeechWordTiming] | None:
+    """The stored word timing of every speech of the project, by the speech's audio id, or None
+    when the render has no captions (a story is never read for timings).
+    """
+    if not captions_wanted(project):
+        return None
+    rows = await session.execute(
+        select(SpeechWordTiming)
+        .where(SpeechWordTiming.project_id == project.id)
+        .execution_options(populate_existing=True)
+    )
+    return {row.speech_unit_audio_id: row for row in rows.scalars()}
+
+
+def _timing_words(row: SpeechWordTiming) -> tuple[tuple[str, float, float], ...] | None:
+    """The words of a stored timing as `(text, start_s, end_s)`, or None when it is unreadable."""
+    words: list[tuple[str, float, float]] = []
+    for word in row.words if isinstance(row.words, list) else []:
+        if not isinstance(word, dict):
+            return None
+        text, start, end = word.get("text"), word.get("start"), word.get("end")
+        if (
+            not isinstance(text, str)
+            or not isinstance(start, int | float)
+            or not isinstance(end, int | float)
+        ):
+            return None
+        words.append((text, float(start), float(end)))
+    return tuple(words)
+
+
+def _caption_timing(
+    audio: SpeechUnitAudio | None,
+    text: str | None,
+    timings: dict[int, SpeechWordTiming],
+) -> story_render_plan.WordTimingSource | None:
+    """The word timing the captions use for a speech: the stored one, or else times estimated
+    now from the script text (by character count, as `word_timings.align` does when nothing was
+    heard). None when the speech has no text or no length to share out.
+    """
+    if audio is None:
+        return None
+    stored = timings.get(audio.id)
+    words = _timing_words(stored) if stored is not None else None
+    if words is not None:
+        return story_render_plan.WordTimingSource(words)
+    if not text or not text.strip() or audio.duration_s is None or audio.duration_s <= 0:
+        return None
+    estimated = word_timings.align(text, [], audio.duration_s, 0)
+    return story_render_plan.WordTimingSource(
+        tuple((word["text"], word["start"], word["end"]) for word in estimated.words),
+        estimated_now=True,
+    )
+
+
 async def _unit_sources(
     session: AsyncSession,
     entry: shot_plans.SceneEntry,
     speech: dict[tuple[str, str], speech_synthesis.UnitEntry],
+    timings: dict[int, SpeechWordTiming] | None = None,
 ) -> list[story_render_plan.UnitSource]:
     """The narration the render uses: the speech made now for each unit when there is some, or
     else the speech the shot plan was measured from (PHASE-039: making a line again does not
-    make the plan out of date, so the plan's record can be older than the speech).
+    make the plan out of date, so the plan's record can be older than the speech). With
+    `timings` (an explainer's captions), each unit also gets its word timing.
     """
     timeline = entry.timeline
     if timeline is None or entry.row is None:
@@ -146,6 +224,13 @@ async def _unit_sources(
                 audio_id=audio.id if audio is not None else None,
                 path=audio.path if audio is not None else None,
                 file_exists=audio is not None and _file_exists(audio.path),
+                timing=(
+                    _caption_timing(
+                        audio, made.unit.get("text") if made is not None else None, timings
+                    )
+                    if timings is not None
+                    else None
+                ),
             )
         )
     return units
@@ -183,6 +268,7 @@ async def _scene_sources(
     plans: shot_plans.ShotPlansState,
     takes: shot_takes.ShotTakesState,
     speech: dict[tuple[str, str], speech_synthesis.UnitEntry],
+    timings: dict[int, SpeechWordTiming] | None = None,
 ) -> list[story_render_plan.SceneSource]:
     shots_by_scene = {
         scene.item["id"]: {shot.shot["id"]: shot for shot in scene.shots} for scene in takes.entries
@@ -204,7 +290,7 @@ async def _scene_sources(
                         take=_take_source(take_entry),
                     )
                 )
-            units = await _unit_sources(session, entry, speech)
+            units = await _unit_sources(session, entry, speech, timings)
         scenes.append(
             story_render_plan.SceneSource(
                 scene_id=scene_id,
@@ -250,8 +336,12 @@ def _plan_of(
     scenes: list[story_render_plan.SceneSource],
     mix: story_render_plan.MixSettings,
     music: story_render_plan.MusicSource | None = None,
+    captions: bool = True,
 ) -> tuple[story_render_plan.RenderPlan | None, str | None]:
-    """The plan of the next render, or the reason it cannot be made."""
+    """The plan of the next render, or the reason it cannot be made. `captions` is False for a
+    plan that only needs where things sit (the music placement): the scenes then need no word
+    timings.
+    """
     try:
         plan = story_render_plan.build_plan(
             scenes,
@@ -260,6 +350,11 @@ def _plan_of(
             height=project.out_height,
             mix=mix,
             music=music,
+            captions=(
+                caption_plan.style_for(project.out_width, project.out_height)
+                if captions and captions_wanted(project)
+                else None
+            ),
         )
     except story_render_plan.RenderPlanError as exc:
         return None, str(exc)
@@ -378,6 +473,9 @@ def _render_reasons(
         elif made.audio.id != unit.get("audio_id"):
             reasons.append(f"{label} was made again since this video was made.")
     reasons.extend(_music_reasons(recorded, *music))
+    # The captions are burned into the picture, so a changed switch needs a new render.
+    if isinstance(recorded.get("captions"), dict) != captions_wanted(music[0]):
+        reasons.append("The captions setting has changed since this video was made.")
     return reasons
 
 
@@ -417,7 +515,12 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None:
         plan, blocked = _plan_of(
-            project, await _scene_sources(session, plans, takes, speech), mix, gate.source
+            project,
+            await _scene_sources(
+                session, plans, takes, speech, await _caption_timings(session, project)
+            ),
+            mix,
+            gate.source,
         )
     if blocked is None and gate.blocked_reason is not None:
         plan, blocked = None, gate.blocked_reason
@@ -481,7 +584,8 @@ async def next_render_sources(session: AsyncSession, project: Project) -> Render
     scenes = await _scene_sources(session, plans, takes, speech)
     # Where the shots and the speech sit does not depend on the music, so the plan is made
     # without it (the placement itself is made from this timeline).
-    plan, blocked = _plan_of(project, scenes, story_render_plan.MixSettings())
+    # ... nor on the captions, which are drawn over the finished picture.
+    plan, blocked = _plan_of(project, scenes, story_render_plan.MixSettings(), captions=False)
     return RenderSources(scenes, plan, blocked, takes)
 
 
@@ -506,7 +610,9 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
     gate = await _music_gate(session, project)
     plan, blocked = _plan_of(
         project,
-        await _scene_sources(session, plans, takes, speech),
+        await _scene_sources(
+            session, plans, takes, speech, await _caption_timings(session, project)
+        ),
         await mix_settings(session),
         gate.source,
     )

@@ -40,6 +40,10 @@ the sound's own seconds (its time 0 is the first sample it plays):
 - *The video model's sound under a bed* (MD-17): the shot audio is lowered by a setting wherever a
   bed plays, never during a line of dialogue. The setting is 0 (off) until the owner tunes it.
 
+**Captions** (timeline version 3, EXPLAINER-008). For an explainer with captions on, `captions`
+holds the style and the caption groups made by `caption_plan.build_captions` from each speech's
+word timing (narration and dialogue alike), on the story's timeline. It is null otherwise.
+
 `master` holds the loudness the finished mix is brought to. Every constant used is recorded.
 """
 
@@ -50,11 +54,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from app.services import frame_counts, render_commands
+from app.services import caption_plan, frame_counts, render_commands
 
 # The shape of `job.input.timeline`. The job refuses a timeline it does not know. Version 2 adds
 # the music layers, the dip of the shot audio under a bed and the master loudness (MUSIC-012).
-TIMELINE_VERSION: Final = 2
+# Version 3 adds `captions`: the word-synced captions of an explainer, or null (EXPLAINER-008).
+TIMELINE_VERSION: Final = 3
 
 SHOT_TARGET_LUFS: Final = -16.0
 NARRATION_TARGET_LUFS: Final = -16.0
@@ -98,6 +103,8 @@ _MS_PER_S: Final = 1000
 # Warning codes.
 TAKE_OUT_OF_DATE: Final = "take_out_of_date"
 TAKE_WITHOUT_SOUND: Final = "take_without_sound"
+# A speech has no stored word timing, so its captions use estimated times (EXPLAINER-008).
+CAPTION_TIMING_ESTIMATED: Final = "caption_timing_estimated"
 
 
 class RenderPlanError(ValueError):
@@ -131,6 +138,18 @@ class ShotSource:
 
 
 @dataclass(frozen=True)
+class WordTimingSource:
+    """The time of each script word of a speech, for the captions (EXPLAINER-007's
+    `speech_word_timing`): `(word, start_s, end_s)` in seconds from the start of the file.
+    `estimated_now` is True when no timing was stored and the times were estimated for this
+    render, which the plan warns about.
+    """
+
+    words: tuple[tuple[str, float, float], ...]
+    estimated_now: bool = False
+
+
+@dataclass(frozen=True)
 class UnitSource:
     """A speech unit on its scene's timeline, and the file of its speech."""
 
@@ -143,6 +162,8 @@ class UnitSource:
     audio_id: int | None
     path: str | None
     file_exists: bool
+    # Only for an explainer whose captions are on: the word timing of the speech.
+    timing: WordTimingSource | None = None
 
 
 @dataclass(frozen=True)
@@ -513,9 +534,11 @@ def build_plan(
     height: int,
     mix: MixSettings | None = None,
     music: MusicSource | None = None,
+    captions: caption_plan.CaptionStyle | None = None,
 ) -> RenderPlan:
     """The frozen timeline of a render and its warnings. Raises RenderPlanError with the reason
-    when the story cannot be rendered now. `music` is None for a render without music.
+    when the story cannot be rendered now. `music` is None for a render without music, and
+    `captions` is None for a render without captions (a story, or an explainer with them off).
     """
     mix = mix or MixSettings()
     if fps < 1 or width < 2 or height < 2:
@@ -530,6 +553,8 @@ def build_plan(
     narration_spans: list[tuple[float, float]] = []
     dialogue_spans: list[tuple[float, float]] = []
     unplaced: list[str] = []
+    timed_units: list[caption_plan.TimedUnit] = []
+    estimated_units: list[str] = []
     cursor = 0  # the frame the last shot ended on
 
     for scene in scenes:
@@ -592,6 +617,25 @@ def build_plan(
         for unit in scene.units:
             start_s = scene.story_start_s + unit.start_s
             end_s = scene.story_start_s + unit.end_s
+            # Captions follow the speech of a narration and of a line of dialogue alike. A line
+            # of dialogue is in its clip at the place its unit has on the timeline.
+            if (
+                captions is not None
+                and unit.timing is not None
+                and unit.audio_id is not None
+                and unit.file_exists
+            ):
+                timed_units.append(
+                    caption_plan.TimedUnit(
+                        scene_id=scene.scene_id,
+                        unit_id=unit.unit_id,
+                        audio_id=unit.audio_id,
+                        start_ms=_ms(start_s),
+                        words=unit.timing.words,
+                    )
+                )
+                if unit.timing.estimated_now:
+                    estimated_units.append(f"{unit.unit_id} of scene {scene.index}")
             if unit.kind == "dialogue":
                 dialogue_spans.append((start_s, end_s))
                 continue
@@ -652,6 +696,20 @@ def build_plan(
                     BED_SHOT_RAMP_S,
                 )
 
+    captions_entry: dict[str, Any] | None = None
+    if captions is not None:
+        groups = caption_plan.build_captions(timed_units, captions, _ms(cursor / fps))
+        captions_entry = caption_plan.track_dict(captions, groups)
+        captions_entry["estimated_units"] = estimated_units
+        if estimated_units:
+            warnings.append(
+                {
+                    "code": CAPTION_TIMING_ESTIMATED,
+                    "message": "The words of these speeches are not timed yet, so their captions "
+                    f"use estimated times: {_named(estimated_units)}.",
+                }
+            )
+
     timeline: dict[str, Any] = {
         "version": TIMELINE_VERSION,
         "fps": fps,
@@ -672,6 +730,7 @@ def build_plan(
         "shots": shots,
         "narration": narration,
         "music": music_entry,
+        "captions": captions_entry,
         "master": master(mix),
         "constants": constants(mix),
         "warnings": warnings,

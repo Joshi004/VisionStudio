@@ -9872,11 +9872,11 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "take_out_of_date" | "take_without_sound";
+            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated";
             /** Scene Id */
-            scene_id: string;
+            scene_id?: string | null;
             /** Shot Id */
-            shot_id: string;
+            shot_id?: string | null;
             /** Message */
             message: string;
         };

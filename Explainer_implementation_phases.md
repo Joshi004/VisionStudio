@@ -237,7 +237,7 @@ Checked on throwaway data: migration `0073` up, down and up again, and `alembic 
 
 ### EXPLAINER-008 — Word-synced captions burned into the render
 
-**Status:** Not Started
+**Status:** Done (code). The playback and phone checks are still the owner's (see the completion notes).
 
 **Objective.** When `captions` is on, the rendered explainer shows word-synced captions, with the word being spoken highlighted.
 
@@ -279,11 +279,32 @@ Checked on throwaway data: migration `0073` up, down and up again, and `alembic 
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Caption list in the timeline, version bump
-- [ ] ASS writer, bundled font, burn-in in the final encode
-- [ ] Two layouts; owner check on a phone; docs; standard checks
+- [x] Caption list in the timeline, version bump
+- [x] ASS writer, bundled font, burn-in in the final encode
+- [x] Two layouts; docs; standard checks
+- [ ] Owner check on a phone
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-28.
+
+What was decided (the four "Planning decides" items):
+
+- **Font:** Montserrat ExtraBold (SIL Open Font License), `backend/app/assets/fonts/Montserrat-ExtraBold.ttf`. Its licence is in `backend/app/assets/licenses/Montserrat-OFL.txt`, outside the fonts folder because libass logs an error for every non-font file in `fontsdir`. The ASS family name is `Montserrat ExtraBold`, regular style.
+- **Text:** upper case, sentence punctuation removed (`. , ! ? ; :`, quotes, brackets and dashes), apostrophes, hyphens inside a word, `%`, `$`, `-` before a number and the points of numbers such as "3.5" and "1,000" kept.
+- **Layout** (fractions of the output size; `services/caption_plan.style_for`): landscape has a font of 6.5 percent of the height, a bottom margin of 9 percent and at most 28 characters in a group. Portrait has a font of 4.2 percent of the height, a bottom margin of 28 percent (above the Shorts and Reels buttons) and at most 14 characters in a group (the plan said 16, but 16 capitals of this font do not fit between the side margins). The highlight is `#FFD60A` until EXPLAINER-010.
+- **Missing timing at Render:** the speech gets estimated times (character count, as EXPLAINER-007's fallback) and the plan carries one warning, `caption_timing_estimated`, which the render panel shows before Render is pressed. A speech whose stored timing is itself `estimated` gives no warning.
+
+What was built:
+
+- `services/caption_plan.py` (pure): text rule, style, grouping, story-time mapping, and reading the frozen track back. A group is at most 4 words, split into near-equal parts (5 words are 3 and 2). It breaks at a sentence mark and at a pause of 0.30 s or more, never holds two speeches, stays up at least 0.4 s unless the next group starts sooner, and a gap under 0.25 s inside a speech is closed.
+- `services/caption_ass.py` (pure): the ASS file. **Deviation from the scope:** the highlight is not made with `\k` karaoke tags, because they leave every word already spoken highlighted. Each word gets its own event, which shows the whole group with that one word coloured; the events of a group meet exactly, so only the word being spoken is highlighted.
+- `story_render_plan`: timeline version 3 with `captions` (null for a story and for captions off), narration and dialogue speeches alike. `story_renders` reads `speech_word_timing` only for an explainer with captions on, and a render is out of date when the captions setting changed since. Music placement (`next_render_sources`) is made without captions.
+- `render_commands.final_encode_args(captions=...)` adds the `subtitles` filter in front of the picture; without it the command is exactly what it was. The two paths in the filter are checked against a safe character set. `jobs/render_story.py` has a new phase, "writing the captions", writes the file in the temp folder and records `output.captions`.
+
+Checked on throwaway data: the backend container's FFmpeg 7.1.5 lists `subtitles` and `ass`, and burns a test ASS with the bundled font through `fontsdir` (the picture shows Montserrat) with an unchanged frame count. A plan was built for a landscape and a portrait output with a narration, a dialogue and an estimated speech, read back with `parse_timeline`, written as ASS and burned in with `final_encode_args`: the frame count equals the timeline's, and a render with `captions` off has no `subtitles` filter and the old `-map 0:v:0`. A path with a space and a quote is refused. Ruff passes. There are no automated tests, as asked.
+
+**Known limits.** A presenter shot whose speech was made again after its take uses the current speech's timing while its clip holds the old audio (the take already shows as out of date). A speech that gets real timing after a render with estimated timing does not make that render out of date. libass logs "Fontconfig error: No writable cache directories" in the container; it is harmless (the bundled font is loaded from `fontsdir`), and it is only shown if a render fails.
+
+**Still for the owner (needs the GPU server and watching):** play one landscape and one portrait explainer and check that the highlight follows the voice over the whole render; on a phone, check that the portrait captions are not covered by the Shorts or Reels buttons (the 28 percent margin is a starting value); render once with `captions` off, and one story, and compare them with before. The backend image must be rebuilt (`docker compose up -d --build backend`) for the new code and font to be in it.
 
 ### EXPLAINER-009 — Callout plan and review
 
@@ -427,7 +448,7 @@ Checked on throwaway data: migration `0073` up, down and up again, and `alembic 
 | EXPLAINER-005 | Done | Run by the owner through EXPLAINER-006. |
 | EXPLAINER-006 | Done | Owner reported it passed on 2026-10-28. |
 | EXPLAINER-007 | Done | Caption settings and word timings. Migration `0073`. Owner still checks the timings by playback. |
-| EXPLAINER-008 | Not Started | Word-synced captions burned in. |
+| EXPLAINER-008 | Done | Word-synced captions burned in. Timeline version 3. Owner still checks the highlight and the portrait margin by playback and on a phone. |
 | EXPLAINER-009 | Not Started | Callout plan and review. Can run in parallel with 008. |
 | EXPLAINER-010 | Not Started | Callouts drawn, and colours. |
 | EXPLAINER-011 | Not Started | Optional, later. |
