@@ -50,6 +50,9 @@ class ProjectCreate(BaseModel):
     kind: ProjectKind = "story"
     presenter_character_id: StrictInt | None = None
     set_environment_id: StrictInt | None = None
+    # Word-synced captions and callouts (EXPLAINER-007). Only an explainer keeps them.
+    captions: StrictBool = True
+    callouts: StrictBool = True
 
 
 class ProjectUpdate(BaseModel):
@@ -72,6 +75,10 @@ class ProjectUpdate(BaseModel):
     music_enabled: StrictBool | None = None
     # Whether a render includes the beds and point sounds (MUSIC-012). Can be changed at any time.
     ambience_enabled: StrictBool | None = None
+    # Whether an explainer's render draws captions, and callouts (EXPLAINER-007). Only an
+    # explainer can change them, at any time.
+    captions: StrictBool | None = None
+    callouts: StrictBool | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -111,6 +118,10 @@ class ProjectDetail(BaseModel):
     music_enabled: bool
     # Whether a render includes the beds and point sounds. On by default.
     ambience_enabled: bool
+    # Whether an explainer gets word-synced captions, and callouts. On by default. A story
+    # never reads them.
+    captions: bool
+    callouts: bool
     story_length: StoryLengthOut
 
 
@@ -154,6 +165,8 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         review_points=_review_points(project),
         music_enabled=project.music_enabled,
         ambience_enabled=project.ambience_enabled,
+        captions=project.captions,
+        callouts=project.callouts,
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,
@@ -205,6 +218,8 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             body.kind,
             body.presenter_character_id,
             body.set_environment_id,
+            body.captions,
+            body.callouts,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

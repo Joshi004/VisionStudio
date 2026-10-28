@@ -154,6 +154,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (EXPLAINER-002 project kind, 2026-10-27):** migration `0072`. **A project says what it is, once, when it is created: a `story` or an `explainer`.** (1) **One new column, `project.kind`** (Section 4.1): `story` or `explainer`, NOT NULL, default `story` (every project made before this reads `story`), with the CHECK `ck_project_kind_valid`. It is never changed after creation: `PATCH /api/projects/{id}` has no `kind` field. An explainer always has `speech_mode = 'both'`, and its cast (one presenter and at most one set, both `as_is`) is written in the same transaction as the project and cannot be changed afterwards. (2) **No new table, no new job type, no new setting.** The kind reaches the prompts through the job inputs: `speech_mode` of the `extract_events` and `plan_shots` jobs can now also be `explainer`, a `define_shot` job has `explainer` (boolean, absent reads false), and a stored generation request has `explainer: true` only for an explainer's shot (and its audios have `marker: 'fully_copy'`). A B-roll shot of an explainer has a `shot_reference_manifest` with an empty `references` list. Nothing already stored changes. See `Explainer_implementation_phases.md`.
 
+**Update (EXPLAINER-007 caption settings and word timings, 2026-10-28):** migration `0073`. **An explainer can have word-synced captions and callouts, and every speech of an explainer gets a start and an end time for each of its script words.** (1) **Two new columns, `project.captions` and `project.callouts`** (Section 4.1; BOOLEAN NOT NULL DEFAULT 1, on for every project, existing ones included). They are read only for an explainer, at render time, so `PATCH /api/projects/{id}` may change them at any time; for a story the PATCH is refused with 422, and `POST /api/projects` keeps the defaults. (2) **`job.type` gains `time_speech_words`**: the CHECK is rebuilt in batch mode, so `job` now has forty-four types. It is a job of the project, `provider='gpu'`, restart rule `resume`, deduped by `speech_unit_audio_id` (Section 5). (3) **One new table, `speech_word_timing`** (Section 4.68): one row per `speech_unit_audio` row (`UNIQUE`, `ON DELETE CASCADE`), with the script's words in order, each with its `start` and `end` in seconds from the start of the file, and how the times were made (`parakeet` or `estimated`). A new speech is a new audio row, so it gets new timings, and an unchanged unit keeps its old ones. (4) **One new global setting** (Section 6): `word_timing_match_threshold` (70, group `Speech`). (5) **A new pipeline step, `word_timings`** ("Time the words"), after `speech_synthesis`: done for a project that does not want timings (a story, or an explainer with captions and callouts both off), which the board shows as `off`. The job is also queued automatically, in the transaction that stores a speech, for an explainer with captions or callouts on. No existing row is changed and nothing is backfilled. See Sections 4.1, 4.68, 5 and 6.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -466,6 +468,9 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `speech_unit_audio` | `project_id` | `project.id` | No (`CASCADE`). PHASE-019 |
 | `speech_unit_audio` | `voice_id` | `voice.id` | Yes (the saved voice that spoke the unit; `SET NULL`). PHASE-019 |
 | `speech_unit_audio` | `job_id` | `job.id` | Yes (the `synthesize_speech_unit` job that made it; `SET NULL`). PHASE-019 |
+| `speech_word_timing` | `project_id` | `project.id` | No (`CASCADE`). EXPLAINER-007 |
+| `speech_word_timing` | `speech_unit_audio_id` | `speech_unit_audio.id` | No (`CASCADE`; one timing per speech, `UNIQUE`). EXPLAINER-007 |
+| `speech_word_timing` | `job_id` | `job.id` | Yes (the `time_speech_words` job that made it; `SET NULL`). EXPLAINER-007 |
 | `shot_plan` | `project_id` | `project.id` | No (`CASCADE`). PHASE-020 |
 | `shot_plan` | `job_id` | `job.id` | Yes (the `plan_shots` job that wrote the version; `SET NULL`). PHASE-020 |
 | `shot_definition` | `project_id` | `project.id` | No (`CASCADE`). PHASE-022 |
@@ -535,6 +540,8 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `review_points` | JSON | NOT NULL | `'[]'` | The review points the project has enabled (PHASE-041): a list of `story_structure` \| `images` \| `scenes` \| `shot_plans` \| `shots`, in the order of the pipeline, without repeats. A run of the story pipeline stops at each one, once, after every step of that stage is complete and the run made something in it, and goes on when the user presses Continue. None by default. Changed by `PATCH /api/projects/{id}` (the whole list) |
 | `music_enabled` | BOOLEAN | NOT NULL | `1` | MUSIC-006. Whether the story gets planned music. On for every project, new and existing. `PATCH /api/projects/{id}` may change it at any time (a JSON `true` or `false`; anything else is refused with 422). When it is `0`, the pipeline step `music_bible` is skipped as complete and the Music Bible panel only says music is off. The rows already made are kept |
 | `ambience_enabled` | BOOLEAN | NOT NULL | `1` | MUSIC-012. Whether a render includes the ambience beds and the point sounds Stable Audio makes. On for every project, new and existing. `PATCH /api/projects/{id}` may change it at any time (a JSON `true` or `false`; anything else is refused with 422). It matters only while `music_enabled` is on, and it changes the render, not the placement: a render made with another value is out of date, the music is not placed again |
+| `captions` | BOOLEAN | NOT NULL | `1` | EXPLAINER-007. Whether an explainer's render draws word-synced captions. On for every project, new and existing, and only read for an explainer. `PATCH /api/projects/{id}` may change it at any time for an explainer (a JSON `true` or `false`; anything else, or any PATCH of a story, is refused with 422). It is read at render time, so changing it makes nothing out of date. While `captions` or `callouts` is on, an explainer's speeches get word timings (Section 4.68) |
+| `callouts` | BOOLEAN | NOT NULL | `1` | EXPLAINER-007. Whether an explainer's render draws callouts. The same rules as `captions` |
 
 ```sql
 CREATE TABLE project (
@@ -552,7 +559,11 @@ CREATE TABLE project (
         CHECK (speech_mode IN ('both', 'no_dialogue', 'no_narration')),
     kind               TEXT NOT NULL DEFAULT 'story'
         CHECK (kind IN ('story', 'explainer')),
-    review_points      JSON NOT NULL DEFAULT '[]'
+    review_points      JSON NOT NULL DEFAULT '[]',
+    music_enabled      BOOLEAN NOT NULL DEFAULT 1,
+    ambience_enabled   BOOLEAN NOT NULL DEFAULT 1,
+    captions           BOOLEAN NOT NULL DEFAULT 1,
+    callouts           BOOLEAN NOT NULL DEFAULT 1
 );
 ```
 
@@ -3163,6 +3174,39 @@ CREATE INDEX idx_music_take_run ON music_take (lab_run_id);
 CREATE INDEX idx_music_take_project ON music_take (project_id);
 ```
 
+### 4.68 `speech_word_timing`
+
+*Added in EXPLAINER-007 (migration `0073`).* The time of every script word of one speech of an explainer (E-12), so that captions and callouts can follow the presenter's voice. There is **one row per `speech_unit_audio` row** (`speech_unit_audio_id` is `UNIQUE`): the timing belongs to the audio, so a speech made again (a new audio row) gets new timings, and an unchanged unit keeps its old ones. The `time_speech_words` job writes the row in the same transaction that finishes it, and a row is never changed afterwards. The words are the **script's** (the audio row's `text`), never a transcript. Parakeet transcribes the stored WAV, the heard words are matched to the script's words (`services/word_timings.align`), and when too few words match, each word gets its share of the speech's length by character count instead (`source = 'estimated'`). The rules are in `services/word_timings.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `speech_unit_audio_id` | INTEGER, FK → `speech_unit_audio.id` | NOT NULL | — | The speech the times belong to. `UNIQUE`, `ON DELETE CASCADE` |
+| `source` | TEXT | NOT NULL | — | `parakeet` (the heard times, matched to the script) or `estimated` (too few words matched, or nothing was heard) (`CHECK`) |
+| `match_percent` | REAL | NOT NULL | — | The share of the script's words (tokens) that matched what was heard exactly, 0 to 100, one decimal. 0 when nothing was heard |
+| `threshold` | INTEGER | NOT NULL | — | The `word_timing_match_threshold` setting when the row was made. `source` is `estimated` when `match_percent` is below it |
+| `words` | JSON | NOT NULL | — | The script's words in order: `[{"text", "start", "end"}]`, times in seconds from the start of the file, three decimals, never going backwards, never past the speech's length |
+| `heard_text` | TEXT | NOT NULL | `''` | What Parakeet heard, as it wrote it |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `time_speech_words` job. `ON DELETE SET NULL` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE speech_word_timing (
+    id                   INTEGER PRIMARY KEY,
+    project_id           INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    speech_unit_audio_id INTEGER NOT NULL UNIQUE REFERENCES speech_unit_audio(id) ON DELETE CASCADE,
+    source               TEXT NOT NULL CHECK (source IN ('parakeet', 'estimated')),
+    match_percent        REAL NOT NULL,
+    threshold            INTEGER NOT NULL,
+    words                JSON NOT NULL,
+    heard_text           TEXT NOT NULL DEFAULT '',
+    job_id               INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_speech_word_timing_project ON speech_word_timing (project_id);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -4274,6 +4318,10 @@ One job per press of **Check takes**. It belongs to a project, is `provider='loc
 
 One job per take with dialogue. It belongs to a project, is `provider='gpu'` with the restart rule `resume`, and is deduped by `take_id` (two presses on one take make one job, two takes run side by side). The input is `{"requested": "check_take_dialogue", "take_id": 41}` until the transcription is submitted; then `server_url`, `upload` (`filename`, `remote_asset_id`), `endpoint` (`/v1/parakeet/transcribe`) and `body` are added next to those keys. The transcription URL setting decides the server (blank means the GPU server URL). `output` is `{"take_id": 41, "take_number": 2, "processing_time": 0.4, "check": {"passed": true, "similarity": 100.0, "threshold": 80, "problems": []}, "purge": {...}}` (`problems` is the list of problem codes; the messages are on the take). The job writes `shot_take.dialogue_check` (and `selected_at` for a take that passed and has none) in the transaction that finishes it. A job that ends normally is `succeeded` even when the check failed: the result is on the take. It is not in the types that are cancelled on the server (it runs for seconds).
 
+### `job.input` and `job.output` for a `time_speech_words` job (EXPLAINER-007)
+
+One job per stored speech of an explainer with captions or callouts on. It belongs to a project, is `provider='gpu'` with the restart rule `resume`, and is deduped by `speech_unit_audio_id` (two presses on one speech make one job, two speeches run side by side). It is queued in the transaction that stores the speech (`jobs/synthesize_speech_unit.py`), or by the pipeline step `word_timings` for a speech that has no timing. The input is `{"requested": "time_speech_words", "speech_unit_audio_id": 41}` until the transcription is submitted; then `server_url`, `upload` (`filename`, `remote_asset_id`), `endpoint` (`/v1/parakeet/transcribe`) and `body` are added next to those keys. The transcription URL setting decides the server (blank means the GPU server URL). `output` is `{"speech_unit_audio_id": 41, "processing_time": 0.3, "timing": {"source": "parakeet", "match_percent": 92.3, "threshold": 70, "words": 14}, "purge": {...}}`, or `"timing": {"kept": 7}` when the speech was timed by an earlier job in the meantime (that result stands). The job writes one `speech_word_timing` row (Section 4.68) in the transaction that finishes it. An empty transcript is a valid answer: it gives `estimated` timing, not a failed job. A job that fails leaves the speech not timed, and the pipeline step queues it again. It is not in the types that are cancelled on the server (it runs for seconds).
+
 ### `job.input` and `job.output` for a `select_shot_references` job (PHASE-033)
 
 One job per shot. It belongs to a project, is `provider='llm'` with the restart rule `never_rerun` (a restart never repeats a paid call: the user presses **Select references** again), and is deduped by `shot_key` (`scene_id/shot_id`: two presses on one shot make one job, two shots run side by side). The input holds `shot_key`, `scene_id`, `shot_id`, `shot_definition_id`, `shot_definition` (the stored specification), `catalog` (every candidate picture as `services/reference_selection.CatalogPicture.as_dict` gives it) and `inputs` (what is written onto the manifest, D-3); the job adds `instructions_sha256`, `server_url`, `endpoint` and the exact `request`. The output is the shared record of `llm_call.Outcome` (`attempts`, `answer` as the checked selection, `answer_usable`, `content` null, `usage`) plus `scene_id`, `shot_id`, `version` (the manifest), `method` (`llm` or `deterministic`), `fallback_reason`, `pictures` and `seconds`. A job that ends with the fixed rule's choice is `succeeded`: the manifest says how it was chosen. It fails only when the fixed rule refuses too, with both reasons. Cancelling it stores nothing.
@@ -4406,6 +4454,7 @@ One job per render. It belongs to a project, is `provider='local'` with the rest
 | `dialogue_match_threshold` | `80` | whole number, from 0 to 100 (PHASE-031, group `Shot duration`). The percent of words that must match when the speech in a clip with dialogue is compared with the shot's lines (case and punctuation ignored). Below it the take fails its dialogue check and is generated again like any failed clip (a new GPU run of 10 to 20 minutes). 100 needs every word; a clip where nothing was heard fails at any value. A percent, not a length, so it is not part of the order above |
 | `shot_continuity_max_rounds` | `2` | whole number, from 0 to 5 (PHASE-023, group `Shot duration`). How many rounds of defining shots again a scene gets when its shots do not line up at a cut. Each round is one paid model call per shot defined again, plus one for the next check. 0 still checks the scene but defines nothing again. It is a count, not a length, so it is not part of the order above. Defining a shot, or pressing Check continuity, starts the count again |
 | `speech_words_per_minute` | `150` | from 60 to 300 (PHASE-018, group `Speech`). The pace used to estimate how long a speech unit takes to say: its words divided by this. A starting value and not a measurement, separate from `story_words_per_minute`. A plan made with another pace is out of date (`services/speech_unit_planner.py`) |
+| `word_timing_match_threshold` | `70` | whole number, from 0 to 100 (EXPLAINER-007, group `Speech`). The percent of an explainer speech's script words that must match what Parakeet hears in it for the heard times to be used. Below it, each word gets its share of the speech's length by character count, and the row is marked `estimated`. A percent, not a length |
 | `narration_unit_max_seconds` | `0` | whole seconds, from 0 to 60 (PHASE-018, group `Speech`). A narration event estimated above this is cut at sentences, then clauses. **0 means use `shot_target_max_seconds`** |
 | `dialogue_shot_margin_seconds` | `2` | whole seconds, from 0 to 13 (PHASE-018, group `Speech`). Dialogue plays inside one shot, so a line estimated above `h3_max_shot_seconds` minus this margin is cut at sentence ends. A margin that leaves under 1 s refuses planning with a readable reason |
 | `story_words_per_minute` | `150` | from 60 to 300 (PHASE-003, group `Story`). The speaking pace used to estimate a story's finished length: its word count divided by this. A common narration pace, a starting value and not a measurement. Affects only the estimate (`services/story_length.py`) |

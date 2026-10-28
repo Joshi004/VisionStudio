@@ -13,6 +13,10 @@ export type Draft = {
   music_enabled: boolean;
   /** Whether a render includes the beds and the point sounds (MUSIC-012). */
   ambience_enabled: boolean;
+  /** Whether an explainer's render draws word-synced captions (EXPLAINER-007). */
+  captions: boolean;
+  /** Whether an explainer's render draws callouts (EXPLAINER-007). */
+  callouts: boolean;
 };
 
 export const NUMBER_FIELDS = ["gen_width", "gen_height", "out_width", "out_height", "fps"] as const;
@@ -27,6 +31,8 @@ export function initialDraft(project: ProjectDetail): Draft {
     fps: project.fps,
     music_enabled: project.music_enabled,
     ambience_enabled: project.ambience_enabled,
+    captions: project.captions,
+    callouts: project.callouts,
   };
 }
 
@@ -46,6 +52,12 @@ export function changedFields(project: ProjectDetail, draft: Draft): ProjectUpda
   }
   if (draft.ambience_enabled !== saved.ambience_enabled) {
     changes.ambience_enabled = draft.ambience_enabled;
+  }
+  if (draft.captions !== saved.captions) {
+    changes.captions = draft.captions;
+  }
+  if (draft.callouts !== saved.callouts) {
+    changes.callouts = draft.callouts;
   }
   for (const field of NUMBER_FIELDS) {
     if (draft[field] !== saved[field]) {

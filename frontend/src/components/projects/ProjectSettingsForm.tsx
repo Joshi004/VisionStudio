@@ -142,6 +142,28 @@ export function ProjectSettingsForm({
           </Stack>
         </Paper>
 
+        {project.kind === "explainer" && (
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="xs">
+              <Title order={4}>Captions and callouts</Title>
+              <Switch
+                label="Word-synced captions"
+                checked={draft.captions}
+                onChange={(event) => edit("captions", event.currentTarget.checked)}
+              />
+              <Switch
+                label="Callouts"
+                checked={draft.callouts}
+                onChange={(event) => edit("callouts", event.currentTarget.checked)}
+              />
+              <Text size="xs" c="dimmed">
+                Both are drawn when the video is rendered, so they can be changed at any time
+                without making anything again.
+              </Text>
+            </Stack>
+          </Paper>
+        )}
+
         <Paper withBorder p="md" radius="md">
           <Stack gap="md">
             <Group gap="sm">

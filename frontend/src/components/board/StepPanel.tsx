@@ -185,6 +185,7 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <LookStateImagesPanel projectId={projectId} />;
       case "speech_units":
       case "speech_synthesis":
+      case "word_timings":
         return <SpeechUnitsPanel projectId={projectId} />;
       case "music_bible":
         return <MusicBiblePanel projectId={projectId} hasStory={hasStory} />;

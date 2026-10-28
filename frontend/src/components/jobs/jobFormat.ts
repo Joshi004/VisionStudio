@@ -44,6 +44,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   rewrite_music_prompt: "Music prompt rewrite",
   place_music: "Music placement",
   preview_music_mix: "Music preview",
+  time_speech_words: "Time speech words",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {

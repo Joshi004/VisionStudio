@@ -11,7 +11,8 @@ of times.
 
 One status per step, the first rule that fits (`step_status`):
 
-1. `off`: the step is switched off for the project (the music steps with music off).
+1. `off`: the step is switched off for the project (the music steps with music off, and the
+   word timings of a story or of an explainer with captions and callouts both off).
 2. `running`: a target has work going on (a job queued or running, or its follow-on work is
    about to show up).
 3. `attention`: a target failed and nothing is going on for it.
@@ -34,6 +35,7 @@ from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
 from app.services import story_pipeline as pipeline
+from app.services import word_timings
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
 
@@ -56,6 +58,10 @@ MUSIC_STEPS: Final = frozenset(
     }
 )
 
+# The step that is switched off for every project but an explainer with captions or callouts on
+# (EXPLAINER-007).
+WORD_TIMINGS_STEP: Final = "word_timings"
+
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -76,6 +82,7 @@ GROUPS: Final[dict[str, str]] = {
     "look_state_images": "scenes",
     "speech_units": "speech",
     "speech_synthesis": "speech",
+    "word_timings": "speech",
     "music_bible": "music",
     "music_themes": "music",
     "music_plan": "music",
@@ -251,7 +258,9 @@ async def build(session: AsyncSession, project: Project) -> Board:
     statuses: dict[str, BoardStatus] = {}
     steps: list[BoardStep] = []
     for step in STEPS:  # the order of STEPS puts every step after the steps it needs
-        off = music_off and step.key in MUSIC_STEPS
+        off = (music_off and step.key in MUSIC_STEPS) or (
+            step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project)
+        )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (
             StepCounts() if off else await _read_step(session, project, step)

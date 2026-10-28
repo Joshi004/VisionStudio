@@ -65,6 +65,7 @@ from app.services import (
     story_bible,
     story_renders,
     story_voices,
+    word_timings,
 )
 from app.services.projects import SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION
 from app.services.story_pipeline import (
@@ -1471,6 +1472,66 @@ async def _start_speech_synthesis(
     )
 
 
+# --- Word timings (EXPLAINER-007) -----------------------------------------------------------
+
+
+async def _evaluate_word_timings(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only an explainer with captions or callouts on needs the time of each word. For any other
+    # project the step has one target that is already done, so a run reports it as skipped.
+    if not word_timings.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await speech_synthesis.state(session, project)
+    timings = await word_timings.state(session, project)
+    targets: list[Target] = []
+    for scene in state.scenes:
+        scene_id = scene.scene.item["id"]
+        for unit in scene.units:
+            unit_id = unit.unit["id"]
+            key = f"unit:{scene_id}/{unit_id}"
+            label = f"Scene {scene.scene.item.get('index')}, line {unit_id}"
+            audio = unit.audio
+            if audio is None:
+                targets.append(
+                    Target(key, label, False, block="Speak this line first.", group=scene_id)
+                )
+                continue
+            entry = timings.get(audio.id)
+            status = entry.status if entry is not None else "none"
+            done = status in ("timed", "estimated")
+            active = status == "in_progress"
+            targets.append(
+                Target(
+                    key,
+                    label,
+                    done,
+                    active=active,
+                    last_error=entry.error if entry is not None else None,
+                    ref=(scene_id, unit_id, str(audio.id)),
+                    group=scene_id,
+                )
+            )
+    if not targets and state.blocked_reason is not None:
+        return _blocked_project(state.blocked_reason)
+    return StepView(targets)
+
+
+async def _start_word_timings(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    return await _start_each(
+        session,
+        targets,
+        deadline,
+        lambda target: _ids_of(word_timings.start(session, project, int(target.ref[2]))),
+    )
+
+
 # --- Shot plans -----------------------------------------------------------------------------
 
 
@@ -2073,6 +2134,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "look_state_images": Adapter(_evaluate_look_state_images, _start_look_state_images),
     "speech_units": Adapter(_evaluate_speech_units, _start_speech_units),
     "speech_synthesis": Adapter(_evaluate_speech_synthesis, _start_speech_synthesis),
+    "word_timings": Adapter(_evaluate_word_timings, _start_word_timings),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "shot_definitions": Adapter(_evaluate_shot_definitions, _start_shot_definitions),
     "shot_continuity": Adapter(_evaluate_shot_continuity, _start_shot_continuity),

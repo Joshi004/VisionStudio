@@ -71,6 +71,11 @@ class Project(Base):
     # matters while `music_enabled` is on; changing it makes the render out of date, not the
     # placement.
     ambience_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # Whether an explainer's render draws word-synced captions, and whether it draws callouts
+    # (EXPLAINER-007). Only read for an explainer, at render time, so they can be changed at
+    # any time.
+    captions: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    callouts: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
 
 
 class Asset(Base):
@@ -127,7 +132,7 @@ class Job(Base):
         # plan, since revision 0067, and the cue detail and its audit, since revision 0068, and
         # the rewrite of a rejected take's prompt, since revision 0069, and the placement of the
         # music on the timeline, since revision 0070, and the preview of a music mix, since revision
-        # 0071.
+        # 0071, and the timing of a speech's words, since revision 0073.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -142,7 +147,7 @@ class Job(Base):
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
             "'audit_music_cues', 'rewrite_music_prompt', 'place_music', "
-            "'preview_music_mix')",
+            "'preview_music_mix', 'time_speech_words')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1138,6 +1143,40 @@ class SpeechUnitAudio(Base):
     duration_s: Mapped[float | None] = mapped_column(default=None)
     sample_rate: Mapped[int | None] = mapped_column(default=None)
     inputs: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SpeechWordTiming(Base):
+    """The start and end time of every script word of one speech (EXPLAINER-007, E-12).
+
+    One row per `speech_unit_audio` row, so a new speech (a new audio row) gets new timings and
+    an unchanged unit keeps its old ones. `words` is the script's words in order, each
+    `{"text", "start", "end"}` in seconds from the start of the file. `source` says how the
+    times were made: `parakeet` (the heard words were matched to the script words) or
+    `estimated` (too few words matched, so each word got its share of the speech's length by
+    character count). `match_percent` is the share of script words that matched exactly, and
+    `threshold` is the setting it was judged against. Written once with its finished job.
+    """
+
+    __tablename__ = "speech_word_timing"
+    __table_args__ = (
+        CheckConstraint("source IN ('parakeet', 'estimated')", name="source_valid"),
+        Index("idx_speech_word_timing_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    speech_unit_audio_id: Mapped[int] = mapped_column(
+        ForeignKey("speech_unit_audio.id", ondelete="CASCADE"), unique=True
+    )
+    source: Mapped[str]
+    match_percent: Mapped[float]
+    threshold: Mapped[int]
+    words: Mapped[Any] = mapped_column(JSON)
+    heard_text: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

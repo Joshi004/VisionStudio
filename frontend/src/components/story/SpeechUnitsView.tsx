@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Group, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Button, Group, Stack, Text, Tooltip } from "@mantine/core";
 
 import type { SpeechUnitAudio } from "../../api/speechAudio";
 import type { SpeechUnit, SpeechUnitsContent } from "../../api/speechUnits";
@@ -20,6 +20,53 @@ const AUDIO_STATUS: Record<
   ready: { label: "Made", color: "green" },
   out_of_date: { label: "Out of date", color: "yellow" },
 };
+
+type WordTiming = NonNullable<SpeechUnitAudio["word_timing"]>;
+
+/** How the timing of an explainer speech's words stands (EXPLAINER-007). "none" shows nothing. */
+const TIMING_STATUS: Record<
+  Exclude<WordTiming["status"], "none">,
+  { label: string; color: string }
+> = {
+  in_progress: { label: "Timing words", color: "blue" },
+  failed: { label: "Timing failed", color: "red" },
+  timed: { label: "Words timed", color: "green" },
+  estimated: { label: "Timing estimated", color: "orange" },
+};
+
+function timingHint(timing: WordTiming): string | null {
+  if (timing.status === "estimated") {
+    return (
+      `Only ${timing.match_percent ?? 0}% of the script's words matched what was heard ` +
+      `(${timing.threshold ?? 0}% needed), so each word was given its share of the speech's ` +
+      `length. Heard: "${timing.heard_text ?? ""}"`
+    );
+  }
+  if (timing.status === "timed") {
+    return `${timing.match_percent ?? 0}% of the script's words matched what was heard.`;
+  }
+  return timing.status === "failed" ? timing.error : null;
+}
+
+function TimingBadge({ timing }: { timing: WordTiming }) {
+  if (timing.status === "none") {
+    return null;
+  }
+  const status = TIMING_STATUS[timing.status];
+  const hint = timingHint(timing);
+  const badge = (
+    <Badge variant="light" color={status.color}>
+      {status.label}
+    </Badge>
+  );
+  return hint === null ? (
+    badge
+  ) : (
+    <Tooltip label={hint} multiline w={320} withArrow>
+      {badge}
+    </Tooltip>
+  );
+}
 
 type SpeechUnitsViewProps = {
   units: SpeechUnitsContent;
@@ -60,6 +107,7 @@ function AudioLine({ unitId, audio, busy, onMake }: AudioLineProps) {
         <Badge variant="light" color={status.color}>
           {status.label}
         </Badge>
+        {audio.word_timing !== null && <TimingBadge timing={audio.word_timing} />}
         {audio.voice_name !== null && (
           <Text size="xs" c="dimmed">
             {audio.voice_name}

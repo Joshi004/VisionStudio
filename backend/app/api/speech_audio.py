@@ -10,8 +10,9 @@
   others are skipped, with the reason.
 - `POST .../{scene_id}/{unit_id}/run` starts the speech of one unit, again if it is made.
 
-A speech is made by the `synthesize_speech_unit` job (`services/speech_synthesis.py`). The
-answers never return ORM objects.
+A speech is made by the `synthesize_speech_unit` job (`services/speech_synthesis.py`). For an
+explainer with captions or callouts on, each unit also says where the timing of its words stands
+(`word_timing`, `services/word_timings.py`). The answers never return ORM objects.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from app.api.projects import load_project
 from app.db.models import Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import speech_synthesis
+from app.services import speech_synthesis, word_timings
 from app.services.speech_synthesis import UnitEntry
 from app.services.storage import media_url
 
@@ -48,6 +49,7 @@ _INVALID = {
 
 Status = Literal["unavailable", "none", "in_progress", "failed", "ready", "out_of_date"]
 Mode = Literal["clone", "direction"]
+WordTimingStatus = Literal["none", "in_progress", "failed", "timed", "estimated"]
 
 
 def _job_out(job: Job | None) -> DiscoveryJobOut | None:
@@ -70,6 +72,22 @@ class SpeechAudioOut(BaseModel):
     sample_rate: int | None
 
 
+class WordTimingOut(BaseModel):
+    """Where the word timing of a unit's stored speech stands (EXPLAINER-007). `estimated`
+    means too few words matched what Parakeet heard, so each word got its share of the speech's
+    length instead.
+    """
+
+    status: WordTimingStatus
+    # Of a timed or estimated speech: the share of script words that matched, the share that was
+    # needed, and what Parakeet heard.
+    match_percent: float | None
+    threshold: int | None
+    heard_text: str | None
+    # Why a `failed` timing failed.
+    error: str | None
+
+
 class SpeechUnitAudioOut(BaseModel):
     """Where the audio of one speech unit stands."""
 
@@ -90,6 +108,9 @@ class SpeechUnitAudioOut(BaseModel):
     blocked_reason: str | None
     # The newest job of this unit's current speech, whatever its status.
     job: DiscoveryJobOut | None
+    # The time of each word of the stored speech. None unless the project is an explainer with
+    # captions or callouts on, and the unit has stored audio.
+    word_timing: WordTimingOut | None
 
 
 class SpeechSceneAudioOut(BaseModel):
@@ -120,7 +141,22 @@ class SpeechAudioRunOut(BaseModel):
     job_id: int
 
 
-def _unit_out(item: UnitEntry) -> SpeechUnitAudioOut:
+def _word_timing_out(entry: word_timings.TimingEntry | None) -> WordTimingOut | None:
+    if entry is None:
+        return None
+    timing = entry.timing
+    return WordTimingOut(
+        status=entry.status,
+        match_percent=timing.match_percent if timing is not None else None,
+        threshold=timing.threshold if timing is not None else None,
+        heard_text=timing.heard_text if timing is not None else None,
+        error=entry.error,
+    )
+
+
+def _unit_out(
+    item: UnitEntry, timings: dict[int, word_timings.TimingEntry] | None
+) -> SpeechUnitAudioOut:
     audio = item.audio
     return SpeechUnitAudioOut(
         unit_id=item.unit["id"],
@@ -144,6 +180,11 @@ def _unit_out(item: UnitEntry) -> SpeechUnitAudioOut:
         can_run=item.can_run,
         blocked_reason=item.blocked_reason,
         job=_job_out(item.job),
+        word_timing=(
+            _word_timing_out(timings.get(audio.id))
+            if timings is not None and audio is not None
+            else None
+        ),
     )
 
 
@@ -159,11 +200,13 @@ def _refused(exc: speech_synthesis.SpeechSynthesisError) -> HTTPException:
 async def get_speech_audio(project_id: int, session: SessionDep) -> SpeechAudioStateOut:
     project = await load_project(session, project_id)
     current = await speech_synthesis.state(session, project)
+    timings = await word_timings.state(session, project) if word_timings.wanted(project) else None
     return SpeechAudioStateOut(
         scenes_version=current.scenes_version,
         scenes=[
             SpeechSceneAudioOut(
-                scene_id=scene.scene.item["id"], units=[_unit_out(item) for item in scene.units]
+                scene_id=scene.scene.item["id"],
+                units=[_unit_out(item, timings) for item in scene.units],
             )
             for scene in current.scenes
         ],

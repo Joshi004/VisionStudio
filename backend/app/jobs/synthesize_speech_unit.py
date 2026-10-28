@@ -5,7 +5,9 @@ It is `SpeechHandler` (Breeze TTS on the GPU server), so the upload of the voice
 long text, the polling, the pre-emption retries and the resume after a restart are the shared
 ones. `store_result` stores the WAV under the project's media folder and fills in the
 `speech_unit_audio` row the job was queued with (`services/speech_synthesis.py`): the file, its
-checksum and the **measured** length, in one transaction with the finished job.
+checksum and the **measured** length, in one transaction with the finished job. For an explainer
+with captions or callouts on, the job that times the words of the speech is queued in that same
+transaction (`jobs/time_speech_words.py`, EXPLAINER-007).
 """
 
 from __future__ import annotations
@@ -15,11 +17,11 @@ from typing import Any, Final
 
 from sqlalchemy import select
 
-from app.db.models import Job, SpeechUnitAudio
+from app.db.models import Job, Project, SpeechUnitAudio
 from app.db.session import SessionLocal
-from app.jobs import store
+from app.jobs import dispatcher, store
 from app.jobs.synthesize_speech import SpeechFile, SpeechHandler
-from app.services import speech_synthesis
+from app.services import speech_synthesis, word_timings
 from app.services.storage import get_storage
 
 _logger = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class SynthesizeSpeechUnitHandler(SpeechHandler):
         }
 
         # The file on the audio row and the finished job are saved together or not at all.
+        queued_timing = False
         async with SessionLocal() as session:
             statement = select(SpeechUnitAudio).where(SpeechUnitAudio.job_id == job.id)
             row = (await session.execute(statement)).scalars().first()
@@ -56,6 +59,12 @@ class SynthesizeSpeechUnitHandler(SpeechHandler):
                 row.sha256 = speech.temp.sha256
                 row.duration_s = speech.duration_s
                 row.sample_rate = speech.sample_rate
+                # An explainer with captions or callouts on needs the time of each word of
+                # this speech (EXPLAINER-007). The job is saved with the speech.
+                project = await session.get(Project, job.project_id)
+                if project is not None and word_timings.wanted(project):
+                    await word_timings.queue(session, row, commit=False)
+                    queued_timing = True
             else:
                 _logger.warning("job %d: speech stored but its audio row is gone", job.id)
             if not await store.finish_job(session, job.id, output):
@@ -68,4 +77,6 @@ class SynthesizeSpeechUnitHandler(SpeechHandler):
                 )
                 return False
             await session.commit()
+        if queued_timing:
+            dispatcher.nudge()
         return True

@@ -128,6 +128,9 @@ STEPS: Final[tuple[Step, ...]] = (
     ),
     Step("speech_units", "Plan the speech", ("events",), inline=True),
     Step("speech_synthesis", "Speak the lines", ("speech_units", "voices")),
+    # An explainer's captions and callouts follow the spoken words (EXPLAINER-007). Nothing
+    # after it waits for it yet; the render will (EXPLAINER-008).
+    Step("word_timings", "Time the words", ("speech_synthesis",)),
     Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging")),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.

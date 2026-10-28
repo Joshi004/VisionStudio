@@ -180,7 +180,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### EXPLAINER-007 — Caption settings and word timings
 
-**Status:** Not Started
+**Status:** Done (code). The playback check against the GPU server is still the owner's (see the completion notes).
 
 **Objective.** Let the user turn captions and callouts on or off when creating an explainer, and give every spoken word of an explainer an exact start and end time.
 
@@ -216,11 +216,24 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Migration and project settings, create form, settings form
-- [ ] Word-timing job, matching, fallback, storage
-- [ ] Docs (`DATABASE_STRUCTURE.md`), standard checks
+- [x] Migration and project settings, create form, settings form
+- [x] Word-timing job, matching, fallback, storage
+- [x] Docs (`DATABASE_STRUCTURE.md`), standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-28.
+
+What was decided (the four "Planning decides" items):
+
+- **Storage:** a new table `speech_word_timing`, one row per `speech_unit_audio` row (`UNIQUE`, `CASCADE`). `speech_unit_audio` is unchanged, so a remade speech (a new audio row) gets new timings and an unchanged unit keeps its row.
+- **Job:** a new job type `time_speech_words` (`jobs/time_speech_words.py`, built like `check_take_dialogue`). It is queued in the same transaction that stores a speech (`synthesize_speech_unit.store_result`) for an explainer with `captions` or `callouts` on. A new pipeline step `word_timings` ("Time the words", after "Speak the lines") queues it for any stored speech without a timing (speech made before this phase, captions turned on later, or a failed job). The step is `off` on the board for a story and for an explainer with both switches off.
+- **Threshold:** a new setting `word_timing_match_threshold`, 70 percent, in the Speech group. It is the share of script tokens that match a heard token exactly. Below it, the unit gets estimated timing.
+- **Board:** each unit's speech line shows a badge: "Words timed" (green), "Timing estimated" (orange, hover shows the match percent against the threshold and what was heard), "Timing words" (blue) or "Timing failed" (red, hover shows the error).
+
+How the matching works (`services/word_timings.align`): script and heard words are normalized with the dialogue check's rules and matched with `SequenceMatcher`. A matched word takes the heard time. A script span that replaces a heard span (for example "five" heard as "5") shares that span's time by character count. A script word nothing was heard for gets a share of the gap between its timed neighbours. A word with no letters (for example a dash) gets a zero-length time at the end of the word before it.
+
+Checked on throwaway data: migration `0073` up, down and up again, and `alembic check` shows no difference for the new table; `align` on a clean match with "five" heard as "5", a missing word, the wrong audio and an empty transcript; a story project refuses `captions` and `callouts` on PATCH and keeps the defaults. Ruff, `npm run lint` and `npm run typecheck` pass, and `schema.d.ts` was regenerated. There are no automated tests, as asked.
+
+**Still for the owner (needs the GPU server and listening):** for a sample of units, play the audio and check that the stored times land on the spoken words within about 0.1 s, and make one speech again to see that it gets new timings. The 70 percent threshold is a starting value: how often Parakeet writes numbers as digits will only show on real units.
 
 ### EXPLAINER-008 — Word-synced captions burned into the render
 
@@ -413,7 +426,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 | EXPLAINER-004 | Done | Story prompts checked to be unchanged. |
 | EXPLAINER-005 | Done | Run by the owner through EXPLAINER-006. |
 | EXPLAINER-006 | Done | Owner reported it passed on 2026-10-28. |
-| EXPLAINER-007 | Not Started | Caption settings and word timings. |
+| EXPLAINER-007 | Done | Caption settings and word timings. Migration `0073`. Owner still checks the timings by playback. |
 | EXPLAINER-008 | Not Started | Word-synced captions burned in. |
 | EXPLAINER-009 | Not Started | Callout plan and review. Can run in parallel with 008. |
 | EXPLAINER-010 | Not Started | Callouts drawn, and colours. |

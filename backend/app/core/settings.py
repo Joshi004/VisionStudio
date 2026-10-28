@@ -179,6 +179,10 @@ SHOT_TAKE_MAX_RETRIES_KEY = "shot_take_max_retries"
 # in percent (PHASE-031). Below it the take fails and is generated again like any failed clip.
 DIALOGUE_MATCH_THRESHOLD_KEY = "dialogue_match_threshold"
 
+# How many of the script's words of an explainer's speech must match the words Parakeet hears in
+# it, in percent (EXPLAINER-007). Below it the speech's word times are estimated instead.
+WORD_TIMING_MATCH_THRESHOLD_KEY = "word_timing_match_threshold"
+
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
 SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
@@ -559,6 +563,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=2,
         min_value=0,
         max_value=H3_MAX_WHOLE_SECONDS - 1,
+    ),
+    SettingSpec(
+        key=WORD_TIMING_MATCH_THRESHOLD_KEY,
+        group=GROUP_SPEECH,
+        label="Word timing match needed (percent)",
+        help=(
+            "Captions and callouts need the time of every word of an explainer's speech. After "
+            "a speech is made, Parakeet listens to it and its words are matched to the script's "
+            "words. At least this share of the script's words must match for the heard times to "
+            "be used. Below it, each word is given its share of the speech's length instead, "
+            "and the board marks the speech as estimated."
+        ),
+        value_type="integer",
+        default=70,
+        min_value=0,
+        max_value=100,
     ),
     SettingSpec(
         key=STORY_WPM_KEY,

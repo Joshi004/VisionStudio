@@ -49,7 +49,7 @@ async function fetchSpeechAudio(projectId: number) {
 
 /**
  * Where the audio of every speech unit stands. It is loaded again every few seconds while any
- * unit is being made.
+ * unit is being made, or its words are being timed.
  */
 export function useSpeechAudio(projectId: number) {
   return useQuery({
@@ -58,7 +58,11 @@ export function useSpeechAudio(projectId: number) {
     enabled: isValidProjectId(projectId),
     refetchInterval: (current) =>
       current.state.data?.scenes.some((scene) =>
-        scene.units.some((unit) => unit.status === "in_progress"),
+        scene.units.some(
+          (unit) =>
+            unit.status === "in_progress" ||
+            unit.word_timing?.status === "in_progress",
+        ),
       )
         ? ACTIVE_POLL_MS
         : false,

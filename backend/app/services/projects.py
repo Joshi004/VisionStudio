@@ -90,8 +90,12 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "review_points": "Review points",
     "music_enabled": "Music",
     "ambience_enabled": "Ambience",
+    "captions": "Captions",
+    "callouts": "Callouts",
 }
 _NULLABLE_FIELDS: Final = frozenset(("script_text",))
+# The switches only an explainer has (EXPLAINER-007). They can be changed at any time.
+_EXPLAINER_SWITCHES: Final = frozenset(("captions", "callouts"))
 
 
 class ProjectValidationError(ValueError):
@@ -175,9 +179,14 @@ async def create_project(
     kind: str = KIND_STORY,
     presenter_character_id: int | None = None,
     set_environment_id: int | None = None,
+    captions: bool = True,
+    callouts: bool = True,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode and the kind are set here and never changed afterwards.
+
+    `captions` and `callouts` (EXPLAINER-007) are kept only for an explainer. A story always
+    gets the defaults, and never reads them.
 
     An explainer (EXPLAINER-002) needs a presenter from the Character Lab and may have a set
     from the Environment Lab. Both go into the project's cast as `as_is`, in the same commit as
@@ -213,6 +222,8 @@ async def create_project(
         review_points=[],
         music_enabled=True,
         ambience_enabled=True,
+        captions=captions if kind == KIND_EXPLAINER else True,
+        callouts=callouts if kind == KIND_EXPLAINER else True,
     )
     validate_project(project)
     session.add(project)
@@ -263,6 +274,8 @@ async def update_project(
     unknown = [field for field in changes if field not in _FIELD_LABELS]
     if unknown:
         raise ProjectValidationError(f"{unknown[0]} cannot be changed.")
+    if project.kind != KIND_EXPLAINER and any(field in _EXPLAINER_SWITCHES for field in changes):
+        raise ProjectValidationError("Captions and callouts are only for an explainer.")
 
     try:
         for field, value in changes.items():
@@ -290,6 +303,10 @@ def _prepare_value(field: str, value: object) -> object:
         raise ProjectValidationError("Music must be on or off.")
     if field == "ambience_enabled" and not isinstance(value, bool):
         raise ProjectValidationError("Ambience must be on or off.")
+    if field == "captions" and not isinstance(value, bool):
+        raise ProjectValidationError("Captions must be on or off.")
+    if field == "callouts" and not isinstance(value, bool):
+        raise ProjectValidationError("Callouts must be on or off.")
     return value
 
 

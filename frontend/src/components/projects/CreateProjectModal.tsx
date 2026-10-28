@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { Alert, Button, Group, Modal, Radio, Select, Stack, Text, TextInput } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  Group,
+  Modal,
+  Radio,
+  Select,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+} from "@mantine/core";
 import { useNavigate } from "react-router";
 
 import { useLibraryCharacters } from "../../api/characterLab";
@@ -111,6 +122,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<ProjectKind>("story");
   const [presenterId, setPresenterId] = useState<string | null>(null);
   const [setId, setSetId] = useState<string | null>(null);
+  const [captions, setCaptions] = useState(true);
+  const [callouts, setCallouts] = useState(true);
   const [name, setName] = useState("");
 
   const canCreate =
@@ -129,6 +142,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         kind,
         presenter_character_id: explainer && presenterId !== null ? Number(presenterId) : null,
         set_environment_id: explainer && setId !== null ? Number(setId) : null,
+        captions: explainer ? captions : true,
+        callouts: explainer ? callouts : true,
       },
       {
         onSuccess: (project) => {
@@ -238,14 +253,35 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
               ))}
             </Stack>
           </Radio.Group>
-
         ) : (
-          <PresenterFields
-            presenterId={presenterId}
-            setId={setId}
-            onPresenter={setPresenterId}
-            onSet={setSetId}
-          />
+          <>
+            <PresenterFields
+              presenterId={presenterId}
+              setId={setId}
+              onPresenter={setPresenterId}
+              onSet={setSetId}
+            />
+            <Stack gap="xs">
+              <Text size="sm" fw={500}>
+                6. Captions and callouts
+              </Text>
+              <Switch
+                label="Captions"
+                description="Words appear on screen as the presenter speaks them."
+                checked={captions}
+                onChange={(event) => setCaptions(event.currentTarget.checked)}
+              />
+              <Switch
+                label="Callouts"
+                description="Short on-screen highlights, such as key ideas and numbers."
+                checked={callouts}
+                onChange={(event) => setCallouts(event.currentTarget.checked)}
+              />
+              <Text size="xs" c="dimmed">
+                You can change both later in the project settings.
+              </Text>
+            </Stack>
+          </>
         )}
 
         {create.isError && <Alert color="red">{describeError(create.error)}</Alert>}

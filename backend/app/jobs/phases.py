@@ -309,7 +309,14 @@ UPLOADING_CLIP_FOR_TRANSCRIPT: Final = "uploading the clip for transcription"
 DOWNLOADING_TRANSCRIPT: Final = "downloading the transcript"
 COMPARING_DIALOGUE: Final = "comparing the speech with the dialogue"
 
-TRANSCRIPT_FINISHING_PHASES: Final = frozenset({DOWNLOADING_TRANSCRIPT, COMPARING_DIALOGUE})
+# `time_speech_words` (EXPLAINER-007) is the same kind of job, on a speech's WAV: it uploads the
+# speech, then matches the heard words to the script's words.
+UPLOADING_SPEECH_FOR_TRANSCRIPT: Final = "uploading the speech for transcription"
+MATCHING_WORDS: Final = "matching the heard words to the script"
+
+TRANSCRIPT_FINISHING_PHASES: Final = frozenset(
+    {DOWNLOADING_TRANSCRIPT, COMPARING_DIALOGUE, MATCHING_WORDS}
+)
 
 # Every phase in which a remote job's result is being fetched and stored.
 FINISHING_PHASES: Final = (
