@@ -19,6 +19,10 @@ converting it back to frames (`ceil(seconds * 24)`) gives exactly `17n + 5` agai
    instead. Shots only get longer, so no line or narration loses room.
 3. If rounding up creates new problems too, the nearest lengths are kept, and the usual checks
    and automatic re-plans deal with them.
+4. Last, a dialogue shot whose line still does not fit with the settle margin is made the shortest
+   H3 length that holds it, even past the planning target (up to the hard maximum). Otherwise a
+   line just under the target could never fit, since H3 has no length between, say, 9.416 s and
+   10.125 s. The timeline does not flag such a shot as outside the target.
 
 This module calls `scene_timeline`, which is why it is not part of `duration_policy`.
 """
@@ -35,6 +39,7 @@ from app.services.frame_counts import H3_FPS, H3_MAX_FRAMES
 _FRAMES_PER_STEP: Final = 17
 _BASE_FRAMES: Final = 5
 _MS_PER_S: Final = 1000
+_TOLERANCE: Final = 1e-6
 
 Mode = Literal["planned", "nearest", "up"]
 
@@ -104,6 +109,31 @@ def _moved(
     return moved
 
 
+def _stretched(
+    shots: list[dict[str, Any]],
+    units: list[scene_timeline.UnitInfo],
+    grid: list[float],
+    policy: DurationPolicy,
+) -> list[dict[str, Any]]:
+    """The shots with every dialogue shot whose line does not fit made the shortest H3 length
+    that holds it. A shot outside the hard bounds, or one no H3 length can make long enough, is
+    left as it is.
+    """
+    stretched = list(shots)
+    for position, shot in enumerate(stretched):
+        length = float(shot["target_duration"])
+        if length < policy.hard_min_s or length > policy.hard_max_s:
+            continue
+        timeline = scene_timeline.build_timeline(stretched, units, policy)
+        need = scene_timeline.dialogue_needs(timeline.shots, timeline.units).get(shot["id"])
+        if need is None or need <= length + _TOLERANCE:
+            continue
+        longer = [candidate for candidate in grid if candidate >= need - _TOLERANCE]
+        if longer:
+            stretched[position] = {**shot, "target_duration": min(longer)}
+    return stretched
+
+
 def _problem_keys(
     shots: list[dict[str, Any]], units: list[scene_timeline.UnitInfo], policy: DurationPolicy
 ) -> set[tuple[str, str | None, str | None]]:
@@ -138,9 +168,11 @@ def fit_shots(
 
     known = _problem_keys(shots, units, policy)
     nearest = _moved(shots, grid, policy, "nearest")
-    if _problem_keys(nearest, units, policy) <= known:
-        return FitResult(shots=nearest, mode="nearest")
-    up = _moved(shots, grid, policy, "up")
-    if _problem_keys(up, units, policy) <= known:
-        return FitResult(shots=up, mode="up")
-    return FitResult(shots=nearest, mode="nearest")
+    chosen = nearest
+    mode: Mode = "nearest"
+    if not _problem_keys(nearest, units, policy) <= known:
+        up = _moved(shots, grid, policy, "up")
+        if _problem_keys(up, units, policy) <= known:
+            chosen = up
+            mode = "up"
+    return FitResult(shots=_stretched(chosen, units, grid, policy), mode=mode)

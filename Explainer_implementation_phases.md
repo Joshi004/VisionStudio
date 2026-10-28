@@ -5,6 +5,7 @@ An **explainer** is a project made of one script that one presenter speaks from 
 - This document records what was decided, how it was built, what the owner still has to check, and what is known to be weak.
 - The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) apply unchanged. Table and column details are in `DATABASE_STRUCTURE.md` (migration `0072`).
 - Written 2026-10-27, from the plan "Explainer mode: presenter plus B-roll".
+- Sections 5 to 8 (captions and callouts, EXPLAINER-007 to EXPLAINER-011) were added on 2026-10-28, from a design discussion with the owner. Run those phases in their order (§7).
 
 ---
 
@@ -84,7 +85,7 @@ The agent could not run these, because they need the GPU server and listening to
 
 **If it fails:** set `AUDIO_MARKER_EXPLAINER` in `services/generation_planner.py` to `"partially_copy"`. That is the only change needed: the prompt wording, the soundscape piece and the upload follow the marker, and the audio is sent unplaced, as it is for a story today.
 
-**Result (owner fills in):** _not yet run_
+**Result (owner fills in):** Passed. The owner reported on 2026-10-28 that the check was run and the result is good. `AUDIO_MARKER_EXPLAINER` stays `"fully_copy"`.
 
 ### EXPLAINER-006 — Run one explainer end to end (not done)
 
@@ -96,7 +97,7 @@ Make one explainer of about 2 minutes (finance or AI), once with a library set a
 - Presenter shots use the reference route with `fully_copy`. B-roll shots use the text route.
 - The rendered video alternates between the presenter and B-roll, in one voice.
 
-**Result (owner fills in):** _not yet run_
+**Result (owner fills in):** Passed. The owner reported on 2026-10-28 that end-to-end explainers render well, with their music.
 
 ---
 
@@ -110,13 +111,310 @@ Make one explainer of about 2 minutes (finance or AI), once with a library set a
 
 ---
 
-## 5. Progress log
+## 5. Captions and callouts: decisions
+
+The goal is to make an explainer more engaging to watch. Captions follow the presenter's words, and callouts put the important things on screen.
+
+| # | Decision |
+|---|----------|
+| E-9 | Captions and callouts are drawn by code on top of the finished picture at render time: one ASS subtitle file, burned in by FFmpeg (libass). H3 is still asked to draw no text, so E-7 stands for B-roll. |
+| E-10 | This is for explainers only. A story project renders exactly as it does today. |
+| E-11 | Two project settings, `captions` and `callouts`, are chosen on the create form and are on by default. They are only read at render time, so unlike `kind` they can be changed later in project settings without redoing anything. |
+| E-12 | Caption words are the script's words (the speech units' text), never a transcript. Their timing comes from Parakeet word timestamps on each unit's TTS file, matched back to the script words. A unit that cannot be matched well gets estimated timing (each word gets its share of the unit's length by character count). |
+| E-13 | Captions are word-synced: groups of 2 to 4 words, with the word being spoken highlighted. They are burned in only. No `.srt` file is made. |
+| E-14 | Callouts are there to make the video more engaging, not to repeat the script, so the model may shorten, paraphrase or reframe. The types are `emphasis`, `number`, `question`, `comparison`, `list` and `section_title`. The presenter's name is never shown. |
+| E-15 | Callout timing is loose. A callout names a speech unit and a rough phrase from it. Code finds the closest matching words in that unit's word timings and shows the callout there. If nothing matches well, it shows at the start of the unit. There is no word-for-word check. |
+| E-16 | Code checks callouts for display rules only: text length per type, the gap between callouts, no two on screen at once, and a most-per-minute limit. One check is a **warning, never a refusal**: a `number` callout that shows a number the script does not say. |
+| E-17 | The user reviews callouts on the board before rendering, and can edit the text, change the type or turn a callout off. An edit is stored as a new version. Only callouts that are turned on go to the render. |
+| E-18 | Colours come from roles, not from each callout. The fixed roles are `number` (amber), `negative` (red) and `positive` (green). The `accent` role is picked by the model to suit the video. Code checks that the accent stays readable and uses a safe default when it does not. The caption highlight uses the accent. |
+| E-19 | There is one layout per orientation, landscape and portrait, taken from the project's orientation. A landscape project is never reframed into portrait. |
+| E-20 | Scripts are in English only. Parakeet's word timings are trusted for English. |
+
+---
+
+## 6. Captions and callouts: design
+
+### 6.1 Where it runs
+
+```text
+speech units + TTS (unchanged)
+  -> word timings: Parakeet on each unit's TTS file, matched to the script words   (EXPLAINER-007)
+  -> callout plan: one model call, display checks, review on the board              (EXPLAINER-009)
+  -> Render pressed: captions and callouts resolved to times and frozen in the timeline
+  -> render job: writes one ASS file and burns it in during the final encode         (EXPLAINER-008, 010)
+```
+
+The word timings belong to the speech audio, so they are made again only when a unit's audio changes. The callout plan depends on the speech units, so changing the script makes it out of date. Nothing is resolved to times until Render is pressed, so a re-render of a stored timeline always gives the same picture.
+
+### 6.2 Layout zones
+
+The zones keep captions and callouts from ever covering each other.
+
+| Element | Landscape | Portrait |
+|---------|-----------|----------|
+| Captions | Bottom-center, inside the title-safe area | Around the lower third, above the area Shorts and Reels cover with their buttons |
+| Callouts on a presenter shot | Upper third, to one side of the presenter | Upper area, centered |
+| Callouts on B-roll | Upper third | Upper area, centered |
+| Section title | Centered. Captions are hidden while it shows | Centered. Captions are hidden while it shows |
+
+The portrait safe-area margins are starting values taken from common platform guidance. The owner checks them on a phone in EXPLAINER-008.
+
+### 6.3 Colour roles
+
+| Role | Used for | Colour |
+|------|----------|--------|
+| `accent` | Caption highlight, `emphasis`, `question`, `section_title`, `list` | Picked by the model, readability-checked, with a fixed default |
+| `number` | A neutral number | Amber |
+| `negative` | Loss, risk, a warning, the weaker side of a `comparison` | Red |
+| `positive` | Gain, growth, the stronger side of a `comparison` | Green |
+
+Red is kept for negative numbers. In finance, red reads as a loss, so a neutral number is amber, not red.
+
+---
+
+## 7. Captions and callouts: phases
+
+Run them in this order: 007, 008, 009, 010. EXPLAINER-009 can also run in parallel with EXPLAINER-008, because it only needs EXPLAINER-007. EXPLAINER-011 is optional and comes last.
+
+Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Planning decides** are left open on purpose and must be settled in the plan.
+
+### EXPLAINER-007 — Caption settings and word timings
+
+**Status:** Not Started
+
+**Objective.** Let the user turn captions and callouts on or off when creating an explainer, and give every spoken word of an explainer an exact start and end time.
+
+**Current state.**
+- `project` has `kind` and `speech_mode` (migration `0072` is the newest). The create form is `frontend/src/components/projects/CreateProjectModal.tsx`, the settings form `ProjectSettingsForm.tsx`, and the checks are in `services/projects.py` and `api/projects.py`.
+- TTS is made per unit by `jobs/synthesize_speech.py` into `speech_unit_audio` (one row per speech, with its measured `duration_s`). The TTS provider returns no word timings.
+- Parakeet already returns word timestamps (`providers/transcriber.py`, `SpokenWord`). `jobs/check_take_dialogue.py` and `services/dialogue_check.py` use it on take clips, and the dialogue check normalizes words (NFKC, lower case, apostrophes dropped) and compares them with `difflib.SequenceMatcher`.
+
+**Scope.**
+- Two new `project` columns, `captions` and `callouts`, both booleans and on by default, in a new migration. The create form shows them only for an explainer. Project settings can change them at any time.
+- A word-timing job that runs Parakeet on a unit's TTS file (narration and dialogue) after the speech is made. Because presenter shots use `fully_copy`, the voice in the clip is this same file, so one timing serves both kinds.
+- Matching: the heard words are matched to the script words with the dialogue check's normalization. Each script word gets the time of its matched word. An unmatched word is given a time between its matched neighbours. When too few words match, the whole unit uses estimated timing (E-12), and this is recorded.
+- Storage: one result per speech audio, holding the script words in order with `start` and `end` in seconds from the start of the file, and how the times were made (`parakeet` or `estimated`). The result is tied to the audio, so a new speech gets new timings.
+- The job runs only for explainers whose `captions` or `callouts` setting is on.
+- **Planning decides:**
+  - whether the timings are a new table or part of `speech_unit_audio`;
+  - whether this is a new job type or a step added after the TTS job;
+  - the match threshold below which a unit falls back to estimated timing;
+  - how the board shows a unit whose timing was estimated.
+
+**Out of scope.** Drawing captions (008). Callouts (009, 010). Story projects. Any language other than English.
+
+**Dependencies.** EXPLAINER-002 to EXPLAINER-006.
+
+**Expected outcome.** Each speech of an explainer has a stored list of its script words, each with a start and an end time, and the project's caption and callout settings are saved.
+
+**Verification criteria.**
+- A new explainer stores the two settings, and changing them in settings is saved.
+- A story project shows neither setting and starts no word-timing job.
+- For a sample of units, the stored times land on the spoken words when played back (within about 0.1 s).
+- A unit whose speech was remade gets new timings, and an unchanged unit keeps its old ones.
+- A forced bad match (for example, the wrong audio) falls back to estimated timing and is marked as estimated.
+- Standard checks.
+
+**Completion checklist.**
+- [ ] Migration and project settings, create form, settings form
+- [ ] Word-timing job, matching, fallback, storage
+- [ ] Docs (`DATABASE_STRUCTURE.md`), standard checks
+
+**Completion notes.** _To be filled in._
+
+### EXPLAINER-008 — Word-synced captions burned into the render
+
+**Status:** Not Started
+
+**Objective.** When `captions` is on, the rendered explainer shows word-synced captions, with the word being spoken highlighted.
+
+**Current state.**
+- `services/story_render_plan.py` builds the timeline (`TIMELINE_VERSION = 2`) with every shot, every narration speech (`start_ms`) and the dialogue spans. It is frozen on the job by `services/story_renders.start_render`.
+- `jobs/render_story.py` renders only that timeline. The final encode is `render_commands.final_encode_args`, which already re-encodes the picture with `libx264`, so adding a video filter there costs little.
+- The backend image is `python:3.13-slim` with Debian's `ffmpeg`. Debian's build is expected to include libass, but this has not been checked. The image has no fonts.
+
+**Scope.**
+- At Render, for an explainer with `captions` on, the timeline gains a caption list. Each entry is a group of 2 to 4 words with its start and end on the story timeline, and each word in it carries its own time. Each time is the unit's start plus the word's time inside its speech. The timeline version goes up by one.
+- Grouping rules:
+  - break at punctuation and at pauses;
+  - a group never spans two units;
+  - each group stays up for at least about 0.4 s;
+  - nothing is shown during a pause.
+- The render job writes an ASS file from the frozen captions and burns it in during the final encode, using karaoke tags for the highlight.
+- A font file is bundled with the app, and FFmpeg is pointed at it, so renders look the same on any machine.
+- Two layouts, landscape and portrait (§6.2). The highlight uses a fixed default colour until EXPLAINER-010 adds the accent.
+- A render with `captions` off, and any story render, runs exactly the FFmpeg commands it runs today.
+- **Planning decides:**
+  - which font to bundle, and its licence (a bold sans-serif such as Inter or Montserrat, both under the SIL Open Font License);
+  - the font sizes, line lengths and margins for each orientation;
+  - whether caption text keeps its punctuation, and whether it is upper case;
+  - how a missing word timing is handled at Render (fall back to estimated timing with a warning, or block the render).
+
+**Out of scope.** Callouts (009, 010). An `.srt` file (E-13). Model-chosen colours (010).
+
+**Dependencies.** EXPLAINER-007.
+
+**Expected outcome.** A landscape and a portrait explainer both render with readable, word-synced captions that follow the voice, on presenter shots and B-roll alike.
+
+**Verification criteria.**
+- `ffmpeg -filters` in the backend container lists the `subtitles` filter.
+- The highlight moves with the voice, with no visible lag, over a whole render.
+- No caption shows during a pause, and no group mixes two units.
+- On a phone, portrait captions are not covered by the Shorts or Reels buttons (the owner checks).
+- Turning `captions` off gives a video with no captions. A story render is unchanged.
+- The render's frame count, length and loudness checks still pass.
+- Standard checks.
+
+**Completion checklist.**
+- [ ] Caption list in the timeline, version bump
+- [ ] ASS writer, bundled font, burn-in in the final encode
+- [ ] Two layouts; owner check on a phone; docs; standard checks
+
+**Completion notes.** _To be filled in._
+
+### EXPLAINER-009 — Callout plan and review
+
+**Status:** Not Started
+
+**Objective.** Have the model suggest engaging callouts for an explainer, check them for display rules only, and let the user review and edit them on the board.
+
+**Current state.**
+- Each scene's speech units are stored in `speech_units` (versioned). Every other planning stage follows the same pattern of a writer, a job, a versioned artifact with provenance, a pipeline step (`services/story_pipeline_targets.py`) and a board panel (`frontend/src/components/board/StepPanel.tsx`).
+- Explainers already have a Story Bible, which gives the tone and style.
+
+**Scope.**
+- One model call per explainer. It reads the Story Bible and every scene's speech units in order, and returns:
+  - the `accent` colour (a hex value) with a short reason;
+  - the callouts. Each callout has a `type` (E-14), a `role` (`accent`, `number`, `negative` or `positive`), its text (a `list` has up to three items and a `comparison` has two sides, each with its own phrase), the unit it belongs to, and a rough phrase from that unit.
+- Instructions to the model:
+  - callouts are there to keep the viewer watching: a hook question, the key idea in a few words, the big number, a clear comparison, a list that builds up;
+  - fewer, stronger callouts beat many;
+  - never show the presenter's name;
+  - never repeat a whole sentence of the script.
+- Code checks (E-16):
+  - text length per type;
+  - the minimum gap between callouts;
+  - no two callouts on the same stretch of speech;
+  - the most-per-minute limit.
+
+  A failing answer is retried as in every other stage. The phrase is never checked word for word (E-15).
+- A warning, not a refusal, when a `number` callout's number is not said in its unit. Number words such as "five" and "ten lakh" count as said.
+- Accent check: the colour must be a valid hex value and readable over the caption style. Otherwise the default is stored, with a note.
+- Storage: a new versioned artifact per project, with `source` `ai` or `manual`. Its provenance records the `speech_units` versions it was made from. Changing any scene's speech units makes it out of date.
+- A board panel that lists the callouts in order, each with its type, text, role, unit, phrase, an on/off switch and any warning. The user can edit text, type and role. Saving makes a new `manual` version, checked by the same display rules.
+- The step runs only for explainers with `callouts` on.
+- **Planning decides:**
+  - the starting limits (suggested: at least 4 s between callouts, at most 6 per minute, length limits per type);
+  - which model runs the call;
+  - whether the review panel can add a new callout or only edit and turn off existing ones;
+  - how the readability check is measured (suggested: the WCAG contrast ratio against the caption outline colour).
+
+**Out of scope.** Drawing callouts (010). Any change to shot planning (011).
+
+**Dependencies.** EXPLAINER-007 (the `callouts` setting).
+
+**Expected outcome.** A 2-minute explainer gets a short list of callouts the owner would actually want on screen, and the owner can adjust them in a minute.
+
+**Verification criteria.**
+- The plan passes the display checks, and a forced overlap or too many callouts is retried.
+- A made-up number shows a warning in the panel and does not block anything.
+- No callout shows the presenter's name.
+- An edit is stored as a new version, and turning a callout off keeps it out of the render list.
+- Changing the script makes the plan out of date.
+- The owner judges the callouts on one real explainer.
+- Standard checks.
+
+**Completion checklist.**
+- [ ] Writer (instructions, parser, display checks, number warning, accent check)
+- [ ] Job, versioned storage and provenance, pipeline step
+- [ ] Board panel with edit and on/off
+- [ ] Owner judges one real explainer; docs; standard checks
+
+**Completion notes.** _To be filled in._
+
+### EXPLAINER-010 — Callouts drawn on the render, and colours
+
+**Status:** Not Started
+
+**Objective.** Draw the reviewed callouts on the rendered explainer, animated and coloured by role, and use the model's accent for the caption highlight.
+
+**Current state.** EXPLAINER-008 burns an ASS caption file into the final encode. EXPLAINER-009 stores reviewed callouts with a unit and a phrase each, and the accent colour.
+
+**Scope.**
+- At Render, for an explainer with `callouts` on, each callout that is turned on is resolved to a time. Code finds the closest match for its phrase among the unit's timed words. With no good match, the callout shows at the unit's start (E-15). The callout stays up for at least about 2 s, or until its unit ends, whichever is longer.
+- Each `list` item and each `comparison` side is resolved by its own phrase, so they build up as they are spoken.
+- Each callout's shot (presenter or B-roll) is looked up so it is placed in the right zone (§6.2). The resolved callouts are frozen in the timeline, next to the captions.
+- ASS styles and simple animations per type, for example:
+  - a fade or slide in, with a box behind the text;
+  - a short scale-up "pop" for `number`;
+  - items appearing one by one for `list`;
+  - two sides for `comparison`, side by side in landscape and stacked in portrait;
+  - a centered `section_title`, with captions hidden while it shows.
+- Colours by role (§6.3), with the caption highlight switching from the fixed default to the stored accent.
+- A render with `callouts` off draws no callouts, and the captions are unaffected.
+- **Planning decides:**
+  - the exact animation timings;
+  - the box style;
+  - how far a phrase may differ before the callout falls back to its unit's start.
+
+**Out of scope.** Charts or diagrams drawn from data (a later phase, if wanted). Telling B-roll to leave room (011).
+
+**Dependencies.** EXPLAINER-008, EXPLAINER-009.
+
+**Expected outcome.** A finished explainer with captions and a handful of well-timed, animated callouts that never cover each other or the captions.
+
+**Verification criteria.**
+- Each callout appears on or near its phrase, and a callout whose phrase does not match appears at its unit's start.
+- No callout overlaps another or the captions, in landscape and in portrait.
+- The colours follow the roles, and the caption highlight uses the accent.
+- Turning `callouts` off removes them, and the captions stay the same.
+- The owner judges one landscape and one portrait explainer as more engaging than the same video without callouts.
+- Standard checks.
+
+**Completion checklist.**
+- [ ] Time resolution and zones in the timeline
+- [ ] ASS styles and animations per type and orientation; colour roles
+- [ ] Owner check in both orientations; docs; standard checks
+
+**Completion notes.** _To be filled in._
+
+### EXPLAINER-011 — Room for callouts in B-roll (optional, later)
+
+**Status:** Not Started
+
+**Objective.** Make B-roll leave empty space where a callout will sit, so the text never lands on the subject of the shot.
+
+**Scope.** Planning decides. The likely shape: the callout plan runs before shot definition, and a B-roll shot that carries a callout gets one line in its definition and prompt asking for clear space in the callout's zone. With `callouts` off, every prompt stays as it is today.
+
+**Out of scope.** Any change to presenter shots.
+
+**Dependencies.** EXPLAINER-010, and the owner's judgement after it that callouts too often land on busy parts of the picture.
+
+**Completion notes.** _To be filled in._
+
+---
+
+## 8. Captions and callouts: known risks
+
+- Parakeet may hear a number or a name differently from how the script writes it ("5" for "five"). The matching handles a few differences, and a unit with too many falls back to estimated timing.
+- The portrait safe-area margins are starting values, and the platforms change their buttons from time to time.
+- The model may suggest callouts that are bland or too many. The display limits and the review panel are the guard, and the instructions favour fewer, stronger callouts.
+- Burning in captions means a video without captions needs a second render with `captions` off.
+
+---
+
+## 9. Progress log
 
 | Id | Status | Notes |
 |----|--------|-------|
-| EXPLAINER-001 | Owner action | See §3. |
+| EXPLAINER-001 | Done | Owner reported it passed on 2026-10-28. |
 | EXPLAINER-002 | Done | Migration `0072`. |
 | EXPLAINER-003 | Done | |
 | EXPLAINER-004 | Done | Story prompts checked to be unchanged. |
-| EXPLAINER-005 | Done | Not run against the GPU server. |
-| EXPLAINER-006 | Owner action | See §3. |
+| EXPLAINER-005 | Done | Run by the owner through EXPLAINER-006. |
+| EXPLAINER-006 | Done | Owner reported it passed on 2026-10-28. |
+| EXPLAINER-007 | Not Started | Caption settings and word timings. |
+| EXPLAINER-008 | Not Started | Word-synced captions burned in. |
+| EXPLAINER-009 | Not Started | Callout plan and review. Can run in parallel with 008. |
+| EXPLAINER-010 | Not Started | Callouts drawn, and colours. |
+| EXPLAINER-011 | Not Started | Optional, later. |

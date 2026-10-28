@@ -16,7 +16,9 @@ of them. A pause has no unit: the shot that shows it carries its time in its `ta
 **Checks.**
 
 - *Flagged* (`outside_target`): a shot outside the planning target range but inside the hard
-  bounds. It starts a re-plan, and it never blocks generation.
+  bounds. It starts a re-plan, and it never blocks generation. A dialogue shot longer than the
+  target is not flagged when one H3 length shorter would not hold its line with the margin:
+  `h3_lengths` makes such a shot that long on purpose, and a re-plan could not shorten it.
 - *Blocking* (`outside_hard_bounds`): a shot outside the hard bounds never reaches generation.
 - *Blocking* (`dialogue_too_short`): a line of dialogue does not fit inside its shot with a small
   margin left for the face to settle.
@@ -30,10 +32,12 @@ the blocking ones keep a scene from generation.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 from app.services.duration_policy import DurationPolicy
+from app.services.frame_counts import H3_FPS, H3_FRAMES_PER_STEP
 
 # Time kept after a line of dialogue inside its shot, for the face to settle.
 DIALOGUE_SETTLE_S: Final = 0.5
@@ -125,9 +129,35 @@ def _seconds(value: float) -> str:
     return f"{value:g} s"
 
 
-def _check_shot(shot: dict[str, Any], policy: DurationPolicy) -> TimelineProblem | None:
+def _shorter_h3_length_s(length_s: float) -> float:
+    """The H3 length one step shorter than `length_s`, stored the way `h3_lengths` stores it:
+    seconds, rounded down to a millisecond.
+    """
+    frames = math.ceil(length_s * H3_FPS - _TOLERANCE) - H3_FRAMES_PER_STEP
+    return (frames * 1000 // H3_FPS) / 1000
+
+
+def dialogue_needs(spans: list[ShotSpan], placed: list[UnitSpan]) -> dict[str, float]:
+    """For each shot that carries dialogue, the shortest it may last: from its start until its
+    last line ends, plus the settle margin.
+    """
+    starts = {span.shot_id: span.start_s for span in spans}
+    needs: dict[str, float] = {}
+    for unit in placed:
+        if unit.kind != "dialogue":
+            continue
+        shot_id = unit.shot_ids[0]
+        need = round(unit.end_s + DIALOGUE_SETTLE_S - starts[shot_id], _DECIMALS)
+        needs[shot_id] = max(needs.get(shot_id, 0.0), need)
+    return needs
+
+
+def _check_shot(
+    shot: dict[str, Any], policy: DurationPolicy, dialogue_need_s: float | None
+) -> TimelineProblem | None:
     """The problem with one shot's length, or None. A shot outside the hard bounds is reported
-    as that only, not also as outside the target.
+    as that only, not also as outside the target. `dialogue_need_s` is the shortest the shot may
+    last for its dialogue (`dialogue_needs`), or None when it carries none.
     """
     length = shot["target_duration"]
     shot_id = shot["id"]
@@ -156,6 +186,11 @@ def _check_shot(shot: dict[str, Any], policy: DurationPolicy) -> TimelineProblem
             shot_id=shot_id,
         )
     if length > policy.target_max_s + _TOLERANCE:
+        if (
+            dialogue_need_s is not None
+            and dialogue_need_s > _shorter_h3_length_s(length) + _TOLERANCE
+        ):
+            return None
         return TimelineProblem(
             "flagged",
             OUTSIDE_TARGET,
@@ -276,10 +311,11 @@ def build_timeline(
     spans = _place_shots(shots)
     total = spans[-1].end_s if spans else 0.0
     placed = _place_units(shots, spans, units)
+    needs = dialogue_needs(spans, placed)
 
     problems: list[TimelineProblem] = []
     for shot in shots:
-        problem = _check_shot(shot, policy)
+        problem = _check_shot(shot, policy, needs.get(shot["id"]))
         if problem is not None:
             problems.append(problem)
     problems.extend(_check_units(placed, spans, total))

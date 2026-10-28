@@ -31,7 +31,7 @@ _FRAMES_PER_STEP: Final = 8
 # The maximum is the longest clip the server makes.
 H3_FPS: Final = 24
 H3_MAX_FRAMES: Final = 345
-_H3_FRAMES_PER_STEP: Final = 17
+H3_FRAMES_PER_STEP: Final = 17
 _H3_BASE_FRAMES: Final = 5
 
 
@@ -67,5 +67,5 @@ def h3_num_frames(target: int) -> int:
     request equal to what runs. There is no minimum or maximum here: a count the GPU server
     does not accept is refused by the server, and its message is shown on the run.
     """
-    steps = max(1, -(-(target - _H3_BASE_FRAMES) // _H3_FRAMES_PER_STEP))  # ceil without floats
-    return _H3_FRAMES_PER_STEP * steps + _H3_BASE_FRAMES
+    steps = max(1, -(-(target - _H3_BASE_FRAMES) // H3_FRAMES_PER_STEP))  # ceil without floats
+    return H3_FRAMES_PER_STEP * steps + _H3_BASE_FRAMES
