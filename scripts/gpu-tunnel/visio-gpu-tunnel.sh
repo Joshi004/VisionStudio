@@ -53,14 +53,13 @@ RETRY_DELAY_S=30
 START_COOLDOWN_S=600
 MAX_START_ATTEMPTS=3
 # Checks in a row that fail through the tunnel while the gateway is fine before
-# the tunnel is reopened anyway (10 x 30 s = 5 minutes).
-MAX_SLOW_CHECKS=10
+# the tunnel is reopened anyway (2 x 30 s = 1 minute).
+MAX_SLOW_CHECKS=2
 # Exit status of the lookup when the cluster answers but the gateway does not.
 GATEWAY_DOWN=3
 # BatchMode makes ssh fail instead of waiting for a password nobody can type.
-# ssh closes a dead connection itself after 15 s x 6 = 90 s without an answer.
-# The wait is long on purpose: big uploads can delay the answers for a while.
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
+# ssh closes a dead connection itself after 15 s x 3 = 45 s without an answer.
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
 
 tunnel_pid=""
 start_attempts=0
