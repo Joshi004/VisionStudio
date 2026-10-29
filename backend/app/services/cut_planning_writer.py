@@ -278,6 +278,7 @@ def build_request(
     model: str,
     feedback: user_feedback.Feedback | None = None,
     staging: dict[str, Any] | None = None,
+    longest_shot_seconds: float = MAX_SHOT_S,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
@@ -288,7 +289,7 @@ def build_request(
     """
     policy = {
         "shortest_shot_seconds": target_min_seconds,
-        "longest_shot_seconds": MAX_SHOT_S,
+        "longest_shot_seconds": longest_shot_seconds,
         "lead_in_seconds": LEAD_IN_S,
         "tail_after_last_word_seconds": TAIL_S,
     }
@@ -353,23 +354,25 @@ def _units_in(spans: list[dict[str, Any]], first: int, last: int) -> list[str]:
     ]
 
 
-def _check_length(position: int, kind: str, start: float, end: float, minimum: float) -> None:
+def _check_length(
+    position: int, kind: str, start: float, end: float, minimum: float, maximum: float
+) -> None:
     length = round(end - start, _TIME_DECIMALS)
     if length < minimum - 1e-6:
         raise ValueError(
             f"Shot {position} lasts {length:g} s, which is shorter than the shortest shot of "
             f"{minimum:g} s. Start it on a later word or merge it with a neighbour."
         )
-    if length > MAX_SHOT_S + 1e-6:
+    if length > maximum + 1e-6:
         if kind == PRESENTER:
             raise ValueError(
                 f"Shot {position} is a presenter shot of {length:g} s. A presenter shot may last "
-                f"at most {MAX_SHOT_S:g} s, because the video model takes at most that much "
+                f"at most {maximum:g} s, because the video model takes at most that much "
                 "speech for one clip. Cut away from the presenter sooner."
             )
         raise ValueError(
             f"Shot {position} lasts {length:g} s, which is longer than the longest shot of "
-            f"{MAX_SHOT_S:g} s. Start another shot on a word inside it."
+            f"{maximum:g} s. Start another shot on a word inside it."
         )
 
 
@@ -403,6 +406,7 @@ def check_answer(
     take: dict[str, Any],
     target_min_seconds: float,
     warnings: list[str] | None = None,
+    longest_shot_seconds: float = MAX_SHOT_S,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the content that is stored: `{scene_id, shots,
     cut_plan}`. Raises ValueError, with a message fit for the user, for the first problem found.
@@ -410,7 +414,8 @@ def check_answer(
     cut is added to it.
 
     `events` is the scene's stored events; `units` its speech units; `take` is `{seconds, words,
-    spans}` as in `take_block`; `target_min_seconds` is the shortest a shot may be.
+    spans}` as in `take_block`; `target_min_seconds` is the shortest a shot may be and
+    `longest_shot_seconds` the longest (`duration_policy.longest_cut_shot_s`, FLOW-006).
     """
     if not isinstance(answer, dict):
         raise ValueError("The shots were not a JSON object.")
@@ -465,7 +470,14 @@ def check_answer(
     # The times, and the length of each shot.
     times = cut_times(words, [shot["start_word"] for shot in parsed], float(take["seconds"]))
     for position, (shot, (start, end)) in enumerate(zip(parsed, times, strict=True), start=1):
-        _check_length(position, shot["type"], start, end, float(target_min_seconds))
+        _check_length(
+            position,
+            shot["type"],
+            start,
+            end,
+            float(target_min_seconds),
+            min(float(longest_shot_seconds), MAX_SHOT_S),
+        )
 
     # The events: each shot lists those of the units it covers, and the events keep their order.
     event_spans: list[tuple[int, int]] = []

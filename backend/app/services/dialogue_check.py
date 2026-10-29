@@ -20,6 +20,12 @@ How the comparison works:
   where nothing was heard always fails (`no_speech`), whatever the threshold is.
 
 Only the words are judged: when a line starts, and which voice says it, are not (PHASE-045).
+
+**A presenter shot of a continuous explainer (FLOW-007)** has one line, the words of the shot
+itself, and its clip was made from a window of the scene's take that runs past the shot's end
+(the render trims that tail, so it is never shown). The line then has `heard_until_s`, the shot's
+length, and only the heard words whose middle (start plus end, halved) is before it are compared:
+a word that straddles the end counts when most of it is inside the shot.
 """
 
 from __future__ import annotations
@@ -50,6 +56,9 @@ class DialogueLine:
     label: str
     text: str
     starts_in_shot_seconds: float
+    # FLOW-007: the end of the part of the clip that is shown, in seconds from the clip's start.
+    # Words heard after it are not compared. None: the whole clip counts.
+    heard_until_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -86,15 +95,7 @@ class DialogueResult:
             "threshold": threshold,
             "checked_at": checked_at.isoformat(),
             "problems": [{"code": p.code, "message": p.message} for p in self.problems],
-            "lines": [
-                {
-                    "unit_id": line.unit_id,
-                    "label": line.label,
-                    "text": line.text,
-                    "starts_in_shot_seconds": line.starts_in_shot_seconds,
-                }
-                for line in lines
-            ],
+            "lines": [_line_json(line) for line in lines],
             "expected_text": " ".join(self.expected_words),
             "heard_text": " ".join(self.heard_words),
             "heard_words": [
@@ -119,10 +120,21 @@ def normalize_words(text: str) -> list[str]:
     return "".join(kept).split()
 
 
+def _number(value: object) -> float | None:
+    """`value` as a float when it is a number (not a bool), else None."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
 def lines_of(audios: object) -> list[DialogueLine]:
     """The dialogue lines in a generation request's `audios` (or in the `lines_as_json` form that
     a take records), in the order they are sent. An entry without text is skipped. Anything that
     is not a list gives no lines.
+
+    An audio that is the window of a scene's take (`window`, FLOW-007) is one line with the
+    shot's own words, whatever words the window holds, and `heard_until_s` set to the shot's
+    length.
     """
     if not isinstance(audios, list):
         return []
@@ -130,36 +142,46 @@ def lines_of(audios: object) -> list[DialogueLine]:
     for audio in audios:
         if not isinstance(audio, dict):
             continue
-        text = audio.get("text")
+        window = audio.get("window")
+        text = window.get("shown_text") if isinstance(window, dict) else audio.get("text")
         if not isinstance(text, str) or not text.strip():
             continue
-        start = audio.get("starts_in_shot_seconds")
+        heard_until = (
+            _number(window.get("shot_seconds"))
+            if isinstance(window, dict)
+            else _number(audio.get("heard_until_s"))
+        )
+        start = _number(audio.get("starts_in_shot_seconds"))
         lines.append(
             DialogueLine(
                 unit_id=str(audio.get("unit_id", "")),
                 label=str(audio.get("label", "")),
                 text=text.strip(),
-                starts_in_shot_seconds=(
-                    float(start)
-                    if isinstance(start, int | float) and not isinstance(start, bool)
-                    else 0.0
-                ),
+                starts_in_shot_seconds=start if start is not None else 0.0,
+                heard_until_s=heard_until,
             )
         )
     return lines
 
 
+def _line_json(line: DialogueLine) -> dict[str, Any]:
+    """One line as a take records it. `heard_until_s` is written only when it is set, so the
+    record of any other take is what it was.
+    """
+    stored: dict[str, Any] = {
+        "unit_id": line.unit_id,
+        "label": line.label,
+        "text": line.text,
+        "starts_in_shot_seconds": line.starts_in_shot_seconds,
+    }
+    if line.heard_until_s is not None:
+        stored["heard_until_s"] = line.heard_until_s
+    return stored
+
+
 def lines_as_json(lines: Sequence[DialogueLine]) -> list[dict[str, Any]]:
     """What `shot_take.inputs.dialogue` records, so a take knows what it was meant to say."""
-    return [
-        {
-            "unit_id": line.unit_id,
-            "label": line.label,
-            "text": line.text,
-            "starts_in_shot_seconds": line.starts_in_shot_seconds,
-        }
-        for line in lines
-    ]
+    return [_line_json(line) for line in lines]
 
 
 def compare(
@@ -172,8 +194,14 @@ def compare(
     expected: list[str] = []
     for line in lines:
         expected.extend(normalize_words(line.text))
+    # FLOW-007: the part of the clip after the shot's end is never shown, so what is said there
+    # is not compared. A word counts when its middle is before the end.
+    ends = [line.heard_until_s for line in lines if line.heard_until_s is not None]
+    until = min(ends) if ends else None
     heard: list[str] = []
     for word in spoken:
+        if until is not None and (word.start + word.end) / 2 >= until:
+            continue
         heard.extend(normalize_words(word.word))
 
     if not expected:

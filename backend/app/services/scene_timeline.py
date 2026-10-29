@@ -28,6 +28,10 @@ of them. A pause has no unit: the shot that shows it carries its time in its `ta
 
 Both kinds start an automatic re-plan (`jobs/plan_shots.py`); after the tries are used up, only
 the blocking ones keep a scene from generation.
+
+**A continuous explainer's scene** (FLOW-006) is laid out by `build_cut_timeline` instead: its
+shots start and end at the cut times of the plan, each with the clip length that covers it, and
+only a shot outside the hard bounds is a problem. It is never planned again by itself.
 """
 
 from __future__ import annotations
@@ -36,8 +40,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
-from app.services.duration_policy import DurationPolicy
-from app.services.frame_counts import H3_FPS, H3_FRAMES_PER_STEP
+from app.services.duration_policy import DurationPolicy, longest_cut_shot_s
+from app.services.frame_counts import H3_FPS, H3_FRAMES_PER_STEP, h3_num_frames, target_frames
 
 # Time kept after a line of dialogue inside its shot, for the face to settle.
 DIALOGUE_SETTLE_S: Final = 0.5
@@ -71,6 +75,10 @@ class ShotSpan:
     shot_id: str
     start_s: float
     end_s: float
+    # Only on the timeline of a cut plan (FLOW-006): the frames of the clip made for the shot,
+    # the shortest H3 length (`17n + 5`) that covers it. The shot is not moved onto it (F-6): the
+    # render trims the extra frames. None for every other timeline.
+    clip_frames: int | None = None
 
 
 @dataclass(frozen=True)
@@ -319,6 +327,91 @@ def build_timeline(
         if problem is not None:
             problems.append(problem)
     problems.extend(_check_units(placed, spans, total))
+    return SceneTimeline(shots=spans, units=placed, total_s=total, problems=problems)
+
+
+@dataclass(frozen=True)
+class CutUnit:
+    """One speech unit of a continuous explainer's scene: its kind, and where it sits inside the
+    scene's take in seconds from the take's start (`take_timings.UnitSpan`).
+    """
+
+    id: str
+    kind: Literal["narration", "dialogue"]
+    start_s: float
+    end_s: float
+
+
+def build_cut_timeline(
+    shots: list[dict[str, Any]],
+    units: list[CutUnit],
+    lead_in_s: float,
+    policy: DurationPolicy,
+) -> SceneTimeline:
+    """The timeline of one scene of a continuous explainer (FLOW-006). Its shots are cut on the
+    words of the scene's take (FLOW-005), so they are not laid one after another by length:
+
+    - a shot starts and ends at its stored cut times (`start_s`, `end_s`, seconds from the start
+      of the take), moved by the lead-in. The first shot starts at 0, so the lead-in belongs to
+      it;
+    - the take sits at the scene's start plus the lead-in, so each unit sits at the lead-in plus
+      its place in the take. The units carried by a shot are the ones the plan lists;
+    - each shot gets the length of the clip made for it (`ShotSpan.clip_frames`);
+    - the scene ends where its last shot ends;
+    - the only problem reported is a shot outside the hard bounds (blocking). The planning
+      target, and the checks of speech carried by a shot, do not apply: the voice is one take
+      that plays whatever the picture shows.
+
+    `shots` is the stored list (each has `id`, `speech_unit_ids`, `start_s` and `end_s`), in order.
+    """
+    spans: list[ShotSpan] = []
+    problems: list[TimelineProblem] = []
+    longest = longest_cut_shot_s(policy)
+    for position, shot in enumerate(shots):
+        start = 0.0 if position == 0 else round(lead_in_s + float(shot["start_s"]), _DECIMALS)
+        end = round(lead_in_s + float(shot["end_s"]), _DECIMALS)
+        spans.append(
+            ShotSpan(
+                shot_id=shot["id"],
+                start_s=start,
+                end_s=end,
+                clip_frames=h3_num_frames(target_frames(start, end, H3_FPS)),
+            )
+        )
+        length = round(end - start, _DECIMALS)
+        if length < policy.hard_min_s - _TOLERANCE:
+            problems.append(
+                TimelineProblem(
+                    "blocking",
+                    OUTSIDE_HARD_BOUNDS,
+                    f"Shot {shot['id']} lasts {_seconds(length)}, which is shorter than the H3 "
+                    f"minimum of {policy.hard_min_s} s.",
+                    shot_id=shot["id"],
+                )
+            )
+        elif length > longest + _TOLERANCE:
+            problems.append(
+                TimelineProblem(
+                    "blocking",
+                    OUTSIDE_HARD_BOUNDS,
+                    f"Shot {shot['id']} lasts {_seconds(length)}, which is longer than the "
+                    f"longest cut shot of {_seconds(longest)}.",
+                    shot_id=shot["id"],
+                )
+            )
+
+    placed = [
+        UnitSpan(
+            unit_id=unit.id,
+            kind=unit.kind,
+            start_s=round(lead_in_s + unit.start_s, _DECIMALS),
+            end_s=round(lead_in_s + unit.end_s, _DECIMALS),
+            natural_start_s=round(lead_in_s + unit.start_s, _DECIMALS),
+            shot_ids=[shot["id"] for shot in shots if unit.id in shot["speech_unit_ids"]],
+        )
+        for unit in units
+    ]
+    total = spans[-1].end_s if spans else 0.0
     return SceneTimeline(shots=spans, units=placed, total_s=total, problems=problems)
 
 

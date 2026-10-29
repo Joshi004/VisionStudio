@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.services.frame_counts import H3_FPS, h3_num_frames
+from app.services.frame_counts import H3_FPS, H3_MAX_FRAMES, h3_num_frames
 
 
 class DurationPolicyError(ValueError):
@@ -53,6 +53,14 @@ async def read_duration_policy(session: AsyncSession) -> DurationPolicy:
         target_min_s=values[settings_service.SHOT_TARGET_MIN_KEY],
         target_max_s=values[settings_service.SHOT_TARGET_MAX_KEY],
     )
+
+
+def longest_cut_shot_s(policy: DurationPolicy) -> float:
+    """The longest a cut-based shot of a continuous explainer may be (FLOW-006): the H3 longest
+    shot setting, but never more than the longest clip H3 makes (345 frames). It is also the
+    longest window of the take a presenter clip is given.
+    """
+    return min(float(policy.hard_max_s), H3_MAX_FRAMES / H3_FPS)
 
 
 def shot_num_frames(target_s: float, policy: DurationPolicy) -> int:

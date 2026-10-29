@@ -55,7 +55,10 @@ _INVALID = {
 
 Source = Literal["ai", "manual"]
 Status = Literal["not_defined", "defined", "out_of_date"]
-ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
+# `presenter` is the type of a shot of a continuous explainer that shows the presenter (FLOW-005).
+ShotType = Literal[
+    "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
+]
 PlanStatus = Literal["not_planned", "planned", "out_of_date"]
 SpeechKind = Literal["narration", "dialogue"]
 

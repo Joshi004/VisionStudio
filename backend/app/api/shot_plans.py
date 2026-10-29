@@ -118,6 +118,9 @@ class TimelineShotOut(BaseModel):
     shot_id: str
     start_seconds: float
     end_seconds: float
+    # The frames of the clip made for the shot: the shortest H3 length that covers it. Only for
+    # the shots of a continuous explainer (FLOW-006); the render trims the extra frames.
+    clip_frames: int | None = None
 
 
 class TimelineUnitOut(BaseModel):
@@ -158,7 +161,10 @@ def _timeline_out(timeline: scene_timeline.SceneTimeline) -> SceneTimelineOut:
         total_seconds=timeline.total_s,
         shots=[
             TimelineShotOut(
-                shot_id=span.shot_id, start_seconds=span.start_s, end_seconds=span.end_s
+                shot_id=span.shot_id,
+                start_seconds=span.start_s,
+                end_seconds=span.end_s,
+                clip_frames=span.clip_frames,
             )
             for span in timeline.shots
         ],

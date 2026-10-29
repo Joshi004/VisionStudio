@@ -14,6 +14,15 @@ function seconds(value: number): string {
   return `${value.toFixed(2)} s`;
 }
 
+/** What a cut shot's clip is: its H3 length, and how much of its end the render trims. */
+function clipNote(frames: number | null | undefined, shotSeconds: number): string {
+  if (frames == null) {
+    return "";
+  }
+  const trimmed = Math.max(0, frames / 24 - shotSeconds);
+  return `. Clip of ${frames} frames (${seconds(frames / 24)}), the last ${seconds(trimmed)} trimmed.`;
+}
+
 function percent(value: number, total: number): string {
   return `${(total > 0 ? (value / total) * 100 : 0).toFixed(3)}%`;
 }
@@ -95,7 +104,7 @@ export function SceneTimelineView({
               end={shot.end_seconds}
               total={total}
               label={`${shot.shot_id} \u00B7 ${seconds(shot.end_seconds - shot.start_seconds)}`}
-              title={`${shot.shot_id}: ${seconds(shot.start_seconds)} to ${seconds(shot.end_seconds)}`}
+              title={`${shot.shot_id}: ${seconds(shot.start_seconds)} to ${seconds(shot.end_seconds)}${clipNote(shot.clip_frames, shot.end_seconds - shot.start_seconds)}`}
               color={
                 timeline.problems.some(
                   (problem) =>

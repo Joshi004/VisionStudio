@@ -81,9 +81,6 @@ CUT_PLAN_NO_EDIT: Final = (
     "The shots of a continuous explainer start on the words of the voice take, so they cannot be "
     "edited or accepted by hand. Plan the scene again, with a note if you want a change."
 )
-# Until the timeline learns to lay out cut-based shots (FLOW-006).
-CUT_PLAN_NO_TIMELINE: Final = "Cut-based shots are not laid out on a timeline yet."
-
 # How many of a project's newest planning jobs are read to find each scene's newest one.
 _JOB_LOOKBACK: Final = 500
 
@@ -599,7 +596,14 @@ async def _queue(
             "target_max_seconds": policy.target_max_s,
             # A continuous explainer's take: its presence is what makes the job cut the scene on
             # the words (FLOW-005). Left out for every other project, so its job is unchanged.
-            **({"take": prepared.take} if prepared.take is not None else {}),
+            **(
+                {
+                    "take": prepared.take,
+                    "longest_shot_seconds": duration_policy.longest_cut_shot_s(policy),
+                }
+                if prepared.take is not None
+                else {}
+            ),
             # Written onto the version the job makes (D-3).
             "inputs": inputs,
         },
@@ -1019,17 +1023,64 @@ def _unit_infos(
     return infos
 
 
+def _cut_units(
+    row: ShotPlan,
+    kinds_by_plan: dict[int, dict[str, str]],
+    clock: take_timings.TakeClock | None,
+) -> list[scene_timeline.CutUnit]:
+    """Where the speech units sit in the take of a cut plan, from the take's clock. Empty when
+    the clock cannot be used: the take is not ready and timed, or it is not the take the plan was
+    made on (the plan is then out of date and says so itself).
+    """
+    if clock is None or clock.blocked_reason is not None:
+        return []
+    if clock.audio is None or clock.timing is None or not isinstance(row.inputs, dict):
+        return []
+    recorded = _recorded(row.inputs, SPEECH_TAKE_KIND)
+    if (
+        recorded is None
+        or recorded.get("id") != clock.audio.id
+        or recorded.get("timing_id") != clock.timing.id
+    ):
+        return []
+    recorded_units = _recorded(row.inputs, SPEECH_UNITS_KIND)
+    kinds = (
+        kinds_by_plan.get(recorded_units["id"])
+        if recorded_units and "id" in recorded_units
+        else None
+    )
+    if kinds is None:
+        return []
+    return [
+        scene_timeline.CutUnit(
+            span.unit_id,
+            "dialogue" if kinds.get(span.unit_id) == "dialogue" else "narration",
+            span.start,
+            span.end,
+        )
+        for span in clock.spans
+    ]
+
+
 def _timeline_of(
     row: ShotPlan | None,
     policy: duration_policy.DurationPolicy | None,
     kinds_by_plan: dict[int, dict[str, str]],
+    clock: take_timings.TakeClock | None = None,
 ) -> scene_timeline.SceneTimeline | None:
-    """The timeline of a scene's newest plan, or None when it cannot be worked out."""
+    """The timeline of a scene's newest plan, or None when it cannot be worked out. `clock` is
+    the scene's take clock, used only by a cut plan for the places of its speech units.
+    """
     if row is None or policy is None or not isinstance(row.inputs, dict):
         return None
     if cut_planning_writer.is_cut_plan(row.content):
-        # Its shots start on words, not on lengths: FLOW-006 lays them out.
-        return None
+        # The shots start on words of the take: they are laid out at their cut times (FLOW-006).
+        return scene_timeline.build_cut_timeline(
+            row.content["shots"],
+            _cut_units(row, kinds_by_plan, clock),
+            float(row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"]),
+            policy,
+        )
     infos = _unit_infos(row, kinds_by_plan)
     if infos is None:
         return None
@@ -1049,15 +1100,10 @@ def _replan_attempt(row: ShotPlan | None, job: Job | None, active: bool) -> int:
     return attempt if isinstance(attempt, int) and not isinstance(attempt, bool) else 0
 
 
-def _is_cut(row: ShotPlan) -> bool:
-    return cut_planning_writer.is_cut_plan(row.content)
-
-
 def _generation_refusal(
     status: Status,
     active: bool,
     timeline: scene_timeline.SceneTimeline | None,
-    cut_plan: bool = False,
 ) -> str | None:
     """Why this scene's shots cannot go to generation yet, or None. Only a current plan whose
     timeline has no blocking problem may; flagged problems (a shot outside the planning target
@@ -1069,8 +1115,6 @@ def _generation_refusal(
         return "The shots of this scene are being planned."
     if status == "out_of_date":
         return "The shot plan of this scene is out of date."
-    if cut_plan:
-        return CUT_PLAN_NO_TIMELINE
     if timeline is None:
         return "The timeline of this scene cannot be worked out."
     blocking = [problem for problem in timeline.problems if problem.severity == "blocking"]
@@ -1088,7 +1132,10 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
     # Each scene's timeline first, so that a scene's start in the story can be given.
     timelines = {
         scene.scene.item["id"]: _timeline_of(
-            rows.get(scene.scene.item["id"]), loaded.policy, kinds_by_plan
+            rows.get(scene.scene.item["id"]),
+            loaded.policy,
+            kinds_by_plan,
+            loaded.clocks.get(scene.scene.item["id"]),
         )
         for scene in loaded.audio.scenes
     }
@@ -1118,9 +1165,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         if blocked_reason is None and active:
             blocked_reason = "The shots are already being planned."
         timeline = timelines[item["id"]]
-        generation_blocked = _generation_refusal(
-            status, active, timeline, cut_plan=row is not None and _is_cut(row)
-        )
+        generation_blocked = _generation_refusal(status, active, timeline)
         entries.append(
             SceneEntry(
                 item=item,

@@ -66,7 +66,10 @@ _INVALID = {
 Status = Literal["not_generated", "generated", "out_of_date", "failed", "unchecked"]
 TakeState = Literal["generating", "checking_dialogue", "ready", "failed"]
 PromptStatus = Literal["not_compiled", "compiled", "out_of_date"]
-ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
+# `presenter` is the type of a shot of a continuous explainer that shows the presenter (FLOW-005).
+ShotType = Literal[
+    "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
+]
 ProblemKind = Literal["clip", "plan"]
 
 

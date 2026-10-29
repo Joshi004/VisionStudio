@@ -141,6 +141,49 @@ async def cut_window(
         raise PadError("The part of the speech could not be cut.")
 
 
+def take_window_args(source: Path, dest: Path, start_s: float, total_s: float) -> list[str]:
+    """Writes the window of a take that starts `start_s` seconds into `source` and lasts exactly
+    `total_s` seconds, as 16-bit PCM WAV (FLOW-007). The part of the take inside the window is
+    kept whole, so the words that fall in a clip's trimmed tail are in it too. Silence fills what
+    the take cannot give: after its end, and before its start when `start_s` is negative (the
+    scene's lead-in). The delay is in whole milliseconds.
+    """
+    first = max(0.0, start_s)
+    lead_ms = max(0, round(-start_s * 1000)) if start_s < 0 else 0
+    last = start_s + total_s
+    return [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-n",
+        "-i",
+        ffmpeg.file_input(source),
+        "-af",
+        (
+            f"atrim=start={first:.6f}:end={max(first, last):.6f},asetpts=PTS-STARTPTS,"
+            f"adelay={lead_ms}:all=1,apad=whole_dur={total_s:.6f},atrim=end={total_s:.6f}"
+        ),
+        "-c:a",
+        "pcm_s16le",
+        ffmpeg.file_input(dest),
+    ]
+
+
+async def take_window(source: Path, dest: Path, start_s: float, total_s: float) -> None:
+    """Cuts the window of a scene's take that a presenter clip covers into the new WAV file
+    `dest` (FLOW-007), padded with silence to exactly `total_s` seconds. Raises PadError.
+    """
+    try:
+        result = await ffmpeg.run_tool(
+            "ffmpeg", take_window_args(source, dest, start_s, total_s), timeout_s=PAD_TIMEOUT_S
+        )
+    except ffmpeg.ToolError as exc:
+        raise PadError(f"The part of the voice take could not be cut: {exc}") from exc
+    if result.returncode != 0:
+        raise PadError("The part of the voice take could not be cut.")
+
+
 def join_args(list_path: Path, dest: Path) -> list[str]:
     return [
         "-hide_banner",

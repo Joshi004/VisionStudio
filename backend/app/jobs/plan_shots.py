@@ -30,7 +30,8 @@ Before it is saved, code moves every shot's `target_duration` onto a length H3 m
 
 A continuous explainer's job holds `take` (FLOW-005): the scene's timed voice take. Then the job
 asks `cut_planning_writer` instead, for shots that start on words; their lengths are not moved
-onto H3's lengths, and there is no re-plan until FLOW-006 gives them a timeline.
+onto H3's lengths (the timeline works out each clip's length, FLOW-006), and they are never
+planned again by themselves: a fresh cut plan cannot have a timeline problem.
 
 After the plan is saved, its timeline is checked (`services/scene_timeline`, PHASE-021). A plan
 with problems is planned again by a new job of the same type that carries `replan` (the attempt,
@@ -101,6 +102,8 @@ class _Input:
     # A continuous explainer's take (FLOW-005): `{seconds, words, spans}`. When it is set, the
     # shots are cut on its words (`cut_planning_writer`); every other job leaves it out.
     take: dict[str, Any] | None = None
+    # The longest a cut shot may be (FLOW-006); a job queued before it used H3's own limit.
+    longest_shot_seconds: float = cut_planning_writer.MAX_SHOT_S
 
 
 def _is_take(value: Any) -> bool:
@@ -165,6 +168,9 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
     staging = job_input.get("staging")
     take = job_input.get("take")
+    longest = job_input.get("longest_shot_seconds", cut_planning_writer.MAX_SHOT_S)
+    if isinstance(longest, bool) or not isinstance(longest, int | float) or longest <= 0:
+        return None
     if not replan_ok or not feedback_ok or not (staging is None or isinstance(staging, dict)):
         return None
     if take is not None and not _is_take(take):
@@ -210,6 +216,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         feedback=feedback,
         staging=staging,
         take=take,
+        longest_shot_seconds=float(longest),
     )
 
 
@@ -249,13 +256,13 @@ class PlanShotsHandler(JobHandler):
         units: list[dict[str, Any]],
         warnings: list[str],
         speech_mode: str,
-        cut: tuple[dict[str, Any], int] | None = None,
+        cut: tuple[dict[str, Any], int, float] | None = None,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
         What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
 
-        `cut` is `(take, shortest shot in seconds)` for a continuous explainer: its answer is
-        checked by `cut_planning_writer`, the shots starting on words (FLOW-005).
+        `cut` is `(take, shortest shot, longest shot)` in seconds for a continuous explainer: its
+        answer is checked by `cut_planning_writer`, the shots starting on words (FLOW-005).
         """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
@@ -264,7 +271,7 @@ class PlanShotsHandler(JobHandler):
             answer = shot_planning_writer.parse_answer(result.content)
             if cut is not None:
                 content = cut_planning_writer.check_answer(
-                    answer, scene_id, events, units, cut[0], cut[1], found
+                    answer, scene_id, events, units, cut[0], cut[1], found, cut[2]
                 )
             else:
                 content = shot_planning_writer.check_answer(
@@ -326,6 +333,7 @@ class PlanShotsHandler(JobHandler):
                 model=target.model,
                 feedback=read.feedback,
                 staging=read.staging,
+                longest_shot_seconds=read.longest_shot_seconds,
             )
         else:
             body = shot_planning_writer.build_request(
@@ -373,7 +381,11 @@ class PlanShotsHandler(JobHandler):
                 read.units,
                 warnings,
                 read.speech_mode,
-                (read.take, read.target_min_seconds) if read.take is not None else None,
+                (
+                    (read.take, read.target_min_seconds, read.longest_shot_seconds)
+                    if read.take is not None
+                    else None
+                ),
             ),
             timeout_s=REQUEST_TIMEOUT_S,
         )
@@ -436,7 +448,7 @@ class PlanShotsHandler(JobHandler):
 
         # A plan with problems is planned again by itself, up to the number of tries in the
         # settings. This is a separate step: the plan is stored and this job is finished first.
-        if problems:
+        if problems and read.take is None:
             async with SessionLocal() as session:
                 replan = await shot_plans.queue_replan(session, project_id, plan_id, problems)
             if replan is not None:

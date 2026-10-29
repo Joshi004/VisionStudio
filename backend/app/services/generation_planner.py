@@ -37,6 +37,12 @@ The rules:
   presenter's line is the clip's whole soundtrack, and the job sends it placed at its start
   inside silence as long as the clip (`speech_audio.place_in_silence`). A B-roll shot has an
   empty manifest, so it takes the text route on its own.
+- **Presenter shot of a continuous explainer (FLOW-007):** the shot has no dialogue lines of its
+  own. Its one audio is the **window of the scene's voice take** that the clip covers: from the
+  shot's start, for the clip's length (`num_frames / 24`), `fully_copy`, starting at 0. The
+  request records the window (`audios[].window`: its start in the take, its length, the shot's
+  length and the shot's own words) and the job cuts it when it uploads, padding with silence past
+  the end of the take. The clip is longer than the shot, and the render trims it (F-6).
 
 Nothing here chooses a seed or a partition: those are decided when the request is sent.
 """
@@ -97,6 +103,29 @@ class DialogueInput:
     duration_s: float | None
     # Where the line starts inside the shot, from the timeline.
     start_in_shot_s: float
+
+
+@dataclass(frozen=True)
+class TakeWindowInput:
+    """The part of a scene's voice take that a presenter clip of a continuous explainer covers
+    (FLOW-007).
+    """
+
+    scene_id: str
+    # The `speech_unit_audio` row of the take, and the key that identifies the recording.
+    audio_id: int
+    audio_key: str
+    speaker_id: str
+    # Where the window starts inside the take, in seconds. Negative when the scene's lead-in
+    # comes before the take.
+    start_s: float
+    # The words the take says inside the whole window, which the prompt quotes.
+    text: str
+    # The words inside the shot's own part of the window (from 0 to the shot's length): the
+    # words the take check looks for, because the clip's trimmed tail is never shown.
+    shown_text: str
+    # The speech units whose words are in the shot.
+    unit_ids: list[str]
 
 
 @dataclass(frozen=True)
@@ -190,6 +219,51 @@ def _check_audio(line: DialogueInput, target_s: float) -> float:
     return seconds
 
 
+def _window_audio(
+    window: TakeWindowInput, num_frames: int, target_s: float, visible: set[str]
+) -> dict[str, Any]:
+    """The one audio of a presenter shot of a continuous explainer (FLOW-007): the window of the
+    scene's take the clip covers. It is `fully_copy` and starts at 0 of the clip, and lasts as
+    long as the clip, whatever the shot's own length is (the render trims the clip to the shot).
+    Raises GenerationPlanError.
+    """
+    window_s = num_frames / H3_FPS
+    if window_s > H3_MAX_AUDIO_SECONDS + _TOLERANCE:
+        raise GenerationPlanError(
+            f"The window of the voice take for this shot lasts {window_s:g} s, longer than the "
+            f"{H3_MAX_AUDIO_SECONDS:g} s the video model takes as a reference. Plan the shots of "
+            "this scene again."
+        )
+    if window.speaker_id not in visible:
+        raise GenerationPlanError(
+            "A presenter shot must show the presenter. Choose the shot's references again."
+        )
+    if not window.text.strip() or not window.shown_text.strip():
+        raise GenerationPlanError(
+            "The presenter says no words in this shot. Plan the shots of this scene again."
+        )
+    return {
+        "label": "Audio 1",
+        "order": 1,
+        "unit_id": f"take:{window.scene_id}",
+        "unit_ids": window.unit_ids,
+        "speaker_id": window.speaker_id,
+        "text": window.text,
+        "speaker_visible": True,
+        "speech_unit_audio_id": window.audio_id,
+        "audio_key": window.audio_key,
+        "duration_s": round(window_s, 3),
+        "starts_in_shot_seconds": 0.0,
+        "marker": AUDIO_MARKER_EXPLAINER,
+        "window": {
+            "start_s": round(window.start_s, 3),
+            "seconds": round(window_s, 3),
+            "shot_seconds": round(target_s, 3),
+            "shown_text": window.shown_text,
+        },
+    }
+
+
 def _exchange_cuts(
     route: Route,
     anchor: dict[str, Any] | None,
@@ -260,22 +334,30 @@ def plan(
     continues_from: str | None = None,
     exchange: bool = False,
     explainer: bool = False,
+    take_window: TakeWindowInput | None = None,
+    clip_frames: int | None = None,
 ) -> GenerationPlan:
     """The generation request of one shot. `pictures` are the manifest's `references` (each has
     `order`, `lab_image_id`, `kind`, `subject_id`, `subject_name`, `view` and `variant`) and
     `dialogue` the lines the shot carries, both in the order they are sent. `continues_from` is
     the id of the shot before it when this is a continuity shot (PHASE-032); `exchange` is true
     when the shot plan marks the shot as a rapid exchange (PHASE-043); `explainer` is true for a
-    shot of an explainer project, whose dialogue audio is `fully_copy` (EXPLAINER-005). Raises
-    GenerationPlanError.
+    shot of an explainer project, whose dialogue audio is `fully_copy` (EXPLAINER-005).
+    `take_window` is set for a presenter shot of a continuous explainer (FLOW-007): the shot's one
+    audio is then that window of the scene's take and `dialogue` is empty. `clip_frames` is the
+    clip length the timeline of a cut-based shot already worked out (FLOW-006): it is used as it is
+    instead of being worked out again from the shot's length, which could differ by one step
+    because a cut time is kept to a thousandth of a second. Raises GenerationPlanError.
     """
+    if take_window is not None and (dialogue or exchange or not explainer):
+        raise GenerationPlanError("A window of the voice take is only for a presenter shot.")
     sizes = video_generator.H3_SIZES.get(orientation)
     if sizes is None:
         raise GenerationPlanError(f"The project's orientation '{orientation}' has no H3 size.")
     width, height = sizes
     try:
         video_generator.check_size(width, height)
-        num_frames = shot_num_frames(target_s, policy)
+        num_frames = clip_frames if clip_frames is not None else shot_num_frames(target_s, policy)
     except DurationPolicyError as exc:
         raise GenerationPlanError(f"{exc} Plan the shots of this scene again.") from exc
     except ValueError as exc:
@@ -297,7 +379,8 @@ def plan(
     planned_pictures = [_picture(entry, number) for number, entry in enumerate(pictures, start=1)]
     notes: list[str] = []
     anchor: dict[str, Any] | None = None
-    if continues_from is not None and not dialogue:
+    has_audio = bool(dialogue) or take_window is not None
+    if continues_from is not None and not has_audio:
         # Q-7: a shot with no dialogue audio is made on the generate endpoint, which takes the
         # first frame and no other picture.
         route: Route = ROUTE_FIRST_FRAME
@@ -313,7 +396,7 @@ def plan(
             "and is sent with no other reference picture."
         )
     elif not pictures:
-        if dialogue:
+        if has_audio:
             raise GenerationPlanError(
                 "The shot has dialogue but no reference pictures, and a text-only clip takes no "
                 "audio. Choose the shot's references first."
@@ -380,6 +463,9 @@ def plan(
                 "marker": AUDIO_MARKER_EXPLAINER if explainer else AUDIO_MARKER,
             }
         )
+
+    if take_window is not None:
+        audios.append(_window_audio(take_window, num_frames, target_s, set(visible_character_ids)))
 
     exchange_content = _exchange_cuts(route, anchor, planned_pictures, audios) if exchange else None
     if exchange_content is not None:

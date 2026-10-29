@@ -50,7 +50,10 @@ _INVALID = {
 
 Source = Literal["ai", "manual"]
 Status = Literal["not_planned", "planned", "out_of_date"]
-ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
+# `presenter` is the type of a shot of a continuous explainer that shows the presenter (FLOW-005).
+ShotType = Literal[
+    "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
+]
 PictureKind = Literal["character", "environment", "anchor"]
 ManifestStatus = Literal["not_selected", "selected", "out_of_date"]
 Route = Literal["reference", "text", "first_frame"]
@@ -75,6 +78,18 @@ class RequestPictureOut(BaseModel):
     variant: str
 
 
+class RequestWindowOut(BaseModel):
+    """FLOW-007: the part of a scene's voice take a presenter clip is given."""
+
+    # Where the window starts inside the take, and how long it lasts (the clip's length).
+    start_s: float
+    seconds: float
+    # How long the shot itself is: the part of the window that is shown.
+    shot_seconds: float
+    # The words inside the shot, which the take check looks for.
+    shown_text: str
+
+
 class RequestAudioOut(BaseModel):
     """One dialogue audio of the request, in the order it is sent. A prompt calls it
     `<Audio n>`.
@@ -92,8 +107,12 @@ class RequestAudioOut(BaseModel):
     url: str | None
     duration_s: float
     starts_in_shot_seconds: float
-    # How the audio is used by the video model. `partially_copy` today.
+    # How the audio is used by the video model: `partially_copy`, or `fully_copy` in an explainer.
     marker: str
+    # Only for a presenter shot of a continuous explainer (FLOW-007): the audio is a window of
+    # the scene's voice take, and these are the speech units whose words are in the shot.
+    unit_ids: list[str] | None = None
+    window: RequestWindowOut | None = None
 
 
 class RequestAnchorOut(BaseModel):

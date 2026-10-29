@@ -84,6 +84,9 @@ class _AudioInput:
     # EXPLAINER-005: where the speech starts inside the clip, when it is sent placed in silence as
     # long as the clip (a `fully_copy` audio). None for every other audio.
     place_start_s: float | None = None
+    # FLOW-007: where the clip's window starts inside the speech, when the speech is a scene's
+    # voice take and only the part the clip covers is sent. None for every other audio.
+    window_start_s: float | None = None
 
 
 def _audio_input(value: object) -> _AudioInput | None:
@@ -103,12 +106,16 @@ def _audio_input(value: object) -> _AudioInput | None:
         start = value.get("place_start_s")
         if start is not None and (isinstance(start, bool) or not isinstance(start, int | float)):
             return None
+        window = value.get("window_start_s")
+        if window is not None and (isinstance(window, bool) or not isinstance(window, int | float)):
+            return None
         return _AudioInput(
             source=str(source),
             id=audio_id,
             path=path,
             mime=mime,
             place_start_s=float(start) if start is not None else None,
+            window_start_s=float(window) if window is not None else None,
         )
     return None
 
@@ -331,6 +338,9 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
         The exception is a `fully_copy` audio (an explainer's presenter, EXPLAINER-005): it is
         the clip's whole soundtrack, so it is sent placed at its start inside silence that lasts
         exactly as long as the clip. The placed WAV is added to `temps` for the caller to remove.
+
+        The other exception is the window of a scene's voice take (FLOW-007): only the part the
+        clip covers is cut out and sent, as long as the clip.
         """
         try:
             path = get_storage().get_path(audio.path)
@@ -341,6 +351,19 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
         filename = (
             f"lab-reference-audio-{audio.source}-{audio.id}{Path(audio.path).suffix or '.wav'}"
         )
+        if audio.window_start_s is not None:
+            # FLOW-007: the part of a scene's voice take the clip covers, from the clip's start
+            # for the clip's length, padded with silence past the end of the take.
+            clip_s = float(request["num_frames"]) / H3_FPS
+            window = get_storage().new_temp_path("wav")
+            temps.append(window)
+            try:
+                await speech_audio.take_window(path, window, audio.window_start_s, clip_s)
+            except speech_audio.PadError as exc:
+                raise AudioUnavailable(str(exc)) from exc
+            filename = f"lab-reference-audio-window-{audio.source}-{audio.id}.wav"
+            remote_id = await video_generator.upload_audio(base_url, window, filename, "audio/wav")
+            return filename, remote_id
         if audio.place_start_s is not None:
             # An H3 body has no `frame_rate`: the model runs at a fixed 24 fps.
             clip_s = float(request["num_frames"]) / H3_FPS

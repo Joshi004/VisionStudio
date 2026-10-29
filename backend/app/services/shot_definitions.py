@@ -486,9 +486,11 @@ def current_skeleton_sha256(
     plan: shot_plans.SceneEntry,
     shot: dict[str, Any],
     units: dict[str, dict[str, Any]],
+    character_ids: list[str] | None = None,
 ) -> str | None:
     """`_skeleton_sha256` of a shot of the scene's newest plan as it stands now, or None when
-    the plan's timeline cannot be read.
+    the plan's timeline cannot be read. `character_ids` are the characters the scene's definition
+    chose; a cut plan (FLOW-006) needs them to tell the presenter's words.
     """
     if plan.timeline is None:
         return None
@@ -497,8 +499,11 @@ def current_skeleton_sha256(
         return None
     start_s, duration = placed[shot["id"]]
     try:
-        speech, _dialogue = _speech_in_shot(shot, start_s, duration, plan.timeline, units)
-    except KeyError:
+        if plan.row is not None and cut_planning_writer.is_cut_plan(plan.row.content):
+            speech, _dialogue = _cut_speech_in_shot(shot, units, character_ids or [])
+        else:
+            speech, _dialogue = _speech_in_shot(shot, start_s, duration, plan.timeline, units)
+    except (KeyError, ShotDefinitionsError):
         return None
     return _skeleton_sha256(shot, duration, speech)
 
@@ -1205,6 +1210,12 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         resolved = loaded.resolution_by_scene.get(scene_id)
         placed = _durations(plan.timeline) if plan.timeline is not None else {}
         units = _unit_map(loaded.speech.get(scene_id))
+        scene_definition = loaded.definitions.get(scene_id)
+        character_ids: list[str] | None = (
+            scene_definition.row.content["characters"]
+            if scene_definition is not None and scene_definition.row is not None
+            else None
+        )
         shots: list[ShotEntry] = []
         for shot in plan.content["shots"] if plan.content is not None else []:
             key = _shot_key(scene_id, shot["id"])
@@ -1220,7 +1231,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                     loaded,
                     plan,
                     resolved,
-                    current_skeleton_sha256(plan, shot, units),
+                    current_skeleton_sha256(plan, shot, units, character_ids),
                     _staging_sha256(staging),
                 )
                 status = "out_of_date" if reasons else "defined"

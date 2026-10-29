@@ -35,14 +35,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import GenerationRequest, Project, ShotDefinition
 from app.db.state_memo import memoized_state
 from app.services import (
+    cut_planning_writer,
     duration_policy,
     generation_planner,
     provenance,
+    scene_timeline,
     shot_plans,
     shot_references,
     speech_synthesis,
+    take_timings,
 )
 from app.services.duration_policy import DurationPolicy
+from app.services.frame_counts import H3_FPS
 from app.services.project_kinds import KIND_EXPLAINER
 
 _logger = logging.getLogger(__name__)
@@ -51,6 +55,10 @@ MANIFEST_KIND: Final = "shot_reference_manifest"
 DEFINITION_KIND: Final = "shot_definition"
 PLAN_KIND: Final = "shot_plan"
 AUDIO_KIND: Final = "speech_unit_audio"
+# The shots of a continuous explainer are cut on its voice take (FLOW-005, FLOW-006). A presenter
+# shot's request has one audio, the window of the take its clip covers (FLOW-007); the request
+# records the take it was cut from under this artifact kind.
+SPEECH_TAKE_KIND: Final = shot_plans.SPEECH_TAKE_KIND
 
 # `not_planned`: no request was made for this shot. `planned`: made, and nothing it was built
 # from has changed. `out_of_date`: made, and something it was built from has changed (see the
@@ -128,6 +136,9 @@ class _Context:
     policy_problem: str | None
     # The shot definitions the newest manifests were chosen for, by row id.
     definitions: dict[int, ShotDefinition]
+    # The take of each scene of a continuous explainer, by scene id (FLOW-007). Empty for every
+    # other project.
+    clocks: dict[str, take_timings.TakeClock]
 
 
 def _key(scene_id: str, shot_id: str) -> str:
@@ -169,6 +180,7 @@ async def _load(session: AsyncSession, project: Project) -> _Context:
         policy=policy,
         policy_problem=policy_problem,
         definitions=definitions,
+        clocks=await take_timings.scene_clocks(session, project),
     )
 
 
@@ -187,6 +199,118 @@ def _definition_of(ctx: _Context, entry: shot_references.ShotEntry) -> ShotDefin
     if row is None or row.shot_definition_id is None:
         return None
     return ctx.definitions.get(row.shot_definition_id)
+
+
+def _plan_shot(plan: shot_plans.SceneEntry, shot_id: str) -> dict[str, Any] | None:
+    """The shot of the scene's newest plan with this id, or None."""
+    shots = plan.row.content.get("shots") if plan.row is not None else None
+    if not isinstance(shots, list):
+        return None
+    return next(
+        (shot for shot in shots if isinstance(shot, dict) and shot.get("id") == shot_id), None
+    )
+
+
+def _window_start(plan: shot_plans.SceneEntry, shot_id: str) -> float | None:
+    """Where the window of a presenter shot starts inside the scene's take: the shot's start on
+    the timeline less the lead-in the take sits after (negative for the first shot when the
+    lead-in is above 0). None when the shot is not on the timeline.
+    """
+    if plan.row is None or plan.timeline is None:
+        return None
+    span = next((span for span in plan.timeline.shots if span.shot_id == shot_id), None)
+    cut_plan = plan.row.content.get(cut_planning_writer.CUT_PLAN_KEY)
+    lead_in = cut_plan.get("lead_in_s") if isinstance(cut_plan, dict) else None
+    if span is None or isinstance(lead_in, bool) or not isinstance(lead_in, int | float):
+        return None
+    return round(span.start_s - float(lead_in), 3)
+
+
+def _cut_refusal(
+    ctx: _Context,
+    scene_id: str,
+    plan: shot_plans.SceneEntry,
+    shot_id: str,
+) -> str | None:
+    """Why a shot of a continuous explainer's cut plan cannot be planned now, or None. A B-roll
+    shot has no audio, so nothing more is needed. A presenter shot needs its scene's take, ready
+    and timed, and the very take its shots were planned on (FLOW-007).
+    """
+    assert plan.row is not None
+    shot = _plan_shot(plan, shot_id)
+    if shot is None:
+        return "The shot is not in the newest shot plan of its scene."
+    if shot.get("type") != cut_planning_writer.PRESENTER:
+        return None
+    clock = ctx.clocks.get(scene_id)
+    if clock is None:
+        return take_timings.NOT_MADE_REASON
+    if clock.blocked_reason is not None:
+        return clock.blocked_reason
+    recorded = _recorded(plan.row.inputs, SPEECH_TAKE_KIND)
+    if (
+        recorded is None
+        or clock.audio is None
+        or clock.timing is None
+        or recorded.get("id") != clock.audio.id
+        or recorded.get("timing_id") != clock.timing.id
+    ):
+        return "The voice take of this scene changed since its shots were planned. Plan them again."
+    if _window_start(plan, shot_id) is None:
+        return "The shot is not on the scene's timeline."
+    return None
+
+
+def _take_window(
+    ctx: _Context,
+    scene_id: str,
+    plan: shot_plans.SceneEntry,
+    shot: dict[str, Any],
+    span: scene_timeline.ShotSpan,
+    speaker_id: str,
+) -> tuple[generation_planner.TakeWindowInput, dict[str, Any]]:
+    """The window of the scene's take that a presenter clip covers (FLOW-007), and the artifact
+    that records the take it was cut from. The window starts at the shot's start and lasts as
+    long as the clip. The words the prompt quotes are the take's words from the shot's first word
+    whose middle is before the window's end, and the words the take check looks for are the
+    shot's own words. Raises GenerationRequestsError.
+    """
+    clock = ctx.clocks[scene_id]
+    start_s = _window_start(plan, span.shot_id)
+    if clock.audio is None or clock.timing is None or start_s is None or span.clip_frames is None:
+        raise GenerationRequestsError("The voice take of this scene cannot be read.")
+    window_s = round(span.clip_frames / H3_FPS, 3)
+    end_s = start_s + window_s
+    words = clock.words
+    first, last = int(shot["start_word"]) - 1, int(shot["last_word"])
+    if first < 0 or last > len(words) or first >= last:
+        raise GenerationRequestsError(
+            "The words of this shot are not in the scene's take. Plan the shots again."
+        )
+    inside = [
+        str(word["text"])
+        for word in words[first:]
+        if (float(word["start"]) + float(word["end"])) / 2 < end_s
+    ]
+    window = generation_planner.TakeWindowInput(
+        scene_id=scene_id,
+        audio_id=clock.audio.id,
+        audio_key=clock.audio.audio_key,
+        speaker_id=speaker_id,
+        start_s=start_s,
+        text=" ".join(inside),
+        shown_text=" ".join(str(word["text"]) for word in words[first:last]),
+        unit_ids=[str(unit_id) for unit_id in shot.get("speech_unit_ids") or []],
+    )
+    artifact = {
+        "kind": SPEECH_TAKE_KIND,
+        "id": clock.audio.id,
+        "audio_key": clock.audio.audio_key,
+        "timing_id": clock.timing.id,
+        "window_start_s": start_s,
+        "window_seconds": window_s,
+    }
+    return window, artifact
 
 
 def _refusal(ctx: _Context, scene_id: str, entry: shot_references.ShotEntry) -> str | None:
@@ -208,6 +332,8 @@ def _refusal(ctx: _Context, scene_id: str, entry: shot_references.ShotEntry) -> 
         return why + " Plan the shots again first."
     if plan.timeline is None:
         return "The timeline of this scene cannot be read."
+    if cut_planning_writer.is_cut_plan(plan.row.content):
+        return _cut_refusal(ctx, scene_id, plan, entry.shot["id"])
     not_ready: list[str] = []
     for line in _dialogue_lines(definition):
         unit = ctx.audio.get((scene_id, str(line.get("unit_id"))))
@@ -257,6 +383,29 @@ def _whose(unit: speech_synthesis.UnitEntry | None) -> str:
     return f"{str(speaker).replace('_', ' ').title()}'s " if isinstance(speaker, str) else ""
 
 
+def _take_window_reasons(row: GenerationRequest, ctx: _Context, scene_id: str) -> list[str]:
+    """Why the window of the voice take that a presenter request was cut from no longer fits the
+    take, one sentence each (FLOW-007). Empty for a request with no such window.
+    """
+    recorded = _recorded(row.inputs, SPEECH_TAKE_KIND)
+    if recorded is None:
+        return []
+    clock = ctx.clocks.get(scene_id)
+    if clock is None:
+        return ["The voice take of the scene is no longer ready: " + take_timings.NOT_MADE_REASON]
+    if clock.audio is not None and clock.audio.id != recorded.get("id"):
+        return ["The voice take of the scene was made again since the request was planned."]
+    if clock.blocked_reason is not None:
+        return [f"The voice take of the scene is no longer ready: {clock.blocked_reason}"]
+    if clock.timing is not None and clock.timing.id != recorded.get("timing_id"):
+        return ["The words of the voice take were timed again since the request was planned."]
+    plan = ctx.plans.get(scene_id)
+    start = _window_start(plan, row.shot_id) if plan is not None else None
+    if start is not None and start != recorded.get("window_start_s"):
+        return ["The place of the shot in the voice take changed since the request was planned."]
+    return []
+
+
 def _out_of_date_reasons(
     row: GenerationRequest, ctx: _Context, scene_id: str, entry: shot_references.ShotEntry
 ) -> list[str]:
@@ -286,6 +435,8 @@ def _out_of_date_reasons(
             )
         elif unit.audio.id != artifact.get("id"):
             reasons.append(f"The speech of {whose}line '{unit_id}' was made again.")
+
+    reasons.extend(_take_window_reasons(row, ctx, scene_id))
 
     seconds = _shot_seconds(ctx, scene_id, row.shot_id)
     if seconds is not None and seconds != row.content.get("target_seconds"):
@@ -418,7 +569,10 @@ def _plan_inputs(
         {"kind": DEFINITION_KIND, "id": definition.id, "version": definition.version},
         {"kind": PLAN_KIND, "id": plan_entry.row.id, "version": plan_entry.row.version},
     ]
-    for line in _dialogue_lines(definition):
+    cut_plan = cut_planning_writer.is_cut_plan(plan_entry.row.content)
+    # A cut plan's shots hold no dialogue lines of their own: a presenter shot is given a window
+    # of the scene's take below (FLOW-007).
+    for line in [] if cut_plan else _dialogue_lines(definition):
         unit_id = str(line.get("unit_id"))
         unit = ctx.audio[(scene_id, unit_id)]
         span_of_unit = units.get(unit_id)
@@ -452,6 +606,17 @@ def _plan_inputs(
         for character in definition.content.get("characters") or []
         if isinstance(character, dict) and isinstance(character.get("id"), str)
     ]
+    take_window: generation_planner.TakeWindowInput | None = None
+    plan_shot = _plan_shot(plan_entry, shot_id) if cut_plan else None
+    if plan_shot is not None and plan_shot.get("type") == cut_planning_writer.PRESENTER:
+        if len(visible) != 1:
+            raise GenerationRequestsError(
+                "A presenter shot must list exactly the presenter. Define the shot again."
+            )
+        take_window, take_artifact = _take_window(
+            ctx, scene_id, plan_entry, plan_shot, span, visible[0]
+        )
+        artifacts.append(take_artifact)
     try:
         plan = generation_planner.plan(
             scene_id=scene_id,
@@ -465,6 +630,8 @@ def _plan_inputs(
             continues_from=continues_from(plan_entry.row.content, shot_id),
             exchange=exchange_of(plan_entry.row.content, shot_id),
             explainer=ctx.project.kind == KIND_EXPLAINER,
+            take_window=take_window,
+            clip_frames=span.clip_frames,
         )
     except generation_planner.GenerationPlanError as exc:
         raise GenerationRequestsError(str(exc)) from exc

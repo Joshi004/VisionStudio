@@ -62,7 +62,10 @@ _INVALID = {
 Source = Literal["ai", "manual"]
 Method = Literal["deterministic", "llm", "manual"]
 Status = Literal["not_selected", "selected", "out_of_date"]
-ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
+# `presenter` is the type of a shot of a continuous explainer that shows the presenter (FLOW-005).
+ShotType = Literal[
+    "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
+]
 PictureKind = Literal["character", "environment"]
 DefinitionStatus = Literal["not_defined", "defined", "out_of_date"]
 

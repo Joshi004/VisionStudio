@@ -312,7 +312,7 @@ Checked on throwaway data (no database; stand-in take, events and units): a good
 
 ### FLOW-006 — Timeline and clip lengths for cut-based shots
 
-**Status:** Not Started
+**Status:** Done (2026-10-29). Looking at a real scene's timeline is the owner's (see the completion notes).
 
 **Objective.** Lay a continuous explainer's shots at their cut times, and make each clip the shortest H3 length that covers its shot.
 
@@ -339,14 +339,33 @@ Checked on throwaway data (no database; stand-in take, events and units): a good
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Timeline branch, clip lengths
-- [ ] Docs, standard checks
+- [x] Timeline branch, clip lengths
+- [x] Docs, standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-29. No migration. Decisions made in planning:
+
+- **Clip length (owner).** Worked out on every read, never stored: `h3_num_frames(target_frames(start, end, 24))`, the shortest `17n + 5` that covers the shot. It is `ShotSpan.clip_frames` on the timeline, and is `None` on every other timeline. FLOW-007 reads it from there.
+- **Upper limit (owner).** One limit for a cut shot everywhere: `duration_policy.longest_cut_shot_s`, which is `min(h3_max_shot_seconds, 345 frames / 24)` (14 s by default). The planner is told it (`longest_shot_seconds` in its DURATION POLICY, from the new `plan_shots` job input key of the same name) and checks its answer against it, and the timeline blocks on it, so a fresh plan cannot block. A job made before this uses 345 frames / 24. The lower limit on the timeline is `h3_min_shot_seconds`; the planner already asks for at least the planning minimum, which is never below it.
+- **Checks.** Only `outside_hard_bounds` (blocking). No `outside_target` flag, and none of `dialogue_too_short`, `narration_overlap`, `speech_past_scene_end`: the voice is one take that plays whatever the picture shows.
+- **No automatic re-plan** for a cut plan: a fresh plan cannot have a timeline problem, and one caused by a later settings change is fixed by pressing Plan.
+
+What was built:
+
+- `scene_timeline.build_cut_timeline(shots, units, lead_in_s, policy)` (pure): a shot starts and ends at its stored cut times plus `cut_plan.lead_in_s` (the first starts at 0), the scene ends where its last shot ends, and units sit at the lead-in plus their span in the take. `build_timeline` is not changed, so a `lines` explainer and a story get exactly today's timeline.
+- `shot_plans._timeline_of` lays out a cut plan with the scene's take clock. Its units are listed only when the clock is usable and its take and timing are the ones recorded in the plan's `speech_take` artifact; otherwise the shots are still laid out and the unit list is empty (the plan is then out of date anyway). `CUT_PLAN_NO_TIMELINE` is gone, so a current cut plan with no blocking problem is `generation_ready`.
+- `shot_definitions.current_skeleton_sha256` reads a cut shot's words through `_cut_speech_in_shot`, as the definition did when it recorded the hash, so a defined cut shot does not read as out of date. Shots of a continuous explainer can now be defined.
+- `generation_requests` refuses a cut plan with "The clips of a continuous explainer cannot be planned yet: a presenter shot needs its window of the voice take (FLOW-007)", so the pipeline stops there with a clear message.
+- API: `timeline.shots[].clip_frames`, and `presenter` as a shot type in the definition, reference, prompt, take and generation request responses (the known limit of FLOW-005). `schema.d.ts` was generated from the local code. The timeline bar of a cut shot says its clip length and how much is trimmed.
+
+Checked on stand-in data (no database): a cut plan with a lead-in of 0 and of 0.5 s (shots meet with no gap; the total is the lead-in plus the take plus its tail, 20.0 s and 20.5 s for a 19.70 s take); clip lengths for shots of 124, 125, 60 and 345 frames (124, 141, 73 and 345) and for 500 random lengths (every one a `17n + 5` length, at least the shot, and less than 17 frames over); a shot of 14.2 s and one of 0.5 s each give one blocking problem and nothing else, and 14.0 s gives none; units from the clock, and none (with the shots still laid out) when the clock is blocked or its take or timing is not the recorded one; `generation_ready` for such a plan; a `lines` timeline with no `clip_frames`; the planner request shows `"longest_shot_seconds": 14.0`, and an answer with a presenter shot of 14.083 s is refused at 14 s and accepted at 14.375 s. Ruff, `npm run lint` and `npm run typecheck` pass. There are no automated tests, as asked. Not run: a real plan on a real take, and the pipeline through "Define the shots".
+
+**Known limits.** A plan whose take is made or timed again is out of date (FLOW-005), so its timeline keeps its shots but lists no units until the plan is made again. Music planning and the render read the timeline's units; they only see a cut plan once FLOW-007 and FLOW-008 let it reach them. FLOW-007 lifted the generation-request refusal and uses `clip_frames`. The longest-shot limit is not recorded on the plan, so changing the "H3 longest shot" setting turns an already planned scene's long shot into a blocking timeline problem, not into "out of date"; Plan fixes it.
+
+**Still for the owner:** rebuild the backend image (`docker compose up -d --build backend`), plan one real scene, open its timeline (shot bars show the clip length on hover), and run "Define the shots" on it to check that the presenter and B-roll shots are defined.
 
 ### FLOW-007 — Generation requests, prompts and the take check for windows
 
-**Status:** Not Started
+**Status:** Done (2026-10-29). Watching the lips on real presenter shots is the owner's (see the completion notes).
 
 **Objective.** Send each presenter shot the window of the take its clip covers, and check the take against the words in that window.
 
@@ -376,11 +395,31 @@ Checked on throwaway data (no database; stand-in take, events and units): a good
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Window cut and upload
-- [ ] Request, prompt and take check
-- [ ] Docs, standard checks
+- [x] Window cut and upload
+- [x] Request, prompt and take check
+- [x] Docs, standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-29. No migration. Decisions made in planning:
+
+- **Partly-inside words (owner).** In the take check, a heard word counts when its middle (start plus end, halved) is before the shot's length. The expected words are exactly the shot's own words (`spoken_text`), which sit inside the shot because cuts fall between words.
+- **Window.** It starts at the shot's start on the timeline less the plan's lead-in (so it is negative for the first shot when the lead-in is above 0, and the job puts silence in front), lasts `clip_frames / 24`, and keeps the take's words that fall in the clip's trimmed tail. Past the end of the take it is padded with silence. It is cut by the job when it uploads, as `place_start_s` is today, and no file is stored.
+- **Clip length.** The request uses the timeline's `clip_frames` as it is. **Found while checking:** working it out again from the shot's length (`shot_num_frames`) gives one step too many for a shot of an exact `17n + 5` length (a cut time is kept to a thousandth of a second, so 124 frames reads as 124.008), which differed from the timeline in 1716 of about 85,000 sampled shots. `generation_planner.plan` takes `clip_frames` for a cut shot; every other shot still uses `shot_num_frames`.
+- **Prompt words.** The audio's `text` is the take's words from the shot's first word whose middle is before the window's end, from the timings; `starts_in_shot_seconds` is 0. The prompt writer needed no change: it reads `text`, the start and the marker, and writes the `fully_copy` audio definition.
+
+What was built:
+
+- `speech_audio.take_window` (`take_window_args`): `atrim`, `adelay`, `apad` and `atrim` into 16-bit PCM WAV of exactly `clip frames * 1000` samples at 24 kHz. `cut_window` of the Audio video lab is not changed.
+- `generation_planner.TakeWindowInput` and `plan(take_window=..., clip_frames=...)`: the one audio is `{unit_id: "take:{scene}", unit_ids, marker: fully_copy, starts_in_shot_seconds: 0, window: {start_s, seconds, shot_seconds, shown_text}}`. The planner refuses a window over 15 s, a presenter who is not in the pictures, and a window of no words. B-roll is unchanged (text route, no audio).
+- `generation_requests`: `CUT_PLAN_NOT_PLANNED` is gone. A B-roll shot of a cut plan needs nothing more. A presenter shot needs its scene's take clock ready, and the take and timing the plan recorded. The request records a `speech_take` artifact (`id`, `audio_key`, `timing_id`, `window_start_s`, `window_seconds`) and is out of date when the take was made again or timed again, is no longer ready, or the shot's start inside the take moved.
+- `shot_takes._inputs_of_request` gives the job `window_start_s`; `jobs/generate_lab_video` cuts and uploads the window (`lab-reference-audio-window-...wav`).
+- `dialogue_check`: `DialogueLine.heard_until_s`; `lines_of` reads a window audio as one line with the shot's words; `compare` leaves out heard words whose middle is not before it. `heard_until_s` is recorded in `shot_take.inputs.dialogue` only for such a line, so any other take records what it did. `jobs/check_take_dialogue.py` is not changed.
+- API: `RequestAudioOut.unit_ids` and `window` (optional). `schema.d.ts` was generated from the local code (it also holds the FLOW-006 changes that were not in it yet).
+
+Checked on throwaway data (no database): `take_window` for a 19.7 s take at 0 s / 141 frames, 5.8 s / 226, 14.9 s / 124 (past the end), 14.9 s / 345, -0.5 s / 124 (lead-in) and 5 frames, each with exactly `frames * 1000` samples at 24 kHz; the planner for a presenter window (route `reference`, 124 frames, one `fully_copy` audio at 0, `match_audio_duration` false), a B-roll shot of a cut plan (text route, 141 frames, no audio) and a story shot (same keys as before, no `window`); refusals for no pictures, an absent presenter and a window of 15.08 s; the prompt layout of the window request (`copy_all`, cue `00:00.000`, the `fully_copy` audio definition); the take check with the straddling word on each side of the midpoint (kept, failing at 100 percent; dropped, passing), and `lines_of` and `lines_as_json` round trip, also for an old take's dialogue (identical); with stand-in plan, timeline and clock: no refusal for B-roll or presenter, the window start, the window words, the `speech_take` artifact, and the out-of-date reasons for a changed place, a remade take, a retimed take and a blocked take, and none for a request with no window. Ruff passes and `npm run lint` and `npm run typecheck` pass. There are no automated tests, as asked. Not run: a real request through the database, the shot prompt model, the GPU server, or the dialogue check on a real clip.
+
+**Known limits.** The prompt quotes the words of the window, which can end with a word the clip's trimmed tail cuts in half; the take check does not count it. A request is not out of date when only the length of the clip changes with the shot's start unchanged (the shot's length check covers it). The render (FLOW-008) does not read cut plans yet, so a clip made now cannot be rendered into a video.
+
+**Still for the owner (needs the GPU server and watching):** rebuild the backend image (`docker compose up -d --build backend`), then on one continuous explainer with timed takes and planned shots run Define, References, Request, Prompt and Generate on two presenter shots, one that starts mid-sentence, and check that the lips follow the words from the first frame and that the dialogue check passes. Check the request's window start and the uploaded audio against the take.
 
 ### FLOW-008 — Render with the take as the voice
 
@@ -466,7 +505,7 @@ Make project 42's script again as a new continuous explainer, in portrait, with 
 | FLOW-003 | Done | 2026-10-29. Migration `0077`. Takes are `speech_unit_audio` rows (kind `take`), per scene, units joined with one space. Not timed yet (FLOW-004). |
 | FLOW-004 | Done | 2026-10-29. No migration. Takes are timed by the same job and table; unit spans are worked out on read (`take_timings`); an estimated take blocks cut planning. Owner checks the timings by playback. |
 | FLOW-005 | Done | 2026-10-29. No migration. New `cut_planning_writer`; cut plans are `shot_plan` rows with `cut_plan` and word-based shots, no timeline until FLOW-006. Owner judges the cut points on real scenes. |
-| FLOW-006 | Not Started | |
-| FLOW-007 | Not Started | |
+| FLOW-006 | Done | 2026-10-29. No migration. `build_cut_timeline`: shots at their cut times, `clip_frames` worked out on read, only hard bounds block (`longest_cut_shot_s`). Generation requests of a cut plan stay refused until FLOW-007. |
+| FLOW-007 | Done | 2026-10-29. No migration. A presenter shot's request has one `fully_copy` audio, the window of the take (`audios[].window`), cut by the job at upload; the clip length is the timeline's `clip_frames`; the take check counts heard words whose middle is before the shot's length. Owner checks the lips on real shots. |
 | FLOW-008 | Not Started | Includes the per-shot voice source (F-9). |
 | FLOW-009 | Not Started | Owner end-to-end check. |

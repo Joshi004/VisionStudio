@@ -652,9 +652,12 @@ async def _inputs_of_request(
     audios: list[dict[str, Any]] = []
     for audio in content["audios"]:
         speech = await session.get(SpeechUnitAudio, audio["speech_unit_audio_id"])
+        window = audio.get("window")
         if speech is None or not _stored_file_exists(speech.path):
             raise ShotTakesError(
-                f"The speech of the line '{audio['unit_id']}' ({audio['label']}) is missing. "
+                "The voice take of this scene is missing. Make it again."
+                if isinstance(window, dict)
+                else f"The speech of the line '{audio['unit_id']}' ({audio['label']}) is missing. "
                 "Make it again."
             )
         # What the job needs of the audio, copied now: a later change moves nothing for it.
@@ -664,7 +667,11 @@ async def _inputs_of_request(
             "path": speech.path,
             "mime": AUDIO_MIME,
         }
-        if audio.get("marker") == generation_planner.AUDIO_MARKER_EXPLAINER:
+        if isinstance(window, dict):
+            # A presenter shot of a continuous explainer (FLOW-007): the job cuts the part of
+            # the scene's take the clip covers, from `window_start_s` for the clip's length.
+            entry["window_start_s"] = window["start_s"]
+        elif audio.get("marker") == generation_planner.AUDIO_MARKER_EXPLAINER:
             # A `fully_copy` audio is the clip's whole soundtrack (EXPLAINER-005): the job sends
             # it placed at its start inside silence as long as the clip.
             entry["place_start_s"] = audio["starts_in_shot_seconds"]

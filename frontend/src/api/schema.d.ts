@@ -9974,7 +9974,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -10356,6 +10356,9 @@ export interface components {
             starts_in_shot_seconds: number;
             /** Marker */
             marker: string;
+            /** Unit Ids */
+            unit_ids?: string[] | null;
+            window?: components["schemas"]["RequestWindowOut"] | null;
         };
         /**
          * RequestCutOut
@@ -10417,11 +10420,25 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
             /** Description */
             description: string;
             /** Duration Seconds */
             duration_seconds: number;
+        };
+        /**
+         * RequestWindowOut
+         * @description FLOW-007: the part of a scene's voice take a presenter clip is given.
+         */
+        RequestWindowOut: {
+            /** Start S */
+            start_s: number;
+            /** Seconds */
+            seconds: number;
+            /** Shot Seconds */
+            shot_seconds: number;
+            /** Shown Text */
+            shown_text: string;
         };
         /** ReroutedOut */
         ReroutedOut: {
@@ -12097,7 +12114,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -12173,7 +12190,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
             /** Description */
             description: string;
             /** Source Event Ids */
@@ -13505,7 +13522,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -13766,6 +13783,8 @@ export interface components {
             start_seconds: number;
             /** End Seconds */
             end_seconds: number;
+            /** Clip Frames */
+            clip_frames?: number | null;
         };
         /**
          * TimelineUnitOut
