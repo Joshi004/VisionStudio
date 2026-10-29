@@ -11677,7 +11677,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
             /** Target Duration */
             target_duration: number;
             /**
@@ -11710,7 +11710,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
             /** Target Duration */
             target_duration: number;
             /**
@@ -11725,6 +11725,16 @@ export interface components {
             rapid_exchange: boolean;
             /** Description */
             description: string;
+            /** Start Word */
+            start_word?: number | null;
+            /** Last Word */
+            last_word?: number | null;
+            /** Start S */
+            start_s?: number | null;
+            /** End S */
+            end_s?: number | null;
+            /** Spoken Text */
+            spoken_text?: string | null;
         };
         /** ShotPlacementOut */
         ShotPlacementOut: {

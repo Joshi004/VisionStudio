@@ -48,6 +48,7 @@ from app.db.models import Job, Project, ShotDefinition, ShotPlan, StoryBible
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    cut_planning_writer,
     environment_views,
     look_state_resolution,
     provenance,
@@ -424,6 +425,48 @@ def _speech_in_shot(
     return speech, dialogue
 
 
+def _cut_speech_in_shot(
+    shot: dict[str, Any], units: dict[str, dict[str, Any]], character_ids: list[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """`(speech, dialogue)` for a shot of a cut plan (FLOW-005). The shot starts on a word of the
+    scene's take and ends on another (`start_word`, `last_word`, counted from 1 over the units'
+    words in order), so each unit it carries is listed with only the words of it that fall inside
+    the shot. A `presenter` shot's words are the presenter's dialogue, whatever the unit's label;
+    any other shot's words are narration over B-roll.
+    """
+    presenter = shot["type"] == cut_planning_writer.PRESENTER
+    if presenter and len(character_ids) != 1:
+        raise ShotDefinitionsError(
+            "An explainer's scene must have exactly one character, the presenter."
+        )
+    first, last = int(shot["start_word"]), int(shot["last_word"])
+    speech: list[dict[str, Any]] = []
+    dialogue: list[dict[str, str]] = []
+    before = 0
+    for unit_id, unit in units.items():
+        words = str(unit["text"]).split()
+        unit_first, unit_last = before + 1, before + len(words)
+        before = unit_last
+        low, high = max(first, unit_first), min(last, unit_last)
+        if low > high:
+            continue
+        text = " ".join(words[low - unit_first : high - unit_first + 1])
+        speaker = character_ids[0] if presenter else None
+        speech.append(
+            {
+                "id": unit_id,
+                "kind": "dialogue" if presenter else "narration",
+                "speaker_id": speaker,
+                "text": text,
+                "continues_from_previous_shot": unit_first < first,
+                "continues_into_next_shot": unit_last > last,
+            }
+        )
+        if speaker is not None:
+            dialogue.append({"unit_id": unit_id, "speaker_id": speaker, "text": text})
+    return speech, dialogue
+
+
 def _unit_map(speech: speech_units.SceneEntry | None) -> dict[str, dict[str, Any]]:
     content = speech.content if speech is not None else None
     return {unit["id"]: unit for unit in content["units"]} if content is not None else {}
@@ -620,9 +663,12 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
     shot_events = [
         event for event in events_row.content["events"] if event["id"] in shown_event_ids
     ]
-    speech, dialogue = _speech_in_shot(
-        shot, start_s, duration, timeline, _unit_map(loaded.speech.get(scene_id))
-    )
+    unit_map = _unit_map(loaded.speech.get(scene_id))
+    cut = cut_planning_writer.is_cut_plan(plan_row.content)
+    if cut:
+        speech, dialogue = _cut_speech_in_shot(shot, unit_map, definition["characters"])
+    else:
+        speech, dialogue = _speech_in_shot(shot, start_s, duration, timeline, unit_map)
 
     chosen_characters = [
         (CHARACTER_DEFINITION_KIND, character_id) for character_id in definition["characters"]
@@ -721,6 +767,8 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         "environment": environment,
         "staging": staging,
         "explainer": loaded.explainer,
+        # Only for a cut plan (FLOW-005), so every other job is exactly what it was.
+        **({"continuous": True} if cut else {}),
         # Written onto the version the job makes (D-3).
         "inputs": inputs,
     }

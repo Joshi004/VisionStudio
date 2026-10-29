@@ -41,6 +41,7 @@ from app.db.models import Job, Project, SceneDiscovery, ShotPlan, SpeechUnits, S
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    cut_planning_writer,
     discovery,
     duration_policy,
     event_extraction_writer,
@@ -54,7 +55,9 @@ from app.services import (
     shot_staging,
     speech_synthesis,
     story_bible,
+    take_timings,
     user_feedback,
+    word_timings,
 )
 from app.services.projects import prompt_mode
 
@@ -72,6 +75,14 @@ MANUAL_REPLACE_MESSAGE: Final = (
     "version from the model, so it has to be confirmed."
 )
 SKIPPED_MANUAL: Final = "Written by you: use this scene's own button to replace it."
+# The shots of a continuous explainer start on words of the take: a person cannot edit them as
+# lengths (FLOW-005). Planning the scene again, with or without a note, still works.
+CUT_PLAN_NO_EDIT: Final = (
+    "The shots of a continuous explainer start on the words of the voice take, so they cannot be "
+    "edited or accepted by hand. Plan the scene again, with a note if you want a change."
+)
+# Until the timeline learns to lay out cut-based shots (FLOW-006).
+CUT_PLAN_NO_TIMELINE: Final = "Cut-based shots are not laid out on a timeline yet."
 
 # How many of a project's newest planning jobs are read to find each scene's newest one.
 _JOB_LOOKBACK: Final = 500
@@ -82,6 +93,9 @@ SCENE_DEFINITION_KIND: Final = "scene_definition"
 SCENE_EVENTS_KIND: Final = "scene_events"
 SPEECH_UNITS_KIND: Final = "speech_units"
 SPEECH_AUDIO_KIND: Final = "speech_unit_audio"
+# What a cut plan of a continuous explainer records in place of its units' audio (FLOW-005): the
+# scene's take and the timing of its words.
+SPEECH_TAKE_KIND: Final = "speech_take"
 CHARACTER_DEFINITION_KIND: Final = scene_definitions.CHARACTER_DEFINITION_KIND
 ENVIRONMENT_DEFINITION_KIND: Final = scene_definitions.ENVIRONMENT_DEFINITION_KIND
 
@@ -191,6 +205,10 @@ class _Loaded:
     policy: duration_policy.DurationPolicy | None
     replan_max_tries: int
     blocked_reason: str | None
+    # A continuous explainer (FLOW-005): its shots are cut on the words of each scene's take, and
+    # `clocks` holds the take's timed words by scene id. Empty for every other project.
+    continuous: bool
+    clocks: dict[str, take_timings.TakeClock]
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -228,6 +246,8 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
             session, settings_service.SHOT_REPLAN_MAX_TRIES_KEY
         ),
         blocked_reason=policy_problem or audio.blocked_reason,
+        continuous=word_timings.times_takes(project),
+        clocks=await take_timings.scene_clocks(session, project),
     )
 
 
@@ -252,12 +272,30 @@ def _chosen(definition: dict[str, Any]) -> list[tuple[str, str]]:
     ]
 
 
+def _take_refusal(clock: take_timings.TakeClock | None) -> str | None:
+    """Why a continuous scene's shots cannot be cut on its take yet, or None: the take must be
+    made, current, and timed from what Parakeet heard.
+    """
+    if clock is None:
+        return take_timings.NOT_MADE_REASON
+    if clock.blocked_reason is not None:
+        return clock.blocked_reason
+    if clock.audio is None or clock.audio.duration_s is None:
+        return "The length of this scene's take was not measured."
+    return None
+
+
 def _scene_refusal(
     scene: speech_synthesis.SceneAudio,
     definition: scene_definitions.SceneEntry | None,
     current: dict[tuple[str, str], scene_definitions.CurrentDefinition],
+    *,
+    continuous: bool = False,
+    clock: take_timings.TakeClock | None = None,
 ) -> str | None:
-    """Why this scene's shots cannot be planned now, or None."""
+    """Why this scene's shots cannot be planned now, or None. A continuous explainer is not
+    judged by its units' audio, which it never makes, but by its scene's take (`clock`).
+    """
     if definition is None or definition.row is None:
         return "Define this scene first: its shots are planned from its definition."
     if definition.status == "out_of_date":
@@ -271,9 +309,14 @@ def _scene_refusal(
         return "Plan this scene's speech units first: its shots carry them."
     if scene.scene.status == "out_of_date":
         return "The speech units of this scene are out of date. Plan them again first."
-    problems = _unit_problems(scene)
-    if problems:
-        return "Make the speech of every unit first. Not ready: " + ", ".join(problems) + "."
+    if continuous:
+        take_reason = _take_refusal(clock)
+        if take_reason is not None:
+            return take_reason
+    else:
+        problems = _unit_problems(scene)
+        if problems:
+            return "Make the speech of every unit first. Not ready: " + ", ".join(problems) + "."
     for kind, discovery_id in _chosen(definition.row.content):
         if (kind, discovery_id) not in current:
             what = "environment" if kind == ENVIRONMENT_DEFINITION_KIND else "character"
@@ -326,6 +369,52 @@ class _Prepared:
     chosen_characters: list[tuple[str, str]]
     environment_key: tuple[str, str]
     inputs: dict[str, Any]
+    # A continuous explainer's take as the cut planning reads it: `{seconds, words, spans}`.
+    # None for every other project.
+    take: dict[str, Any] | None = None
+
+
+def _take_units(
+    scene: speech_synthesis.SceneAudio, clock: take_timings.TakeClock
+) -> tuple[list[dict[str, Any]], list[scene_timeline.UnitInfo]]:
+    """A continuous scene's speech units as the model sees them, each with the length it takes in
+    the take (its span), and as the timeline reads them.
+    """
+    spans = {span.unit_id: span for span in clock.spans}
+    units: list[dict[str, Any]] = []
+    infos: list[scene_timeline.UnitInfo] = []
+    for entry in scene.units:
+        unit = entry.unit
+        seconds = spans[unit["id"]].end - spans[unit["id"]].start
+        units.append(
+            {
+                "id": unit["id"],
+                "event_id": unit["event_id"],
+                "kind": unit["kind"],
+                "speaker_id": unit["speaker_id"],
+                "text": unit["text"],
+                "measured_seconds": round(seconds, 2),
+            }
+        )
+        infos.append(scene_timeline.UnitInfo(unit["id"], unit["kind"], float(seconds)))
+    return units, infos
+
+
+def _take_input(clock: take_timings.TakeClock) -> dict[str, Any]:
+    """The take for the job: its length, its timed words and where each unit sits in them."""
+    audio = clock.audio
+    assert audio is not None and audio.duration_s is not None  # the refusal made sure
+    return {
+        "seconds": float(audio.duration_s),
+        "words": [
+            {"text": word["text"], "start": word["start"], "end": word["end"]}
+            for word in clock.words
+        ],
+        "spans": [
+            {"unit_id": span.unit_id, "first_word": span.first_word, "last_word": span.last_word}
+            for span in clock.spans
+        ],
+    }
 
 
 def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAudio) -> _Prepared:
@@ -338,7 +427,10 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
 
     item = scene.scene.item
     definition_entry = loaded.definitions.get(item["id"])
-    refusal = _scene_refusal(scene, definition_entry, loaded.current)
+    clock = loaded.clocks.get(item["id"])
+    refusal = _scene_refusal(
+        scene, definition_entry, loaded.current, continuous=loaded.continuous, clock=clock
+    )
     if refusal is not None:
         raise ShotPlansError(refusal)
     assert definition_entry is not None and definition_entry.row is not None
@@ -357,30 +449,48 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
     units: list[dict[str, Any]] = []
     infos: list[scene_timeline.UnitInfo] = []
     audio_artifacts: list[dict[str, Any]] = []
-    for entry in scene.units:
-        audio = entry.audio
-        assert audio is not None and audio.duration_s is not None  # the refusal made sure
-        unit = entry.unit
-        units.append(
-            {
-                "id": unit["id"],
-                "event_id": unit["event_id"],
-                "kind": unit["kind"],
-                "speaker_id": unit["speaker_id"],
-                "text": unit["text"],
-                "measured_seconds": round(audio.duration_s, 2),
-            }
-        )
-        infos.append(scene_timeline.UnitInfo(unit["id"], unit["kind"], float(audio.duration_s)))
+    take: dict[str, Any] | None = None
+    if loaded.continuous:
+        # The units have no audio of their own: the scene's take, and the timing of its words,
+        # are what the plan is made from.
+        assert clock is not None and clock.audio is not None  # the refusal made sure
+        assert clock.timing is not None and clock.audio.duration_s is not None
+        units, infos = _take_units(scene, clock)
+        take = _take_input(clock)
         audio_artifacts.append(
             {
-                "kind": SPEECH_AUDIO_KIND,
-                "unit_id": unit["id"],
-                "id": audio.id,
-                "audio_key": audio.audio_key,
-                "duration_s": audio.duration_s,
+                "kind": SPEECH_TAKE_KIND,
+                "id": clock.audio.id,
+                "audio_key": clock.audio.audio_key,
+                "duration_s": clock.audio.duration_s,
+                "timing_id": clock.timing.id,
             }
         )
+    else:
+        for entry in scene.units:
+            audio = entry.audio
+            assert audio is not None and audio.duration_s is not None  # the refusal made sure
+            unit = entry.unit
+            units.append(
+                {
+                    "id": unit["id"],
+                    "event_id": unit["event_id"],
+                    "kind": unit["kind"],
+                    "speaker_id": unit["speaker_id"],
+                    "text": unit["text"],
+                    "measured_seconds": round(audio.duration_s, 2),
+                }
+            )
+            infos.append(scene_timeline.UnitInfo(unit["id"], unit["kind"], float(audio.duration_s)))
+            audio_artifacts.append(
+                {
+                    "kind": SPEECH_AUDIO_KIND,
+                    "unit_id": unit["id"],
+                    "id": audio.id,
+                    "audio_key": audio.audio_key,
+                    "duration_s": audio.duration_s,
+                }
+            )
 
     inputs = {
         "project_id": project.id,
@@ -421,6 +531,7 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         chosen_characters=chosen_characters,
         environment_key=environment_key,
         inputs=inputs,
+        take=take,
     )
 
 
@@ -486,6 +597,9 @@ async def _queue(
             "units": prepared.units,
             "target_min_seconds": policy.target_min_s,
             "target_max_seconds": policy.target_max_s,
+            # A continuous explainer's take: its presence is what makes the job cut the scene on
+            # the words (FLOW-005). Left out for every other project, so its job is unchanged.
+            **({"take": prepared.take} if prepared.take is not None else {}),
             # Written onto the version the job makes (D-3).
             "inputs": inputs,
         },
@@ -638,7 +752,13 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
         if entry.needs_confirmation:
             skipped.append(Skipped(item["id"], item["title"], SKIPPED_MANUAL))
             continue
-        refusal = _scene_refusal(scene, loaded.definitions.get(item["id"]), loaded.current)
+        refusal = _scene_refusal(
+            scene,
+            loaded.definitions.get(item["id"]),
+            loaded.current,
+            continuous=loaded.continuous,
+            clock=loaded.clocks.get(item["id"]),
+        )
         if refusal is not None:
             skipped.append(Skipped(item["id"], item["title"], refusal))
             continue
@@ -717,6 +837,23 @@ def _audio_reasons(
     ]
 
 
+def _take_reasons(row: ShotPlan, clock: take_timings.TakeClock | None) -> list[str]:
+    """Why a cut plan no longer fits the scene's take, one sentence each: the take was made
+    again, or its words were timed again. A take that is not there or not timed now says so in
+    its own stage, so it gives no reason here.
+    """
+    if not isinstance(row.inputs, dict) or clock is None or clock.audio is None:
+        return []
+    recorded = _recorded(row.inputs, SPEECH_TAKE_KIND)
+    if recorded is None:
+        return ["These shots did not record the voice take they were planned on."]
+    if recorded.get("id") != clock.audio.id:
+        return ["The voice take of the scene was made again since these shots were planned."]
+    if clock.timing is not None and recorded.get("timing_id") != clock.timing.id:
+        return ["The words of the voice take were timed again since these shots were planned."]
+    return []
+
+
 def _out_of_date_reasons(
     row: ShotPlan,
     loaded: _Loaded,
@@ -769,8 +906,12 @@ def _out_of_date_reasons(
     # Making a line again does not by itself invalidate the plan: the plan holds lengths, and
     # only a line that no longer fits its shot does (PHASE-039). The shots that carry the
     # line are told by their own generation request.
-    now = {item.unit["id"]: item for item in scene.units}
-    reasons.extend(_audio_reasons(row, loaded.policy, now))
+    if loaded.continuous:
+        # The shots start on the words of the take, so a take made or timed again is a change.
+        reasons.extend(_take_reasons(row, loaded.clocks.get(scene.scene.item["id"])))
+    else:
+        now = {item.unit["id"]: item for item in scene.units}
+        reasons.extend(_audio_reasons(row, loaded.policy, now))
     for artifact in inputs.get("artifacts") or []:
         if not isinstance(artifact, dict):
             continue
@@ -886,6 +1027,9 @@ def _timeline_of(
     """The timeline of a scene's newest plan, or None when it cannot be worked out."""
     if row is None or policy is None or not isinstance(row.inputs, dict):
         return None
+    if cut_planning_writer.is_cut_plan(row.content):
+        # Its shots start on words, not on lengths: FLOW-006 lays them out.
+        return None
     infos = _unit_infos(row, kinds_by_plan)
     if infos is None:
         return None
@@ -905,8 +1049,15 @@ def _replan_attempt(row: ShotPlan | None, job: Job | None, active: bool) -> int:
     return attempt if isinstance(attempt, int) and not isinstance(attempt, bool) else 0
 
 
+def _is_cut(row: ShotPlan) -> bool:
+    return cut_planning_writer.is_cut_plan(row.content)
+
+
 def _generation_refusal(
-    status: Status, active: bool, timeline: scene_timeline.SceneTimeline | None
+    status: Status,
+    active: bool,
+    timeline: scene_timeline.SceneTimeline | None,
+    cut_plan: bool = False,
 ) -> str | None:
     """Why this scene's shots cannot go to generation yet, or None. Only a current plan whose
     timeline has no blocking problem may; flagged problems (a shot outside the planning target
@@ -918,6 +1069,8 @@ def _generation_refusal(
         return "The shots of this scene are being planned."
     if status == "out_of_date":
         return "The shot plan of this scene is out of date."
+    if cut_plan:
+        return CUT_PLAN_NO_TIMELINE
     if timeline is None:
         return "The timeline of this scene cannot be worked out."
     blocking = [problem for problem in timeline.problems if problem.severity == "blocking"]
@@ -955,11 +1108,19 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         if row is not None and isinstance(row.inputs, dict):
             reasons = _out_of_date_reasons(row, loaded, scene, definition)
             status = "out_of_date" if reasons else "planned"
-        blocked_reason = loaded.blocked_reason or _scene_refusal(scene, definition, loaded.current)
+        blocked_reason = loaded.blocked_reason or _scene_refusal(
+            scene,
+            definition,
+            loaded.current,
+            continuous=loaded.continuous,
+            clock=loaded.clocks.get(item["id"]),
+        )
         if blocked_reason is None and active:
             blocked_reason = "The shots are already being planned."
         timeline = timelines[item["id"]]
-        generation_blocked = _generation_refusal(status, active, timeline)
+        generation_blocked = _generation_refusal(
+            status, active, timeline, cut_plan=row is not None and _is_cut(row)
+        )
         entries.append(
             SceneEntry(
                 item=item,
@@ -1136,6 +1297,8 @@ async def save_manual(
     records which version the user accepted as it is. Raises ShotPlansError.
     """
     loaded = await _load(session, project)
+    if loaded.continuous:
+        raise ShotPlansError(CUT_PLAN_NO_EDIT)
     if loaded.blocked_reason is not None:
         raise ShotPlansError(loaded.blocked_reason)
     _blocked_by_story(loaded)

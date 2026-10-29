@@ -246,7 +246,7 @@ Checked on stand-in data (the state functions replaced by fixed values): `wanted
 
 ### FLOW-005 — Cut planning on the voice
 
-**Status:** Not Started
+**Status:** Done (2026-10-29). Judging the cut points on real scenes is the owner's (see the completion notes).
 
 **Objective.** Plan each scene's shots on top of the timed take, so a cut can fall on any word, including inside a sentence.
 
@@ -283,11 +283,32 @@ Checked on stand-in data (the state functions replaced by fixed values): `wanted
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Planner branch, instructions, answer checks
-- [ ] Shot definition note
-- [ ] Docs, standard checks
+- [x] Planner branch, instructions, answer checks
+- [x] Shot definition note
+- [x] Docs, standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-29. No migration. Decisions made in planning:
+
+- **New writer, shared job.** `services/cut_planning_writer.py` is a new pure module (instructions, TAKE block, request, cut times, answer checks). The `plan_shots` job, the `shot_plan` table, `services/shot_plans.py` and the pipeline step are reused and branch on the project being continuous. `shot_planning_writer.py` is not changed, so a `lines` explainer and a story get exactly the instructions and the job input they get today (checked against `HEAD` for the shot definition instructions; the planner file has no diff).
+- **Cut position (owner).** The middle of the gap between the end of the word before and the start of the start word, moved to the nearest 1/24 s frame. Any word boundary is allowed, including a gap of 0, because the take is never cut: only the picture changes. The first shot starts at 0 and the last ends at the take plus `TAIL_S` (0.30 s), rounded up to a frame. The lead-in is 0 (`LEAD_IN_S`): the take starts at the scene's start with its own leading silence. Both are stored on the plan (`cut_plan`).
+- **Presenter limits (owner).** Code enforces only the hard limits: every shot at least `shot_target_min_seconds` (2 s by default) and at most 345 frames (14.375 s), with its own message for a presenter shot (H3's audio limit), and every event shown in order. Opening and closing on the presenter, and not leaving the presenter off screen for long, are in the instructions only.
+- **Hand edits (owner).** Edit and "Accept as is" are refused for a continuous explainer (422, with the way out). Plan again, with or without a note, works.
+- **Waiting for the timings.** The step graph is unchanged. A continuous scene whose take is being made or timed is `settling` in the "Plan the shots" step, so a run waits instead of reporting; any other reason (a failed timing, a poor match) is reported.
+
+What was built:
+
+- **The answer.** Each shot has `start_word`, `type` (`presenter`, `establishing`, `action` or `insert`), `source_event_ids` and `description`. The user message has the usual blocks plus `TAKE` (the take's length and its sentences, each with its unit and the unit's `dialogue` / `narration` label as a hint, each word with its number, time and `pause_before`) and a `DURATION POLICY` (shortest and longest shot, lead-in, tail) as data (D-8).
+- **The checks** (a failing answer is refused and asked for once more): first start word is 1 and start words rise (so the shots cover the take with no gap and no overlap); a shot is not too short or too long; a shot lists the event of every unit that has a word in it, and a spoken event only when one of its words is in it; the events are consecutive and in story order and every event is shown (`shot_planning_writer._event_span` and `_check_event_cover` are reused).
+- **The stored shot** keeps today's keys (`speech_unit_ids` worked out from the words, `target_duration` = `end_s - start_s`, `continues_previous` and `rapid_exchange` false) and adds `start_word`, `last_word`, `start_s`, `end_s` and `spoken_text`. The plan content has `cut_plan`. The plan's `inputs` hold one `speech_take` artifact (take, key, length, timing id) in place of the units' audio; a take made or timed again makes the plan out of date.
+- **`shot_plans.py`.** A continuous scene is judged by its take clock (`take_timings.scene_clocks`), not its units' audio; the job input gets `take`; a cut plan has no timeline and no automatic re-plan until FLOW-006, so `generation_ready` is false with "Cut-based shots are not laid out on a timeline yet."
+- **Shot definition.** A separate `_CONTINUOUS_NOTE` (used only for a cut-based shot; the `lines` note is untouched), and `shot_definitions._cut_speech_in_shot`, which lists each unit's words inside the shot: a `presenter` shot's words are the presenter's dialogue, so the existing character check gives "presenter shot lists the presenter, any other shot lists nobody". It runs once FLOW-006 gives cut plans a timeline.
+- **API and board.** `presenter` is a shot type; `ShotOut` has the optional `start_word`, `last_word`, `start_s`, `end_s` and `spoken_text`; the plan view shows a cut shot's times and its words. `schema.d.ts` was regenerated from the local code (two changes).
+
+Checked on throwaway data (no database; stand-in take, events and units): a good plan with a cut inside a sentence and a unit split over two shots; refused: a first start word other than 1, a repeated, decreasing, out-of-range or boolean start word, an unknown type, a shot under the minimum, a presenter shot and a B-roll shot over 14.375 s, a pause event left out, an event listed with none of its words, and words of an event that is not listed; cut times for a gap of zero, a short gap and a long pause; the TAKE text is valid JSON; the take input, the refusals for a missing or blocked take, the out-of-date reasons, the cut-plan generation message and timeline, and the definition fragments for a presenter shot, a B-roll shot and a scene with no single character. Ruff, `npm run lint` and `npm run typecheck` pass. There are no automated tests, as asked.
+
+**Known limits.** The other APIs that re-emit a shot's `type` (shot definitions, references, prompts, takes, generation requests) still list the old six types; FLOW-006 must add `presenter` to them, because only then do cut plans reach them. The model is asked for fluent cuts but nothing but the hard limits is enforced, so a scene may open or close on B-roll. A shot's description is not checked against its words. `shot_cut_repair_writer` still has no explainer note (as before).
+
+**Still for the owner (needs the model and judgement):** rebuild the backend image (`docker compose up -d --build backend`), make the takes and let the "Time the words" step time them, then press Plan on two real scenes and read the plans: are the cuts at natural places, some of them inside a sentence, with B-roll for the examples and numbers? The 2 s minimum and the 0.30 s tail are starting values.
 
 ### FLOW-006 — Timeline and clip lengths for cut-based shots
 
@@ -444,7 +465,7 @@ Make project 42's script again as a new continuous explainer, in portrait, with 
 | FLOW-002 | Done | 2026-10-29. Migration `0076`. Delivery text: owner's, else Story Bible narration, else a default; editable; no scene override. |
 | FLOW-003 | Done | 2026-10-29. Migration `0077`. Takes are `speech_unit_audio` rows (kind `take`), per scene, units joined with one space. Not timed yet (FLOW-004). |
 | FLOW-004 | Done | 2026-10-29. No migration. Takes are timed by the same job and table; unit spans are worked out on read (`take_timings`); an estimated take blocks cut planning. Owner checks the timings by playback. |
-| FLOW-005 | Not Started | |
+| FLOW-005 | Done | 2026-10-29. No migration. New `cut_planning_writer`; cut plans are `shot_plan` rows with `cut_plan` and word-based shots, no timeline until FLOW-006. Owner judges the cut points on real scenes. |
 | FLOW-006 | Not Started | |
 | FLOW-007 | Not Started | |
 | FLOW-008 | Not Started | Includes the per-shot voice source (F-9). |

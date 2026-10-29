@@ -34,6 +34,9 @@ NOT_MADE_REASON: Final = "Make this scene's take first."
 IN_PROGRESS_REASON: Final = "This scene's take is being made."
 OUT_OF_DATE_REASON: Final = "This scene's take is out of date. Make the take again."
 NOT_TIMED_REASON: Final = "The words of this scene's take are not timed yet."
+# The reasons that pass by themselves: a take being made, or being timed. Any other reason needs
+# the user (a take to make again, a timing that failed, a poor match).
+WAITING_REASONS: Final = (IN_PROGRESS_REASON, NOT_TIMED_REASON)
 
 
 @dataclass(frozen=True)

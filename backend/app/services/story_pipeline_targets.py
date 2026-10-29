@@ -1673,7 +1673,12 @@ async def _evaluate_shot_plans(
                         "The plan of this scene cannot be used to make clips."
                     )
             elif not entry.can_run:
-                block = entry.blocked_reason
+                if entry.blocked_reason in take_timings.WAITING_REASONS:
+                    # A continuous scene whose take is being made or timed (FLOW-005): the
+                    # "Time the words" step is on it, so wait for it instead of reporting.
+                    settling = True
+                else:
+                    block = entry.blocked_reason
         targets.append(
             Target(
                 f"scene:{entry.item['id']}",

@@ -238,15 +238,30 @@ show the presenter or the set, and it holds no written words, labels, captions, 
 diagrams. Describe B-roll as something a camera could film, in the style of the StoryBible."""
 
 
-def instructions(explainer: bool = False) -> str:
+# A continuous explainer (FLOW-005): the shots are cut on top of one voice recording, so a
+# presenter shot starts and ends on words, often in the middle of a sentence.
+_CONTINUOUS_NOTE: Final = """This is an explainer with one presenter, and the shots are cut on \
+top of one continuous voice recording, so the words of a shot may begin or end in the middle of \
+a sentence. When SPEECH lists words of the presenter (kind "dialogue"), the shot is a presenter \
+shot: it shows the presenter speaking those words to the camera. The presenter is the only entry \
+in "characters", looks straight into the lens, stands in the set and is framed from the chest up \
+or closer, and the camera is steady. Do not describe the thought as starting or finishing in \
+this shot. When SPEECH lists only narration, the shot is B-roll that illustrates the words: \
+"characters" is an empty list, the picture does not show the presenter or the set, and it holds \
+no written words, labels, captions, logos, charts or diagrams. Describe B-roll as something a \
+camera could film, in the style of the StoryBible."""
+
+
+def instructions(explainer: bool = False, continuous: bool = False) -> str:
     """The system message: the same for every project except an explainer's, which has a note
-    added after the rules.
+    added after the rules (the note of a continuous explainer is its own).
     """
     if not explainer:
         return _INSTRUCTIONS
+    note = _CONTINUOUS_NOTE if continuous else _EXPLAINER_NOTE
     marker = "\n\n" + length_rule(LIMITS)
     head, tail = _INSTRUCTIONS.split(marker, 1)
-    return f"{head}\n\n{_EXPLAINER_NOTE}{marker}{tail}"
+    return f"{head}\n\n{note}{marker}{tail}"
 
 
 def build_request(
@@ -265,6 +280,7 @@ def build_request(
     feedback: user_feedback.Feedback | None = None,
     staging: dict[str, Any] | None = None,
     explainer: bool = False,
+    continuous: bool = False,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
@@ -283,7 +299,8 @@ def build_request(
     THIS SHOT` (the placements and the axis) and `VIEWS` (the views of the place with whom each
     may stand behind).
 
-    `explainer` adds the explainer note to the instructions (EXPLAINER-004).
+    `explainer` adds the explainer note to the instructions (EXPLAINER-004). `continuous` (a
+    continuous explainer's cut-based shot, FLOW-005) makes it the note of the cut-based shots.
     """
     parts = [
         "STORY BIBLE (JSON):\n" + json.dumps(bible_content, ensure_ascii=False, indent=2),
@@ -304,7 +321,7 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": instructions(explainer)},
+            {"role": "system", "content": instructions(explainer, continuous)},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,

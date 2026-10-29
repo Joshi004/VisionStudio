@@ -64,6 +64,16 @@ export function ShotPlanView({
               <Badge variant="light" color="gray" style={{ flexShrink: 0 }}>
                 {seconds(shot.target_duration)}
               </Badge>
+              {shot.start_s != null && shot.end_s != null && (
+                <Badge
+                  variant="outline"
+                  color="gray"
+                  style={{ flexShrink: 0, textTransform: "none" }}
+                  title={`Starts on word ${shot.start_word ?? "?"} of the voice take and runs to word ${shot.last_word ?? "?"}`}
+                >
+                  {`${shot.start_s.toFixed(2)} to ${shot.end_s.toFixed(2)} s`}
+                </Badge>
+              )}
               {shot.continues_previous && (
                 <Badge
                   variant="light"
@@ -89,6 +99,11 @@ export function ShotPlanView({
               </Text>
             </Group>
             <Stack gap={0} ml={72}>
+              {shot.spoken_text != null && (
+                <Text size="xs" fs="italic">
+                  {`\u201C${shot.spoken_text}\u201D`}
+                </Text>
+              )}
               {shot.source_event_ids.map((eventId) => {
                 const event = eventsById.get(eventId);
                 return (

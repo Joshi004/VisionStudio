@@ -28,6 +28,10 @@ with the reason and nothing is stored.
 Before it is saved, code moves every shot's `target_duration` onto a length H3 makes
 (`services/h3_lengths`, D-9), so the clips need no trimming.
 
+A continuous explainer's job holds `take` (FLOW-005): the scene's timed voice take. Then the job
+asks `cut_planning_writer` instead, for shots that start on words; their lengths are not moved
+onto H3's lengths, and there is no re-plan until FLOW-006 gives them a timeline.
+
 After the plan is saved, its timeline is checked (`services/scene_timeline`, PHASE-021). A plan
 with problems is planned again by a new job of the same type that carries `replan` (the attempt,
 the problems and the shots that failed), up to `shot_replan_max_tries` times. The re-plan is
@@ -50,6 +54,7 @@ from app.jobs import dispatcher, llm_call, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import (
+    cut_planning_writer,
     discovery,
     duration_policy,
     h3_lengths,
@@ -93,6 +98,35 @@ class _Input:
     feedback: user_feedback.Feedback | None = None
     # The scene's staging for the planner (PHASE-054); None on a job queued before it.
     staging: dict[str, Any] | None = None
+    # A continuous explainer's take (FLOW-005): `{seconds, words, spans}`. When it is set, the
+    # shots are cut on its words (`cut_planning_writer`); every other job leaves it out.
+    take: dict[str, Any] | None = None
+
+
+def _is_take(value: Any) -> bool:
+    """Whether `value` is a take as `shot_plans` writes it into the job."""
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("seconds"), int | float)
+        and not isinstance(value.get("seconds"), bool)
+        and isinstance(value.get("words"), list)
+        and bool(value["words"])
+        and all(
+            isinstance(word, dict)
+            and isinstance(word.get("text"), str)
+            and isinstance(word.get("start"), int | float)
+            and isinstance(word.get("end"), int | float)
+            for word in value["words"]
+        )
+        and isinstance(value.get("spans"), list)
+        and all(
+            isinstance(span, dict)
+            and isinstance(span.get("unit_id"), str)
+            and isinstance(span.get("first_word"), int)
+            and isinstance(span.get("last_word"), int)
+            for span in value["spans"]
+        )
+    )
 
 
 def _read_replan(value: Any) -> tuple[bool, dict[str, Any] | None]:
@@ -130,7 +164,10 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
     staging = job_input.get("staging")
+    take = job_input.get("take")
     if not replan_ok or not feedback_ok or not (staging is None or isinstance(staging, dict)):
+        return None
+    if take is not None and not _is_take(take):
         return None
     if (
         speech_mode not in PROMPT_MODES
@@ -172,6 +209,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         speech_mode=speech_mode,
         feedback=feedback,
         staging=staging,
+        take=take,
     )
 
 
@@ -211,18 +249,27 @@ class PlanShotsHandler(JobHandler):
         units: list[dict[str, Any]],
         warnings: list[str],
         speech_mode: str,
+        cut: tuple[dict[str, Any], int] | None = None,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
         What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
+
+        `cut` is `(take, shortest shot in seconds)` for a continuous explainer: its answer is
+        checked by `cut_planning_writer`, the shots starting on words (FLOW-005).
         """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
         found: list[str] = []
         try:
             answer = shot_planning_writer.parse_answer(result.content)
-            content = shot_planning_writer.check_answer(
-                answer, scene_id, events, units, found, speech_mode
-            )
+            if cut is not None:
+                content = cut_planning_writer.check_answer(
+                    answer, scene_id, events, units, cut[0], cut[1], found
+                )
+            else:
+                content = shot_planning_writer.check_answer(
+                    answer, scene_id, events, units, found, speech_mode
+                )
         except ValueError as exc:
             return str(exc), None
         warnings[:] = found
@@ -263,30 +310,48 @@ class PlanShotsHandler(JobHandler):
         title = read.scene["title"]
 
         await self._phase(job_id, phases.PREPARING_PROMPT)
-        body = shot_planning_writer.build_request(
-            bible_content=bible_content,
-            scene=read.scene,
-            scene_definition=read.scene_definition,
-            scene_characters=read.scene_characters,
-            environment=read.environment,
-            events=read.events,
-            units=read.units,
-            target_min_seconds=read.target_min_seconds,
-            target_max_seconds=read.target_max_seconds,
-            model=target.model,
-            h3_lengths_seconds=h3_lengths_seconds,
-            replan=(
-                {
-                    "previous_shots": read.replan["previous_shots"],
-                    "problems": read.replan["problems"],
-                }
-                if read.replan is not None
-                else None
-            ),
-            feedback=read.feedback,
-            speech_mode=read.speech_mode,
-            staging=read.staging,
-        )
+        if read.take is not None:
+            # A continuous explainer: the shots start on words of the take, so there is no
+            # list of H3 lengths and no re-plan (FLOW-005).
+            body = cut_planning_writer.build_request(
+                bible_content=bible_content,
+                scene=read.scene,
+                scene_definition=read.scene_definition,
+                scene_characters=read.scene_characters,
+                environment=read.environment,
+                events=read.events,
+                units=read.units,
+                take=read.take,
+                target_min_seconds=read.target_min_seconds,
+                model=target.model,
+                feedback=read.feedback,
+                staging=read.staging,
+            )
+        else:
+            body = shot_planning_writer.build_request(
+                bible_content=bible_content,
+                scene=read.scene,
+                scene_definition=read.scene_definition,
+                scene_characters=read.scene_characters,
+                environment=read.environment,
+                events=read.events,
+                units=read.units,
+                target_min_seconds=read.target_min_seconds,
+                target_max_seconds=read.target_max_seconds,
+                model=target.model,
+                h3_lengths_seconds=h3_lengths_seconds,
+                replan=(
+                    {
+                        "previous_shots": read.replan["previous_shots"],
+                        "problems": read.replan["problems"],
+                    }
+                    if read.replan is not None
+                    else None
+                ),
+                feedback=read.feedback,
+                speech_mode=read.speech_mode,
+                staging=read.staging,
+            )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
             server_url=docker_mapped(target.base_url),
@@ -302,7 +367,13 @@ class PlanShotsHandler(JobHandler):
             target,
             body,
             lambda result: self._read(
-                result, scene_id, read.events, read.units, warnings, read.speech_mode
+                result,
+                scene_id,
+                read.events,
+                read.units,
+                warnings,
+                read.speech_mode,
+                (read.take, read.target_min_seconds) if read.take is not None else None,
             ),
             timeout_s=REQUEST_TIMEOUT_S,
         )
@@ -322,7 +393,9 @@ class PlanShotsHandler(JobHandler):
                 policy = await duration_policy.read_duration_policy(session)
             except duration_policy.DurationPolicyError:
                 policy = None
-            if policy is not None:
+            # A cut plan keeps the lengths its cuts give (F-6): the clip is made at the shortest
+            # H3 length that covers the shot, later.
+            if policy is not None and read.take is None:
                 fitted = h3_lengths.fit_shots(
                     content["shots"], _unit_infos(read.units, read.inputs), policy
                 )

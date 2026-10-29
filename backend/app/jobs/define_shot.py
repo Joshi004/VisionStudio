@@ -90,6 +90,8 @@ class _Input:
     staging: dict[str, Any] | None = None
     # An explainer's shot (EXPLAINER-004); False on a job made before explainers existed.
     explainer: bool = False
+    # A continuous explainer's cut-based shot (FLOW-005); False on every other job.
+    continuous: bool = False
 
 
 def _is_number(value: Any) -> bool:
@@ -119,10 +121,12 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     bible_id = job_input.get("story_bible_id")
     staging = job_input.get("staging")
     explainer = job_input.get("explainer", False)
+    continuous = job_input.get("continuous", False)
     feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     if (
         not feedback_ok
         or not isinstance(explainer, bool)
+        or not isinstance(continuous, bool)
         or not (staging is None or isinstance(staging, dict))
         or not isinstance(scene, dict)
         or not isinstance(scene_id, str)
@@ -170,6 +174,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         feedback=feedback,
         staging=staging,
         explainer=explainer,
+        continuous=continuous,
     )
 
 
@@ -251,6 +256,7 @@ class DefineShotHandler(JobHandler):
             feedback=read.feedback,
             staging=read.staging,
             explainer=read.explainer,
+            continuous=read.continuous,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

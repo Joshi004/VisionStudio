@@ -52,7 +52,10 @@ _INVALID = {
 
 Source = Literal["ai", "manual"]
 Status = Literal["not_planned", "planned", "out_of_date"]
-ShotType = Literal["establishing", "action", "reaction", "dialogue", "insert", "transition"]
+# `presenter` is the type of a shot of a continuous explainer that shows the presenter (FLOW-005).
+ShotType = Literal[
+    "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
+]
 
 
 # --- The shots, as `Path_ahead.md` Section 25 gives them -------------------------------------
@@ -76,6 +79,14 @@ class ShotOut(BaseModel):
     # line. Plans made before this phase have no such field and read as False.
     rapid_exchange: bool = False
     description: str
+    # FLOW-005: only the shots of a continuous explainer start on words of its voice take. The
+    # number of the first and the last word of the shot (counted from 1 over the scene's take),
+    # its start and end in seconds from the start of the take, and the words said in it.
+    start_word: int | None = None
+    last_word: int | None = None
+    start_s: float | None = None
+    end_s: float | None = None
+    spoken_text: str | None = None
 
 
 class ShotPlanContentOut(BaseModel):

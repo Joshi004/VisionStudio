@@ -11,10 +11,16 @@ export const SHOT_TYPE: Record<Shot["type"], { label: string; color: string }> =
     dialogue: { label: "Dialogue", color: "teal" },
     insert: { label: "Insert", color: "orange" },
     transition: { label: "Transition", color: "gray" },
+    // A continuous explainer's shot that shows the presenter; only the cut planner writes it.
+    presenter: { label: "Presenter", color: "cyan" },
   };
 
-/** The shot types in the order the planner lists them. */
-export const SHOT_TYPES = Object.keys(SHOT_TYPE) as Shot["type"][];
+/** The shot types a person may choose when editing a shot. `presenter` is only ever written by
+ * the cut planning of a continuous explainer, which cannot be edited by hand.
+ */
+export const SHOT_TYPES = Object.keys(SHOT_TYPE).filter(
+  (type) => type !== "presenter",
+) as Shot["type"][];
 
 const EVENT_LABEL: Record<SceneEvent["type"], string> = {
   narration: "Narration",
