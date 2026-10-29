@@ -124,6 +124,15 @@ def _timeline_hash(sources: story_renders.RenderSources) -> str:
             for unit in scene.units
         ],
     }
+    voice = timeline.get("voice")
+    if voice is not None:
+        # A continuous explainer (FLOW-008): where each scene's take starts. Added only then, so
+        # no placement of another project goes out of date. Which presenter shots use their
+        # clip's own voice is not part of it: that does not move a second of the story.
+        material["voice"] = [
+            [take["scene_id"], take["audio_id"], take["start_ms"], take["seconds"]]
+            for take in voice["takes"]
+        ]
     text = json.dumps(material, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -292,6 +301,8 @@ async def _speech(
     treated as all speech).
     """
     assert sources.plan is not None
+    if sources.plan.timeline.get("voice") is not None:
+        return await _voice_speech(session, sources, layout, unmeasured)
     speech: list[music_placer.Speech] = []
     narration = sorted(sources.plan.timeline["narration"], key=lambda item: item["start_ms"])
     for position, entry in enumerate(narration):
@@ -324,6 +335,50 @@ async def _speech(
             ref = music_timeline.unit_ref(scene.scene_id, unit.unit_id)
             start_s, end_s = layout.spans[ref]
             speech.append(music_placer.Speech(ref, "dialogue", start_s, end_s))
+    return sorted(speech, key=lambda item: item.start_s)
+
+
+async def _voice_speech(
+    session: AsyncSession,
+    sources: story_renders.RenderSources,
+    layout: _Layout,
+    unmeasured: list[str],
+) -> list[music_placer.Speech]:
+    """The speech of a continuous explainer (FLOW-008): each unit's span in its scene's take, with
+    the silences measured inside the take (they are in the take's own seconds, so they are moved
+    to the story and cut to the unit).
+    """
+    assert sources.plan is not None
+    takes = {take["scene_id"]: take for take in sources.plan.timeline["voice"]["takes"]}
+    end_of_story = layout.total_samples / music_placer.SAMPLE_RATE
+    speech: list[music_placer.Speech] = []
+    for scene in sources.scenes:
+        take = takes.get(scene.scene_id)
+        if scene.story_start_s is None or take is None:
+            continue
+        silences: list[tuple[float, float]] = []
+        audio = await session.get(SpeechUnitAudio, take["audio_id"])
+        measurement = (
+            await _measure_file(session, audio.path, audio.sha256) if audio is not None else None
+        )
+        take_start = take["start_ms"] / 1000
+        if measurement is None:
+            unmeasured.append(f"the voice take of {music_timeline.scene_ref(scene.scene_id)}")
+        else:
+            silences = [
+                (take_start + float(item["start_s"]), take_start + float(item["end_s"]))
+                for item in measurement.get("silences") or []
+            ]
+        for unit in scene.units:
+            ref = music_timeline.unit_ref(scene.scene_id, unit.unit_id)
+            start, end = layout.spans[ref]
+            end = min(end, end_of_story)
+            inside = tuple(
+                (max(low, start), min(high, end))
+                for low, high in silences
+                if low < end and high > start
+            )
+            speech.append(music_placer.Speech(ref, unit.kind, start, end, inside))
     return sorted(speech, key=lambda item: item.start_s)
 
 

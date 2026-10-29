@@ -246,6 +246,8 @@ SAVING_SHOT_PROMPT: Final = "saving the shot prompt"
 CHECKING_RENDER_CLIPS: Final = "checking the clips"
 MEASURING_LEVELS: Final = "measuring the sound levels"
 PLACING_NARRATION: Final = "placing the narration"
+# FLOW-008: the voice takes of a continuous explainer, in place of the narration.
+PLACING_VOICE: Final = "placing the voice"
 # MUSIC-012: the music layers, the mix of everything into the pre-master, its loudness, and the
 # loudness of the finished video. `preview_music_mix` uses the same phases.
 PLACING_MUSIC_LAYERS: Final = "placing the music layers"

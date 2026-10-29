@@ -13,6 +13,9 @@
   compiled and current and that has no current take and is not already being generated.
 - `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
 - `POST .../{scene_id}/{shot_id}/run` starts one more take of one shot (Generate or Regenerate).
+- `PUT .../{scene_id}/{shot_id}/voice-source` (FLOW-008) sets which voice a presenter shot of a
+  continuous explainer is heard with in the render: `take` (the default) or `clip`. It only makes
+  the render out of date.
 - `POST .../{scene_id}/{shot_id}/takes/{take_id}/select` makes a ready take the shot's selected
   one, also a take that failed a check (the user accepts it), and stops the shot's automatic
   retries.
@@ -45,7 +48,7 @@ from app.api.projects import load_project
 from app.db.models import Asset, Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import shot_takes, storage
+from app.services import shot_takes, shot_voice_sources, storage
 from app.services.shot_takes import SceneEntry, ShotEntry, TakeEntry
 
 _logger = logging.getLogger(__name__)
@@ -71,6 +74,7 @@ ShotType = Literal[
     "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
 ]
 ProblemKind = Literal["clip", "plan"]
+VoiceSource = Literal["take", "clip"]
 
 
 class TakeProblemOut(BaseModel):
@@ -197,6 +201,9 @@ class ShotTakesEntryOut(BaseModel):
     # PHASE-032: the id of the shot before it when this shot continues it with no cut, else
     # None. While that shot has no current, passing take, `blocked_reason` says this shot waits.
     continues_from: str | None = None
+    # FLOW-008: the voice a presenter shot of a continuous explainer is heard with in the render,
+    # the scene's voice take or its clip's own sound. None for every other shot.
+    voice_source: VoiceSource | None = None
 
 
 class SceneShotTakesOut(BaseModel):
@@ -246,6 +253,14 @@ class SelectedTakeOut(BaseModel):
 
 class ShotTakesCheckOut(BaseModel):
     job_id: int
+
+
+class VoiceSourceIn(BaseModel):
+    source: VoiceSource
+
+
+class VoiceSourceOut(BaseModel):
+    source: VoiceSource
 
 
 def _job_out(job: Job | None) -> DiscoveryJobOut | None:
@@ -369,6 +384,7 @@ def _shot_out(entry: ShotEntry, frame_urls: dict[int, str]) -> ShotTakesEntryOut
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
         continues_from=entry.continues_from,
+        voice_source=cast(VoiceSource | None, entry.voice_source),
     )
 
 
@@ -561,3 +577,29 @@ async def select_take(
             if dependent is not None:
                 dispatcher.nudge()
     return selected
+
+
+@router.put(
+    "/projects/{project_id}/shot-takes/{scene_id}/{shot_id}/voice-source",
+    response_model=VoiceSourceOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def set_voice_source(
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    body: VoiceSourceIn,
+    session: SessionDep,
+) -> VoiceSourceOut:
+    """Sets the voice a presenter shot of a continuous explainer is heard with in the render:
+    the scene's voice take (`take`, the default) or its clip's own sound (`clip`). No clip is
+    made again; only the render becomes out of date. Any other shot is refused.
+    """
+    project = await load_project(session, project_id)
+    try:
+        source = await shot_voice_sources.set_source(
+            session, project, scene_id, shot_id, body.source
+        )
+    except shot_voice_sources.ShotVoiceSourceError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return VoiceSourceOut(source=source)

@@ -4298,6 +4298,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-takes/{scene_id}/{shot_id}/voice-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Voice Source
+         * @description Sets the voice a presenter shot of a continuous explainer is heard with in the render:
+         *     the scene's voice take (`take`, the default) or its clip's own sound (`clip`). No clip is
+         *     made again; only the render becomes out of date. Any other shot is refused.
+         */
+        put: operations["set_voice_source_api_projects__project_id__shot_takes__scene_id___shot_id__voice_source_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/story-renders": {
         parameters: {
             query?: never;
@@ -12312,6 +12334,8 @@ export interface components {
             blocked_reason: string | null;
             /** Continues From */
             continues_from?: string | null;
+            /** Voice Source */
+            voice_source?: ("take" | "clip") | null;
         };
         /** ShotTakesOut */
         ShotTakesOut: {
@@ -14197,6 +14221,22 @@ export interface components {
             transcript: string;
             /** Lab Voice Run Id */
             lab_voice_run_id: number | null;
+        };
+        /** VoiceSourceIn */
+        VoiceSourceIn: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "take" | "clip";
+        };
+        /** VoiceSourceOut */
+        VoiceSourceOut: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "take" | "clip";
         };
         /** VoiceUpdate */
         VoiceUpdate: {
@@ -23866,6 +23906,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SelectedTakeOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_voice_source_api_projects__project_id__shot_takes__scene_id___shot_id__voice_source_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceSourceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceSourceOut"];
                 };
             };
             /** @description No such project. */

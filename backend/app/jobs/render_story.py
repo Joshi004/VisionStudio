@@ -18,7 +18,10 @@ The steps, which are also the phases the page shows:
 2. *measuring the sound levels*: each clip's sound over the part its shot uses, so every shot can
    be brought to the same loudness (a cut then does not jump);
 3. *placing the narration*: one WAV of the whole story's length with every narration speech at its
-   own place, and its loudness measured;
+   own place, and its loudness measured. For a continuous explainer (FLOW-008) this is *placing
+   the voice*: each scene's take at its place, cut around the presenter shots that use their
+   clip's own voice (`build_voice`), and the sound of a presenter clip is dropped, or, for those
+   shots, brought to the take's loudness and faded at both ends;
 4. *placing the music layers* (MUSIC-012, only with music): the score, the ambience beds and the
    sounds (hits and point sounds), each one WAV of the whole story's length, with every placed
    sound at its own sample, its fades, its ducks under the voice, its dips and its swells;
@@ -111,6 +114,16 @@ class RenderFailed(Exception):
 
 
 @dataclass(frozen=True)
+class VoiceWindow:
+    """The part of a scene's take under a shot that uses its clip's own voice, in the take's own
+    seconds.
+    """
+
+    start_s: float
+    end_s: float
+
+
+@dataclass(frozen=True)
 class Shot:
     scene_id: str
     scene_index: int
@@ -122,6 +135,10 @@ class Shot:
     source_frames: int
     duck: tuple[tuple[float, float], ...]
     bed_duck: tuple[tuple[float, float], ...]
+    # Only in a continuous explainer: `take` (the sound of the clip is dropped) or `clip` (the
+    # clip's own sound is the voice) for a presenter shot, None for any other shot.
+    voice: str | None = None
+    voice_window: VoiceWindow | None = None
 
     @property
     def label(self) -> str:
@@ -134,6 +151,46 @@ class Narration:
     path: str
     start_ms: int
     seconds: float
+
+
+@dataclass(frozen=True)
+class VoicePiece:
+    """A part of a voice take that is heard: where it starts in the story (samples at 48 kHz),
+    the part of the take it plays, and the fades at its ends.
+    """
+
+    in_sample: int
+    start_sample: int
+    length_samples: int
+    fade_in_samples: int
+    fade_out_samples: int
+
+
+@dataclass(frozen=True)
+class VoiceTake:
+    scene_id: str
+    audio_id: int
+    path: str
+    seconds: float
+    pieces: tuple[VoicePiece, ...]
+
+
+@dataclass(frozen=True)
+class VoiceLevel:
+    """What was done to a voice take: its loudness, and the gain that brings it to its target."""
+
+    lufs: float | None
+    gain_db: float
+
+
+@dataclass(frozen=True)
+class VoiceMatch:
+    """What a shot on its clip's own voice is matched to: the loudness of the take over the same
+    span (None when it could not be measured) and the gain the take has in the mix.
+    """
+
+    take_span_lufs: float | None
+    take_gain_db: float
 
 
 @dataclass(frozen=True)
@@ -176,12 +233,14 @@ class Timeline:
     total_frames: int
     shots: list[Shot]
     narration: list[Narration]
+    voice: list[VoiceTake] | None
     music: Music | None
     captions: caption_plan.CaptionTrack | None
     callouts: callout_render.CalloutTrack | None
     shot_target_lufs: float
     narration_target_lufs: float
     max_boost_db: float
+    voice_fade_s: float
     duck_db: float
     duck_ramp_s: float
     music_duck_ramp_s: float
@@ -351,10 +410,14 @@ def _parse_callouts(
     return track
 
 
+# What a shot's `voice` may be (see `Shot`).
+_SHOT_VOICES: Final = (None, story_render_plan.VOICE_TAKE, story_render_plan.VOICE_CLIP)
+
 _CONSTANT_KEYS: Final = (
     "shot_target_lufs",
     "narration_target_lufs",
     "max_boost_db",
+    "voice_fade_s",
     "duck_db",
     "duck_ramp_s",
     "music_duck_ramp_s",
@@ -365,6 +428,68 @@ _CONSTANT_KEYS: Final = (
     "bed_shot_duck_db",
     "bed_shot_ramp_s",
 )
+
+
+def _parse_voice(raw: object) -> list[VoiceTake] | None:
+    """The voice takes of the timeline, or None for a render without. Their pieces must lie
+    inside the take.
+    """
+    if raw is None:
+        return None
+    entries = raw.get("takes") if isinstance(raw, dict) else None
+    if not isinstance(entries, list) or not entries:
+        raise RenderFailed(_CHANGED_MESSAGE)
+    takes: list[VoiceTake] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        scene_id, path, audio_id = (
+            entry.get("scene_id"),
+            entry.get("path"),
+            _whole(entry.get("audio_id")),
+        )
+        seconds, pieces = _number(entry.get("seconds")), entry.get("pieces")
+        if (
+            not isinstance(scene_id, str)
+            or not isinstance(path, str)
+            or audio_id is None
+            or seconds is None
+            or seconds <= 0
+            or not isinstance(pieces, list)
+        ):
+            raise RenderFailed(_CHANGED_MESSAGE)
+        parsed: list[VoicePiece] = []
+        for piece in pieces:
+            if not isinstance(piece, dict):
+                raise RenderFailed(_CHANGED_MESSAGE)
+            numbers = [
+                _whole(piece.get(key))
+                for key in (
+                    "in_sample",
+                    "start_sample",
+                    "length_samples",
+                    "fade_in_samples",
+                    "fade_out_samples",
+                )
+            ]
+            if any(value is None or value < 0 for value in numbers) or not numbers[2]:
+                raise RenderFailed(_CHANGED_MESSAGE)
+            in_sample, start, length, fade_in, fade_out = (value or 0 for value in numbers)
+            if fade_in > length or fade_out > length:
+                raise RenderFailed(_CHANGED_MESSAGE)
+            parsed.append(VoicePiece(in_sample, start, length, fade_in, fade_out))
+        takes.append(VoiceTake(scene_id, audio_id, path, seconds, tuple(parsed)))
+    return takes
+
+
+def _parse_voice_window(raw: object) -> VoiceWindow | None:
+    if raw is None:
+        return None
+    start = _number(raw.get("start_s")) if isinstance(raw, dict) else None
+    end = _number(raw.get("end_s")) if isinstance(raw, dict) else None
+    if start is None or end is None or start < 0 or end <= start:
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return VoiceWindow(start, end)
 
 
 def parse_timeline(recorded: object) -> Timeline:
@@ -404,6 +529,7 @@ def parse_timeline(recorded: object) -> Timeline:
         source_frames, number = _whole(entry.get("source_frames")), _whole(entry.get("take_number"))
         index = _whole(entry.get("scene_index"))
         duck, bed_duck = _windows(entry.get("duck")), _windows(entry.get("bed_duck"))
+        voice_of_shot, window = entry.get("voice"), _parse_voice_window(entry.get("voice_window"))
         scene_id, shot_id, path = entry.get("scene_id"), entry.get("shot_id"), entry.get("path")
         if (
             frames is None
@@ -415,6 +541,7 @@ def parse_timeline(recorded: object) -> Timeline:
             or index is None
             or duck is None
             or bed_duck is None
+            or voice_of_shot not in _SHOT_VOICES
             or not isinstance(scene_id, str)
             or not isinstance(shot_id, str)
             or not isinstance(path, str)
@@ -432,6 +559,8 @@ def parse_timeline(recorded: object) -> Timeline:
                 source_frames,
                 duck,
                 bed_duck,
+                voice_of_shot,
+                window,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -454,6 +583,13 @@ def parse_timeline(recorded: object) -> Timeline:
             raise RenderFailed(_CHANGED_MESSAGE)
         narration.append(Narration(unit_id, path, start_ms, seconds))
     narration.sort(key=lambda speech: speech.start_ms)
+    voice = _parse_voice(raw.get("voice"))
+    # The voice is the narration of a continuous explainer: a timeline has one or the other, and
+    # only a continuous one has shots on a voice.
+    if voice is None and any(shot.voice is not None for shot in shots):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    if voice is not None and narration:
+        raise RenderFailed(_CHANGED_MESSAGE)
 
     values = {key: _number(constants.get(key)) for key in _CONSTANT_KEYS}
     goals = {key: _number(master.get(key)) for key in ("target_lufs", "true_peak_db", "lra")}
@@ -479,12 +615,14 @@ def parse_timeline(recorded: object) -> Timeline:
         total_frames=total,
         shots=shots,
         narration=narration,
+        voice=voice,
         music=music,
         captions=captions,
         callouts=callouts,
         shot_target_lufs=known("shot_target_lufs"),
         narration_target_lufs=known("narration_target_lufs"),
         max_boost_db=known("max_boost_db"),
+        voice_fade_s=known("voice_fade_s"),
         duck_db=duck_db,
         duck_ramp_s=ramp,
         music_duck_ramp_s=known("music_duck_ramp_s"),
@@ -547,6 +685,7 @@ class RenderStoryHandler(JobHandler):
         await self._phase(job_id, phases.CHECKING_RENDER_CLIPS)
         sources = [await probe_shot(storage, shot) for shot in timeline.shots]
         speeches = [(speech, *await probe_speech(storage, speech)) for speech in timeline.narration]
+        take_files = [(take, *await probe_take(storage, take)) for take in timeline.voice or []]
         music_files = (
             [(sound, *await probe_music(storage, sound)) for sound in timeline.music.sounds]
             if timeline.music is not None
@@ -555,14 +694,31 @@ class RenderStoryHandler(JobHandler):
 
         await self._phase(job_id, phases.MEASURING_LEVELS)
         shot_lufs = [
-            await measure_shot(shot, source, timeline.fps)
+            # The sound of a presenter clip on the take's voice is dropped: not measured.
+            None
+            if shot.voice == story_render_plan.VOICE_TAKE
+            else await measure_shot(shot, source, timeline.fps)
             for shot, source in zip(timeline.shots, sources, strict=True)
         ]
 
-        # The narration layer, placed on the story's timeline.
-        await self._phase(job_id, phases.PLACING_NARRATION)
-        narration_path, narration_lufs, narration_gain = await build_narration(
-            storage, timeline, speeches, temp_paths
+        # The narration layer, placed on the story's timeline. A continuous explainer has the
+        # scenes' takes instead (FLOW-008).
+        narration_path: Path | None = None
+        narration_lufs: float | None = None
+        narration_gain = 0.0
+        voice_levels: dict[str, VoiceLevel] = {}
+        if timeline.voice is None:
+            await self._phase(job_id, phases.PLACING_NARRATION)
+            narration_path, narration_lufs, narration_gain = await build_narration(
+                storage, timeline, speeches, temp_paths
+            )
+        else:
+            await self._phase(job_id, phases.PLACING_VOICE)
+            narration_path, voice_levels = await build_voice(
+                storage, timeline, take_files, temp_paths
+            )
+        matches = await voice_matches(
+            timeline, take_files, voice_levels, range(len(timeline.shots))
         )
 
         # The music layers (MUSIC-012).
@@ -578,10 +734,12 @@ class RenderStoryHandler(JobHandler):
         for number, shot in enumerate(timeline.shots, start=1):
             await self._phase(job_id, phases.trimming_shot(number, len(timeline.shots)))
             source = sources[number - 1]
-            audio = clip_audio(timeline, shot, source, shot_lufs[number - 1])
+            audio = clip_audio(
+                timeline, shot, source, shot_lufs[number - 1], matches.get(number - 1)
+            )
             sounds.append(
                 _ShotSound(
-                    label="clip" if audio is not None else "none in the clip",
+                    label=_sound_label(shot, audio),
                     loudness_lufs=shot_lufs[number - 1],
                     gain_db=None if audio is None else audio.gain_db,
                 )
@@ -665,6 +823,7 @@ class RenderStoryHandler(JobHandler):
             timeline,
             sounds,
             (narration_lufs, narration_gain if timeline.narration else None),
+            _voice_record(timeline, voice_levels),
             _music_record(timeline, lanes),
             master,
             (trim_seconds, join_seconds),
@@ -681,6 +840,7 @@ class RenderStoryHandler(JobHandler):
         timeline: Timeline,
         sounds: list[_ShotSound],
         narration: tuple[float | None, float | None],
+        voice: list[dict[str, Any]] | None,
         music: dict[str, Any] | None,
         master: dict[str, Any],
         seconds: tuple[float, float],
@@ -719,6 +879,7 @@ class RenderStoryHandler(JobHandler):
                 if timeline.narration
                 else None
             ),
+            "voice": voice,
             "music": music,
             "master": master,
         }
@@ -839,6 +1000,20 @@ async def probe_speech(storage: Storage, speech: Narration) -> tuple[Path, int |
     return path, probed.audio_streams[0].channels
 
 
+async def probe_take(storage: Storage, take: VoiceTake) -> tuple[Path, int | None]:
+    """A scene's voice take file and its channel count."""
+    try:
+        path = storage.get_path(take.path)
+    except StorageError as exc:
+        raise RenderFailed("A file of this render could not be found on disk.") from exc
+    probed = await ffmpeg.probe(path)
+    if probed is None or not probed.audio_streams:
+        raise RenderFailed(
+            f"The voice take of scene {take.scene_id} could not be read. Make the take again."
+        )
+    return path, probed.audio_streams[0].channels
+
+
 async def probe_music(storage: Storage, sound: MusicSound) -> tuple[Path, int | None]:
     """A placed music sound's file and its channel count."""
     try:
@@ -869,10 +1044,41 @@ async def measure_shot(shot: Shot, source: Source, fps: int) -> float | None:
 
 
 def clip_audio(
-    timeline: Timeline, shot: Shot, source: Source, lufs: float | None
+    timeline: Timeline,
+    shot: Shot,
+    source: Source,
+    lufs: float | None,
+    match: VoiceMatch | None = None,
 ) -> render_commands.ClipAudio | None:
-    """What stage 1 does to a clip's sound, or None for a clip with no sound."""
+    """What stage 1 does to a clip's sound, or None for a clip with no sound.
+
+    In a continuous explainer (FLOW-008) the sound of a presenter clip on the take's voice is
+    dropped (None). A presenter clip on its own voice is brought to the loudness the take has
+    there (`match`), is not ducked, and fades over `voice_fade_s` at both ends, where the take
+    fades the other way.
+    """
+    if shot.voice == story_render_plan.VOICE_TAKE:
+        return None
     audio = source.probe.audio
+    if shot.voice == story_render_plan.VOICE_CLIP:
+        if audio is None:
+            raise RenderFailed(
+                f"The clip of shot {shot.label} has no sound, so it cannot be its voice. "
+                "Switch it back to the take's voice, or select another take."
+            )
+        match = match or VoiceMatch(None, 0.0)
+        return render_commands.ClipAudio(
+            channels=audio.channels,
+            duration_s=audio.duration_s,
+            gain_db=story_render_plan.voice_match_gain(
+                lufs,
+                match.take_span_lufs,
+                match.take_gain_db,
+                timeline.shot_target_lufs,
+                timeline.max_boost_db,
+            ),
+            fade_s=timeline.voice_fade_s,
+        )
     if audio is None:
         return None
     return render_commands.ClipAudio(
@@ -926,6 +1132,86 @@ async def build_narration(
         lufs, timeline.narration_target_lufs, timeline.max_boost_db
     )
     return path, lufs, gain
+
+
+async def build_voice(
+    storage: Storage,
+    timeline: Timeline,
+    files: Sequence[tuple[VoiceTake, Path, int | None]],
+    temp_paths: list[Path],
+) -> tuple[Path | None, dict[str, VoiceLevel]]:
+    """The voice layer of a continuous explainer (FLOW-008): one WAV of the story's length with
+    each scene's take, brought to the narration's loudness, at its place. A take plays in pieces
+    that leave out the presenter shots on their clip's own voice, with a crossfade at each edge
+    (`story_render_plan.voice_pieces`). Its path (None when no piece is heard) and, by scene id,
+    each take's loudness and gain. The layer is already at its level: mix it with a gain of 0.
+    """
+    levels: dict[str, VoiceLevel] = {}
+    members: list[render_commands.LaneSound] = []
+    for take, path, channels in files:
+        lufs = await ffmpeg.measure_loudness(
+            path, pre_filters=render_commands.stereo_filters(channels)
+        )
+        gain = story_render_plan.gain_toward(
+            lufs, timeline.narration_target_lufs, timeline.max_boost_db
+        )
+        levels[take.scene_id] = VoiceLevel(lufs, gain)
+        members += [
+            render_commands.LaneSound(
+                path=path,
+                channels=channels,
+                start_sample=piece.start_sample,
+                in_sample=piece.in_sample,
+                length_samples=piece.length_samples,
+                gain_db=gain,
+                fade_in_samples=piece.fade_in_samples,
+                fade_in_shape="linear",
+                fade_out_samples=piece.fade_out_samples,
+                fade_out_shape="linear",
+            )
+            for piece in take.pieces
+        ]
+    if not members:
+        return None, levels
+    dest = storage.new_temp_path("wav")
+    temp_paths.append(dest)
+    await run_ffmpeg(
+        render_commands.music_lane_args(members, dest, total_samples=timeline.total_samples),
+        LANE_TIMEOUT_S,
+        "placing the voice",
+    )
+    return dest, levels
+
+
+async def voice_matches(
+    timeline: Timeline,
+    files: Sequence[tuple[VoiceTake, Path, int | None]],
+    levels: dict[str, VoiceLevel],
+    numbers: Sequence[int],
+) -> dict[int, VoiceMatch]:
+    """For each shot (by its position, from `numbers`) that uses its clip's own voice, what its
+    loudness is matched to: the loudness of the scene's take over the shot's span, and the take's
+    gain.
+    """
+    by_scene = {take.scene_id: (path, channels) for take, path, channels in files}
+    matches: dict[int, VoiceMatch] = {}
+    for number in numbers:
+        shot = timeline.shots[number]
+        if shot.voice != story_render_plan.VOICE_CLIP:
+            continue
+        level = levels.get(shot.scene_id)
+        found = by_scene.get(shot.scene_id)
+        window = shot.voice_window
+        span_lufs: float | None = None
+        if found is not None and window is not None:
+            span_lufs = await ffmpeg.measure_loudness(
+                found[0],
+                start_s=window.start_s,
+                duration_s=window.end_s - window.start_s,
+                pre_filters=render_commands.stereo_filters(found[1]),
+            )
+        matches[number] = VoiceMatch(span_lufs, level.gain_db if level is not None else 0.0)
+    return matches
 
 
 def _lane_sound(
@@ -1033,6 +1319,33 @@ async def measure_master(
         ),
         measured,
     )
+
+
+def _sound_label(shot: Shot, audio: render_commands.ClipAudio | None) -> str:
+    """What a shot's sound was, for the render's record."""
+    if shot.voice == story_render_plan.VOICE_TAKE:
+        return "dropped (the take is the voice)"
+    if shot.voice == story_render_plan.VOICE_CLIP:
+        return "clip voice"
+    return "clip" if audio is not None else "none in the clip"
+
+
+def _voice_record(timeline: Timeline, levels: dict[str, VoiceLevel]) -> list[dict[str, Any]] | None:
+    """What the render's record says about the voice takes: None when it has none."""
+    if timeline.voice is None:
+        return None
+    return [
+        {
+            "scene_id": take.scene_id,
+            "audio_id": take.audio_id,
+            "loudness_lufs": _tenth(levels[take.scene_id].lufs)
+            if take.scene_id in levels
+            else None,
+            "gain_db": _tenth(levels[take.scene_id].gain_db) if take.scene_id in levels else None,
+            "pieces": len(take.pieces),
+        }
+        for take in timeline.voice
+    ]
 
 
 def _music_record(timeline: Timeline, lanes: list[tuple[str, Path]]) -> dict[str, Any] | None:

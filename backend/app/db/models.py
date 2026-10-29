@@ -1223,6 +1223,30 @@ class SpeechWordTiming(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
+class ShotVoiceSource(Base):
+    """A presenter shot of a continuous explainer that the owner switched to its clip's own voice
+    (FLOW-008, F-9).
+
+    A row means the voice source of the shot is `clip`; no row means `take` (the default). The
+    row counts only while `shot_plan_id` is still the newest plan of the scene, so planning the
+    scene again puts every shot back on `take`. Making a new take of the clip, or selecting
+    another take, leaves the row alone.
+    """
+
+    __tablename__ = "shot_voice_source"
+    __table_args__ = (
+        UniqueConstraint("project_id", "scene_id", "shot_id"),
+        Index("idx_shot_voice_source_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    shot_plan_id: Mapped[int] = mapped_column(ForeignKey("shot_plan.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
 class LookStateResolution(Base):
     """One version of a project's resolution of the looks and environment states its scenes
     asked for (PHASE-016, `Path_ahead.md` Section 16).

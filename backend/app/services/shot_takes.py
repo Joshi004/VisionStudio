@@ -70,6 +70,7 @@ from app.services import (
     generation_planner,
     provenance,
     shot_prompts,
+    shot_voice_sources,
     take_validation,
     video_lab,
     video_models,
@@ -167,6 +168,8 @@ class ShotEntry:
     # same id while that shot has no current, passing take yet (the shot has to wait for it).
     continues_from: str | None = None
     waiting_on: str | None = None
+    # FLOW-008: `take` or `clip` for a presenter shot of a continuous explainer, else None.
+    voice_source: str | None = None
 
     @property
     def selected(self) -> TakeEntry | None:
@@ -512,6 +515,9 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
             and (row.validation is None or _needs_dialogue_check(row, lines_by_take[row.id]))
         )
 
+    clip_voice = await shot_voice_sources.clip_shots(session, project)
+    has_voice_source = shot_voice_sources.offered(project)
+
     entries: list[SceneEntry] = []
     for scene in prompts.entries:
         scene_id = scene.item["id"]
@@ -579,6 +585,16 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                     blocked_reason=blocked,
                     continues_from=continues_from,
                     waiting_on=continues_from if only_waiting else None,
+                    voice_source=(
+                        (
+                            shot_voice_sources.CLIP
+                            if (scene_id, prompt.shot["id"]) in clip_voice
+                            else shot_voice_sources.TAKE
+                        )
+                        if has_voice_source
+                        and prompt.shot.get("type") == shot_voice_sources.PRESENTER_TYPE
+                        else None
+                    ),
                 )
             )
         entries.append(SceneEntry(item=scene.item, shots=shots))

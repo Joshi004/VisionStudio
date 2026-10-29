@@ -423,7 +423,7 @@ Checked on throwaway data (no database): `take_window` for a 19.7 s take at 0 s 
 
 ### FLOW-008 — Render with the take as the voice
 
-**Status:** Not Started
+**Status:** Done
 
 **Objective.** Render a continuous explainer with each scene's take as the voice, every clip trimmed to its shot, and captions, callouts and music timed from the take. Let the owner switch any presenter shot to its clip's own voice (F-9).
 
@@ -462,12 +462,36 @@ Checked on throwaway data (no database): `take_window` for a 19.7 s take at 0 s 
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Voice layer, timeline version
-- [ ] Voice source per presenter shot: storage, toggle on the board, mute and mix in the render
-- [ ] Captions, callouts and music on the take
-- [ ] Docs, standard checks
+- [x] Voice layer, timeline version
+- [x] Voice source per presenter shot: storage, toggle on the board, mute and mix in the render
+- [x] Captions, callouts and music on the take
+- [x] Docs, standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.**
+
+Decisions (the plan's "Planning decides"):
+
+- **Presenter shot audio on `take`.** Dropped entirely (silence of the shot's exact length), not kept as room tone. The shot's own sound is not measured either.
+- **Where the voice source is stored.** A new table `shot_voice_source` (migration `0078`, Section 4.72 of `DATABASE_STRUCTURE.md`): a row means `clip`, no row means `take`. The row names the shot plan it was set on and counts only while that plan is the scene's newest, so planning the scene again puts every shot back on `take`; a new take of the clip or another selection leaves it alone. `PUT /api/projects/{id}/shot-takes/{scene_id}/{shot_id}/voice-source` sets it (422 for a project that is not a continuous explainer and for a shot that is not a presenter shot). The board entry has `voice_source` (`take`, `clip`, or null where it is not offered).
+- **Crossfade.** 50 ms (`VOICE_FADE_S`), linear. The take is cut into pieces that reach 50 ms into a clip span and fade out or in; the clip's own sound fades over the same 50 ms the other way (`ClipAudio.fade_s`). Two adjacent clip spans give one silent stretch; a span at the start or end of the take or past it is clamped.
+- **Loudness of a clip voice.** Matched to the take over the shot's span (`voice_match_gain`: the take's gain plus the take's loudness over the span less the clip's loudness, never above `max_boost_db`). If the take's span cannot be measured it falls back to the shot target, and to 0 dB if the clip cannot be measured. A clip with no sound fails the render with a sentence naming the shot.
+- **Timeline.** New layer `voice` in timeline version 5 (the narration layer stays empty with it). Each take is a list of pieces in samples. `lines` and story timelines have `voice: null` and no other change.
+
+What was built:
+
+- `shot_voice_sources` service, `ShotVoiceSource` model, migration `0078`, API route and `voice_source` on the board.
+- `story_render_plan` v5: `voice_pieces`, `voice_match_gain`, `ShotSource.presenter` / `clip_voice`, `SceneSource.voice`, B-roll ducking and music speech spans from the units' spans, callouts see a presenter shot as dialogue, a silent clip on `clip` is refused.
+- `story_renders`: sources from the take clocks (`take_timings.scene_clocks`), units' words re-based to the unit's start, reasons for a blocked take clock, and the out-of-date reasons "switched to the voice of its clip" and "switched back to the voice take".
+- `render_story` job: new phase "placing the voice" (`build_voice`: one WAV of the story's length through `music_lane_args`), `voice_matches`, `clip_audio` for `take` and `clip`; `levels.voice` in the render's record. `preview_music_mix` uses the same helpers. `ffmpeg.measure_loudness(start_s=...)`.
+- `music_placement`: the speech spans of a continuous timeline come from the units' spans with the take's measured silences; the timeline hash gains a `voice` key only for a voice timeline, so an existing placement is not out of date.
+- Frontend: `useSetVoiceSource` and a "Voice in the video: Voice take / This clip's voice" control with a note on each presenter shot of the shot generation board. `schema.d.ts` generated from the local code.
+
+Checked on throwaway data (no real project): migration `0078` up, down and up on an empty database (`alembic check` shows only the older REAL/FLOAT type notes of other tables, none for the new one); `voice_pieces` for no span, one span, adjacent spans, a span at the start, past the end and over the whole take; `build_plan` of a `lines` scenario compared with the plan of `HEAD`: equal apart from the version, `voice_fade_s` and the new per-shot `voice` / `voice_window` keys, same warnings; `trim_args` and `shot_audio_args` equal to `HEAD` for a clip with no fade given; a real FFmpeg run of the voice lane with a 4 s tone (exactly the story's length in samples, silent in the clip span, linear 2400-sample ramps, no step); a run of `probe_take`, `build_voice`, `voice_matches`, `clip_audio`, stage 1 for each shot, the join and the pre-master mix on stand-in clips (the `clip` shot at 0.00605 RMS against 0.00592 for a `take` shot of the same take, exact sample count, no click); the storage service against the migrated database (switch, repeat, refusals, reset by a newer plan, back to `take`, refusal for a `lines` project). Ruff, `npm run lint` and `npm run typecheck` pass. There are no automated tests, as asked. Not run: the whole `render_story` job through the queue, captions, callouts and music of a real continuous explainer, the music placement model, or the page in a browser.
+
+**Known limits.** The loudness match uses the measured take over the shot's span, so a shot of silence in the take falls back to the shot target. A render made before this phase keeps its video; a queued `render_story` job of the older timeline version fails with "Render again". The crossfade is not a setting.
+
+**Still for the owner (needs the GPU server and watching):** rebuild the backend image (`docker compose up -d --build backend`), then on one continuous explainer with generated clips run Render, listen for one even voice and check that captions and callouts follow it. Switch one presenter shot to "This clip's voice", render again, and listen at both edges of that shot for a click or a jump in loudness.
+
 
 ### FLOW-009 — One continuous explainer end to end (owner, not done)
 
@@ -507,5 +531,5 @@ Make project 42's script again as a new continuous explainer, in portrait, with 
 | FLOW-005 | Done | 2026-10-29. No migration. New `cut_planning_writer`; cut plans are `shot_plan` rows with `cut_plan` and word-based shots, no timeline until FLOW-006. Owner judges the cut points on real scenes. |
 | FLOW-006 | Done | 2026-10-29. No migration. `build_cut_timeline`: shots at their cut times, `clip_frames` worked out on read, only hard bounds block (`longest_cut_shot_s`). Generation requests of a cut plan stay refused until FLOW-007. |
 | FLOW-007 | Done | 2026-10-29. No migration. A presenter shot's request has one `fully_copy` audio, the window of the take (`audios[].window`), cut by the job at upload; the clip length is the timeline's `clip_frames`; the take check counts heard words whose middle is before the shot's length. Owner checks the lips on real shots. |
-| FLOW-008 | Not Started | Includes the per-shot voice source (F-9). |
+| FLOW-008 | Done | 2026-10-29. Migration `0078`. Timeline v5 with a `voice` layer of take pieces; `shot_voice_source` (a row means `clip`, reset when the scene is planned again); 50 ms crossfade, clip loudness matched to the take over the shot's span; `lines` and story unchanged. Owner listens to one render and one switched shot. |
 | FLOW-009 | Not Started | Owner end-to-end check. |

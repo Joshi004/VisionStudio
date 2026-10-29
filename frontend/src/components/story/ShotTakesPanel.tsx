@@ -9,6 +9,7 @@ import {
   Loader,
   Menu,
   Paper,
+  SegmentedControl,
   Stack,
   Text,
   Title,
@@ -28,6 +29,7 @@ import {
   useGenerateOneShot,
   useGenerateSceneShots,
   useSelectTake,
+  useSetVoiceSource,
   useShotTakes,
   type SceneShotTakes,
   type ShotTake,
@@ -323,6 +325,7 @@ type ShotRowProps = {
   prompts: ShotPromptTools;
   onGenerate: () => void;
   onSelect: (takeId: number) => void;
+  onVoiceSource: (source: "take" | "clip") => void;
 };
 
 /** What the newest take's failed check says, and where the automatic retries stand. */
@@ -378,6 +381,7 @@ function ShotRow({
   prompts,
   onGenerate,
   onSelect,
+  onVoiceSource,
 }: ShotRowProps) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -399,7 +403,8 @@ function ShotRow({
   const promptEntry = prompts.entry;
   const prompt = promptEntry?.prompt ?? null;
   const promptVersion = promptEntry?.version ?? null;
-  const promptWorking = promptEntry !== undefined && isJobActive(promptEntry.job);
+  const promptWorking =
+    promptEntry !== undefined && isJobActive(promptEntry.job);
   const hasPieces = prompt !== null && Object.keys(prompt.pieces).length > 0;
   const canGenerate = entry.can_run && !busy;
   const canRewrite =
@@ -418,7 +423,8 @@ function ShotRow({
         : promptWorking
           ? "The prompt is being written."
           : !promptEntry.can_run
-            ? (promptEntry.blocked_reason ?? "The prompt cannot be changed now.")
+            ? (promptEntry.blocked_reason ??
+              "The prompt cannot be changed now.")
             : !hasPieces
               ? "This prompt was compiled before its pieces were kept, so it cannot be edited by hand. Feedback still works."
               : null;
@@ -647,12 +653,39 @@ function ShotRow({
           </Text>
         </Stack>
       )}
+      {entry.voice_source != null && (
+        <Group ml={72} gap="xs" align="center">
+          <Text size="xs" c="dimmed">
+            Voice in the video:
+          </Text>
+          <SegmentedControl
+            size="xs"
+            value={entry.voice_source}
+            disabled={busy}
+            onChange={(value) =>
+              onVoiceSource(value === "clip" ? "clip" : "take")
+            }
+            data={[
+              { value: "take", label: "Voice take" },
+              { value: "clip", label: "This clip's voice" },
+            ]}
+          />
+          <Text size="xs" c="dimmed" style={{ flexBasis: "100%" }}>
+            Use the clip&apos;s own voice when the lips look off against the
+            take. Changing this only makes the video out of date; no clip is
+            made again.
+          </Text>
+        </Group>
+      )}
       {reviewing && (
         <Stack ml={72}>
           <ShotPromptReview
             prompt={prompt}
             version={promptVersion}
-            take={{ number: reference.take_number, jobId: reference.job?.id ?? null }}
+            take={{
+              number: reference.take_number,
+              jobId: reference.job?.id ?? null,
+            }}
             canGenerate={canGenerate}
             canRewrite={canRewrite}
             onGenerate={onGenerate}
@@ -700,6 +733,7 @@ type SceneRowProps = {
   onGenerateShot: (shotId: string) => void;
   promptsOf: (shotId: string) => ShotPromptTools;
   onSelect: (shotId: string, takeId: number) => void;
+  onVoiceSource: (shotId: string, source: "take" | "clip") => void;
 };
 
 /** One scene: how many of its shots have a clip, and its shots. */
@@ -711,6 +745,7 @@ function SceneRow({
   onGenerateShot,
   promptsOf,
   onSelect,
+  onVoiceSource,
 }: SceneRowProps) {
   const generated = scene.shots.filter(
     (shot) => shot.status === "generated",
@@ -774,6 +809,7 @@ function SceneRow({
               prompts={promptsOf(entry.shot.id)}
               onGenerate={() => onGenerateShot(entry.shot.id)}
               onSelect={(takeId) => onSelect(entry.shot.id, takeId)}
+              onVoiceSource={(source) => onVoiceSource(entry.shot.id, source)}
             />
           ))}
         </Stack>
@@ -799,6 +835,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const generateScene = useGenerateSceneShots(projectId);
   const generateOne = useGenerateOneShot(projectId);
   const selectTake = useSelectTake(projectId);
+  const setVoiceSource = useSetVoiceSource(projectId);
   const checkTakes = useCheckShotTakes(projectId);
   // The prompts the clips are made from, which can be edited or rewritten from here.
   const shotPrompts = useShotPrompts(projectId).data;
@@ -811,6 +848,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
     generateScene.isPending ||
     generateOne.isPending ||
     selectTake.isPending ||
+    setVoiceSource.isPending ||
     checkTakes.isPending ||
     compilePrompt.isPending ||
     savePrompt.isPending;
@@ -920,7 +958,14 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             {describeError(error)}
           </Alert>
         )}
-        {[generateAll, generateScene, generateOne, selectTake, checkTakes].map(
+        {[
+          generateAll,
+          generateScene,
+          generateOne,
+          selectTake,
+          setVoiceSource,
+          checkTakes,
+        ].map(
           (mutation, position) =>
             mutation.isError && (
               <Alert
@@ -968,6 +1013,9 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             promptsOf={promptsOf(scene.id)}
             onSelect={(shotId, takeId) =>
               selectTake.mutate({ sceneId: scene.id, shotId, takeId })
+            }
+            onVoiceSource={(shotId, source) =>
+              setVoiceSource.mutate({ sceneId: scene.id, shotId, source })
             }
           />
         ))}

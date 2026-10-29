@@ -364,12 +364,14 @@ async def measure_loudness(
     duration_s: float | None = None,
     pre_filters: Sequence[str] = (),
     timeout_s: float = 120.0,
+    start_s: float | None = None,
 ) -> float | None:
     """The integrated loudness of a file's first audio stream, in LUFS (EBU R128).
 
     With `duration_s`, only the first `duration_s` seconds are measured: a clip is longer
-    than the scene that uses it, and only the scene's part is heard. The measuring run
-    writes nothing (`-f null`).
+    than the scene that uses it, and only the scene's part is heard. With `start_s` too, the
+    measured part begins there instead of at 0 (the part of a voice take under one shot). The
+    measuring run writes nothing (`-f null`).
 
     `pre_filters` are audio filters applied before the measurement, so the sound is measured
     as it will be heard. A mono file counts 3 dB louder once it plays on two channels, so
@@ -381,6 +383,8 @@ async def measure_loudness(
     when it prints something unusable. Never raises.
     """
     args = ["-hide_banner", "-nostdin", "-nostats", "-loglevel", "info"]
+    if start_s is not None and start_s > 0:
+        args += ["-ss", f"{start_s:.6f}"]
     if duration_s is not None:
         args += ["-t", f"{duration_s:.6f}"]
     args += [

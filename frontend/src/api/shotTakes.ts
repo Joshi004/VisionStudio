@@ -184,6 +184,47 @@ export function useSelectTake(projectId: number) {
 }
 
 /**
+ * Sets which voice a presenter shot of a continuous explainer is heard with in the video: the
+ * scene's voice take (the default) or its clip's own sound. No clip is made again; the video
+ * made before becomes out of date.
+ */
+export function useSetVoiceSource(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (target: {
+      sceneId: string;
+      shotId: string;
+      source: "take" | "clip";
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/shot-takes/{scene_id}/{shot_id}/voice-source",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              scene_id: target.sceneId,
+              shot_id: target.shotId,
+            },
+          },
+          body: { source: target.source },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not change the voice of the shot (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/**
  * "Check takes": starts the local job that checks the clips made before the checks existed. It
  * starts no generation, so it costs seconds and no GPU time.
  */

@@ -49,6 +49,14 @@ holds the style and every callout that is turned on in the current callout plan,
 time, its zone and its laid-out text (`callout_render.resolve`), and the plan it came from. It is
 null otherwise. While a section title shows, the captions are hidden.
 
+**Voice** (timeline version 5, FLOW-008). A continuous explainer speaks each scene as one take.
+`voice` holds each scene's take at the scene's start plus the lead-in, cut into `pieces` around the
+presenter shots the owner switched to their clip's own voice (`shots[].voice` is `clip`): the take
+is silent for exactly such a shot's span, with a crossfade of `VOICE_FADE_S` at each edge. By
+default (`take`) the sound inside a presenter clip is dropped, because it is a copy of the voice.
+B-roll sound is ducked under the take as it is under narration. `narration` is empty and `voice`
+is null for every other render.
+
 `master` holds the loudness the finished mix is brought to. Every constant used is recorded.
 """
 
@@ -66,7 +74,9 @@ from app.services import callout_render, caption_plan, font_metrics, frame_count
 # Version 3 adds `captions`: the word-synced captions of an explainer, or null (EXPLAINER-008).
 # Version 4 adds `callouts`: the callouts of an explainer with their times and places, or null
 # (EXPLAINER-010).
-TIMELINE_VERSION: Final = 4
+# Version 5 adds `voice`, the scene takes of a continuous explainer, and `voice` / `voice_window`
+# on each shot (FLOW-008).
+TIMELINE_VERSION: Final = 5
 
 SHOT_TARGET_LUFS: Final = -16.0
 NARRATION_TARGET_LUFS: Final = -16.0
@@ -94,6 +104,13 @@ SWELL_RAMP_S: Final = 0.5
 BED_SHOT_RAMP_S: Final = 1.0
 # loudnorm's loudness range, wide so a quiet story keeps its dynamics (linear mode).
 MASTER_LRA: Final = 20.0
+
+# --- The voice take of a continuous explainer (FLOW-008). Starting values, untested by ear. ----
+# The crossfade at each edge of a presenter shot switched to its clip's own voice: the take fades
+# out (or in) over this long, inside the shot, while the clip's sound fades in (or out).
+VOICE_FADE_S: Final = 0.05
+VOICE_TAKE: Final = "take"
+VOICE_CLIP: Final = "clip"
 
 LANE_SCORE: Final = "score"
 LANE_BED: Final = "bed"
@@ -142,6 +159,10 @@ class ShotSource:
     start_s: float
     end_s: float
     take: TakeSource | None
+    # Only in a continuous explainer (FLOW-008): the shot shows the presenter, and the owner
+    # switched it to its clip's own voice.
+    presenter: bool = False
+    clip_voice: bool = False
 
 
 @dataclass(frozen=True)
@@ -174,6 +195,19 @@ class UnitSource:
 
 
 @dataclass(frozen=True)
+class VoiceSource:
+    """The voice take of a scene of a continuous explainer (FLOW-008). It plays from the scene's
+    start plus `lead_in_s`.
+    """
+
+    audio_id: int
+    path: str
+    seconds: float
+    file_exists: bool
+    lead_in_s: float
+
+
+@dataclass(frozen=True)
 class SceneSource:
     scene_id: str
     index: int
@@ -186,6 +220,8 @@ class SceneSource:
     plan_version: int | None
     shots: list[ShotSource]
     units: list[UnitSource]
+    # Set for every scene of a continuous explainer, and only then.
+    voice: VoiceSource | None = None
 
 
 @dataclass(frozen=True)
@@ -343,6 +379,7 @@ def constants(mix: MixSettings | None = None) -> dict[str, float]:
         "swell_ramp_s": SWELL_RAMP_S,
         "bed_shot_duck_db": float(mix.bed_shot_duck_db),
         "bed_shot_ramp_s": BED_SHOT_RAMP_S,
+        "voice_fade_s": VOICE_FADE_S,
         "master_lufs": float(mix.loudness_lufs),
         "master_true_peak_db": float(mix.true_peak_db),
         "master_lra": MASTER_LRA,
@@ -356,6 +393,86 @@ def master(mix: MixSettings) -> dict[str, float]:
         "true_peak_db": float(mix.true_peak_db),
         "lra": MASTER_LRA,
     }
+
+
+# --- The voice take (FLOW-008) ---------------------------------------------------------------
+
+
+def voice_pieces(
+    take_start_sample: int,
+    take_samples: int,
+    clip_spans: Sequence[tuple[int, int]],
+    fade_samples: int,
+    total_samples: int,
+) -> list[dict[str, int]]:
+    """The pieces of one scene's take that are heard, sample-exact at 48 kHz. `take_start_sample`
+    is where the take starts on the story's timeline, `take_samples` its length, and `clip_spans`
+    the `(start, end)` samples, on the story's timeline, of the shots whose own voice is used: the
+    take is silent for exactly those spans.
+
+    Each piece plays the part `in_sample` to `in_sample + length_samples` of the take at
+    `start_sample` of the story. A piece that borders a clip span reaches `fade_samples` into it
+    and fades out (or in) over that stretch, while the clip's own sound fades in (or out) over
+    the same samples, so the cut between the two voices does not click. With no span the take is
+    one piece with no fades. A take that starts outside the video has none.
+    """
+    length = min(take_samples, total_samples - take_start_sample)
+    if length < 1:
+        return []
+    spans: list[list[int]] = []
+    for start, end in sorted(clip_spans):
+        low, high = max(0, start - take_start_sample), min(length, end - take_start_sample)
+        if high <= low:
+            continue
+        if spans and low <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], high)
+        else:
+            spans.append([low, high])
+    # The stretches of the take between the spans, each with whether a span lies before / after.
+    gaps: list[tuple[int, int, bool, bool]] = []
+    cursor = 0
+    for position, (low, high) in enumerate(spans):
+        gaps.append((cursor, low, position > 0, True))
+        cursor = high
+    gaps.append((cursor, length, bool(spans), False))
+
+    pieces: list[dict[str, int]] = []
+    for gap_start, gap_end, has_before, has_after in gaps:
+        if gap_end <= gap_start and not (has_before and has_after):
+            continue
+        start = max(0, gap_start - fade_samples) if has_before else gap_start
+        end = min(length, gap_end + fade_samples) if has_after else gap_end
+        if end <= start:
+            continue
+        pieces.append(
+            {
+                "in_sample": start,
+                "start_sample": take_start_sample + start,
+                "length_samples": end - start,
+                "fade_in_samples": min(fade_samples, gap_start - start) if has_before else 0,
+                "fade_out_samples": min(fade_samples, end - gap_end) if has_after else 0,
+            }
+        )
+    return pieces
+
+
+def voice_match_gain(
+    clip_lufs: float | None,
+    take_span_lufs: float | None,
+    take_gain_db: float,
+    target_lufs: float,
+    max_boost_db: float,
+) -> float:
+    """The gain of a presenter clip's own voice. It is brought to the loudness the take has in
+    the mix over the same span (the take's loudness there plus the take's own gain), boosted by at
+    most `max_boost_db`. When the take's span could not be measured, the clip is brought to
+    `target_lufs` like any shot's sound; a clip that could not be measured keeps its own level.
+    """
+    if clip_lufs is None:
+        return 0.0
+    if take_span_lufs is None:
+        return gain_toward(clip_lufs, target_lufs, max_boost_db)
+    return min(max_boost_db, take_gain_db + take_span_lufs - clip_lufs)
 
 
 # --- The music layers -----------------------------------------------------------------------
@@ -533,6 +650,54 @@ def _check_takes(scenes: list[SceneSource]) -> None:
         )
 
 
+def _voice_entry(
+    scenes: list[SceneSource],
+    clip_spans: dict[str, list[tuple[int, int]]],
+    shots: list[dict[str, Any]],
+    fps: int,
+    total_frames: int,
+) -> dict[str, Any]:
+    """The `voice` layer: each scene's take at its place, cut into the pieces that are heard. Also
+    fills in `voice_window` (the part of the take under the shot, in the take's own seconds) on
+    every shot that uses its clip's voice, which the render measures to match the two loudnesses.
+    """
+    rate = render_commands.SAMPLE_RATE
+    total_samples = render_commands.sample_count(total_frames, fps)
+    fade = round(VOICE_FADE_S * rate)
+    takes: list[dict[str, Any]] = []
+    for scene in scenes:
+        assert scene.voice is not None and scene.story_start_s is not None
+        start_ms = _ms(scene.story_start_s + scene.voice.lead_in_s)
+        start_sample = start_ms * (rate // _MS_PER_S)
+        length = round(scene.voice.seconds * rate)
+        spans = clip_spans.get(scene.scene_id, [])
+        for entry in shots:
+            if entry["scene_id"] != scene.scene_id or entry["voice"] != VOICE_CLIP:
+                continue
+            low = max(0, render_commands.sample_count(entry["start_frame"], fps) - start_sample)
+            high = min(
+                length,
+                render_commands.sample_count(entry["start_frame"] + entry["frames"], fps)
+                - start_sample,
+            )
+            if high > low:
+                entry["voice_window"] = {
+                    "start_s": round(low / rate, 6),
+                    "end_s": round(high / rate, 6),
+                }
+        takes.append(
+            {
+                "scene_id": scene.scene_id,
+                "audio_id": scene.voice.audio_id,
+                "path": scene.voice.path,
+                "seconds": scene.voice.seconds,
+                "start_ms": start_ms,
+                "pieces": voice_pieces(start_sample, length, spans, fade, total_samples),
+            }
+        )
+    return {"takes": takes}
+
+
 def build_plan(
     scenes: list[SceneSource],
     *,
@@ -567,7 +732,20 @@ def build_plan(
     timed_units: list[caption_plan.TimedUnit] = []
     callout_units: list[callout_render.CalloutUnit] = []
     estimated_units: list[str] = []
+    voice_spans: list[tuple[float, float]] = []  # the units' spans of a continuous explainer
+    presenter_spans: list[tuple[int, int]] = []  # the presenter shots, in ms
+    clip_spans: dict[str, list[tuple[int, int]]] = {}  # by scene: shots on their own voice, samples
+    silent_clips: list[str] = []
     cursor = 0  # the frame the last shot ended on
+    continuous = any(scene.voice is not None for scene in scenes)
+    if continuous:
+        for scene in scenes:
+            if scene.voice is None:
+                raise RenderPlanError(f"{_scene_label(scene)} has no voice take.")
+            if not scene.voice.file_exists:
+                raise RenderPlanError(
+                    f"The voice take of {_scene_label(scene)} is missing. Make the take again."
+                )
 
     for scene in scenes:
         assert scene.story_start_s is not None  # `_check_scenes` made sure
@@ -588,6 +766,21 @@ def build_plan(
             if take.frame_count is None or take.frame_count < needed - 1:
                 have = "an unreadable number of" if take.frame_count is None else take.frame_count
                 too_short.append(f"{label} has {have} frames, needs {needed}")
+            # What this shot's sound is in a continuous explainer (FLOW-008).
+            voice_of_shot: str | None = None
+            if scene.voice is not None and shot.presenter:
+                voice_of_shot = VOICE_CLIP if shot.clip_voice else VOICE_TAKE
+            if voice_of_shot is not None:
+                presenter_spans.append((start_ms, end_ms))
+            if voice_of_shot == VOICE_CLIP:
+                clip_spans.setdefault(scene.scene_id, []).append(
+                    (
+                        render_commands.sample_count(start_frame, fps),
+                        render_commands.sample_count(end_frame, fps),
+                    )
+                )
+                if not take.has_audio:
+                    silent_clips.append(label)
             if take.reasons:
                 warnings.append(
                     {
@@ -598,7 +791,7 @@ def build_plan(
                         f"out of date: {' '.join(take.reasons)}",
                     }
                 )
-            if not take.has_audio:
+            if not take.has_audio and voice_of_shot != VOICE_TAKE:
                 warnings.append(
                     {
                         "code": TAKE_WITHOUT_SOUND,
@@ -622,6 +815,8 @@ def build_plan(
                     "path": take.path,
                     "source_frames": needed,
                     "has_audio": take.has_audio,
+                    "voice": voice_of_shot,
+                    "voice_window": None,  # filled in below, for a shot on its clip's voice
                     "duck": [],  # filled in below, once every narration span is known
                     "bed_duck": [],  # and every bed
                 }
@@ -659,6 +854,10 @@ def build_plan(
                         words=timing.words if timing is not None else (),
                     )
                 )
+            if scene.voice is not None:
+                # The voice is the scene's take: no unit has a speech of its own.
+                voice_spans.append((start_s, end_s))
+                continue
             if unit.kind == "dialogue":
                 dialogue_spans.append((start_s, end_s))
                 continue
@@ -680,6 +879,11 @@ def build_plan(
                 }
             )
 
+    if silent_clips:
+        raise RenderPlanError(
+            f"The clip of these shots has no sound, so it cannot be their voice: "
+            f"{_named(silent_clips)}. Switch them back to the take's voice, or select another take."
+        )
     if too_short:
         raise RenderPlanError(
             f"A clip is shorter than its shot: {_named(too_short)}. Regenerate it, or select "
@@ -690,8 +894,10 @@ def build_plan(
             f"The speech of these narration units is missing: {_named(unplaced)}. Make it again."
         )
 
-    windows = duck_windows(narration_spans, dialogue_spans, DUCK_MERGE_GAP_S)
+    windows = duck_windows([*narration_spans, *voice_spans], dialogue_spans, DUCK_MERGE_GAP_S)
     for shot_entry in shots:
+        if shot_entry["voice"] is not None:
+            continue  # a presenter shot's sound is dropped, or is the voice itself
         shot_entry["duck"] = slice_windows(
             windows,
             shot_entry["start_frame"] / fps,
@@ -699,12 +905,16 @@ def build_plan(
             DUCK_RAMP_S,
         )
 
+    voice_entry: dict[str, Any] | None = None
+    if continuous:
+        voice_entry = _voice_entry(scenes, clip_spans, shots, fps, cursor)
+
     music_entry: dict[str, Any] | None = None
     if music is not None:
         music_entry, bed_spans = _music_timeline(
             music,
             mix,
-            [*narration_spans, *dialogue_spans],
+            [*narration_spans, *voice_spans, *dialogue_spans],
             dialogue_spans,
             render_commands.sample_count(cursor, fps),
         )
@@ -712,6 +922,8 @@ def build_plan(
             # The video model's own sound is lowered under a bed, but never in a line of dialogue.
             lowered = subtract_spans(bed_spans, dialogue_spans)
             for shot_entry in shots:
+                if shot_entry["voice"] is not None:
+                    continue
                 shot_entry["bed_duck"] = slice_windows(
                     lowered,
                     shot_entry["start_frame"] / fps,
@@ -727,7 +939,9 @@ def build_plan(
             callouts,
             callout_units,
             [(entry["start_ms"], entry["end_ms"]) for entry in shots],
-            [(_ms(start), _ms(end)) for start, end in dialogue_spans],
+            # The presenter is on camera in a presenter shot of a continuous explainer, whatever
+            # unit label its words have.
+            presenter_spans if continuous else [(_ms(s), _ms(e)) for s, e in dialogue_spans],
             total_ms,
             width,
             height,
@@ -774,6 +988,7 @@ def build_plan(
         ],
         "shots": shots,
         "narration": narration,
+        "voice": voice_entry,
         "music": music_entry,
         "captions": captions_entry,
         "callouts": callouts_entry,

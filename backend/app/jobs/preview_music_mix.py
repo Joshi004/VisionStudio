@@ -34,8 +34,10 @@ from app.jobs.render_story import (
     TRIM_TIMEOUT_S,
     RenderFailed,
     Timeline,
+    VoiceLevel,
     build_lanes,
     build_narration,
+    build_voice,
     clip_audio,
     measure_master,
     measure_shot,
@@ -44,10 +46,12 @@ from app.jobs.render_story import (
     probe_music,
     probe_shot,
     probe_speech,
+    probe_take,
     run_ffmpeg,
+    voice_matches,
     write_new_file,
 )
-from app.services import ffmpeg, music_preview, render_commands
+from app.services import ffmpeg, music_preview, render_commands, story_render_plan
 from app.services.storage import Storage, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -106,6 +110,7 @@ class PreviewMusicMixHandler(JobHandler):
         ]
         sources = {number: await probe_shot(storage, timeline.shots[number]) for number in wanted}
         speeches = [(speech, *await probe_speech(storage, speech)) for speech in timeline.narration]
+        take_files = [(take, *await probe_take(storage, take)) for take in timeline.voice or []]
         music_files = (
             [
                 (sound, *await probe_music(storage, sound))
@@ -119,14 +124,29 @@ class PreviewMusicMixHandler(JobHandler):
 
         await self._phase(job_id, phases.MEASURING_LEVELS)
         lufs = {
-            number: await measure_shot(timeline.shots[number], source, timeline.fps)
+            number: (
+                None
+                if timeline.shots[number].voice == story_render_plan.VOICE_TAKE
+                else await measure_shot(timeline.shots[number], source, timeline.fps)
+            )
             for number, source in sources.items()
         }
 
-        await self._phase(job_id, phases.PLACING_NARRATION)
-        narration_path, _lufs, narration_gain = await build_narration(
-            storage, timeline, speeches, temp_paths
-        )
+        # The narration, or the voice takes of a continuous explainer (FLOW-008): all of it, so
+        # its level is the render's.
+        voice_levels: dict[str, VoiceLevel] = {}
+        if timeline.voice is None:
+            await self._phase(job_id, phases.PLACING_NARRATION)
+            narration_path, _lufs, narration_gain = await build_narration(
+                storage, timeline, speeches, temp_paths
+            )
+        else:
+            await self._phase(job_id, phases.PLACING_VOICE)
+            narration_path, voice_levels = await build_voice(
+                storage, timeline, take_files, temp_paths
+            )
+            narration_gain = 0.0
+        matches = await voice_matches(timeline, take_files, voice_levels, sorted(sources))
 
         lanes: list[tuple[str, Path]] = []
         if music_files:
@@ -139,7 +159,9 @@ class PreviewMusicMixHandler(JobHandler):
             dest = storage.new_temp_path("wav")
             temp_paths.append(dest)
             if number in sources:
-                audio = clip_audio(timeline, shot, sources[number], lufs[number])
+                audio = clip_audio(
+                    timeline, shot, sources[number], lufs[number], matches.get(number)
+                )
                 args = render_commands.shot_audio_args(
                     sources[number].path, dest, frames=shot.frames, fps=timeline.fps, audio=audio
                 )
