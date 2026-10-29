@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api import (
+    callout_plan,
     character_definitions,
     character_images,
     character_lab,
@@ -63,6 +64,7 @@ api_router.include_router(story_bible.router, tags=["story-bible"])
 api_router.include_router(music_bible.router, tags=["music-bible"])
 api_router.include_router(music_themes.router, tags=["music-themes"])
 api_router.include_router(music_plan.router, tags=["music-plan"])
+api_router.include_router(callout_plan.router, tags=["callout-plan"])
 api_router.include_router(music_cues.router, tags=["music-cues"])
 api_router.include_router(music_takes.router, tags=["music-takes"])
 api_router.include_router(music_placement.router, tags=["music-placement"])

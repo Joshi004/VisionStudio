@@ -183,6 +183,12 @@ DIALOGUE_MATCH_THRESHOLD_KEY = "dialogue_match_threshold"
 # it, in percent (EXPLAINER-007). Below it the speech's word times are estimated instead.
 WORD_TIMING_MATCH_THRESHOLD_KEY = "word_timing_match_threshold"
 
+# The display limits of an explainer's callouts (EXPLAINER-009): the least time between the start
+# of two callouts, and the most callouts in any one minute. The callout plan is checked against
+# them and records the values it was checked with.
+CALLOUT_MIN_GAP_MS_KEY = "callout_min_gap_ms"
+CALLOUTS_PER_MINUTE_MAX_KEY = "callouts_per_minute_max"
+
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
 SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
@@ -579,6 +585,35 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=70,
         min_value=0,
         max_value=100,
+    ),
+    SettingSpec(
+        key=CALLOUT_MIN_GAP_MS_KEY,
+        group=GROUP_STORY,
+        label="Callouts: least time between two (ms)",
+        help=(
+            "The callouts of an explainer are checked before you review them: two callouts "
+            "must start at least this far apart. Before the video is rendered the times are "
+            "estimated from the length of each speech line, so leave some room. A starting "
+            "value, not a measurement."
+        ),
+        value_type="integer",
+        default=4000,
+        min_value=500,
+        max_value=30000,
+    ),
+    SettingSpec(
+        key=CALLOUTS_PER_MINUTE_MAX_KEY,
+        group=GROUP_STORY,
+        label="Callouts: most in one minute",
+        help=(
+            "The callouts of an explainer are checked before you review them: no minute of the "
+            "video may hold more callouts than this. Fewer, stronger callouts keep a viewer "
+            "watching better than many. A starting value, not a measurement."
+        ),
+        value_type="integer",
+        default=6,
+        min_value=1,
+        max_value=30,
     ),
     SettingSpec(
         key=STORY_WPM_KEY,

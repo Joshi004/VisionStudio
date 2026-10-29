@@ -132,7 +132,8 @@ class Job(Base):
         # plan, since revision 0067, and the cue detail and its audit, since revision 0068, and
         # the rewrite of a rejected take's prompt, since revision 0069, and the placement of the
         # music on the timeline, since revision 0070, and the preview of a music mix, since revision
-        # 0071, and the timing of a speech's words, since revision 0073.
+        # 0071, and the timing of a speech's words, since revision 0073, and the callout plan,
+        # since revision 0074.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -147,7 +148,7 @@ class Job(Base):
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
             "'audit_music_cues', 'rewrite_music_prompt', 'place_music', "
-            "'preview_music_mix', 'time_speech_words')",
+            "'preview_music_mix', 'time_speech_words', 'write_callout_plan')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -279,6 +280,35 @@ class MusicPlan(Base):
     rounds: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
     facts: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class CalloutPlan(Base):
+    """One version of an explainer's callout plan (EXPLAINER-009, revision 0074).
+
+    Every run or edit is a new row with the next `version`, and a stored row is never changed.
+    `content` is `{accent, callouts}` (`services/callout_plan_writer`). `inputs` holds the Story
+    Bible and every scene's speech units it was built from, and the rules it was checked against,
+    so staleness is worked out on read.
+    """
+
+    __tablename__ = "callout_plan"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_callout_plan_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

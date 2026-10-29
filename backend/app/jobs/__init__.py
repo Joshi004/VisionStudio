@@ -21,7 +21,8 @@
   (`write_music_cue.py`, `audit_music_cues.py`) and the rewrite of a rejected music take's prompt
   (`rewrite_music_prompt.py`), the placement of the music on the timeline (`place_music.py`)
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
-  of an explainer's speech (`time_speech_words.py`).
+  of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
+  (`write_callout_plan.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -75,6 +76,7 @@ def register_handlers() -> None:
     from app.jobs.story_pipeline import StoryPipelineHandler
     from app.jobs.synthesize_speech_unit import SynthesizeSpeechUnitHandler
     from app.jobs.time_speech_words import TimeSpeechWordsHandler
+    from app.jobs.write_callout_plan import WriteCalloutPlanHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
@@ -131,3 +133,4 @@ def register_handlers() -> None:
     handlers.register(PlaceMusicHandler())
     handlers.register(PreviewMusicMixHandler())
     handlers.register(TimeSpeechWordsHandler())
+    handlers.register(WriteCalloutPlanHandler())

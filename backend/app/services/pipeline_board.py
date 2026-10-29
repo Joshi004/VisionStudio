@@ -34,8 +34,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
+from app.services import callout_plan, word_timings
 from app.services import story_pipeline as pipeline
-from app.services import word_timings
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
 
@@ -62,6 +62,10 @@ MUSIC_STEPS: Final = frozenset(
 # (EXPLAINER-007).
 WORD_TIMINGS_STEP: Final = "word_timings"
 
+# The step that is switched off for every project but an explainer with callouts on
+# (EXPLAINER-009).
+CALLOUT_PLAN_STEP: Final = "callout_plan"
+
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -83,6 +87,7 @@ GROUPS: Final[dict[str, str]] = {
     "speech_units": "speech",
     "speech_synthesis": "speech",
     "word_timings": "speech",
+    "callout_plan": "speech",
     "music_bible": "music",
     "music_themes": "music",
     "music_plan": "music",
@@ -258,8 +263,10 @@ async def build(session: AsyncSession, project: Project) -> Board:
     statuses: dict[str, BoardStatus] = {}
     steps: list[BoardStep] = []
     for step in STEPS:  # the order of STEPS puts every step after the steps it needs
-        off = (music_off and step.key in MUSIC_STEPS) or (
-            step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project)
+        off = (
+            (music_off and step.key in MUSIC_STEPS)
+            or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
+            or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (

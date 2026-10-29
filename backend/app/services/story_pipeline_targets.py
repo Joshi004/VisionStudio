@@ -31,6 +31,7 @@ from app.db.models import Job, Project, ProjectMissingLibraryItem
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
+    callout_plan,
     character_definitions,
     character_images,
     character_links,
@@ -109,6 +110,10 @@ _MANUAL_MUSIC_BIBLE: Final = (
 _MANUAL_MUSIC_PLAN: Final = (
     "The newest music plan was written by you, and planning the music again adds a version from "
     "the model."
+)
+_MANUAL_CALLOUT_PLAN: Final = (
+    "The newest callout plan was written by you, and planning the callouts again adds a version "
+    "from the model."
 )
 _MANUAL_MUSIC_TAKE: Final = (
     "You chose the take of this cue, and making it again replaces your choice."
@@ -1532,6 +1537,41 @@ async def _start_word_timings(
     )
 
 
+# --- The callout plan (EXPLAINER-009) ---------------------------------------------------------
+
+
+async def _evaluate_callout_plan(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only an explainer with callouts on has a callout plan. For any other project the step has
+    # one target that is already done, so a run reports it as skipped.
+    if not callout_plan.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await callout_plan.state(session, project)
+    done = state.latest is not None and not state.out_of_date
+    active = _active(state.job)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                consent=_MANUAL_CALLOUT_PLAN if state.needs_confirmation and not done else None,
+                last_error=_failure(state.job),
+                stale=state.latest is not None and not done,
+            )
+        ]
+    )
+
+
+async def _call_callout_plan(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await callout_plan.start_run(
+        session, project, confirm_replace_manual=options.confirm_overwrite
+    )
+
+
 # --- Shot plans -----------------------------------------------------------------------------
 
 
@@ -2135,6 +2175,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "speech_units": Adapter(_evaluate_speech_units, _start_speech_units),
     "speech_synthesis": Adapter(_evaluate_speech_synthesis, _start_speech_synthesis),
     "word_timings": Adapter(_evaluate_word_timings, _start_word_timings),
+    "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "shot_definitions": Adapter(_evaluate_shot_definitions, _start_shot_definitions),
     "shot_continuity": Adapter(_evaluate_shot_continuity, _start_shot_continuity),
@@ -2171,6 +2212,7 @@ _CONSENT_STEPS: Final[tuple[str, ...]] = (
     "music_generation",
     "scene_staging",
     "speech_units",
+    "callout_plan",
     "shot_plans",
     "shot_definitions",
     "references",

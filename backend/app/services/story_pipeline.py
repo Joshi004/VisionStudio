@@ -131,6 +131,11 @@ STEPS: Final[tuple[Step, ...]] = (
     # An explainer's captions and callouts follow the spoken words (EXPLAINER-007). Nothing
     # after it waits for it yet; the render will (EXPLAINER-008).
     Step("word_timings", "Time the words", ("speech_synthesis",)),
+    # EXPLAINER-009: the callouts an explainer shows on the picture. They are written from the
+    # speech units alone (times are estimated), so the step does not wait for the voices.
+    # Skipped as complete for a story and for an explainer with callouts off. Nothing after it
+    # waits for it yet; the render will (EXPLAINER-010).
+    Step("callout_plan", "Plan the callouts", ("speech_units",)),
     Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging")),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.

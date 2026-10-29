@@ -156,6 +156,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (EXPLAINER-007 caption settings and word timings, 2026-10-28):** migration `0073`. **An explainer can have word-synced captions and callouts, and every speech of an explainer gets a start and an end time for each of its script words.** (1) **Two new columns, `project.captions` and `project.callouts`** (Section 4.1; BOOLEAN NOT NULL DEFAULT 1, on for every project, existing ones included). They are read only for an explainer, at render time, so `PATCH /api/projects/{id}` may change them at any time; for a story the PATCH is refused with 422, and `POST /api/projects` keeps the defaults. (2) **`job.type` gains `time_speech_words`**: the CHECK is rebuilt in batch mode, so `job` now has forty-four types. It is a job of the project, `provider='gpu'`, restart rule `resume`, deduped by `speech_unit_audio_id` (Section 5). (3) **One new table, `speech_word_timing`** (Section 4.68): one row per `speech_unit_audio` row (`UNIQUE`, `ON DELETE CASCADE`), with the script's words in order, each with its `start` and `end` in seconds from the start of the file, and how the times were made (`parakeet` or `estimated`). A new speech is a new audio row, so it gets new timings, and an unchanged unit keeps its old ones. (4) **One new global setting** (Section 6): `word_timing_match_threshold` (70, group `Speech`). (5) **A new pipeline step, `word_timings`** ("Time the words"), after `speech_synthesis`: done for a project that does not want timings (a story, or an explainer with captions and callouts both off), which the board shows as `off`. The job is also queued automatically, in the transaction that stores a speech, for an explainer with captions or callouts on. No existing row is changed and nothing is backfilled. See Sections 4.1, 4.68, 5 and 6.
 
+**Update (EXPLAINER-009 callout plan, 2026-10-28):** migration `0074`. **An explainer gets a callout plan: an accent colour and a list of short pieces of text to show on the picture, suggested by the model, checked by code for display rules only, and reviewed by the owner.** (1) **One new table, `callout_plan`** (Section 4.69): one immutable row per version of a project's plan, following Section 2.1 (`inputs` holds the Story Bible and every scene's `speech_units` row it was built from, and the display limits it was checked with). (2) **`job.type` gains `write_callout_plan`**: the CHECK is rebuilt in batch mode, so `job` now has forty-five types. It is a job of the project, `provider='llm'`, restart rule `never_rerun`, on the story model, deduped per project (Section 5). (3) **Two new global settings** (Section 6): `callout_min_gap_ms` (4000) and `callouts_per_minute_max` (6), both in group `Story`. (4) **A new pipeline step, `callout_plan`** ("Plan the callouts"), after `word_timings`, needing `speech_units` only (the checks use each unit's estimated length, not the spoken audio). It is done for a project that has no callout plan (a story, or an explainer with `callouts` off), which the board shows as `off`. Nothing waits for it yet; the render will (EXPLAINER-010). No existing row is changed and nothing is backfilled. See Sections 4.69, 5 and 6.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -471,6 +473,8 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `speech_word_timing` | `project_id` | `project.id` | No (`CASCADE`). EXPLAINER-007 |
 | `speech_word_timing` | `speech_unit_audio_id` | `speech_unit_audio.id` | No (`CASCADE`; one timing per speech, `UNIQUE`). EXPLAINER-007 |
 | `speech_word_timing` | `job_id` | `job.id` | Yes (the `time_speech_words` job that made it; `SET NULL`). EXPLAINER-007 |
+| `callout_plan` | `project_id` | `project.id` | No (`CASCADE`). EXPLAINER-009 |
+| `callout_plan` | `job_id` | `job.id` | Yes (the `write_callout_plan` job that made it; `SET NULL`; NULL for a manual version). EXPLAINER-009 |
 | `shot_plan` | `project_id` | `project.id` | No (`CASCADE`). PHASE-020 |
 | `shot_plan` | `job_id` | `job.id` | Yes (the `plan_shots` job that wrote the version; `SET NULL`). PHASE-020 |
 | `shot_definition` | `project_id` | `project.id` | No (`CASCADE`). PHASE-022 |
@@ -3207,6 +3211,36 @@ CREATE TABLE speech_word_timing (
 CREATE INDEX idx_speech_word_timing_project ON speech_word_timing (project_id);
 ```
 
+### 4.69 `callout_plan`
+
+*Added in EXPLAINER-009 (migration `0074`).* The callouts of an explainer (E-14 to E-18): one row per **version** of a project's callout plan, written by the `write_callout_plan` job or by the owner's edit. It follows Section 2.1 exactly as `music_plan` does (Section 4.63): every run or edit adds a new row with the next `version`, and a stored row is never changed. The newest row is the current plan. Only an explainer with `project.callouts` on has one. Out of date is worked out on every read, never stored: the plan is out of date when the Story Bible or any scene's `speech_units` row was made again, the scenes changed, or the display limits changed. The rules are in `services/callout_plan.py` (the stage) and `services/callout_plan_writer.py` (the instructions and the checks).
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... per project. `UNIQUE (project_id, version)` |
+| `source` | TEXT | NOT NULL | — | `ai` (the model's answer) or `manual` (the owner's edit) (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_callout_plan` job. `ON DELETE SET NULL`. NULL for a manual version |
+| `inputs` | JSON | NOT NULL | — | Provenance: `{"artifacts": [{"kind": "story_bible", "id", "version"}, {"kind": "speech_units", "id", "version", "scene_id"} ...], "rules": {"min_gap_ms", "per_minute_max"}}`. A manual version adds `"edited_from": {"id", "version"}` |
+| `content` | JSON | NOT NULL | — | `{"accent": {"colour", "reason", "note"}, "callouts": [...]}`. See Section 5, "The callout plan" |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE callout_plan (
+    id         INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version    INTEGER NOT NULL,
+    source     TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id     INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, version)
+);
+CREATE INDEX idx_callout_plan_project ON callout_plan (project_id);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -4322,6 +4356,29 @@ One job per take with dialogue. It belongs to a project, is `provider='gpu'` wit
 
 One job per stored speech of an explainer with captions or callouts on. It belongs to a project, is `provider='gpu'` with the restart rule `resume`, and is deduped by `speech_unit_audio_id` (two presses on one speech make one job, two speeches run side by side). It is queued in the transaction that stores the speech (`jobs/synthesize_speech_unit.py`), or by the pipeline step `word_timings` for a speech that has no timing. The input is `{"requested": "time_speech_words", "speech_unit_audio_id": 41}` until the transcription is submitted; then `server_url`, `upload` (`filename`, `remote_asset_id`), `endpoint` (`/v1/parakeet/transcribe`) and `body` are added next to those keys. The transcription URL setting decides the server (blank means the GPU server URL). `output` is `{"speech_unit_audio_id": 41, "processing_time": 0.3, "timing": {"source": "parakeet", "match_percent": 92.3, "threshold": 70, "words": 14}, "purge": {...}}`, or `"timing": {"kept": 7}` when the speech was timed by an earlier job in the meantime (that result stands). The job writes one `speech_word_timing` row (Section 4.68) in the transaction that finishes it. An empty transcript is a valid answer: it gives `estimated` timing, not a failed job. A job that fails leaves the speech not timed, and the pipeline step queues it again. It is not in the types that are cancelled on the server (it runs for seconds).
 
+### `job.input` and `job.output` for a `write_callout_plan` job (EXPLAINER-009)
+
+One job per press of **Run** on the callout plan (or per pipeline run). It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, on the **story model**, and is deduped per project (a press while one waits or runs returns that job). `input` is a copy of everything the job needs, taken when it was queued: `bible` (the Story Bible's content), `presenter_name`, `scenes` (`[{"id", "title", "units": [{"id", "text", "estimated_seconds"}]}]` in story order), `rules` (`{"min_gap_ms", "per_minute_max"}`, the settings then) and `saved_inputs` (the provenance the version will carry). When the job starts, `server_url`, `endpoint` and `calls_sent.callouts` (`instructions_sha256` and the exact `request`) are added. There is **one call**, with the shared at-most-two-attempts rule of `jobs/llm_call.py`: an answer that breaks a display rule (a text over its length, two callouts too close, two on the same stretch of speech, too many in a minute, the presenter's name, an unknown unit or type) is sent back once with the reason. A bad accent colour never fails the job: the default is stored with a note. `output` is `{"calls": {"callouts": {...attempts...}}, "usage": {...}, "callout_plan_id", "version", "seconds"}`. A successful job saves its row and finishes in **one transaction**. Nothing paid starts by itself: it starts only from `POST /api/projects/{id}/callout-plan/run` or a pipeline run. Running again over a version the owner wrote is refused with 422 unless `confirm_replace_manual` is true.
+
+### The callout plan (EXPLAINER-009)
+
+`callout_plan.content` (Section 4.69) is `{"accent": {"colour": "#2EC4B6", "reason": "...", "note": null}, "callouts": [...]}`. `accent.colour` is `#RRGGBB`, upper case; `note` says why the default `#FFD60A` was stored instead of the model's colour (not a hex value, or a WCAG contrast ratio below 4.5 against the caption outline `#000000`), or is null. Each callout is:
+
+```json
+{ "id": "co_1", "type": "number", "role": "number", "enabled": true,
+  "scene_id": "intro", "unit_id": "su_1", "phrase": "ten lakh rupees",
+  "text": "10 lakh", "items": null, "sides": null,
+  "estimated_start_s": 1.1, "warnings": [] }
+```
+
+- `type` is `emphasis`, `number`, `question`, `comparison`, `list` or `section_title`. `text` holds the text of every type but `list` and `comparison` (at most 32, 20, 48 and 32 characters for `emphasis`, `number`, `question` and `section_title`). A `list` has `items: [{"text", "phrase"}]` (2 or 3, at most 24 characters each) and `text` null. A `comparison` has `sides: [{"text", "phrase", "role"}]` (exactly 2, at most 24 characters each) and `role` null.
+- `role` is `accent`, `number`, `negative` or `positive` (E-18). `accent` is the plan's colour; the others are amber, red and green.
+- `scene_id` and `unit_id` name the speech unit (the unit ids are those of the scene's newest `speech_units` row). `phrase` is a rough phrase from that unit (E-15); it is never checked word for word. Where it does not match the unit's words well, the callout sits at the start of the unit and `warnings` says so.
+- `enabled` is false for a callout the owner turned off. Only callouts that are on go to the render (E-17).
+- `estimated_start_s` is the callout's place on the story's **estimated** timeline (each unit's `estimated_seconds` laid end to end, pauses not counted). It is only used for the display checks: EXPLAINER-010 places each callout exactly at Render.
+- `warnings` never stop a plan. A `number` callout whose number is not said in its unit (digits or English number words, including "lakh" and "crore") has one.
+- Ids are `co_1`, `co_2` ... in time order on a model version; a manual version keeps them. A manual version has the same callouts, units and phrases as the newest version before it, with the owner's text, type, role and `enabled`.
+
 ### `job.input` and `job.output` for a `select_shot_references` job (PHASE-033)
 
 One job per shot. It belongs to a project, is `provider='llm'` with the restart rule `never_rerun` (a restart never repeats a paid call: the user presses **Select references** again), and is deduped by `shot_key` (`scene_id/shot_id`: two presses on one shot make one job, two shots run side by side). The input holds `shot_key`, `scene_id`, `shot_id`, `shot_definition_id`, `shot_definition` (the stored specification), `catalog` (every candidate picture as `services/reference_selection.CatalogPicture.as_dict` gives it) and `inputs` (what is written onto the manifest, D-3); the job adds `instructions_sha256`, `server_url`, `endpoint` and the exact `request`. The output is the shared record of `llm_call.Outcome` (`attempts`, `answer` as the checked selection, `answer_usable`, `content` null, `usage`) plus `scene_id`, `shot_id`, `version` (the manifest), `method` (`llm` or `deterministic`), `fallback_reason`, `pictures` and `seconds`. A job that ends with the fixed rule's choice is `succeeded`: the manifest says how it was chosen. It fails only when the fixed rule refuses too, with both reasons. Cancelling it stores nothing.
@@ -4467,6 +4524,8 @@ One job per render. It belongs to a project, is `provider='local'` with the rest
 | `shot_continuity_max_rounds` | `2` | whole number, from 0 to 5 (PHASE-023, group `Shot duration`). How many rounds of defining shots again a scene gets when its shots do not line up at a cut. Each round is one paid model call per shot defined again, plus one for the next check. 0 still checks the scene but defines nothing again. It is a count, not a length, so it is not part of the order above. Defining a shot, or pressing Check continuity, starts the count again |
 | `speech_words_per_minute` | `150` | from 60 to 300 (PHASE-018, group `Speech`). The pace used to estimate how long a speech unit takes to say: its words divided by this. A starting value and not a measurement, separate from `story_words_per_minute`. A plan made with another pace is out of date (`services/speech_unit_planner.py`) |
 | `word_timing_match_threshold` | `70` | whole number, from 0 to 100 (EXPLAINER-007, group `Speech`). The percent of an explainer speech's script words that must match what Parakeet hears in it for the heard times to be used. Below it, each word gets its share of the speech's length by character count, and the row is marked `estimated`. A percent, not a length |
+| `callout_min_gap_ms` | `4000` | whole milliseconds, from 500 to 30000 (EXPLAINER-009, group `Story`). The least time between the start of two turned-on callouts of an explainer. The times are estimated from each speech unit's length before anything is rendered, and pauses are not counted, so real gaps are a little longer. The plan records the value it was checked with, and a changed value makes it out of date |
+| `callouts_per_minute_max` | `6` | whole number, from 1 to 30 (EXPLAINER-009, group `Story`). The most turned-on callouts of an explainer in any one minute. Recorded and compared like `callout_min_gap_ms` |
 | `narration_unit_max_seconds` | `0` | whole seconds, from 0 to 60 (PHASE-018, group `Speech`). A narration event estimated above this is cut at sentences, then clauses. **0 means use `shot_target_max_seconds`** |
 | `dialogue_shot_margin_seconds` | `2` | whole seconds, from 0 to 13 (PHASE-018, group `Speech`). Dialogue plays inside one shot, so a line estimated above `h3_max_shot_seconds` minus this margin is cut at sentence ends. A margin that leaves under 1 s refuses planning with a readable reason |
 | `story_words_per_minute` | `150` | from 60 to 300 (PHASE-003, group `Story`). The speaking pace used to estimate a story's finished length: its word count divided by this. A common narration pace, a starting value and not a measurement. Affects only the estimate (`services/story_length.py`) |

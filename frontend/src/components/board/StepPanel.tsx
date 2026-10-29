@@ -99,6 +99,7 @@ const StoryRenderPanel = lazyNamed(() => import("../story/StoryRenderPanel"), "S
 const MusicBiblePanel = lazyNamed(() => import("../music/MusicBiblePanel"), "MusicBiblePanel");
 const MusicThemesPanel = lazyNamed(() => import("../music/MusicThemesPanel"), "MusicThemesPanel");
 const MusicPlanPanel = lazyNamed(() => import("../music/MusicPlanPanel"), "MusicPlanPanel");
+const CalloutPlanPanel = lazyNamed(() => import("../story/CalloutPlanPanel"), "CalloutPlanPanel");
 const MusicCuesPanel = lazyNamed(() => import("../music/MusicCuesPanel"), "MusicCuesPanel");
 const MusicTakesPanel = lazyNamed(() => import("../music/MusicTakesPanel"), "MusicTakesPanel");
 const MusicPlacementPanel = lazyNamed(
@@ -187,6 +188,8 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
       case "speech_synthesis":
       case "word_timings":
         return <SpeechUnitsPanel projectId={projectId} />;
+      case "callout_plan":
+        return <CalloutPlanPanel projectId={projectId} />;
       case "music_bible":
         return <MusicBiblePanel projectId={projectId} hasStory={hasStory} />;
       case "music_themes":

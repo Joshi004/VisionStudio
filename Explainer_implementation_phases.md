@@ -308,7 +308,7 @@ Checked on throwaway data: the backend container's FFmpeg 7.1.5 lists `subtitles
 
 ### EXPLAINER-009 — Callout plan and review
 
-**Status:** Not Started
+**Status:** Done (code). The owner's judgement on one real explainer is still to do (see the completion notes).
 
 **Objective.** Have the model suggest engaging callouts for an explainer, check them for display rules only, and let the user review and edit them on the board.
 
@@ -359,12 +359,35 @@ Checked on throwaway data: the backend container's FFmpeg 7.1.5 lists `subtitles
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Writer (instructions, parser, display checks, number warning, accent check)
-- [ ] Job, versioned storage and provenance, pipeline step
-- [ ] Board panel with edit and on/off
-- [ ] Owner judges one real explainer; docs; standard checks
+- [x] Writer (instructions, parser, display checks, number warning, accent check)
+- [x] Job, versioned storage and provenance, pipeline step
+- [x] Board panel with edit and on/off
+- [x] Docs (`DATABASE_STRUCTURE.md`), standard checks
+- [ ] Owner judges one real explainer
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-28.
+
+What was decided (the four "Planning decides" items, and two choices of the owner):
+
+- **Starting limits:** two new settings in the `Story` group, `callout_min_gap_ms` (4000) and `callouts_per_minute_max` (6). The length limits are constants in `services/callout_plan_writer.py`: `emphasis` 32 characters, `number` 20, `question` 48, `section_title` 32, a `list` item 24 (2 or 3 items), a `comparison` side 24 (exactly 2 sides). The limits a plan was checked with are recorded in its `inputs`, and a changed setting makes the plan out of date.
+- **Model:** the story role (`STORY_MODEL_KEY`), like every story stage. No new model setting.
+- **Panel:** edits only (text, type, colour role, on or off). It cannot add or delete a callout (the owner's choice). A run again is the way to get a different set.
+- **Readability:** the WCAG contrast ratio of the accent against the caption outline colour (`caption_plan.OUTLINE_COLOUR`, `#000000`) must be at least 4.5. A colour that is not `#RRGGBB`, or is below that, is replaced by `caption_plan.HIGHLIGHT_COLOUR` (`#FFD60A`) and the stored accent carries a `note` the panel shows.
+- **Times for the checks (the owner's choice):** each speech unit's `estimated_seconds` laid end to end in story order, so the step needs only the speech units, not the spoken audio. A callout sits at its unit's start plus the share of the unit's words before its phrase. A phrase that does not match (`PHRASE_MATCH_MIN` 0.6, `SequenceMatcher` over the normalized words) puts the callout at the unit's start, with a warning. Pauses are not counted, so the gaps are a little shorter than the real ones and the checks err on the strict side.
+
+What was built:
+
+- `services/number_words.py` (pure): `numbers_in(text)` gives the values a text says, from digits (`1,000`, `3.5`, `73%`, `$5`, `5k`, `2.5 million`) and English words ("twenty five", "one hundred and five", "ten lakh", "three crore", "three point five"). "ten lakh" and "1,000,000" are the same value. There was no number parser in the code before.
+- `services/callout_plan_writer.py` (pure): the instructions (callouts keep the viewer watching, fewer and stronger, never the presenter's name, never a whole script sentence, the types and roles, the limits as numbers), `build_request`, `locate_phrase` (written so EXPLAINER-010 can reuse it on timed words), `check_callouts` and `check_plan`. A failing answer is refused with a message that names the callouts at fault, and `jobs/llm_call.py` retries once with that message. Refused: an unknown unit, type or role; the wrong shape for the type; a text over its length (never cut); a part of the presenter's name of 3 letters or more (the whole name if it has none) shown as a word; two turned-on callouts closer than the gap; two on the same stretch of one unit; more than the limit in any 60 s window. A `number` callout whose number the unit does not say gets a warning on the callout, never a refusal. `check_accent` never raises.
+- `services/callout_plan.py`: `wanted(project)` (an explainer with `callouts` on), `start_run`, `save_version`, `save_manual`, `state`. The plan is blocked until the Story Bible exists and every scene's speech units are planned and current. Provenance records the Story Bible row and one `speech_units` row per scene. A manual save keeps each callout's unit and phrase by id, runs the same display checks against the script as it is now, keeps the accent, and is refused while the job runs, when the plan is out of date, and when the edit adds or removes a callout.
+- `jobs/write_callout_plan.py`, migration `0074` (`callout_plan` and the `job.type` CHECK), `api/callout_plan.py` (`run`, `GET`, `PUT`, `versions/{n}`), the step `callout_plan` ("Plan the callouts", after `word_timings`, needing `speech_units`), its board group (`speech`), an `off` status for a story and for an explainer with `callouts` off, a staleness item, and `CalloutPlanPanel` and `CalloutPlanEditor` on the board.
+- The render list is `callout_plan_writer.enabled_callouts(content)`: only callouts that are turned on, in order. EXPLAINER-010 reads it.
+
+Checked on throwaway data: migration `0074` up, down and up again (`alembic check` lists only five `FLOAT` against `REAL` differences on other tables that were there before); `numbers_in` on the forms above; the checks on a forced overlap (too close, the same spot), seven callouts in a minute (refused) and six (kept), the presenter's name, an over-long text, an unknown unit, a short list, an empty plan (valid), a made-up number (warning), "ten lakh" against "1,000,000" (no warning), and a bad, a dark and a missing accent (default and a note); the job's answer reader on a refused, a cut-off and a good answer; the stage on a migrated database with the Story Bible, the speech units and the presenter replaced by fixed values: start a run, save the model's version, read it through the API model, edit (off, a new type, a text over its length, the presenter's name, a removed callout), the manual versions, the render list, a re-run refused until confirmed, the plan out of date after a speech row changed and then refusing an edit, and no plan for a story or with `callouts` off; the board shows the step as `off` for a story and for an explainer with callouts off, and `waiting` for an explainer with no speech yet. Ruff, `npm run lint` and `npm run typecheck` pass, and `schema.d.ts` was regenerated from the app's OpenAPI. There are no automated tests, as asked.
+
+**Known limits.** The number parser does not read ordinals, fractions ("half"), ranges, a year said in two parts ("twenty twenty four" reads as 44) or a currency letter after the number ("10L" reads as 10): those give a warning, never a refusal. A phrase is matched by whole words, so a typo in it ("acount") counts as a miss. The estimated times can differ from the voice by a few seconds over a long script, so two callouts that pass here could still sit close in the render, and EXPLAINER-010 has to deal with that. A name part that is also a common word (for example a presenter called "May") is refused wherever it shows.
+
+**Still for the owner (needs the model and judgement):** run the callout plan on one real explainer and judge the callouts: would you want them on screen, are they too many or too bland, and does the accent suit the video? The two limits (4 s, 6 a minute) and the length limits are starting values. Rebuild the backend image (`docker compose up -d --build backend`) so that the new migration, job and routes are in it.
 
 ### EXPLAINER-010 — Callouts drawn on the render, and colours
 
@@ -449,6 +472,6 @@ Checked on throwaway data: the backend container's FFmpeg 7.1.5 lists `subtitles
 | EXPLAINER-006 | Done | Owner reported it passed on 2026-10-28. |
 | EXPLAINER-007 | Done | Caption settings and word timings. Migration `0073`. Owner still checks the timings by playback. |
 | EXPLAINER-008 | Done | Word-synced captions burned in. Timeline version 3. Owner still checks the highlight and the portrait margin by playback and on a phone. |
-| EXPLAINER-009 | Not Started | Callout plan and review. Can run in parallel with 008. |
+| EXPLAINER-009 | Done | Callout plan and review. Migration `0074`. Owner still judges the callouts on one real explainer. |
 | EXPLAINER-010 | Not Started | Callouts drawn, and colours. |
 | EXPLAINER-011 | Not Started | Optional, later. |

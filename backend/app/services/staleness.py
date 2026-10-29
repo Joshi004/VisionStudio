@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Project
 from app.services import (
+    callout_plan,
     character_definitions,
     character_images,
     character_relations,
@@ -379,6 +380,16 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
             found.add(
                 "music_plan",
                 Item("music_plan", "Music plan", plan.reasons, acceptable=False),
+            )
+
+    # The callout plan of an explainer (EXPLAINER-009). Its speech units were made again, or the
+    # limits changed: the plan has to be written again, since its units may have moved.
+    if callout_plan.wanted(project):
+        callouts = await callout_plan.state(session, project)
+        if callouts.latest is not None and callouts.out_of_date:
+            found.add(
+                "callout_plan",
+                Item("callout_plan", "Callout plan", callouts.reasons, acceptable=False),
             )
 
     # The detail and prompts of each music cue (MUSIC-009). Only for a plan that is current: a
