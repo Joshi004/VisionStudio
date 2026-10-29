@@ -158,6 +158,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (EXPLAINER-009 callout plan, 2026-10-28):** migration `0074`. **An explainer gets a callout plan: an accent colour and a list of short pieces of text to show on the picture, suggested by the model, checked by code for display rules only, and reviewed by the owner.** (1) **One new table, `callout_plan`** (Section 4.69): one immutable row per version of a project's plan, following Section 2.1 (`inputs` holds the Story Bible and every scene's `speech_units` row it was built from, and the display limits it was checked with). (2) **`job.type` gains `write_callout_plan`**: the CHECK is rebuilt in batch mode, so `job` now has forty-five types. It is a job of the project, `provider='llm'`, restart rule `never_rerun`, on the story model, deduped per project (Section 5). (3) **Two new global settings** (Section 6): `callout_min_gap_ms` (4000) and `callouts_per_minute_max` (6), both in group `Story`. (4) **A new pipeline step, `callout_plan`** ("Plan the callouts"), after `word_timings`, needing `speech_units` only (the checks use each unit's estimated length, not the spoken audio). It is done for a project that has no callout plan (a story, or an explainer with `callouts` off), which the board shows as `off`. Nothing waits for it yet; the render will (EXPLAINER-010). No existing row is changed and nothing is backfilled. See Sections 4.69, 5 and 6.
 
+**Update (AVLAB audio video lab, 2026-10-29):** migration `0075`. **A library character gets an Audio video lab: one text is spoken whole, some parts of it are marked for video, and two videos are rendered to compare how the sound is used.** (1) **Two new tables**, `av_lab_test` (Section 4.70) and `av_lab_segment` (Section 4.71). A test belongs to a library character (`ON DELETE CASCADE`) and to no project. (2) **`job.type` gains `time_lab_speech_words` and `render_av_test`**: the CHECK is rebuilt in batch mode, so `job` now has forty-seven types. `time_lab_speech_words` is `provider='gpu'` with the restart rule `resume` and times the words of a test's speech with Parakeet (the same steps as `time_speech_words`); `render_av_test` is `provider='local'` with the restart rule `start_again` and renders the two videos with FFmpeg (Section 5). Both are deduped by `input.test_id`. (3) **A part's slice of the speech is stored as a `lab_voice_run` row with a file and no job**, so a character take can use it as `audio_input` like any speech. The Voice lab list and the character's takes gallery leave out the slices and the takes of the segments (`av_lab_segment.slice_run_id`, `av_lab_segment.take_id`); the rows are read, never changed, by the other labs. No existing row is changed and nothing is backfilled. See Sections 4.70, 4.71 and 5.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -3241,6 +3243,91 @@ CREATE TABLE callout_plan (
 CREATE INDEX idx_callout_plan_project ON callout_plan (project_id);
 ```
 
+### 4.70 `av_lab_test`
+
+*Added in AVLAB (migration `0075`).* One test of the Audio video lab, inside a library character. The whole `text` is spoken as **one** Voice lab speech (`voice_run_id`: `direction` mode with `instruction`, the character's saved voice), Parakeet times its words (`timing_job_id`, `word_timing`), and every part the author marked (`parts`) becomes an H3 clip made from its slice of that speech (Section 4.71). `audio_marker` says how every clip uses its slice. The render then makes two videos: `mixed_path` (the speech in the gaps between the parts, each clip's own sound inside its part) and `tts_path` (the speech only, the clips muted). Both show the same picture: the still of the first frame in the gaps, the clip inside a part. What a test is doing is worked out on every read from the speech, the jobs and the takes (`services/av_lab.py`); only `last_error` is stored, for a failure that no job holds (the parts could not be cut, or a clip could not start). A test is never deleted by the labs. The rules are in `services/av_lab.py` and `services/av_lab_render.py`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `character_id` | INTEGER, FK → `library_character.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `text` | TEXT | NOT NULL | — | The whole text, trimmed. Its words are `text.split()` |
+| `instruction` | TEXT | NOT NULL | — | How the text is spoken (tone, emotion, pace), at most 500 characters |
+| `audio_marker` | TEXT | NOT NULL | — | How each clip uses its slice: `fully_copy` or `partially_copy` (`CHECK`) |
+| `orientation` | TEXT | NOT NULL | — | `portrait` or `landscape` (`CHECK`) |
+| `first_frame` | JSON | NOT NULL | — | `{"source": "lab" or "asset", "id"}`: the first frame of every clip, and the still shown in the gaps |
+| `parts` | JSON | NOT NULL | — | `[{"start_word", "end_word"}]`, in order, not overlapping; the words counted from 0 in `text.split()`, the end included. One to eight |
+| `voice_run_id` | INTEGER, FK → `lab_voice_run.id` | NULL | — | The speech of the whole text. `ON DELETE SET NULL` |
+| `timing_job_id` | INTEGER, FK → `job.id` | NULL | — | The `time_lab_speech_words` job. `ON DELETE SET NULL` |
+| `word_timing` | JSON | NULL | — | `{"source": "parakeet" or "estimated", "match_percent", "threshold", "heard_text", "words": [{"text", "start", "end"}]}`. NULL until timed; written once and never changed (the segments were cut from it) |
+| `render_job_id` | INTEGER, FK → `job.id` | NULL | — | The newest `render_av_test` job. `ON DELETE SET NULL` |
+| `mixed_path` | TEXT | NULL | — | The mixed video, under `media/lab/`. NULL until rendered; a render again replaces the path (the old file stays on disk) |
+| `tts_path` | TEXT | NULL | — | The speech-only video |
+| `render_info` | JSON | NULL | — | `{"fps", "frames", "duration_s", "width", "height", "pieces": [{"kind": "still" or "clip", "start_frame", "end_frame", "part"}], "clips_without_sound": [part numbers]}` |
+| `last_error` | TEXT | NULL | — | A failure no job holds. Cleared when the timing is saved or a render is queued |
+| `copied_from_id` | INTEGER | NULL | — | The test this one was copied from (same speech, word times, parts, slices and first frame; another `audio_marker`). A note, not a foreign key |
+
+```sql
+CREATE TABLE av_lab_test (
+    id             INTEGER PRIMARY KEY,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    character_id   INTEGER NOT NULL REFERENCES library_character(id) ON DELETE CASCADE,
+    text           TEXT NOT NULL,
+    instruction    TEXT NOT NULL,
+    audio_marker   TEXT NOT NULL CHECK (audio_marker IN ('fully_copy', 'partially_copy')),
+    orientation    TEXT NOT NULL CHECK (orientation IN ('portrait', 'landscape')),
+    first_frame    JSON NOT NULL,
+    parts          JSON NOT NULL,
+    voice_run_id   INTEGER REFERENCES lab_voice_run(id) ON DELETE SET NULL,
+    timing_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    word_timing    JSON,
+    render_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    mixed_path     TEXT,
+    tts_path       TEXT,
+    render_info    JSON,
+    last_error     TEXT,
+    copied_from_id INTEGER
+);
+CREATE INDEX idx_av_lab_test_character ON av_lab_test (character_id);
+```
+
+### 4.71 `av_lab_segment`
+
+*Added in AVLAB (migration `0075`).* One marked part of a test. It holds the words, where they lie in the speech and the two things made for them: the **slice** of the speech and the **take** that makes the clip. `start_s` and `end_s` are seconds in the whole speech: the middle of the silence before the part's first word (0 for the first word of the text) and the middle of the silence after its last word (the end of the speech for the last word), from the word times, so two parts side by side meet at one point. `clip_frames` is the H3 length of the slice: the smallest `17n + 5` frames that hold the part (at most 345, 14.4 s; a longer part is refused before any clip is paid for). The slice is the part's audio placed at the start of silence of exactly that length, stored as a `lab_voice_run` row with a file and no job (`mode='direction'`, the test's `instruction`, `params` with `av_lab_test_id`, `start_s` and `end_s`), so a character take can use it as `audio_input` `{"source": "voice_run", "id"}` and the take's own check that a `fully_copy` dialogue equals the speech's text holds. The take is a normal `character_take` (`output='video'`, MiniMax H3, `match_audio_duration` true, the test's `audio_marker` and first frame); the character's takes gallery leaves it out. A copied test has segments of its own with the **same slice rows** and takes of its own.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `test_id` | INTEGER, FK → `av_lab_test.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (test_id, position)` |
+| `position` | INTEGER | NOT NULL | — | 1, 2, 3 ... in order |
+| `start_word` | INTEGER | NOT NULL | — | The first word of the part (from 0) |
+| `end_word` | INTEGER | NOT NULL | — | The last word of the part |
+| `text` | TEXT | NOT NULL | — | The part's words joined with one space: the dialogue of the take and the text of the slice |
+| `start_s` | REAL | NOT NULL | — | Where the part starts in the speech, in seconds |
+| `end_s` | REAL | NOT NULL | — | Where the part ends in the speech |
+| `clip_frames` | INTEGER | NOT NULL | — | The H3 frame count of the clip and the slice (24 fps) |
+| `slice_run_id` | INTEGER, FK → `lab_voice_run.id` | NULL | — | The slice. `ON DELETE SET NULL` |
+| `take_id` | INTEGER, FK → `character_take.id` | NULL | — | The take that makes the clip. NULL until started. `ON DELETE SET NULL` |
+
+```sql
+CREATE TABLE av_lab_segment (
+    id           INTEGER PRIMARY KEY,
+    test_id      INTEGER NOT NULL REFERENCES av_lab_test(id) ON DELETE CASCADE,
+    position     INTEGER NOT NULL,
+    start_word   INTEGER NOT NULL,
+    end_word     INTEGER NOT NULL,
+    text         TEXT NOT NULL,
+    start_s      REAL NOT NULL,
+    end_s        REAL NOT NULL,
+    clip_frames  INTEGER NOT NULL,
+    slice_run_id INTEGER REFERENCES lab_voice_run(id) ON DELETE SET NULL,
+    take_id      INTEGER REFERENCES character_take(id) ON DELETE SET NULL,
+    UNIQUE (test_id, position)
+);
+CREATE INDEX idx_av_lab_segment_take ON av_lab_segment (take_id);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -4355,6 +4442,14 @@ One job per take with dialogue. It belongs to a project, is `provider='gpu'` wit
 ### `job.input` and `job.output` for a `time_speech_words` job (EXPLAINER-007)
 
 One job per stored speech of an explainer with captions or callouts on. It belongs to a project, is `provider='gpu'` with the restart rule `resume`, and is deduped by `speech_unit_audio_id` (two presses on one speech make one job, two speeches run side by side). It is queued in the transaction that stores the speech (`jobs/synthesize_speech_unit.py`), or by the pipeline step `word_timings` for a speech that has no timing. The input is `{"requested": "time_speech_words", "speech_unit_audio_id": 41}` until the transcription is submitted; then `server_url`, `upload` (`filename`, `remote_asset_id`), `endpoint` (`/v1/parakeet/transcribe`) and `body` are added next to those keys. The transcription URL setting decides the server (blank means the GPU server URL). `output` is `{"speech_unit_audio_id": 41, "processing_time": 0.3, "timing": {"source": "parakeet", "match_percent": 92.3, "threshold": 70, "words": 14}, "purge": {...}}`, or `"timing": {"kept": 7}` when the speech was timed by an earlier job in the meantime (that result stands). The job writes one `speech_word_timing` row (Section 4.68) in the transaction that finishes it. An empty transcript is a valid answer: it gives `estimated` timing, not a failed job. A job that fails leaves the speech not timed, and the pipeline step queues it again. It is not in the types that are cancelled on the server (it runs for seconds).
+
+### `job.input` and `job.output` for a `time_lab_speech_words` job (AVLAB)
+
+One job per test, queued in the code that runs once the test's speech has been stored (`jobs/lab_voice.py`, `av_lab.on_voice_finished`). It belongs to no project (`project_id` is NULL), is `provider='gpu'` with the restart rule `resume`, and is deduped by `test_id`. It is `time_speech_words` for a test's speech: the same upload, polling, download and matching (`word_timings.align`, the `word_timing_match_threshold` setting), with `input` `{"requested": "time_lab_speech_words", "test_id": 3}` until the transcription is submitted (then `server_url`, `upload`, `endpoint` and `body` are added). `output` is `{"test_id": 3, "processing_time": 0.4, "timing": {"source": "parakeet", "match_percent": 96.0, "threshold": 70, "words": 24}, "purge": {...}}`, or `"timing": {"kept": true}` when the test had a timing already (that one stands). The job writes `av_lab_test.word_timing` in the transaction that finishes it. After that, best effort, the parts are cut and their clips started (`av_lab.on_timing_finished`): a failure there is kept on `av_lab_test.last_error` and never fails the job.
+
+### `job.input` and `job.output` for a `render_av_test` job (AVLAB)
+
+One job per press of **Render**. It belongs to no project, is `provider='local'` with the restart rule `start_again`, and is deduped by `test_id`. `input` is `{"requested": "render_av_test", "test_id": 3}`. Phases: checking the test's clips, making the picture, adding the speech and the clips' sound, adding the speech alone, saving. FFmpeg makes the picture once (the still of the first frame in the gaps, each clip inside its part, in whole frames at 24 fps, exactly the speech's length) and both videos reuse it unchanged: the **mixed** video plays the speech in the gaps and each clip's own sound inside its part (a clip with no sound track is silent there), the **speech-only** video plays the speech from 0 to the end. Each file is checked (the frame count of the layout, a sound track) before it is stored. `output` is `{"test_id", "mixed": {"path", "size_bytes"}, "tts_only": {"path", "size_bytes"}, "fps", "frames", "duration_s", "width", "height", "pieces", "clips_without_sound"}`; the files and `av_lab_test.render_info` are saved in the transaction that finishes the job. Nothing is paid for.
 
 ### `job.input` and `job.output` for a `write_callout_plan` job (EXPLAINER-009)
 

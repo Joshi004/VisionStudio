@@ -8,6 +8,7 @@ import {
   Group,
   Loader,
   Paper,
+  SegmentedControl,
   SimpleGrid,
   Stack,
   Text,
@@ -26,6 +27,7 @@ import type { CharacterDefinition } from "../../api/characterDefinitions";
 import { describeError } from "../../api/errors";
 import { DeleteLibraryItemModal } from "../library/DeleteLibraryItemModal";
 import { CharacterDefinitionView } from "./CharacterDefinitionView";
+import { AudioVideoPanel } from "./AudioVideoPanel";
 import { CreatePanel } from "./CreatePanel";
 import { LOOK_STEP, PROFILE_STEP, VOICE_STEP, type DrawerStep } from "./CharacterDrawer";
 import {
@@ -39,10 +41,14 @@ import {
   takeToForm,
   type TakeFormState,
 } from "./characterLabView";
+import { DEFAULT_AV_FORM, type AvFormState } from "./avLabView";
 import { NamedLooks } from "./NamedLooks";
 import { TakeGallery } from "./TakeGallery";
 import { UsedByProjects } from "./UsedByProjects";
 import { VersionHistory } from "./VersionHistory";
+
+/** What the right column shows: the takes of the Create panel, or the Audio video lab. */
+type Workspace = "takes" | "audio_video";
 
 type CharacterPageProps = {
   characterId: number;
@@ -151,6 +157,9 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
   const [deleteOpened, setDeleteOpened] = useState(false);
   // The Create panel's form lives here, so a take in the gallery can fill it.
   const [takeForm, setTakeForm] = useState<TakeFormState>(DEFAULT_TAKE_FORM);
+  const [workspace, setWorkspace] = useState<Workspace>("takes");
+  // The Audio video form lives here too, so switching to the takes and back keeps the text.
+  const [avForm, setAvForm] = useState<AvFormState>(DEFAULT_AV_FORM);
 
   function reuseTake(take: CharacterTake) {
     setTakeForm(takeToForm(take));
@@ -314,8 +323,22 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
 
         <Grid.Col span={{ base: 12, lg: 8 }}>
           <Stack gap="lg">
-            <CreatePanel character={data} form={takeForm} onChange={setTakeForm} />
-            <TakeGallery characterId={data.id} onReuse={reuseTake} />
+            <SegmentedControl
+              value={workspace}
+              onChange={(value) => setWorkspace(value as Workspace)}
+              data={[
+                { value: "takes", label: "Takes" },
+                { value: "audio_video", label: "Audio video" },
+              ]}
+            />
+            {workspace === "takes" ? (
+              <>
+                <CreatePanel character={data} form={takeForm} onChange={setTakeForm} />
+                <TakeGallery characterId={data.id} onReuse={reuseTake} />
+              </>
+            ) : (
+              <AudioVideoPanel character={data} form={avForm} onChange={setAvForm} />
+            )}
           </Stack>
         </Grid.Col>
       </Grid>

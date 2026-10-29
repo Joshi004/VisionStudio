@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api import (
+    av_lab,
     callout_plan,
     character_definitions,
     character_images,
@@ -84,6 +85,7 @@ api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
 api_router.include_router(music_lab.router, tags=["music-lab"])
 api_router.include_router(character_lab.router, tags=["character-lab"])
+api_router.include_router(av_lab.router, tags=["av-lab"])
 api_router.include_router(environment_lab.router, tags=["environment-lab"])
 api_router.include_router(environment_links.router, tags=["environment-links"])
 api_router.include_router(environment_definitions.router, tags=["environment-definitions"])

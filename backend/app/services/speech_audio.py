@@ -99,6 +99,48 @@ async def place_in_silence(source: Path, dest: Path, start_s: float, total_s: fl
         raise PadError("The speech could not be prepared for the video model.")
 
 
+def window_args(
+    source: Path, dest: Path, start_s: float, end_s: float, total_s: float
+) -> list[str]:
+    """Writes the part of `source` from `start_s` to `end_s` as 16-bit PCM WAV, with silence after
+    it, so the file lasts exactly `total_s` seconds (cut there if the part were longer). Nothing
+    of the speech after `end_s` is in the file: the silence replaces it.
+    """
+    return [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-n",
+        "-i",
+        ffmpeg.file_input(source),
+        "-af",
+        (
+            f"atrim=start={start_s:.6f}:end={end_s:.6f},asetpts=PTS-STARTPTS,"
+            f"apad=whole_dur={total_s:.6f},atrim=end={total_s:.6f}"
+        ),
+        "-c:a",
+        "pcm_s16le",
+        ffmpeg.file_input(dest),
+    ]
+
+
+async def cut_window(
+    source: Path, dest: Path, start_s: float, end_s: float, total_s: float
+) -> None:
+    """Cuts a part of a speech out into the new WAV file `dest`, padded with silence to exactly
+    `total_s` seconds (the Audio video lab). Raises PadError.
+    """
+    try:
+        result = await ffmpeg.run_tool(
+            "ffmpeg", window_args(source, dest, start_s, end_s, total_s), timeout_s=PAD_TIMEOUT_S
+        )
+    except ffmpeg.ToolError as exc:
+        raise PadError(f"The part of the speech could not be cut: {exc}") from exc
+    if result.returncode != 0:
+        raise PadError("The part of the speech could not be cut.")
+
+
 def join_args(list_path: Path, dest: Path) -> list[str]:
     return [
         "-hide_banner",

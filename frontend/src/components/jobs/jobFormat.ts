@@ -46,6 +46,8 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   preview_music_mix: "Music preview",
   time_speech_words: "Time speech words",
   write_callout_plan: "Callout plan",
+  time_lab_speech_words: "Time test speech words",
+  render_av_test: "Render audio video test",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
@@ -64,6 +66,8 @@ export function labPathFor(type: JobSummary["type"]): string {
       return "/lab/music";
     case "write_character_look_prompt":
     case "write_character_take_prompt":
+    case "time_lab_speech_words":
+    case "render_av_test":
       return "/lab/characters";
     case "write_environment_prompt":
       return "/lab/environments";

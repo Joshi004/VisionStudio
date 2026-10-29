@@ -261,6 +261,12 @@ SAVING_STORY_VIDEO: Final = "saving the video"
 # The preview of the music in context (MUSIC-012, MD-20).
 PREPARING_PREVIEW: Final = "preparing the preview"
 SAVING_PREVIEW: Final = "saving the preview"
+# The two videos of an Audio video test (AVLAB): local FFmpeg runs.
+PREPARING_AV_TEST: Final = "checking the test's clips"
+RENDERING_AV_PICTURE: Final = "making the picture"
+MIXING_AV_CLIP_SOUND: Final = "adding the speech and the clips' sound"
+MIXING_AV_TTS_SOUND: Final = "adding the speech alone"
+SAVING_AV_VIDEOS: Final = "saving the videos"
 
 
 def trimming_shot(number: int, total: int) -> str:

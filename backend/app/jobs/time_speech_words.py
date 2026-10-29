@@ -27,6 +27,7 @@ import logging
 from typing import Any, Final
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped
@@ -53,6 +54,9 @@ class TimeSpeechWordsHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "gpu"
     restart_rule = "resume"
+    # The key of the job's input that names what is timed (the Audio video lab times a test's
+    # speech instead of a speech unit: `TimeLabSpeechWordsHandler`).
+    target_key = word_timings.DEDUPE_KEY
 
     # --- start: upload and submit -----------------------------------------------
 
@@ -63,16 +67,13 @@ class TimeSpeechWordsHandler(JobHandler):
                 await session.commit()
                 return
             recorded = dict(job.input) if isinstance(job.input, dict) else {}
-            audio_id = recorded.get(word_timings.DEDUPE_KEY)
-            audio = (
-                await session.get(SpeechUnitAudio, audio_id) if isinstance(audio_id, int) else None
-            )
+            audio_id = recorded.get(self.target_key)
+            speech_path = await self._speech_path(session, audio_id)
             base_url = await settings_service.get_str(session, TRANSCRIPTION_URL_KEY)
             partition = await settings_service.get_str(session, PARTITION_KEY)
-            speech_path = audio.path if audio is not None else None
             await session.commit()
 
-        if audio is None or speech_path is None:
+        if speech_path is None:
             await self._fail(job_id, "The speech this timing was queued for has no audio any more.")
             return
         try:
@@ -120,6 +121,13 @@ class TimeSpeechWordsHandler(JobHandler):
         }
         async with SessionLocal() as session:
             await store.mark_submitted(session, job_id, provider_job_id, submitted)
+
+    async def _speech_path(self, session: AsyncSession, target_id: object) -> str | None:
+        """The stored path of the speech to time, or None when there is none any more."""
+        audio = (
+            await session.get(SpeechUnitAudio, target_id) if isinstance(target_id, int) else None
+        )
+        return audio.path if audio is not None else None
 
     async def _give_up_starting(self, job_id: int, exc: GpuCallError) -> None:
         async with SessionLocal() as session:
@@ -252,7 +260,7 @@ class TimeSpeechWordsHandler(JobHandler):
             )
             output: dict[str, Any] = {
                 "speech_unit_audio_id": audio.id,
-                "processing_time": _processing_time(body),
+                "processing_time": processing_time(body),
             }
             if existing is not None:
                 # Timed by an earlier job in the meantime: its result stands.
@@ -329,7 +337,7 @@ class TimeSpeechWordsHandler(JobHandler):
             await store.fail_job(session, job_id, message)
 
 
-def _processing_time(body: dict[str, Any]) -> float | None:
+def processing_time(body: dict[str, Any]) -> float | None:
     value = body.get("processing_time")
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None

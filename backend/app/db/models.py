@@ -148,7 +148,8 @@ class Job(Base):
             "'plan_environment_views', 'write_environment_view_prompt', 'write_music_bible', "
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
             "'audit_music_cues', 'rewrite_music_prompt', 'place_music', "
-            "'preview_music_mix', 'time_speech_words', 'write_callout_plan')",
+            "'preview_music_mix', 'time_speech_words', 'write_callout_plan', "
+            "'time_lab_speech_words', 'render_av_test')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -2576,3 +2577,88 @@ class ProjectMissingLibraryItem(Base):
     name: Mapped[str]
     in_cast: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     deleted_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class AvLabTest(Base):
+    """One test of the Audio video lab, inside a library character (AVLAB).
+
+    The whole `text` is spoken as one Voice lab speech (`voice_run_id`, `direction` mode with
+    `instruction`), Parakeet times its words (`timing_job_id`, `word_timing`), and each part the
+    author marked (`parts`: `{"start_word", "end_word"}`, the words counted from 0 in
+    `text.split()`, the end included) gets an H3 clip made from its slice of the speech
+    (`av_lab_segment`). `audio_marker` says how every clip uses its slice. Two videos are then
+    rendered: `mixed_path` (the speech in the gaps, the clip's own sound inside the parts) and
+    `tts_path` (the speech only, the clips muted). `copied_from_id` is a note of the test whose
+    speech and timings this one reuses; it is not a link.
+    """
+
+    __tablename__ = "av_lab_test"
+    __table_args__ = (
+        CheckConstraint("audio_marker IN ('fully_copy', 'partially_copy')", name="marker_valid"),
+        CheckConstraint("orientation IN ('portrait', 'landscape')", name="orientation_valid"),
+        Index("idx_av_lab_test_character", "character_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("library_character.id", ondelete="CASCADE")
+    )
+    text: Mapped[str]
+    instruction: Mapped[str]
+    audio_marker: Mapped[str]
+    orientation: Mapped[str]
+    # {source: "lab" | "asset", id}: the first frame of every clip, and the still shown in the gaps.
+    first_frame: Mapped[Any] = mapped_column(JSON)
+    parts: Mapped[Any] = mapped_column(JSON)
+    voice_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_voice_run.id", ondelete="SET NULL"), default=None
+    )
+    timing_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    # {"source", "match_percent", "threshold", "heard_text", "words": [{text, start, end}]}.
+    word_timing: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    render_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    mixed_path: Mapped[str | None] = mapped_column(default=None)
+    tts_path: Mapped[str | None] = mapped_column(default=None)
+    # What the render made: size, frames and lengths of the two files.
+    render_info: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+    copied_from_id: Mapped[int | None] = mapped_column(default=None)
+
+
+class AvLabSegment(Base):
+    """One marked part of an Audio video lab test: the words, where they sit in the speech, the
+    slice of the speech made for them (a `lab_voice_run` with a file and no job) and the
+    character take that makes the clip from it.
+
+    `start_s` and `end_s` are seconds in the whole speech: the middle of the gap before the first
+    word (0 for the first word of the text) and the middle of the gap after the last word (the
+    end of the speech for the last word). `clip_frames` is the H3 length (`17n + 5`) of the
+    slice, which is the part padded with silence at its end.
+    """
+
+    __tablename__ = "av_lab_segment"
+    __table_args__ = (
+        UniqueConstraint("test_id", "position"),
+        Index("idx_av_lab_segment_take", "take_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("av_lab_test.id", ondelete="CASCADE"))
+    position: Mapped[int]
+    start_word: Mapped[int]
+    end_word: Mapped[int]
+    text: Mapped[str]
+    start_s: Mapped[float]
+    end_s: Mapped[float]
+    clip_frames: Mapped[int]
+    slice_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_voice_run.id", ondelete="SET NULL"), default=None
+    )
+    take_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_take.id", ondelete="SET NULL"), default=None
+    )

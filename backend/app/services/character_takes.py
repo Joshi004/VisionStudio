@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import (
+    AvLabSegment,
     CharacterTake,
     Job,
     LabImage,
@@ -1302,10 +1303,13 @@ async def list_takes(
     session: AsyncSession, character_id: int | None, before_id: int | None, limit: int
 ) -> list[TakeRow]:
     """The newest takes first, `limit` of them, those with an id below `before_id` if given,
-    those of one character if given.
+    those of one character if given. The clips of the Audio video lab are left out.
     """
+    # The clips of the Audio video lab have a page of their own: they are not gallery takes.
+    lab_takes = select(AvLabSegment.take_id).where(AvLabSegment.take_id.is_not(None))
     statement = (
         select(CharacterTake)
+        .where(CharacterTake.id.not_in(lab_takes))
         .order_by(CharacterTake.id.desc())
         .limit(min(limit, LIST_LIMIT_MAX))
         .execution_options(populate_existing=True)

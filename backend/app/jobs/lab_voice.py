@@ -4,7 +4,8 @@ It is `SpeechHandler` with one piece of text, and `store_result` stores the WAV 
 `media/lab/` and writes it on the `lab_voice_run` row, in one transaction with the finished
 job. The job belongs to no project (`job.project_id` is NULL).
 
-A speech made for a take of the Character lab (Phase 25) best-effort nudges that take along
+A speech made for an Audio video test (`av_lab.on_voice_finished`) queues the timing of its
+words. A speech made for a take of the Character lab (Phase 25) best-effort nudges that take along
 when it has been stored (`character_takes.on_voice_finished`); a speech made for anything else
 (a plain Voice lab run) finds no take and does nothing further. A sample the story pipeline made
 for a character or the narrator (PHASE-011) is saved as a voice and attached the same way
@@ -20,7 +21,7 @@ from app.db.models import Job, LabVoiceRun
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, store
 from app.jobs.synthesize_speech import SpeechFile, SpeechHandler
-from app.services import character_takes, story_voices, voice_lab
+from app.services import av_lab, character_takes, story_voices, voice_lab
 from app.services.storage import get_storage
 
 _logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ class LabVoiceHandler(SpeechHandler):
 
         if isinstance(run_id, int):
             await self._continue_take(job.id, run_id)
+            await self._time_test(job.id, run_id)
             await self._save_story_voice(job.id, run_id)
         return True
 
@@ -83,6 +85,19 @@ class LabVoiceHandler(SpeechHandler):
             await story_voices.on_voice_finished(run_id)
         except Exception:
             _logger.exception("job %d: the story voice could not be saved after its speech", job_id)
+
+    @staticmethod
+    async def _time_test(job_id: int, run_id: int) -> None:
+        """Queues the timing of the words of the Audio video tests this speech was made for, if
+        any. Best effort: a failure never fails the speech (it is stored).
+        """
+        try:
+            queued = await av_lab.on_voice_finished(run_id)
+        except Exception:
+            _logger.exception("job %d: the words of the speech could not be timed", job_id)
+            return
+        if queued:
+            dispatcher.nudge()
 
     @staticmethod
     async def _continue_take(job_id: int, run_id: int) -> None:

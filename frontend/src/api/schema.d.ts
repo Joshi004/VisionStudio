@@ -2473,6 +2473,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/characters/{character_id}/av-tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tests
+         * @description The character's tests, the newest first. Pass the last id you have as `before_id` for the
+         *     next page.
+         */
+        get: operations["list_tests_api_lab_characters__character_id__av_tests_get"];
+        put?: never;
+        /**
+         * Create Test
+         * @description Checks the form, saves the test and starts the speech of the whole text. The rest follows
+         *     by itself: the words are timed, the parts are cut and their clips are made.
+         */
+        post: operations["create_test_api_lab_characters__character_id__av_tests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/av-tests/{test_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Test */
+        get: operations["get_test_api_lab_characters_av_tests__test_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/av-tests/{test_id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render Test
+         * @description Makes the two videos, once every part has its clip. Nothing is paid for: it is FFmpeg.
+         */
+        post: operations["render_test_api_lab_characters_av_tests__test_id__render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/av-tests/{test_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Test
+         * @description Makes a new test from this one with another way of using the speech. It keeps the speech,
+         *     the word times, the parts and the first frame, and makes the clips again (each one is a paid
+         *     video run).
+         */
+        post: operations["copy_test_api_lab_characters_av_tests__test_id__copy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/environments": {
         parameters: {
             query?: never;
@@ -5526,6 +5611,14 @@ export interface components {
             /** Message */
             message: string | null;
         };
+        /** CopyIn */
+        CopyIn: {
+            /**
+             * Audio Marker
+             * @enum {string}
+             */
+            audio_marker: "fully_copy" | "partially_copy";
+        };
         /** CritiqueOut */
         CritiqueOut: {
             /** Lens */
@@ -6860,7 +6953,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
             /**
              * Status
              * @enum {string}
@@ -6913,7 +7006,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
             /**
              * Kind
              * @enum {string}
@@ -6952,7 +7045,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
             /**
              * Status
              * @enum {string}
@@ -8992,6 +9085,24 @@ export interface components {
             /** Threshold Db */
             threshold_db: number;
         };
+        /**
+         * PartIn
+         * @description A part marked for video: the words from `start_word` to `end_word` (included), counted
+         *     from 0 in the text split at spaces and line breaks.
+         */
+        PartIn: {
+            /** Start Word */
+            start_word: number;
+            /** End Word */
+            end_word: number;
+        };
+        /** PartOut */
+        PartOut: {
+            /** Start Word */
+            start_word: number;
+            /** End Word */
+            end_word: number;
+        };
         /** PendingChangeOut */
         PendingChangeOut: {
             /** Snapshot Id */
@@ -9562,7 +9673,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
             /** Running */
             running: number;
             /** Queued */
@@ -10064,6 +10175,21 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** RenderInfoOut */
+        RenderInfoOut: {
+            /** Fps */
+            fps: number;
+            /** Frames */
+            frames: number;
+            /** Duration S */
+            duration_s: number;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Clips Without Sound */
+            clips_without_sound: number[];
         };
         /**
          * RenderMasterOut
@@ -11076,6 +11202,42 @@ export interface components {
             label: string;
             /** Is Set */
             is_set: boolean;
+        };
+        /** SegmentOut */
+        SegmentOut: {
+            /** Position */
+            position: number;
+            /** Start Word */
+            start_word: number;
+            /** End Word */
+            end_word: number;
+            /** Text */
+            text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Clip Frames */
+            clip_frames: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "waiting" | "working" | "ready" | "failed";
+            /** Step */
+            step: string | null;
+            /** Error */
+            error: string | null;
+            /** Take Id */
+            take_id: number | null;
+            /** Audio Url */
+            audio_url: string | null;
+            /** Clip Url */
+            clip_url: string | null;
+            /** Clip Duration S */
+            clip_duration_s: number | null;
+            /** Clip Has Sound */
+            clip_has_sound: boolean | null;
         };
         /** SelectedTakeOut */
         SelectedTakeOut: {
@@ -13295,6 +13457,94 @@ export interface components {
             /** Next Before Id */
             next_before_id: number | null;
         };
+        /** TestIn */
+        TestIn: {
+            /** Text */
+            text: string;
+            /** Instruction */
+            instruction: string;
+            /**
+             * Audio Marker
+             * @default fully_copy
+             * @enum {string}
+             */
+            audio_marker: "fully_copy" | "partially_copy";
+            /**
+             * Orientation
+             * @default portrait
+             * @enum {string}
+             */
+            orientation: "portrait" | "landscape";
+            first_frame: components["schemas"]["FirstFrameIn"];
+            /** Parts */
+            parts: components["schemas"]["PartIn"][];
+        };
+        /** TestOut */
+        TestOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Character Id */
+            character_id: number;
+            /** Text */
+            text: string;
+            /** Instruction */
+            instruction: string;
+            /**
+             * Audio Marker
+             * @enum {string}
+             */
+            audio_marker: "fully_copy" | "partially_copy";
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "portrait" | "landscape";
+            first_frame: components["schemas"]["FirstFrameOut"] | null;
+            /** Parts */
+            parts: components["schemas"]["PartOut"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "speaking" | "timing" | "clips" | "ready" | "rendering" | "done" | "failed";
+            /** Error */
+            error: string | null;
+            /** Timing Warning */
+            timing_warning: string | null;
+            timing: components["schemas"]["TimingOut"] | null;
+            /** Speech Run Id */
+            speech_run_id: number | null;
+            /** Speech Url */
+            speech_url: string | null;
+            /** Speech Duration S */
+            speech_duration_s: number | null;
+            speech_job: components["schemas"]["JobSummary"] | null;
+            timing_job: components["schemas"]["JobSummary"] | null;
+            render_job: components["schemas"]["JobSummary"] | null;
+            /** Segments */
+            segments: components["schemas"]["SegmentOut"][];
+            /** Mixed Url */
+            mixed_url: string | null;
+            /** Tts Only Url */
+            tts_only_url: string | null;
+            render: components["schemas"]["RenderInfoOut"] | null;
+            /** Can Render */
+            can_render: boolean;
+            /** Copied From Id */
+            copied_from_id: number | null;
+        };
+        /** TestsOut */
+        TestsOut: {
+            /** Tests */
+            tests: components["schemas"]["TestOut"][];
+            /** Next Before Id */
+            next_before_id: number | null;
+        };
         /** ThemeCandidateOut */
         ThemeCandidateOut: {
             /** Id */
@@ -13459,6 +13709,15 @@ export interface components {
             shot_ids: string[];
             /** Delayed */
             delayed: boolean;
+        };
+        /** TimingOut */
+        TimingOut: {
+            /** Source */
+            source: string;
+            /** Match Percent */
+            match_percent: number;
+            /** Threshold */
+            threshold: number;
         };
         /** ToolStatus */
         ToolStatus: {
@@ -19573,6 +19832,208 @@ export interface operations {
                 };
             };
             /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_tests_api_lab_characters__character_id__av_tests_get: {
+        parameters: {
+            query?: {
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_test_api_lab_characters__character_id__av_tests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestOut"];
+                };
+            };
+            /** @description No character or test has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_test_api_lab_characters_av_tests__test_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                test_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestOut"];
+                };
+            };
+            /** @description No character or test has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_test_api_lab_characters_av_tests__test_id__render_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                test_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestOut"];
+                };
+            };
+            /** @description No character or test has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    copy_test_api_lab_characters_av_tests__test_id__copy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                test_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CopyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestOut"];
+                };
+            };
+            /** @description No character or test has this id. */
             404: {
                 headers: {
                     [name: string]: unknown;

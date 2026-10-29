@@ -32,13 +32,17 @@ from typing import Any, Final, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Job, LabVoiceRun, Voice
+from app.db.models import AvLabSegment, Job, LabVoiceRun, Voice
 from app.jobs import store
 from app.providers import speech_synthesizer
+from app.services import speech_chunks
 
 _logger = logging.getLogger(__name__)
 
 RUN_JOB: Final = "lab_voice"
+# A run made for the Audio video lab may be longer than one request: its text is cut into pieces
+# that are made one after the other in the same voice and joined (`speech_chunks.split_script`).
+LONG_TEXT_MAX_CHARS: Final = 3000
 
 Mode = Literal["design", "clone", "direction"]
 MODES: Final[tuple[Mode, ...]] = ("design", "clone", "direction")
@@ -75,17 +79,18 @@ def _instruction(form: VoiceLabForm) -> str | None:
     return (form.instruction or "").strip() or None
 
 
-def validate_form(form: VoiceLabForm) -> None:
-    """Raises VoiceLabInputError for a form no run should be started with."""
+def validate_form(form: VoiceLabForm, *, long_text: bool = False) -> None:
+    """Raises VoiceLabInputError for a form no run should be started with. With `long_text` the
+    text may be up to `LONG_TEXT_MAX_CHARS` (the Audio video lab).
+    """
     if form.mode not in MODES:
         raise VoiceLabInputError("Choose design, clone or direction.")
     text = form.text.strip()
     if not text:
         raise VoiceLabInputError("Write the text to speak first.")
-    if len(text) > speech_synthesizer.TEXT_MAX_CHARS:
-        raise VoiceLabInputError(
-            f"The text must be at most {speech_synthesizer.TEXT_MAX_CHARS:,} characters."
-        )
+    limit = LONG_TEXT_MAX_CHARS if long_text else speech_synthesizer.TEXT_MAX_CHARS
+    if len(text) > limit:
+        raise VoiceLabInputError(f"The text must be at most {limit:,} characters.")
     instruction = _instruction(form)
     if instruction is not None and len(instruction) > speech_synthesizer.INSTRUCTION_MAX_CHARS:
         raise VoiceLabInputError(
@@ -109,12 +114,15 @@ def validate_form(form: VoiceLabForm) -> None:
         )
 
 
-async def create_run(session: AsyncSession, form: VoiceLabForm, *, commit: bool = True) -> RunRow:
+async def create_run(
+    session: AsyncSession, form: VoiceLabForm, *, commit: bool = True, long_text: bool = False
+) -> RunRow:
     """Checks the form and starts one run. Commits, unless `commit` is False: the run and its
     job are then only flushed, so a caller (a take of the Talking character lab) can link them
-    and commit everything together. Raises VoiceLabInputError.
+    and commit everything together. With `long_text` the text may be longer than one request
+    and is made as several pieces (the Audio video lab). Raises VoiceLabInputError.
     """
-    validate_form(form)
+    validate_form(form, long_text=long_text)
     voice: Voice | None = None
     if form.voice_id is not None:
         voice = await session.get(Voice, form.voice_id)
@@ -149,7 +157,7 @@ async def create_run(session: AsyncSession, form: VoiceLabForm, *, commit: bool 
             "requested": "lab_voice",
             "run_id": run.id,
             "mode": form.mode,
-            "chunks": [text],
+            "chunks": speech_chunks.split_script(text) if long_text else [text],
             "instruction": instruction,
             "seed": seed,
             "cfg_scale": cfg_scale,
@@ -192,7 +200,11 @@ def _select() -> Any:
 
 async def list_runs(session: AsyncSession, before_id: int | None, limit: int) -> list[RunRow]:
     """The newest runs first, `limit` of them, those with an id below `before_id` if given."""
-    statement = _select().order_by(LabVoiceRun.id.desc()).limit(limit)
+    # The slices of the Audio video lab are made by code, with no job: they are not runs to list.
+    slices = select(AvLabSegment.slice_run_id).where(AvLabSegment.slice_run_id.is_not(None))
+    statement = (
+        _select().where(LabVoiceRun.id.not_in(slices)).order_by(LabVoiceRun.id.desc()).limit(limit)
+    )
     if before_id is not None:
         statement = statement.where(LabVoiceRun.id < before_id)
     return _rows(await session.execute(statement.execution_options(populate_existing=True)))

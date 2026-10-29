@@ -74,6 +74,8 @@ JobType = Literal[
     "preview_music_mix",
     "time_speech_words",
     "write_callout_plan",
+    "time_lab_speech_words",
+    "render_av_test",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]
