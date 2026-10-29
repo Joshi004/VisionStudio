@@ -9,6 +9,7 @@ import {
   Stack,
   Switch,
   Text,
+  Textarea,
   TextInput,
   Title,
 } from "@mantine/core";
@@ -17,6 +18,7 @@ import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
 import { projectKindLabel } from "./projectKinds";
 import { speechModeLabel } from "./speechModes";
+import { DELIVERY_MAX_CHARS, voiceTrackLabel } from "./voiceTracks";
 import { changedFields, initialDraft, type Draft, type NUMBER_FIELDS } from "./settingsDraft";
 
 type ProjectSettingsFormProps = {
@@ -113,6 +115,38 @@ export function ProjectSettingsForm({
                 The speech mode is fixed after creation.
               </Text>
             </Group>
+          </Paper>
+        )}
+
+        {project.kind === "explainer" && (
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="xs">
+              <Group gap="sm">
+                <Title order={4}>Voice</Title>
+                <Badge variant="light">{voiceTrackLabel(project.voice_track)}</Badge>
+                <Text size="xs" c="dimmed">
+                  The voice is fixed after creation.
+                </Text>
+              </Group>
+              {project.voice_track === "continuous" && (
+                <>
+                  <Textarea
+                    label="Presenter delivery"
+                    description="How the presenter should sound, for example pace and energy. Left empty, the style from the Story Bible is used, or a default."
+                    value={draft.presenter_delivery}
+                    onChange={(event) => edit("presenter_delivery", event.currentTarget.value)}
+                    maxLength={DELIVERY_MAX_CHARS}
+                    autosize
+                    minRows={2}
+                    maxRows={6}
+                  />
+                  <Text size="xs" c="dimmed">
+                    Every scene's voice take is made with this text, so changing it makes the
+                    takes out of date.
+                  </Text>
+                </>
+              )}
+            </Stack>
           </Paper>
         )}
 

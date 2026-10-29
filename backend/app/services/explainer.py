@@ -25,8 +25,17 @@ from app.db.models import (
     ProjectCastEnvironment,
     ProjectCharacterLink,
 )
+from app.providers import speech_synthesizer
 from app.services import character_library, character_versions, environment_versions
 from app.services.project_kinds import KIND_EXPLAINER
+
+# What steers a continuous explainer's voice when the owner wrote nothing and the Story Bible
+# has no presenter style yet (FLOW-002).
+DEFAULT_PRESENTER_DELIVERY: Final = (
+    "Speak clearly and confidently at a lively, steady pace, like a friendly expert "
+    "explaining to one viewer, with natural emphasis on key words and numbers."
+)
+assert len(DEFAULT_PRESENTER_DELIVERY) <= speech_synthesizer.INSTRUCTION_MAX_CHARS
 
 # The kind of discovered item the presenter is, and what its one line says.
 PRESENTER_DESCRIPTION: Final = "The presenter who explains the topic on camera."
@@ -215,3 +224,25 @@ async def presenter_voice_id(session: AsyncSession, project_id: int) -> int | No
         else await character_versions.latest_version(session, presenter.id)
     )
     return version.voice_id if version is not None else None
+
+
+async def presenter_delivery(session: AsyncSession, project: Project) -> str:
+    """The instruction that steers the voice of every take of a continuous explainer (FLOW-002).
+
+    The owner's text wins. When there is none, the newest Story Bible's way the presenter speaks
+    (`storytelling_style.narration`) is used, and when there is no Bible yet, a fixed default.
+    The answer is never longer than the speech model accepts. Nothing is stored.
+    """
+    # Imported here: the Story Bible module reaches the job store, which reaches the services.
+    from app.services import story_bible
+
+    max_chars = speech_synthesizer.INSTRUCTION_MAX_CHARS
+    if project.presenter_delivery and project.presenter_delivery.strip():
+        return project.presenter_delivery.strip()[:max_chars]
+    bible = await story_bible.latest(session, project.id)
+    content = bible.content if bible is not None and isinstance(bible.content, dict) else {}
+    style = content.get("storytelling_style")
+    narration = style.get("narration") if isinstance(style, dict) else None
+    if isinstance(narration, str) and narration.strip():
+        return f"Speak in this style: {narration.strip()}"[:max_chars]
+    return DEFAULT_PRESENTER_DELIVERY

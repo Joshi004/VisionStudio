@@ -7,7 +7,7 @@ Today an explainer's speech is made line by line, and each line decides the pict
 
 This plan fixes both at the root: **the voice is made first, as one continuous take per scene, and the picture is cut on top of it.** The same recording plays whether the presenter is seen or not, so the pace cannot change at a cut, and a cut can fall on any word.
 
-- The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) apply unchanged. Table and column details go in `DATABASE_STRUCTURE.md`. The newest migration when this was written is `0074`.
+- The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) apply unchanged. Table and column details go in `DATABASE_STRUCTURE.md`. The newest migration when this was written was `0074`; the Audio video lab added `0075` and FLOW-002 added `0076`.
 - Written 2026-10-29, from a design discussion with the owner about narration pace and cutting to B-roll mid-sentence.
 - FLOW-001 is a go/no-go trial. Nothing else starts until it passes. It passed on 2026-10-29 (see its result).
 
@@ -99,7 +99,7 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 
 ### FLOW-002 — The `voice_track` setting and the presenter delivery
 
-**Status:** Not Started
+**Status:** Done (2026-10-29)
 
 **Objective.** Let the owner choose continuous voice when creating an explainer, and give the presenter one delivery text that every take uses.
 
@@ -127,11 +127,18 @@ Standard checks are those of `Implementation_phases.md` §3.5. Items marked **Pl
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Migration, project checks, create form
-- [ ] Delivery text and its default
-- [ ] Docs (`DATABASE_STRUCTURE.md`), standard checks
+- [x] Migration, project checks, create form
+- [x] Delivery text and its default
+- [x] Docs (`DATABASE_STRUCTURE.md`), standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Migration `0076` adds `project.voice_track` (`lines` or `continuous`, default `lines`, CHECK `ck_project_voice_track_valid`) and `project.presenter_delivery` (nullable text). Decisions made in planning:
+
+- **Delivery source.** The delivery text is a nullable project column the owner may write. When it is empty, `services/explainer.presenter_delivery` returns the newest Story Bible's `storytelling_style.narration` as "Speak in this style: ...", and when there is no Bible, `DEFAULT_PRESENTER_DELIVERY` ("Speak clearly and confidently at a lively, steady pace, like a friendly expert explaining to one viewer, with natural emphasis on key words and numbers."). No model job was added. The result is cut to 500 characters and never stored. FLOW-003 calls it.
+- **Editable.** The delivery text can be changed at any time in the project settings, only for a continuous explainer (PATCH on any other project gets 422). `voice_track` cannot be changed: a PATCH that sends it gets 422.
+- **Scene override.** Not built: one text per project.
+- **Creation.** An explainer defaults to `continuous` (the create form has a "Voice" choice and an optional delivery box). A story is always `lines`; a story that asks for `continuous`, or sends a delivery text, gets 422. The settings page shows a Voice panel for an explainer only.
+
+Nothing reads `voice_track` yet, so no speech, plan or render changes. The OpenAPI schema (`schema.d.ts`) was generated from the local code, because the running backend image has not been rebuilt. The owner still has to rebuild it (`docker compose up -d --build backend`) so migration `0076` is applied, and to create one explainer in the browser to see the form.
 
 ### FLOW-003 — One voice take per scene
 
@@ -406,7 +413,7 @@ Make project 42's script again as a new continuous explainer, in portrait, with 
 | Id | Status | Notes |
 |----|--------|-------|
 | FLOW-001 | Done | Passed 2026-10-29 in the Audio video lab. Always `fully_copy`; the take is the default voice, with a per-shot switch to the clip's voice (F-9). |
-| FLOW-002 | Not Started | |
+| FLOW-002 | Done | 2026-10-29. Migration `0076`. Delivery text: owner's, else Story Bible narration, else a default; editable; no scene override. |
 | FLOW-003 | Not Started | |
 | FLOW-004 | Not Started | |
 | FLOW-005 | Not Started | |

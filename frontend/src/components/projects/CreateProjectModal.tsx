@@ -9,6 +9,7 @@ import {
   Stack,
   Switch,
   Text,
+  Textarea,
   TextInput,
 } from "@mantine/core";
 import { useNavigate } from "react-router";
@@ -21,6 +22,8 @@ import { PROJECT_KINDS, isProjectKind } from "./projectKinds";
 import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
 import type { SpeechMode } from "./speechModes";
+import { DELIVERY_MAX_CHARS, VOICE_TRACKS, isVoiceTrack } from "./voiceTracks";
+import type { VoiceTrack } from "./voiceTracks";
 
 const ORIENTATIONS = [
   { value: "landscape", label: "Landscape", size: "1920 x 1080" },
@@ -124,6 +127,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [setId, setSetId] = useState<string | null>(null);
   const [captions, setCaptions] = useState(true);
   const [callouts, setCallouts] = useState(true);
+  const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
+  const [delivery, setDelivery] = useState("");
   const [name, setName] = useState("");
 
   const canCreate =
@@ -144,6 +149,10 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         set_environment_id: explainer && setId !== null ? Number(setId) : null,
         captions: explainer ? captions : true,
         callouts: explainer ? callouts : true,
+        // A story sends neither: it is always "lines" and has no delivery text.
+        voice_track: explainer ? voiceTrack : undefined,
+        presenter_delivery:
+          explainer && voiceTrack === "continuous" && delivery.trim() !== "" ? delivery : undefined,
       },
       {
         onSuccess: (project) => {
@@ -261,9 +270,47 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
               onPresenter={setPresenterId}
               onSet={setSetId}
             />
+            <Radio.Group
+              label="6. Voice"
+              description="How the presenter's speech is made. It cannot be changed later."
+              value={voiceTrack}
+              onChange={(value) => {
+                if (isVoiceTrack(value)) {
+                  setVoiceTrack(value);
+                }
+              }}
+            >
+              <Stack mt="xs" gap="xs">
+                {VOICE_TRACKS.map((option) => (
+                  <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                    <Group wrap="nowrap" align="flex-start">
+                      <Radio.Indicator />
+                      <Stack gap={2}>
+                        <Text fw={500}>{option.label}</Text>
+                        <Text size="sm" c="dimmed">
+                          {option.description}
+                        </Text>
+                      </Stack>
+                    </Group>
+                  </Radio.Card>
+                ))}
+              </Stack>
+            </Radio.Group>
+            {voiceTrack === "continuous" && (
+              <Textarea
+                label="Presenter delivery (optional)"
+                description="How the presenter should sound, for example pace and energy. Left empty, the style from the Story Bible is used, or a default. You can change it later in the project settings."
+                value={delivery}
+                onChange={(event) => setDelivery(event.currentTarget.value)}
+                maxLength={DELIVERY_MAX_CHARS}
+                autosize
+                minRows={2}
+                maxRows={6}
+              />
+            )}
             <Stack gap="xs">
               <Text size="sm" fw={500}>
-                6. Captions and callouts
+                7. Captions and callouts
               </Text>
               <Switch
                 label="Captions"

@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Project
+from app.providers import speech_synthesizer
 from app.services import review_points
 from app.services.project_kinds import KIND_EXPLAINER, KIND_STORY, KINDS
 
@@ -37,6 +38,15 @@ SPEECH_BOTH: Final = "both"
 SPEECH_NO_DIALOGUE: Final = "no_dialogue"
 SPEECH_NO_NARRATION: Final = "no_narration"
 SPEECH_MODES: Final = (SPEECH_BOTH, SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION)
+# How an explainer's speech is made (FLOW-002). Chosen when the project is created and never
+# changed. `lines`: each line is its own speech (what every project did until now).
+# `continuous`: one voice take per scene, the picture cut on top of it. A story is always `lines`.
+VOICE_LINES: Final = "lines"
+VOICE_CONTINUOUS: Final = "continuous"
+VOICE_TRACKS: Final = (VOICE_LINES, VOICE_CONTINUOUS)
+# The presenter delivery text is sent to the speech model as the take's instruction.
+DELIVERY_MAX_CHARS: Final = speech_synthesizer.INSTRUCTION_MAX_CHARS
+
 # What the event and shot prompts branch on (EXPLAINER-004): the project's speech mode, or
 # `explainer` for an explainer project (whose speech mode is always `both`). It is never stored
 # on the project; it is worked out by `prompt_mode` and copied onto a job's input.
@@ -92,8 +102,9 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "ambience_enabled": "Ambience",
     "captions": "Captions",
     "callouts": "Callouts",
+    "presenter_delivery": "Presenter delivery",
 }
-_NULLABLE_FIELDS: Final = frozenset(("script_text",))
+_NULLABLE_FIELDS: Final = frozenset(("script_text", "presenter_delivery"))
 # The switches only an explainer has (EXPLAINER-007). They can be changed at any time.
 _EXPLAINER_SWITCHES: Final = frozenset(("captions", "callouts"))
 
@@ -156,6 +167,20 @@ def validate_project(project: Project) -> None:
     if project.script_text is not None and len(project.script_text) > SCRIPT_MAX_CHARS:
         raise ProjectValidationError(f"The story must be at most {SCRIPT_MAX_CHARS:,} characters.")
 
+    if project.voice_track not in VOICE_TRACKS:
+        raise ProjectValidationError("Voice must be lines or continuous.")
+    if project.kind != KIND_EXPLAINER and project.voice_track != VOICE_LINES:
+        raise ProjectValidationError("Only an explainer can have a continuous voice.")
+    if project.presenter_delivery is not None:
+        if project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS:
+            raise ProjectValidationError(
+                "The presenter delivery is only for an explainer with a continuous voice."
+            )
+        if len(project.presenter_delivery) > DELIVERY_MAX_CHARS:
+            raise ProjectValidationError(
+                f"The presenter delivery must be at most {DELIVERY_MAX_CHARS} characters."
+            )
+
 
 def _normalise_name(value: str) -> str:
     return value.strip()
@@ -171,6 +196,13 @@ def _normalise_script(value: str | None) -> str | None:
     return value
 
 
+def _normalise_delivery(value: str | None) -> str | None:
+    """The delivery text trimmed; a blank one is stored as NULL (use the default)."""
+    if value is None or not value.strip():
+        return None
+    return value.strip()
+
+
 async def create_project(
     session: AsyncSession,
     name: str,
@@ -181,12 +213,18 @@ async def create_project(
     set_environment_id: int | None = None,
     captions: bool = True,
     callouts: bool = True,
+    voice_track: str | None = None,
+    presenter_delivery: str | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
-    The speech mode and the kind are set here and never changed afterwards.
+    The speech mode, the kind and the voice track are set here and never changed afterwards.
 
     `captions` and `callouts` (EXPLAINER-007) are kept only for an explainer. A story always
     gets the defaults, and never reads them.
+
+    `voice_track` (FLOW-002) is `continuous` for an explainer unless it is sent as `lines`, and
+    always `lines` for a story (a story that asks for `continuous` is refused).
+    `presenter_delivery` is the owner's voice text for a continuous explainer; blank means none.
 
     An explainer (EXPLAINER-002) needs a presenter from the Character Lab and may have a set
     from the Environment Lab. Both go into the project's cast as `as_is`, in the same commit as
@@ -196,6 +234,19 @@ async def create_project(
         raise ProjectValidationError("Orientation must be landscape or portrait.")
     if kind not in KINDS:
         raise ProjectValidationError("Kind must be story or explainer.")
+    if voice_track is not None and voice_track not in VOICE_TRACKS:
+        raise ProjectValidationError("Voice must be lines or continuous.")
+    if kind == KIND_EXPLAINER:
+        voice_track = voice_track or VOICE_CONTINUOUS
+    else:
+        if voice_track == VOICE_CONTINUOUS:
+            raise ProjectValidationError("Only an explainer can have a continuous voice.")
+        voice_track = VOICE_LINES
+    delivery = _normalise_delivery(presenter_delivery)
+    if delivery is not None and voice_track != VOICE_CONTINUOUS:
+        raise ProjectValidationError(
+            "The presenter delivery is only for an explainer with a continuous voice."
+        )
     if kind == KIND_EXPLAINER:
         speech_mode = SPEECH_BOTH
         if presenter_character_id is None:
@@ -224,6 +275,8 @@ async def create_project(
         ambience_enabled=True,
         captions=captions if kind == KIND_EXPLAINER else True,
         callouts=callouts if kind == KIND_EXPLAINER else True,
+        voice_track=voice_track,
+        presenter_delivery=delivery,
     )
     validate_project(project)
     session.add(project)
@@ -276,6 +329,12 @@ async def update_project(
         raise ProjectValidationError(f"{unknown[0]} cannot be changed.")
     if project.kind != KIND_EXPLAINER and any(field in _EXPLAINER_SWITCHES for field in changes):
         raise ProjectValidationError("Captions and callouts are only for an explainer.")
+    if "presenter_delivery" in changes and (
+        project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
+    ):
+        raise ProjectValidationError(
+            "The presenter delivery is only for an explainer with a continuous voice."
+        )
 
     try:
         for field, value in changes.items():
@@ -299,6 +358,10 @@ def _prepare_value(field: str, value: object) -> object:
         return _normalise_script(value if isinstance(value, str) else None)
     if field == "review_points":
         return _prepare_review_points(value)
+    if field == "presenter_delivery":
+        if value is not None and not isinstance(value, str):
+            raise ProjectValidationError("The presenter delivery must be text.")
+        return _normalise_delivery(value)
     if field == "music_enabled" and not isinstance(value, bool):
         raise ProjectValidationError("Music must be on or off.")
     if field == "ambience_enabled" and not isinstance(value, bool):

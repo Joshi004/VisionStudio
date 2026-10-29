@@ -17,6 +17,8 @@ export type Draft = {
   captions: boolean;
   /** Whether an explainer's render draws callouts (EXPLAINER-007). */
   callouts: boolean;
+  /** The text that steers a continuous explainer's voice (FLOW-002). Empty means none. */
+  presenter_delivery: string;
 };
 
 export const NUMBER_FIELDS = ["gen_width", "gen_height", "out_width", "out_height", "fps"] as const;
@@ -33,6 +35,7 @@ export function initialDraft(project: ProjectDetail): Draft {
     ambience_enabled: project.ambience_enabled,
     captions: project.captions,
     callouts: project.callouts,
+    presenter_delivery: project.presenter_delivery ?? "",
   };
 }
 
@@ -58,6 +61,11 @@ export function changedFields(project: ProjectDetail, draft: Draft): ProjectUpda
   }
   if (draft.callouts !== saved.callouts) {
     changes.callouts = draft.callouts;
+  }
+  const delivery = draft.presenter_delivery.trim();
+  if (delivery !== saved.presenter_delivery.trim()) {
+    // An emptied box clears the text, so the Story Bible's style or the default is used.
+    changes.presenter_delivery = delivery === "" ? null : delivery;
   }
   for (const field of NUMBER_FIELDS) {
     if (draft[field] !== saved[field]) {

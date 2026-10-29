@@ -9721,6 +9721,10 @@ export interface components {
              * @default true
              */
             callouts: boolean;
+            /** Voice Track */
+            voice_track?: ("lines" | "continuous") | null;
+            /** Presenter Delivery */
+            presenter_delivery?: string | null;
         };
         /**
          * ProjectDeleteIn
@@ -9797,6 +9801,13 @@ export interface components {
             captions: boolean;
             /** Callouts */
             callouts: boolean;
+            /**
+             * Voice Track
+             * @enum {string}
+             */
+            voice_track: "lines" | "continuous";
+            /** Presenter Delivery */
+            presenter_delivery: string | null;
             story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
@@ -9847,8 +9858,8 @@ export interface components {
         };
         /**
          * ProjectUpdate
-         * @description Only the fields that are sent are changed. The orientation, the speech mode and the kind
-         *     cannot be changed.
+         * @description Only the fields that are sent are changed. The orientation, the speech mode, the kind and
+         *     the voice track cannot be changed.
          */
         ProjectUpdate: {
             /** Name */
@@ -9875,6 +9886,8 @@ export interface components {
             captions?: boolean | null;
             /** Callouts */
             callouts?: boolean | null;
+            /** Presenter Delivery */
+            presenter_delivery?: string | null;
         };
         /**
          * ProjectUseOut

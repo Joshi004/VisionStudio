@@ -31,6 +31,7 @@ router = APIRouter()
 Orientation = Literal["landscape", "portrait"]
 SpeechMode = Literal["both", "no_dialogue", "no_narration"]
 ProjectKind = Literal["story", "explainer"]
+VoiceTrack = Literal["lines", "continuous"]
 
 # SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
 _MAX_PROJECT_ID = 2**63 - 1
@@ -53,11 +54,15 @@ class ProjectCreate(BaseModel):
     # Word-synced captions and callouts (EXPLAINER-007). Only an explainer keeps them.
     captions: StrictBool = True
     callouts: StrictBool = True
+    # How an explainer's speech is made (FLOW-002). Left out, an explainer gets `continuous`. A
+    # story is always `lines`. The delivery text is for a continuous explainer only.
+    voice_track: VoiceTrack | None = None
+    presenter_delivery: StrictStr | None = None
 
 
 class ProjectUpdate(BaseModel):
-    """Only the fields that are sent are changed. The orientation, the speech mode and the kind
-    cannot be changed.
+    """Only the fields that are sent are changed. The orientation, the speech mode, the kind and
+    the voice track cannot be changed.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -79,6 +84,8 @@ class ProjectUpdate(BaseModel):
     # explainer can change them, at any time.
     captions: StrictBool | None = None
     callouts: StrictBool | None = None
+    # The text that steers a continuous explainer's voice (FLOW-002). Null or blank clears it.
+    presenter_delivery: StrictStr | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -122,6 +129,10 @@ class ProjectDetail(BaseModel):
     # never reads them.
     captions: bool
     callouts: bool
+    # How the speech is made: `lines` for a story and for an explainer made before FLOW-002.
+    voice_track: VoiceTrack
+    # The owner's voice text for a continuous explainer. Null when there is none.
+    presenter_delivery: str | None
     story_length: StoryLengthOut
 
 
@@ -138,6 +149,11 @@ def _speech_mode(project: Project) -> SpeechMode:
 def _kind(project: Project) -> ProjectKind:
     # The database CHECK constraint keeps this to the two allowed values.
     return cast(ProjectKind, project.kind)
+
+
+def _voice_track(project: Project) -> VoiceTrack:
+    # The database CHECK constraint keeps this to the two allowed values.
+    return cast(VoiceTrack, project.voice_track)
 
 
 def _review_points(project: Project) -> list[ReviewPointKey]:
@@ -167,6 +183,8 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         ambience_enabled=project.ambience_enabled,
         captions=project.captions,
         callouts=project.callouts,
+        voice_track=_voice_track(project),
+        presenter_delivery=project.presenter_delivery,
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,
@@ -220,6 +238,8 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             body.set_environment_id,
             body.captions,
             body.callouts,
+            body.voice_track,
+            body.presenter_delivery,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

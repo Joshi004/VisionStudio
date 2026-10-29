@@ -43,6 +43,7 @@ class Project(Base):
             "speech_mode IN ('both', 'no_dialogue', 'no_narration')", name="speech_mode_valid"
         ),
         CheckConstraint("kind IN ('story', 'explainer')", name="kind_valid"),
+        CheckConstraint("voice_track IN ('lines', 'continuous')", name="voice_track_valid"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -76,6 +77,14 @@ class Project(Base):
     # any time.
     captions: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
     callouts: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # FLOW-002. Chosen when the project is created and never changed: `lines` (each line is its
+    # own speech) or `continuous` (one voice take per scene, the picture cut on top of it). Only
+    # an explainer can be `continuous`; a story is always `lines`.
+    voice_track: Mapped[str] = mapped_column(default="lines", server_default=text("'lines'"))
+    # FLOW-002. The owner's text that steers the voice of every take of a `continuous`
+    # explainer (at most 500 characters). NULL means the Story Bible's narration style, or the
+    # default. Can be changed at any time.
+    presenter_delivery: Mapped[str | None] = mapped_column(default=None)
 
 
 class Asset(Base):
