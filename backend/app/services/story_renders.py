@@ -20,6 +20,10 @@ changes nothing in a render that has started.
   refused without one (`render_music.gate`); the placement is read by id and recorded on the
   render, and a newer placement makes the render out of date. The mix and loudness settings are
   recorded on the render too.
+- **Callouts (EXPLAINER-010).** An explainer with `callouts` on is rendered with the callouts
+  that are turned on in its current callout plan, and is refused without one (`_callout_gate`):
+  the plan must exist, be current and not be written just now. The plan's accent colour is the
+  caption highlight then. A newer callout plan makes the render out of date.
 - **Captions (EXPLAINER-008).** An explainer with `captions` on reads the word timing of each
   speech (`speech_word_timing`) and its render has word-synced captions. A speech with no stored
   timing gets estimated times, which the plan warns about. A story never reads the timings.
@@ -39,6 +43,9 @@ from app.db.models import Job, Project, SpeechUnitAudio, SpeechWordTiming, Story
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    callout_plan,
+    callout_plan_writer,
+    callout_render,
     caption_plan,
     provenance,
     shot_plans,
@@ -131,13 +138,18 @@ def captions_wanted(project: Project) -> bool:
     return project.kind == KIND_EXPLAINER and project.captions
 
 
+def callouts_wanted(project: Project) -> bool:
+    """Whether the render draws callouts: an explainer with its callouts switch on."""
+    return callout_plan.wanted(project)
+
+
 async def _caption_timings(
     session: AsyncSession, project: Project
 ) -> dict[int, SpeechWordTiming] | None:
     """The stored word timing of every speech of the project, by the speech's audio id, or None
-    when the render has no captions (a story is never read for timings).
+    when the render has neither captions nor callouts (a story is never read for timings).
     """
-    if not captions_wanted(project):
+    if not captions_wanted(project) and not callouts_wanted(project):
         return None
     rows = await session.execute(
         select(SpeechWordTiming)
@@ -337,11 +349,14 @@ def _plan_of(
     mix: story_render_plan.MixSettings,
     music: story_render_plan.MusicSource | None = None,
     captions: bool = True,
+    callouts: callout_render.CalloutSource | None = None,
 ) -> tuple[story_render_plan.RenderPlan | None, str | None]:
     """The plan of the next render, or the reason it cannot be made. `captions` is False for a
     plan that only needs where things sit (the music placement): the scenes then need no word
-    timings.
+    timings. `callouts` is the callout plan the render is made with, if any: its accent is the
+    caption highlight.
     """
+    highlight = callouts.accent if callouts is not None else caption_plan.HIGHLIGHT_COLOUR
     try:
         plan = story_render_plan.build_plan(
             scenes,
@@ -351,14 +366,63 @@ def _plan_of(
             mix=mix,
             music=music,
             captions=(
-                caption_plan.style_for(project.out_width, project.out_height)
+                caption_plan.style_for(project.out_width, project.out_height, highlight)
                 if captions and captions_wanted(project)
                 else None
             ),
+            callouts=callouts,
         )
     except story_render_plan.RenderPlanError as exc:
         return None, str(exc)
     return plan, None
+
+
+# --- The callout plan ------------------------------------------------------------------------
+
+_CALLOUT_WAY_OUT: Final = (
+    "Plan the callouts again, or switch callouts off in the project's settings."
+)
+
+
+@dataclass(frozen=True)
+class CalloutGate:
+    """What the next render does about callouts: a source, a reason it cannot be made, or
+    neither (no callouts in this render).
+    """
+
+    source: callout_render.CalloutSource | None
+    blocked_reason: str | None
+
+
+async def _callout_gate(session: AsyncSession, project: Project) -> CalloutGate:
+    """Whether the next render has callouts, and if it must, whether it can. It must have the
+    current callout plan (the owner's choice): a render is refused, never made without them.
+    """
+    if not callouts_wanted(project):
+        return CalloutGate(None, None)
+    state = await callout_plan.state(session, project)
+    if state.job is not None and state.job.status in store.ACTIVE_STATUSES:
+        return CalloutGate(
+            None, f"The callout plan is being written. Wait for it to finish. {_CALLOUT_WAY_OUT}"
+        )
+    if state.latest is None:
+        return CalloutGate(None, f"There is no callout plan yet. {_CALLOUT_WAY_OUT}")
+    if state.blocked_reason is not None:
+        return CalloutGate(None, f"{state.blocked_reason} {_CALLOUT_WAY_OUT}")
+    if state.out_of_date:
+        return CalloutGate(
+            None, f"The callout plan is out of date: {state.reasons[0]} {_CALLOUT_WAY_OUT}"
+        )
+    content = state.latest.content
+    return CalloutGate(
+        callout_render.CalloutSource(
+            plan_id=state.latest.id,
+            plan_version=state.latest.version,
+            accent=str(content["accent"]["colour"]),
+            callouts=tuple(callout_plan_writer.enabled_callouts(content)),
+        ),
+        None,
+    )
 
 
 # --- Reading the state ----------------------------------------------------------------------
@@ -418,6 +482,7 @@ def _render_reasons(
     music: tuple[
         Project, story_render_plan.MusicSource | None, str | None, story_render_plan.MixSettings
     ],
+    callouts: CalloutGate,
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
@@ -476,7 +541,27 @@ def _render_reasons(
     # The captions are burned into the picture, so a changed switch needs a new render.
     if isinstance(recorded.get("captions"), dict) != captions_wanted(music[0]):
         reasons.append("The captions setting has changed since this video was made.")
+    reasons.extend(_callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
     return reasons
+
+
+def _callout_reasons(recorded: dict[str, Any], gate: CalloutGate, *, wanted: bool) -> list[str]:
+    """Why the callouts of a render, which are burned into the picture, no longer match."""
+    used = recorded.get("callouts") if isinstance(recorded.get("callouts"), dict) else None
+    if used is not None and not wanted:
+        return ["Callouts have been switched off since this video was made."]
+    if used is None and wanted:
+        return ["Callouts have been switched on since this video was made."]
+    if used is None:
+        return []
+    if gate.source is None:
+        return ["The callout plan of this video is out of date or no longer ready."]
+    if used.get("plan_id") != gate.source.plan_id:
+        return [
+            f"The callout plan was changed since this video was made (version "
+            f"{gate.source.plan_version}; this video used version {used.get('plan_version')})."
+        ]
+    return []
 
 
 async def _all_renders(session: AsyncSession, project_id: int) -> list[StoryRender]:
@@ -511,8 +596,11 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
 
     mix = await mix_settings(session)
     gate = await _music_gate(session, project)
+    callouts = await _callout_gate(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
+    if blocked is None and callouts.blocked_reason is not None:
+        blocked = callouts.blocked_reason
     if blocked is None:
         plan, blocked = _plan_of(
             project,
@@ -521,6 +609,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             ),
             mix,
             gate.source,
+            callouts=callouts.source,
         )
     if blocked is None and gate.blocked_reason is not None:
         plan, blocked = None, gate.blocked_reason
@@ -530,7 +619,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     entries: list[RenderEntry] = []
     for row in renders:
         reasons = _render_reasons(
-            row, plans, takes, speech, (project, gate.source, gate.blocked_reason, mix)
+            row, plans, takes, speech, (project, gate.source, gate.blocked_reason, mix), callouts
         )
         entries.append(
             RenderEntry(
@@ -608,6 +697,9 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
     if blocked is not None:
         raise StoryRendersError(blocked)
     gate = await _music_gate(session, project)
+    callouts = await _callout_gate(session, project)
+    if callouts.blocked_reason is not None:
+        raise StoryRendersError(callouts.blocked_reason)
     plan, blocked = _plan_of(
         project,
         await _scene_sources(
@@ -615,6 +707,7 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
         ),
         await mix_settings(session),
         gate.source,
+        callouts=callouts.source,
     )
     if plan is None:
         raise StoryRendersError(blocked or "The story cannot be rendered now.")

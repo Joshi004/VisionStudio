@@ -28,12 +28,12 @@ The steps, which are also the phases the page shows:
 6. *mixing the sound* (stage 2): the shots' sound, the narration and the music layers become one
    float WAV, the pre-master;
 7. *measuring the mix*: the first pass of `loudnorm` over the pre-master (MD-19);
-8. *writing the captions* (EXPLAINER-008, only for an explainer with captions): the frozen caption
-   groups become one ASS file (`services/caption_ass.py`);
-   *joining the shots and encoding the video* (stage 3): the MOVs are joined, the captions are
-   burned into the picture with the bundled font, the pre-master is brought to the target
-   loudness and true-peak ceiling by the second pass of `loudnorm`, and the final H.264 and AAC
-   file is written;
+8. *writing the captions and callouts* (EXPLAINER-008 and 010, only for an explainer with either):
+   the frozen caption groups and callouts become one ASS file (`services/caption_ass.py`);
+   *joining the shots and encoding the video* (stage 3): the MOVs are joined, the captions and
+   callouts are burned into the picture with the bundled font, the pre-master is brought to the
+   target loudness and true-peak ceiling by the second pass of `loudnorm`, and the final H.264
+   and AAC file is written;
 9. *checking the video*: size, frame count, fps and length are compared with the timeline;
 10. *measuring the finished sound*: the loudness and true peak of the file, recorded on the render
     (a miss of the target is a note, not a failure);
@@ -61,9 +61,11 @@ from app.db.session import SessionLocal
 from app.jobs import phases, store
 from app.jobs.handlers import JobHandler
 from app.services import (
+    callout_render,
     caption_ass,
     caption_plan,
     ffmpeg,
+    font_metrics,
     render_commands,
     story_render_plan,
     story_renders,
@@ -84,7 +86,7 @@ ERROR_TAIL_CHARS: Final = 500
 
 # The fonts the captions are drawn with, bundled with the app (EXPLAINER-008), so a render looks
 # the same on any machine.
-FONTS_DIR: Final = Path(__file__).resolve().parents[1] / "assets" / "fonts"
+FONTS_DIR: Final = font_metrics.FONTS_DIR
 VIDEO_SETTINGS: Final = "libx264 crf 18 preset medium yuv420p"
 AUDIO_SETTINGS: Final = "aac 192k 48000 Hz stereo"
 _CHANGED_MESSAGE: Final = (
@@ -176,6 +178,7 @@ class Timeline:
     narration: list[Narration]
     music: Music | None
     captions: caption_plan.CaptionTrack | None
+    callouts: callout_render.CalloutTrack | None
     shot_target_lufs: float
     narration_target_lufs: float
     max_boost_db: float
@@ -331,6 +334,23 @@ def _parse_captions(
     return track
 
 
+def _parse_callouts(
+    raw: dict[str, Any], width: int, height: int
+) -> callout_render.CalloutTrack | None:
+    """The callouts of the timeline, or None for a render without. The key must be there (a
+    timeline of version 4 always has it), and the style must be made for this output size.
+    """
+    if "callouts" not in raw:
+        raise RenderFailed(_CHANGED_MESSAGE)
+    try:
+        track = callout_render.parse_track(raw["callouts"])
+    except callout_render.CalloutError as exc:
+        raise RenderFailed(_CHANGED_MESSAGE) from exc
+    if track is not None and (track.style.play_res_x, track.style.play_res_y) != (width, height):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return track
+
+
 _CONSTANT_KEYS: Final = (
     "shot_target_lufs",
     "narration_target_lufs",
@@ -447,6 +467,7 @@ def parse_timeline(recorded: object) -> Timeline:
     if music is not None and music.total_samples != render_commands.sample_count(total, fps):
         raise RenderFailed(_CHANGED_MESSAGE)
     captions = _parse_captions(raw, width, height)
+    callouts = _parse_callouts(raw, width, height)
 
     def known(key: str) -> float:
         return values[key] or 0.0
@@ -460,6 +481,7 @@ def parse_timeline(recorded: object) -> Timeline:
         narration=narration,
         music=music,
         captions=captions,
+        callouts=callouts,
         shot_target_lufs=known("shot_target_lufs"),
         narration_target_lufs=known("narration_target_lufs"),
         max_boost_db=known("max_boost_db"),
@@ -598,11 +620,18 @@ class RenderStoryHandler(JobHandler):
         await self._phase(job_id, phases.MEASURING_MIX)
         norm, measured = await measure_master(timeline, premaster)
 
-        # The captions of an explainer, as one ASS file the final encode burns in.
+        # The captions and callouts of an explainer, as one ASS file the final encode burns in.
         captions: tuple[Path, Path] | None = None
-        if timeline.captions is not None and timeline.captions.groups:
+        has_captions = timeline.captions is not None and bool(timeline.captions.groups)
+        has_callouts = timeline.callouts is not None and bool(timeline.callouts.entries)
+        if has_captions or has_callouts:
             await self._phase(job_id, phases.WRITING_CAPTIONS)
-            captions = await write_captions(storage, timeline.captions, temp_paths)
+            captions = await write_subtitles(
+                storage,
+                timeline.captions if has_captions else None,
+                timeline.callouts if has_callouts else None,
+                temp_paths,
+            )
 
         # Stage 3: join the picture, bring the sound to its target, encode.
         await self._phase(job_id, phases.JOINING_STORY)
@@ -614,7 +643,7 @@ class RenderStoryHandler(JobHandler):
                 listing, premaster, final, fps=timeline.fps, norm=norm, captions=captions
             )
         except ValueError as exc:
-            raise RenderFailed("The captions could not be added to the video.") from exc
+            raise RenderFailed("The captions or callouts could not be added to the video.") from exc
         await run_ffmpeg(encode, JOIN_TIMEOUT_S, "joining the shots and encoding the video")
         join_seconds = time.monotonic() - started
 
@@ -711,6 +740,14 @@ class RenderStoryHandler(JobHandler):
                     "words": sum(len(group.words) for group in timeline.captions.groups),
                 }
                 if timeline.captions is not None
+                else None
+            ),
+            "callouts": (
+                {
+                    "count": len(timeline.callouts.entries),
+                    "by_type": _count_by_type(timeline.callouts),
+                }
+                if timeline.callouts is not None
                 else None
             ),
             "ffmpeg_version": await ffmpeg.tool_version("ffmpeg"),
@@ -1068,17 +1105,27 @@ def write_new_file(path: Path, text: str) -> None:
         file.write(text.encode("utf-8"))
 
 
-async def write_captions(
-    storage: Storage, track: caption_plan.CaptionTrack, temp_paths: list[Path]
+def _count_by_type(track: callout_render.CalloutTrack) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in track.entries:
+        counts[entry.type] = counts.get(entry.type, 0) + 1
+    return counts
+
+
+async def write_subtitles(
+    storage: Storage,
+    captions: caption_plan.CaptionTrack | None,
+    callouts: callout_render.CalloutTrack | None,
+    temp_paths: list[Path],
 ) -> tuple[Path, Path]:
-    """Writes the captions as an ASS file in the temp folder. Returns the file and the folder of
-    the bundled fonts, which is what `final_encode_args` burns in.
+    """Writes the captions and the callouts as one ASS file in the temp folder. Returns the file
+    and the folder of the bundled fonts, which is what `final_encode_args` burns in.
     """
     if not FONTS_DIR.is_dir():
         raise RenderFailed("The caption font is missing from this installation.")
     path = storage.new_temp_path("ass")
     temp_paths.append(path)
-    await asyncio.to_thread(write_new_file, path, caption_ass.ass_document(track))
+    await asyncio.to_thread(write_new_file, path, caption_ass.ass_document(captions, callouts))
     return path, FONTS_DIR
 
 

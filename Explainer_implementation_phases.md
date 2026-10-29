@@ -391,7 +391,7 @@ Checked on throwaway data: migration `0074` up, down and up again (`alembic chec
 
 ### EXPLAINER-010 — Callouts drawn on the render, and colours
 
-**Status:** Not Started
+**Status:** Done (code). The owner's check in both orientations is still to do (see the completion notes).
 
 **Objective.** Draw the reviewed callouts on the rendered explainer, animated and coloured by role, and use the model's accent for the caption highlight.
 
@@ -429,11 +429,36 @@ Checked on throwaway data: migration `0074` up, down and up again (`alembic chec
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Time resolution and zones in the timeline
-- [ ] ASS styles and animations per type and orientation; colour roles
-- [ ] Owner check in both orientations; docs; standard checks
+- [x] Time resolution and zones in the timeline
+- [x] ASS styles and animations per type and orientation; colour roles
+- [x] Docs; standard checks
+- [ ] Owner check in both orientations
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-29.
+
+What was decided (the three "Planning decides" items, and two choices of the owner):
+
+- **Gate (owner):** with `callouts` on, Render is refused when the callout plan is missing, out of date, blocked or being written, with the way out in the message ("Plan the callouts again, or switch callouts off in the project's settings"), like music without a placement (`story_renders._callout_gate`). The board's render step shows the reason as it does for music.
+- **Accent (owner):** the caption highlight is the plan's accent only when the render has callouts. With `callouts` off, captions are exactly as in EXPLAINER-008 (`#FFD60A`).
+- **Phrase tolerance:** `callout_plan_writer.locate_phrase` and `PHRASE_MATCH_MIN` (0.6) are reused on the unit's timed words, so the plan panel and the render agree. No match puts the callout at its unit's start, with one warning (`callout_at_unit_start`).
+- **Animation timings** (constants in `services/callout_render.py`): every callout fades in and out over 200 ms; `emphasis`, `question`, list items and comparison sides also slide down into place over 250 ms from 2 percent of the height above; `number` pops from 80 to 112 percent at 150 ms and settles at 100 percent at 280 ms; `section_title` fades over 300 ms and grows from 95 to 100 percent over 400 ms.
+- **Box style:** one opaque box per line (`BorderStyle 3`), black at about 65 percent, its padding 22 percent of the font size, the text in the role colour. Colours: `number` `#FFB000`, `negative` `#FF4D4D`, `positive` `#2ED573`, `accent` from the plan.
+- **Duration:** at least 2 s or until the unit ends, whichever is longer, and cut 150 ms before the next callout. **Deviation from the scope:** a `section_title` lasts a fixed 2.5 s, because the captions are hidden while it shows.
+- **Zones** (fractions of the output): landscape B-roll, top-centre, 70 percent wide, 8 to 40 percent of the height; landscape presenter shot, a 40 percent wide box on one side (`PRESENTER_SIDE`, the right, a constant to flip); portrait, centred, 84 percent wide, 12 to 55 percent of the height (above the captions, whose top is at about 62 percent); a section title is centred. A comparison is side by side in landscape while its font needs no more than 30 percent taken off, and stacked otherwise (so on a presenter shot it is usually stacked), and always stacked in portrait. The shot under a callout's start decides the zone; a callout that lasts into the next shot keeps its place.
+
+What was built:
+
+- `services/callout_render.py` (pure): `resolve` gives each callout that is turned on its time, zone and laid-out lines, and the warnings. A callout whose cut would leave it under 1.2 s is dropped in favour of the earlier one (`callout_dropped`, one combined warning), because the times the plan was checked with are estimates (the known limit of EXPLAINER-009). `track_dict` and `parse_track` freeze and read the track.
+- `services/font_metrics.py`: the bundled font (`FONTS_DIR` moved here, `render_story` imports it) and `measure(text, size)`. **Found while checking:** libass takes `\fs` as the font's cell height (`usWinAscent` plus `usWinDescent` = 1.562 em), so a text is only 0.64 em per `\fs`. `measure` uses that, and was checked against libass on the host and in the backend container: the widths agree within one percent. A text is split into at most two balanced lines, then its font is reduced until the widest line fits 95 percent of its zone; two lines are two parts, each with its own box, because libass boxes of lines set close together overlap.
+- `caption_plan.style_for(..., highlight_colour)` and `hide_during` (captions are cut out while a section title shows).
+- `caption_ass.ass_document(captions, callouts)`: either track may be missing; the captions-only file is what it was. Callouts are on layer 1 in a `Callout` style with exact `\an8`, `\pos` or `\move`, `\q2`, `\fad` and `\t` tags.
+- `story_render_plan`: timeline version 4 with `callouts` (null for a story and for callouts off) and the two warning codes; `story_renders`: the gate, the timings read when either switch is on, three out-of-date reasons (callouts switched on or off since, the callout plan changed since, the plan no longer ready); `render_story`: the key is required, the style must match the output size, one ASS file for both, `output.callouts` with the count by type. The phase is now "writing the captions and callouts". The music placement is still made without captions and callouts. The frontend needed no change: the render panel already lists the warnings and the blocked reason.
+
+Checked on throwaway data: a plan with a question, a number, a comparison, a list and a section title, in landscape and portrait, burned in with FFmpeg on the host and in the backend container (frame count 528 equal to the video's): the callouts come in at the phrase, the list builds up item by item, the section title hides the captions, the colours follow the roles and the caption highlight is the accent, and nothing overlaps in either orientation. A phrase that does not match starts at its unit (with the warning), a forced collision drops the later callout, `hide_during` on a group before, inside and outside a window, and a timeline built with callouts, with captions only, with callouts only and with neither, each read back with `parse_timeline`. Ruff passes. There are no automated tests, as asked.
+
+**Known limits.** The portrait zone and the landscape presenter side are guesses about where the presenter and the platform buttons are, and the font sizes are starting values (landscape text 5.5 percent of the height, a number 9, a section title 8; portrait 3.2, 5.5 and 4.5). A callout cut short or dropped by the render is not changed in the plan, so the panel can show a callout the video leaves out (the warning says which). A section title or a callout at the very end of the video shorter than 1.2 s is dropped. A callout starts at the word the phrase matched, so a phrase that matches the wrong repeated words shows early or late.
+
+**Still for the owner (needs the GPU server and watching):** rebuild the backend image (`docker compose up -d --build backend`), run the callout plan on one landscape and one portrait explainer, render each with `callouts` on and off, and judge: do the callouts come in on their words, do they cover the presenter's face (flip `PRESENTER_SIDE` if the presenter stands on the right), are the sizes right on a phone, and is the video more engaging with them.
 
 ### EXPLAINER-011 — Room for callouts in B-roll (optional, later)
 
@@ -473,5 +498,5 @@ Checked on throwaway data: migration `0074` up, down and up again (`alembic chec
 | EXPLAINER-007 | Done | Caption settings and word timings. Migration `0073`. Owner still checks the timings by playback. |
 | EXPLAINER-008 | Done | Word-synced captions burned in. Timeline version 3. Owner still checks the highlight and the portrait margin by playback and on a phone. |
 | EXPLAINER-009 | Done | Callout plan and review. Migration `0074`. Owner still judges the callouts on one real explainer. |
-| EXPLAINER-010 | Not Started | Callouts drawn, and colours. |
+| EXPLAINER-010 | Done | Callouts drawn, and colours. Timeline version 4. Owner still checks one landscape and one portrait explainer by eye. |
 | EXPLAINER-011 | Not Started | Optional, later. |

@@ -44,6 +44,11 @@ the sound's own seconds (its time 0 is the first sample it plays):
 holds the style and the caption groups made by `caption_plan.build_captions` from each speech's
 word timing (narration and dialogue alike), on the story's timeline. It is null otherwise.
 
+**Callouts** (timeline version 4, EXPLAINER-010). For an explainer with callouts on, `callouts`
+holds the style and every callout that is turned on in the current callout plan, each with its
+time, its zone and its laid-out text (`callout_render.resolve`), and the plan it came from. It is
+null otherwise. While a section title shows, the captions are hidden.
+
 `master` holds the loudness the finished mix is brought to. Every constant used is recorded.
 """
 
@@ -54,12 +59,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from app.services import caption_plan, frame_counts, render_commands
+from app.services import callout_render, caption_plan, font_metrics, frame_counts, render_commands
 
 # The shape of `job.input.timeline`. The job refuses a timeline it does not know. Version 2 adds
 # the music layers, the dip of the shot audio under a bed and the master loudness (MUSIC-012).
 # Version 3 adds `captions`: the word-synced captions of an explainer, or null (EXPLAINER-008).
-TIMELINE_VERSION: Final = 3
+# Version 4 adds `callouts`: the callouts of an explainer with their times and places, or null
+# (EXPLAINER-010).
+TIMELINE_VERSION: Final = 4
 
 SHOT_TARGET_LUFS: Final = -16.0
 NARRATION_TARGET_LUFS: Final = -16.0
@@ -535,10 +542,14 @@ def build_plan(
     mix: MixSettings | None = None,
     music: MusicSource | None = None,
     captions: caption_plan.CaptionStyle | None = None,
+    callouts: callout_render.CalloutSource | None = None,
+    measure: callout_render.Measure | None = None,
 ) -> RenderPlan:
     """The frozen timeline of a render and its warnings. Raises RenderPlanError with the reason
     when the story cannot be rendered now. `music` is None for a render without music, and
-    `captions` is None for a render without captions (a story, or an explainer with them off).
+    `captions` is None for a render without captions (a story, or an explainer with them off), and
+    `callouts` is None for a render without callouts. `measure` measures a callout's text (the
+    bundled font's by default).
     """
     mix = mix or MixSettings()
     if fps < 1 or width < 2 or height < 2:
@@ -554,6 +565,7 @@ def build_plan(
     dialogue_spans: list[tuple[float, float]] = []
     unplaced: list[str] = []
     timed_units: list[caption_plan.TimedUnit] = []
+    callout_units: list[callout_render.CalloutUnit] = []
     estimated_units: list[str] = []
     cursor = 0  # the frame the last shot ended on
 
@@ -617,25 +629,36 @@ def build_plan(
         for unit in scene.units:
             start_s = scene.story_start_s + unit.start_s
             end_s = scene.story_start_s + unit.end_s
-            # Captions follow the speech of a narration and of a line of dialogue alike. A line
-            # of dialogue is in its clip at the place its unit has on the timeline.
-            if (
-                captions is not None
-                and unit.timing is not None
-                and unit.audio_id is not None
-                and unit.file_exists
-            ):
+            # Captions and callouts follow the speech of a narration and of a line of dialogue
+            # alike. A line of dialogue is in its clip at the place its unit has on the timeline.
+            timing = (
+                unit.timing
+                if unit.timing is not None and unit.audio_id is not None and unit.file_exists
+                else None
+            )
+            if captions is not None and timing is not None:
+                assert unit.audio_id is not None
                 timed_units.append(
                     caption_plan.TimedUnit(
                         scene_id=scene.scene_id,
                         unit_id=unit.unit_id,
                         audio_id=unit.audio_id,
                         start_ms=_ms(start_s),
-                        words=unit.timing.words,
+                        words=timing.words,
                     )
                 )
-                if unit.timing.estimated_now:
+                if timing.estimated_now:
                     estimated_units.append(f"{unit.unit_id} of scene {scene.index}")
+            if callouts is not None:
+                callout_units.append(
+                    callout_render.CalloutUnit(
+                        scene_id=scene.scene_id,
+                        unit_id=unit.unit_id,
+                        start_ms=_ms(start_s),
+                        end_ms=_ms(end_s),
+                        words=timing.words if timing is not None else (),
+                    )
+                )
             if unit.kind == "dialogue":
                 dialogue_spans.append((start_s, end_s))
                 continue
@@ -696,9 +719,31 @@ def build_plan(
                     BED_SHOT_RAMP_S,
                 )
 
+    total_ms = _ms(cursor / fps)
+    callouts_entry: dict[str, Any] | None = None
+    hidden: list[tuple[int, int]] = []
+    if callouts is not None:
+        resolution = callout_render.resolve(
+            callouts,
+            callout_units,
+            [(entry["start_ms"], entry["end_ms"]) for entry in shots],
+            [(_ms(start), _ms(end)) for start, end in dialogue_spans],
+            total_ms,
+            width,
+            height,
+            measure or font_metrics.measure,
+        )
+        callouts_entry = callout_render.track_dict(resolution.track)
+        callouts_entry["plan_id"] = callouts.plan_id
+        callouts_entry["plan_version"] = callouts.plan_version
+        warnings.extend(resolution.warnings)
+        hidden = callout_render.windows_hiding_captions(resolution.track)
+
     captions_entry: dict[str, Any] | None = None
     if captions is not None:
-        groups = caption_plan.build_captions(timed_units, captions, _ms(cursor / fps))
+        groups = caption_plan.hide_during(
+            caption_plan.build_captions(timed_units, captions, total_ms), hidden
+        )
         captions_entry = caption_plan.track_dict(captions, groups)
         captions_entry["estimated_units"] = estimated_units
         if estimated_units:
@@ -731,6 +776,7 @@ def build_plan(
         "narration": narration,
         "music": music_entry,
         "captions": captions_entry,
+        "callouts": callouts_entry,
         "master": master(mix),
         "constants": constants(mix),
         "warnings": warnings,

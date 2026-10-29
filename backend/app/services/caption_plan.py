@@ -120,8 +120,10 @@ class TimedUnit:
 # --- The layout -----------------------------------------------------------------------------
 
 
-def style_for(width: int, height: int) -> CaptionStyle:
-    """The caption style of an output size. A taller output is portrait."""
+def style_for(width: int, height: int, highlight_colour: str = HIGHLIGHT_COLOUR) -> CaptionStyle:
+    """The caption style of an output size. A taller output is portrait. `highlight_colour` is
+    the video's accent when the render has callouts (EXPLAINER-010), else the fixed default.
+    """
     if height > width:
         return CaptionStyle(
             layout=LAYOUT_PORTRAIT,
@@ -136,7 +138,7 @@ def style_for(width: int, height: int) -> CaptionStyle:
             max_chars=14,
             text_colour=TEXT_COLOUR,
             outline_colour=OUTLINE_COLOUR,
-            highlight_colour=HIGHLIGHT_COLOUR,
+            highlight_colour=highlight_colour,
         )
     return CaptionStyle(
         layout=LAYOUT_LANDSCAPE,
@@ -150,7 +152,7 @@ def style_for(width: int, height: int) -> CaptionStyle:
         max_chars=28,
         text_colour=TEXT_COLOUR,
         outline_colour=OUTLINE_COLOUR,
-        highlight_colour=HIGHLIGHT_COLOUR,
+        highlight_colour=highlight_colour,
     )
 
 
@@ -333,6 +335,50 @@ def _fit_words(
         following = starts[index + 1] if index + 1 < len(words) else end_ms
         fitted.append(CaptionWord(word.text, starts[index], following))
     return tuple(fitted)
+
+
+def _cut_out(group: CaptionGroup, window_start: int, window_end: int) -> CaptionGroup | None:
+    """The part of a group outside one window (milliseconds), or None when nothing is left.
+    A group that starts before the window keeps the words before it and ends where it starts. A
+    group that starts inside the window keeps the words after its end and starts where it ends.
+    """
+    if group.end_ms <= window_start or group.start_ms >= window_end:
+        return group
+    if group.start_ms < window_start:
+        kept = tuple(word for word in group.words if word.start_ms < window_start)
+        start, end = group.start_ms, window_start
+    else:
+        kept = tuple(word for word in group.words if word.start_ms >= window_end)
+        start, end = window_end, group.end_ms
+    if not kept or end <= start:
+        return None
+    return CaptionGroup(
+        scene_id=group.scene_id,
+        unit_id=group.unit_id,
+        audio_id=group.audio_id,
+        start_ms=start,
+        end_ms=end,
+        words=_fit_words(kept, start, end),
+    )
+
+
+def hide_during(
+    groups: Sequence[CaptionGroup], windows: Sequence[tuple[int, int]]
+) -> list[CaptionGroup]:
+    """The caption groups with nothing shown inside the windows (milliseconds, `(start, end)`),
+    which are the stretches a section title is on screen (EXPLAINER-010). A group that no window
+    touches is returned as it was.
+    """
+    shown: list[CaptionGroup] = []
+    for group in groups:
+        current: CaptionGroup | None = group
+        for window_start, window_end in sorted(windows):
+            if current is None:
+                break
+            current = _cut_out(current, window_start, window_end)
+        if current is not None:
+            shown.append(current)
+    return shown
 
 
 # --- Recording and reading back -------------------------------------------------------------
