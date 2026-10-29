@@ -11,6 +11,7 @@ import type { components } from "./schema";
 export type SpeechAudio = components["schemas"]["SpeechAudioStateOut"];
 export type SpeechSceneAudio = components["schemas"]["SpeechSceneAudioOut"];
 export type SpeechUnitAudio = components["schemas"]["SpeechUnitAudioOut"];
+export type SpeechTake = components["schemas"]["SpeechTakeOut"];
 export type SpeechAudioRunAll = components["schemas"]["SpeechAudioRunAllOut"];
 
 /**
@@ -48,8 +49,9 @@ async function fetchSpeechAudio(projectId: number) {
 }
 
 /**
- * Where the audio of every speech unit stands. It is loaded again every few seconds while any
- * unit is being made, or its words are being timed.
+ * Where the audio of every speech unit stands (and of every scene's take, for a continuous
+ * explainer). It is loaded again every few seconds while any unit or take is being made, or a
+ * unit's words are being timed.
  */
 export function useSpeechAudio(projectId: number) {
   return useQuery({
@@ -57,12 +59,14 @@ export function useSpeechAudio(projectId: number) {
     queryFn: () => fetchSpeechAudio(projectId),
     enabled: isValidProjectId(projectId),
     refetchInterval: (current) =>
-      current.state.data?.scenes.some((scene) =>
-        scene.units.some(
-          (unit) =>
-            unit.status === "in_progress" ||
-            unit.word_timing?.status === "in_progress",
-        ),
+      current.state.data?.scenes.some(
+        (scene) =>
+          scene.take?.status === "in_progress" ||
+          scene.units.some(
+            (unit) =>
+              unit.status === "in_progress" ||
+              unit.word_timing?.status === "in_progress",
+          ),
       )
         ? ACTIVE_POLL_MS
         : false,
@@ -123,6 +127,34 @@ export function useMakeOneSpeech(projectId: number) {
           detailMessage(
             error,
             `Could not start the speech (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Starts the take of one scene of a continuous explainer (again, also after a failure). */
+export function useMakeSceneTake(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { sceneId: string }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/speech-audio/{scene_id}/take/run",
+        {
+          params: {
+            path: { project_id: projectId, scene_id: input.sceneId },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not start the take (HTTP ${response.status}).`,
           ),
           response.status,
         );

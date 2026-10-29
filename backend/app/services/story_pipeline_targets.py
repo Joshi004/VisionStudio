@@ -1438,6 +1438,26 @@ async def _evaluate_speech_synthesis(
     targets: list[Target] = []
     for scene in state.scenes:
         scene_id = scene.scene.item["id"]
+        if state.continuous:
+            # A continuous explainer speaks each scene as one take (FLOW-003).
+            take = scene.take
+            if take is not None:
+                targets.append(
+                    Target(
+                        f"take:{scene_id}",
+                        f"Scene {scene.scene.item.get('index')}, voice take",
+                        take.status == "ready",
+                        active=take.status == "in_progress",
+                        block=(
+                            None if take.status in ("ready", "in_progress") else take.blocked_reason
+                        ),
+                        last_error=take.error or _failure(take.job),
+                        ref=(scene_id,),
+                        stale=take.status == "out_of_date",
+                        group=scene_id,
+                    )
+                )
+            continue
         for unit in scene.units:
             unit_id = unit.unit["id"]
             done = unit.status == "ready"
@@ -1472,7 +1492,9 @@ async def _start_speech_synthesis(
         targets,
         deadline,
         lambda target: _ids_of(
-            speech_synthesis.start_unit(session, project, target.ref[0], target.ref[1])
+            speech_synthesis.start_take(session, project, target.ref[0])
+            if len(target.ref) == 1
+            else speech_synthesis.start_unit(session, project, target.ref[0], target.ref[1])
         ),
     )
 

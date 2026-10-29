@@ -62,7 +62,12 @@ class SynthesizeSpeechUnitHandler(SpeechHandler):
                 # An explainer with captions or callouts on needs the time of each word of
                 # this speech (EXPLAINER-007). The job is saved with the speech.
                 project = await session.get(Project, job.project_id)
-                if project is not None and word_timings.wanted(project):
+                # A scene's take (FLOW-003) is timed by FLOW-004, not here.
+                if (
+                    project is not None
+                    and row.kind != speech_synthesis.KIND_TAKE
+                    and word_timings.wanted(project)
+                ):
                     await word_timings.queue(session, row, commit=False)
                     queued_timing = True
             else:

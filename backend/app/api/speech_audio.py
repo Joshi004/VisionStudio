@@ -9,6 +9,10 @@
 - `POST .../run` ("Make all") starts the speech of every unit that has no current audio. The
   others are skipped, with the reason.
 - `POST .../{scene_id}/{unit_id}/run` starts the speech of one unit, again if it is made.
+- For a continuous explainer (FLOW-003) each scene is spoken as one take: `continuous` is true,
+  each scene has a `take` with the same kind of state as a unit's, "Make all" starts one take per
+  scene, and `POST .../{scene_id}/take/run` starts the take of one scene. Its units are not
+  spoken one by one.
 
 A speech is made by the `synthesize_speech_unit` job (`services/speech_synthesis.py`). For an
 explainer with captions or callouts on, each unit also says where the timing of its words stands
@@ -27,11 +31,11 @@ from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import Job
+from app.db.models import Job, SpeechUnitAudio
 from app.db.session import SessionDep
 from app.jobs import dispatcher
 from app.services import speech_synthesis, word_timings
-from app.services.speech_synthesis import UnitEntry
+from app.services.speech_synthesis import TakeEntry, UnitEntry
 from app.services.storage import media_url
 
 router = APIRouter()
@@ -113,9 +117,33 @@ class SpeechUnitAudioOut(BaseModel):
     word_timing: WordTimingOut | None
 
 
+class SpeechTakeOut(BaseModel):
+    """Where the one take of a scene of a continuous explainer stands (FLOW-003). The voice is
+    the presenter's, the mode is always `direction`, and `instruction` is the presenter delivery.
+    """
+
+    status: Status
+    # Why out-of-date audio no longer matches the scene, one sentence each.
+    reasons: list[str]
+    voice_id: int | None
+    voice_name: str | None
+    instruction: str
+    # What the take says: the scene's unit texts joined.
+    text: str
+    # The newest stored audio of what the take is now. Plays while a new one is being made.
+    audio: SpeechAudioOut | None
+    # Why a `failed` take failed.
+    error: str | None
+    can_run: bool
+    blocked_reason: str | None
+    job: DiscoveryJobOut | None
+
+
 class SpeechSceneAudioOut(BaseModel):
     scene_id: str
     units: list[SpeechUnitAudioOut]
+    # None unless the project is a continuous explainer and the scene has units.
+    take: SpeechTakeOut | None
 
 
 class SpeechAudioStateOut(BaseModel):
@@ -124,11 +152,14 @@ class SpeechAudioStateOut(BaseModel):
     scenes: list[SpeechSceneAudioOut]
     # Why nothing can be made yet, or None.
     blocked_reason: str | None
+    # True for a continuous explainer, whose scenes are spoken as takes.
+    continuous: bool
 
 
 class SpeechAudioSkippedOut(BaseModel):
     scene_id: str
-    unit_id: str
+    # None for the take of a scene.
+    unit_id: str | None
     reason: str
 
 
@@ -167,15 +198,7 @@ def _unit_out(
         # The database CHECK constraint keeps the mode to the two allowed values.
         mode=cast(Mode | None, item.mode),
         instruction=item.instruction,
-        audio=(
-            SpeechAudioOut(
-                url=media_url(audio.path),
-                measured_seconds=audio.duration_s,
-                sample_rate=audio.sample_rate,
-            )
-            if audio is not None and audio.path is not None and audio.duration_s is not None
-            else None
-        ),
+        audio=_audio_out(audio),
         error=item.error,
         can_run=item.can_run,
         blocked_reason=item.blocked_reason,
@@ -185,6 +208,34 @@ def _unit_out(
             if timings is not None and audio is not None
             else None
         ),
+    )
+
+
+def _audio_out(audio: SpeechUnitAudio | None) -> SpeechAudioOut | None:
+    if audio is None or audio.path is None or audio.duration_s is None:
+        return None
+    return SpeechAudioOut(
+        url=media_url(audio.path),
+        measured_seconds=audio.duration_s,
+        sample_rate=audio.sample_rate,
+    )
+
+
+def _take_out(take: TakeEntry | None) -> SpeechTakeOut | None:
+    if take is None:
+        return None
+    return SpeechTakeOut(
+        status=take.status,
+        reasons=take.reasons,
+        voice_id=take.voice.id if take.voice is not None else None,
+        voice_name=take.voice.name if take.voice is not None else None,
+        instruction=take.instruction,
+        text=take.text,
+        audio=_audio_out(take.audio),
+        error=take.error,
+        can_run=take.can_run,
+        blocked_reason=take.blocked_reason,
+        job=_job_out(take.job),
     )
 
 
@@ -207,10 +258,12 @@ async def get_speech_audio(project_id: int, session: SessionDep) -> SpeechAudioS
             SpeechSceneAudioOut(
                 scene_id=scene.scene.item["id"],
                 units=[_unit_out(item, timings) for item in scene.units],
+                take=_take_out(scene.take),
             )
             for scene in current.scenes
         ],
         blocked_reason=current.blocked_reason,
+        continuous=current.continuous,
     )
 
 
@@ -238,6 +291,28 @@ async def run_all(project_id: int, session: SessionDep) -> SpeechAudioRunAllOut:
             for item in started.skipped
         ],
     )
+
+
+# Declared before the unit's route: "take" would otherwise be read as a unit id.
+@router.post(
+    "/projects/{project_id}/speech-audio/{scene_id}/take/run",
+    response_model=SpeechAudioRunOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def run_take(
+    project_id: int, scene_id: DiscoveryId, session: SessionDep
+) -> SpeechAudioRunOut:
+    """Starts the take of one scene of a continuous explainer, again if it is made. Refused while
+    that very take is already being made, and for a project that does not speak in takes.
+    """
+    project = await load_project(session, project_id)
+    try:
+        job = await speech_synthesis.start_take(session, project, scene_id)
+    except speech_synthesis.SpeechSynthesisError as exc:
+        raise _refused(exc) from exc
+    dispatcher.nudge()
+    return SpeechAudioRunOut(job_id=job.id)
 
 
 @router.post(

@@ -7,7 +7,7 @@ Today an explainer's speech is made line by line, and each line decides the pict
 
 This plan fixes both at the root: **the voice is made first, as one continuous take per scene, and the picture is cut on top of it.** The same recording plays whether the presenter is seen or not, so the pace cannot change at a cut, and a cut can fall on any word.
 
-- The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) apply unchanged. Table and column details go in `DATABASE_STRUCTURE.md`. The newest migration when this was written was `0074`; the Audio video lab added `0075` and FLOW-002 added `0076`.
+- The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) apply unchanged. Table and column details go in `DATABASE_STRUCTURE.md`. The newest migration when this was written was `0074`; the Audio video lab added `0075`, FLOW-002 added `0076` and FLOW-003 added `0077`.
 - Written 2026-10-29, from a design discussion with the owner about narration pace and cutting to B-roll mid-sentence.
 - FLOW-001 is a go/no-go trial. Nothing else starts until it passes. It passed on 2026-10-29 (see its result).
 
@@ -142,7 +142,7 @@ Nothing reads `voice_track` yet, so no speech, plan or render changes. The OpenA
 
 ### FLOW-003 — One voice take per scene
 
-**Status:** Not Started
+**Status:** Done (2026-10-29). Listening to the takes is the owner's (see the completion notes).
 
 **Objective.** In `continuous` mode, make each scene's speech as one take with the presenter's voice and the delivery instruction.
 
@@ -174,11 +174,24 @@ Nothing reads `voice_track` yet, so no speech, plan or render changes. The OpenA
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Take storage, key and state
-- [ ] Speech step branch and board
-- [ ] Docs, standard checks
+- [x] Take storage, key and state
+- [x] Speech step branch and board
+- [x] Docs, standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-29. Migration `0077`. Decisions made in planning:
+
+- **Storage.** A take is a `speech_unit_audio` row with `kind = 'take'`, `unit_id` NULL and `speaker_id` NULL (migration `0077` makes `unit_id` nullable and adds `take` to the `kind` CHECK). No new table and no new job type: the `synthesize_speech_unit` job and its handler are used as they are, and `speech_word_timing` already points at `speech_unit_audio`, so FLOW-004 needs no new table. The downgrade deletes the take rows, which is stated in the migration.
+- **Per scene.** FLOW-001 passed, so takes are per scene. A scene over 1000 characters is made in pieces by the existing chunker.
+- **Sentence break.** The unit texts are joined with one space and nothing else, so the take reads exactly as the script does (a unit that was cut at a comma stays a comma).
+- **Key and state.** `take_key` is the SHA-256 of `{take, text, voice_id, mode: direction, instruction}`, so it never equals a unit's key. A take's state (`unavailable`, `none`, `in_progress`, `failed`, `ready`, `out_of_date`) is worked out on every read by the rules of a unit, against the scene's earlier takes. The reasons say whether the scene's text, the presenter's voice or the delivery changed. The voice is the narrator's (the presenter's, E-4) and the instruction is `explainer.presenter_delivery` (FLOW-002); guidance is 4.
+- **Where.** `speech_synthesis.state` gives each scene a `take` and the state a `continuous` flag; `start_take` and Make all queue one take per scene that is not ready or in progress. The units of a continuous explainer are refused ("This explainer speaks each scene as one take"). New route `POST /api/projects/{id}/speech-audio/{scene_id}/take/run`. The pipeline step `speech_synthesis` has one target per scene take (`take:{scene_id}`), and an out-of-date take shows in the stale list as "Scene N, voice take". The speech panel shows a take line (status, length, player, Make) in place of the per-unit buttons.
+- **Not timed yet.** `synthesize_speech_unit` does not queue word timing for a take (FLOW-004).
+
+**Interim effect.** For a continuous explainer, the `word_timings` step, shot planning and everything after them wait for unit audio that the project no longer makes, so the pipeline stops after the takes until FLOW-004 and FLOW-005 read them. A `lines` explainer and a story are unchanged.
+
+Checked on throwaway data: migration `0077` up, down and up again (with a word timing kept across the upgrade, deleted with its take on the downgrade), and `alembic check` shows only the `FLOAT` against `REAL` differences that were there before. On a continuous project with two scenes: one take per scene with the joined text, direction mode, the default delivery and guidance 4; Make all made 2 jobs; after storing both, both are `ready`; changing one unit of the first scene made only that take `out_of_date` (the other stayed `ready`), and Make all then made 1 job and skipped the other; a unit's run was refused; a take key differs from the unit key of the same text. On a lines project: no take, `continuous` false, Make all made 4 jobs (3 and 1 units) whose input has the same keys as before, and a take run was refused. Ruff, `npm run lint` and `npm run typecheck` pass; `schema.d.ts` was generated from the local code (the running backend has not been rebuilt). There are no automated tests, as asked.
+
+**Still for the owner (needs the GPU server and listening):** rebuild the backend image (`docker compose up -d --build backend`) so migration `0077` applies, make the takes of one continuous explainer, and listen for one pace across what used to be dialogue and narration.
 
 ### FLOW-004 — Word timings of the take, and each unit's span
 
@@ -414,7 +427,7 @@ Make project 42's script again as a new continuous explainer, in portrait, with 
 |----|--------|-------|
 | FLOW-001 | Done | Passed 2026-10-29 in the Audio video lab. Always `fully_copy`; the take is the default voice, with a per-shot switch to the clip's voice (F-9). |
 | FLOW-002 | Done | 2026-10-29. Migration `0076`. Delivery text: owner's, else Story Bible narration, else a default; editable; no scene override. |
-| FLOW-003 | Not Started | |
+| FLOW-003 | Done | 2026-10-29. Migration `0077`. Takes are `speech_unit_audio` rows (kind `take`), per scene, units joined with one space. Not timed yet (FLOW-004). |
 | FLOW-004 | Not Started | |
 | FLOW-005 | Not Started | |
 | FLOW-006 | Not Started | |

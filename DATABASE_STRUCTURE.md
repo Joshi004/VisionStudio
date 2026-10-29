@@ -162,6 +162,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (FLOW-002 voice track, 2026-10-29):** migration `0076`. **An explainer says how its speech is made, once, when it is created, and may carry a presenter delivery text.** (1) **Two new columns on `project`** (Section 4.1): `voice_track` (`lines` or `continuous`, NOT NULL, default `lines`, with the CHECK `ck_project_voice_track_valid`; every project made before this reads `lines`) and `presenter_delivery` (TEXT, nullable). `voice_track` is never changed after creation: `PATCH /api/projects/{id}` has no such field and refuses it with 422. `POST /api/projects` gives an explainer `continuous` unless it sends `lines`; a story is always `lines`, and a story that sends `continuous`, or any delivery text, is refused with 422. (2) **`presenter_delivery`** is the owner's text for the voice of every take of a continuous explainer, at most 500 characters (`speech_synthesizer.INSTRUCTION_MAX_CHARS`), trimmed, and a blank text is stored as NULL. `PATCH /api/projects/{id}` may change it at any time, but only for a continuous explainer (any other project gets 422). It is chosen by `services/explainer.presenter_delivery` when a take is made (FLOW-003), in this order: the owner's text; else `storytelling_style.narration` of the newest Story Bible, as "Speak in this style: ..."; else a fixed default. The answer is worked out on every read and never stored. A scene cannot override it. (3) **No new table, no new job type, no new setting.** Nothing reads `voice_track` yet: no speech, timing, plan or render changes. No existing row is changed and nothing is backfilled.
 
+**Update (FLOW-003 scene voice takes, 2026-10-29):** migration `0077`. **A continuous explainer speaks each scene as one take.** (1) **`speech_unit_audio` changes in two ways** (Section 4.42): `unit_id` is now nullable, and the `kind` CHECK gains `take`. A take is a row with `kind = 'take'`, `unit_id` NULL and `speaker_id` NULL, `mode = 'direction'`, `text` the scene's unit texts joined with one space, and `instruction` the project's presenter delivery (FLOW-002). The table is rebuilt in batch mode; no row changes. The downgrade deletes the take rows (and their `speech_word_timing` rows), because the old table cannot hold a row with no unit. (2) **No new table, no new job type, no new setting**: a take is made by the same `synthesize_speech_unit` job (its input has `"take": true` and no `unit_id`; `instruction` is the delivery and `cfg_scale` 4). (3) **The take's `audio_key`** is the SHA-256 of `{take: true, text, voice_id, mode: 'direction', instruction}`, so it can never equal a unit's key; an unchanged scene keeps its take, and one changed line makes only its scene's take out of date. The voice is the narrator's, which is the presenter's (E-4). (4) The take is not timed yet: `synthesize_speech_unit` does not queue `time_speech_words` for a take (FLOW-004). A `lines` project and a story never have a take. See Sections 4.42 and 5.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -2099,19 +2101,21 @@ CREATE INDEX idx_speech_units_project_scene ON speech_units (project_id, scene_i
 
 *Added in PHASE-019 (migration `0039`).* The Speech stage's result (`Path_ahead.md` Sections 20 and 21): one row per **speech made, or being made, for one speech unit**. `synthesize_speech_unit` writes the row's file and measured length in the same transaction that finishes its job, so a finished job always has a stored speech. The file is stored under the project's folder in `media/`. `scene_id` and `unit_id` say which unit of which scene the speech was made for, but **the key is `audio_key`**, a hash of the text, the voice, the mode and the instruction: a re-plan renumbers the unit ids, and audio is found by its key, so a unit that did not change keeps its audio (and two lines with the same text in the same voice share one). A speech made again adds a row. The rules are in `services/speech_synthesis.py`.
 
+*Changed in FLOW-003 (migration `0077`).* A continuous explainer (`project.voice_track`) speaks each **scene** as one **take**, which is a row with `kind = 'take'` and no `unit_id`: its `text` is the scene's unit texts joined with one space, its `mode` is `direction`, its `instruction` is the project's presenter delivery, and its `audio_key` also records that it is a take, so it never equals a unit's key. A take is found, and is out of date, by the same rules as a unit's, with the scene instead of the unit.
+
 | Column | Type | Null | Default | Description |
 |---|---|---|---|---|
 | `id` | INTEGER | NOT NULL | auto | Primary key |
 | `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
 | `scene_id` | TEXT | NOT NULL | — | The scene's slug `id` |
-| `unit_id` | TEXT | NOT NULL | — | The unit's id in the plan it was made from (`su_1`, ...) |
-| `kind` | TEXT | NOT NULL | — | `narration` or `dialogue` (`CHECK`) |
-| `speaker_id` | TEXT | NULL | — | The discovered character's slug id; NULL for narration |
+| `unit_id` | TEXT | NULL | — | The unit's id in the plan it was made from (`su_1`, ...). NULL for a take |
+| `kind` | TEXT | NOT NULL | — | `narration`, `dialogue` or `take` (`CHECK`) |
+| `speaker_id` | TEXT | NULL | — | The discovered character's slug id; NULL for narration and for a take |
 | `text` | TEXT | NOT NULL | — | The text that was spoken, as it was when the speech was queued |
 | `mode` | TEXT | NOT NULL | — | `clone` (no delivery emotion) or `direction` (steered by `instruction`) (`CHECK`) |
 | `instruction` | TEXT | NULL | — | What steered a `direction` speech, written from the unit's emotion |
 | `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice that spoke it. `ON DELETE SET NULL` |
-| `audio_key` | TEXT | NOT NULL | — | SHA-256 of `{text, voice_id, mode, instruction}` |
+| `audio_key` | TEXT | NOT NULL | — | SHA-256 of `{text, voice_id, mode, instruction}` (of `{take: true, text, voice_id, mode, instruction}` for a take) |
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | The `synthesize_speech_unit` job. `ON DELETE SET NULL` |
 | `path` | TEXT | NULL | — | The stored WAV, relative to `media/`. NULL until the job has stored it |
 | `size_bytes` | INTEGER | NULL | — | Set with `path` |
@@ -2126,8 +2130,8 @@ CREATE TABLE speech_unit_audio (
     id          INTEGER PRIMARY KEY,
     project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
     scene_id    TEXT NOT NULL,
-    unit_id     TEXT NOT NULL,
-    kind        TEXT NOT NULL CHECK (kind IN ('narration', 'dialogue')),
+    unit_id     TEXT,
+    kind        TEXT NOT NULL CHECK (kind IN ('narration', 'dialogue', 'take')),
     speaker_id  TEXT,
     text        TEXT NOT NULL,
     mode        TEXT NOT NULL CHECK (mode IN ('clone', 'direction')),
@@ -3861,6 +3865,8 @@ A `synthesize_speech_unit` job makes one unit's speech. Its `job.input` is what 
 `voice` is `{"kind": "narrator", "narrator_voice_version": n}` for narration. **The mode** is chosen by code: a unit with a delivery emotion is `direction`, steered by `Speak with this emotion: {emotion}.` (at most 500 characters, guidance 4); a unit with none is `clone` (no instruction, guidance 1). **The key** `audio_key` is the SHA-256 of `{text, voice_id, mode, instruction}` with the keys sorted.
 
 **When audio is current, on this read.** For each unit of the scene's newest plan, its voice is looked up (the speaker's character's voice at the version the project pins, or the newest narrator voice) and its key worked out. The newest row with that key decides: its job queued or running is `in_progress`; a stored speech is `ready` (it plays even while a new one is being made); a failed or cancelled job is `failed`. With no row for the key, a stored speech made earlier for the same scene and unit id makes the unit `out_of_date`, with the reasons found by comparing the two rows (the text, the voice, the mode and instruction); otherwise it is `none`. A unit with no voice is `unavailable`, and the reason names the voice to make first. A unit can be made only while its scene's plan is current.
+
+**A scene's take (FLOW-003).** For a continuous explainer the job is queued per scene, with `"take": true` and no `unit_id`, `mode` `direction`, `instruction` the presenter delivery (the owner's text, else the Story Bible's narration style, else the default) and `cfg_scale` 4. `chunks` is the joined text cut to at most 1000 characters a piece, all made with one voice, seed and guidance, and joined. `target` is the take's key. The row's `inputs` has the same `artifacts` and `voice` as a unit's, and `"delivery"`, the instruction used. On a read, each scene's take gets its status by the rules above (the newest row of the take's key decides; with none, an earlier take of the same scene makes it `out_of_date`, with reasons for the text, the presenter's voice and the delivery). The scene's units are then not spoken one by one: they have no audio and cannot be made. It is made by `POST /api/projects/{id}/speech-audio/{scene_id}/take/run` and by Make all, which starts one take per scene that is not ready or in progress. Until FLOW-004 and FLOW-005 read takes, the steps after speech (word timing, shot planning) wait for unit audio a continuous explainer does not have.
 
 **What writes it.** `POST /api/projects/{id}/speech-audio/{scene_id}/{unit_id}/run` (one unit, also one that is made already) and `POST .../run` (Make all, which skips ready, in-progress and unavailable units). In one transaction each creates the `synthesize_speech_unit` job and the `speech_unit_audio` row (`path` NULL). `store_result` of the job then moves the WAV into `media/{project_id}/` and sets the row's `path`, `size_bytes`, `sha256`, `sample_rate` and the measured `duration_s` while finishing the job.
 

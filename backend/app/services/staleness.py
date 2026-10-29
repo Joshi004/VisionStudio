@@ -472,6 +472,18 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
             )
 
     for scene in (await speech_synthesis.state(session, project)).scenes:
+        take = scene.take
+        if take is not None and take.status == "out_of_date":
+            found.add(
+                "speech_synthesis",
+                Item(
+                    "speech_synthesis",
+                    f"{_scene_title(scene.scene.item)}, voice take",
+                    take.reasons,
+                    acceptable=False,
+                    scene_id=scene.scene.item["id"],
+                ),
+            )
         for unit in scene.units:
             if unit.status == "out_of_date":
                 found.add(

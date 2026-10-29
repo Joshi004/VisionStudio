@@ -3586,6 +3586,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/speech-audio/{scene_id}/take/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Take
+         * @description Starts the take of one scene of a continuous explainer, again if it is made. Refused while
+         *     that very take is already being made, and for a project that does not speak in takes.
+         */
+        post: operations["run_take_api_projects__project_id__speech_audio__scene_id__take_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/speech-audio/{scene_id}/{unit_id}/run": {
         parameters: {
             query?: never;
@@ -12445,7 +12466,7 @@ export interface components {
             /** Scene Id */
             scene_id: string;
             /** Unit Id */
-            unit_id: string;
+            unit_id: string | null;
             /** Reason */
             reason: string;
         };
@@ -12457,6 +12478,8 @@ export interface components {
             scenes: components["schemas"]["SpeechSceneAudioOut"][];
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Continuous */
+            continuous: boolean;
         };
         /** SpeechSceneAudioOut */
         SpeechSceneAudioOut: {
@@ -12464,6 +12487,37 @@ export interface components {
             scene_id: string;
             /** Units */
             units: components["schemas"]["SpeechUnitAudioOut"][];
+            take: components["schemas"]["SpeechTakeOut"] | null;
+        };
+        /**
+         * SpeechTakeOut
+         * @description Where the one take of a scene of a continuous explainer stands (FLOW-003). The voice is
+         *     the presenter's, the mode is always `direction`, and `instruction` is the presenter delivery.
+         */
+        SpeechTakeOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unavailable" | "none" | "in_progress" | "failed" | "ready" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /** Voice Id */
+            voice_id: number | null;
+            /** Voice Name */
+            voice_name: string | null;
+            /** Instruction */
+            instruction: string;
+            /** Text */
+            text: string;
+            audio: components["schemas"]["SpeechAudioOut"] | null;
+            /** Error */
+            error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
         };
         /**
          * SpeechUnitAudioOut
@@ -22314,6 +22368,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpeechAudioRunAllOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene or unit is not in the newest plan, the plan is out of date, or the unit has no voice to speak with yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_take_api_projects__project_id__speech_audio__scene_id__take_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeechAudioRunOut"];
                 };
             };
             /** @description No such project. */

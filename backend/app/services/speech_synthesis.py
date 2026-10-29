@@ -20,8 +20,17 @@ its length **measured** with ffprobe, so timing comes from real audio and needs 
   unit used to be (the reasons say what changed), and `none` when it has never been made.
 - A scene's units can be made only while the scene's plan is current.
 
-`start_unit` and `start_all` queue the jobs and write one `speech_unit_audio` row per job, in one
-transaction.
+**A continuous explainer** (`project.voice_track`, FLOW-003) speaks each scene as one **take**
+instead: the scene's unit texts joined with one space, so it reads exactly as the script, in the
+presenter's voice (the narrator's, E-4), in `direction` mode with the project's presenter
+delivery as the one instruction and guidance 4. A take is a `speech_unit_audio` row with kind
+`take` and no unit; its key is a hash of the joined text, the voice and the instruction (never
+equal to a unit's key), so an unchanged scene is not made again and one changed line makes only
+its scene's take out of date. The units of such a project are not spoken one by one. A `lines`
+project and a story never have a take and are unchanged.
+
+`start_unit`, `start_take` and `start_all` queue the jobs and write one `speech_unit_audio` row
+per job, in one transaction.
 """
 
 from __future__ import annotations
@@ -30,7 +39,7 @@ import hashlib
 import json
 import logging
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final, Literal
 
 from sqlalchemy import select
@@ -46,11 +55,21 @@ from app.db.models import (
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.providers import speech_synthesizer
-from app.services import character_links, speech_chunks, speech_units, story_voices
+from app.services import (
+    character_links,
+    explainer,
+    projects,
+    speech_chunks,
+    speech_units,
+    story_voices,
+)
 
 _logger = logging.getLogger(__name__)
 
 JOB_TYPE: Final = "synthesize_speech_unit"
+# The `kind` of a scene's take (FLOW-003). A unit's is `narration` or `dialogue`.
+KIND_TAKE: Final = "take"
+TAKE_MODE: Final = "direction"
 # Two presses on one line in one voice make one job.
 DEDUPE_KEY: Final = "target"
 
@@ -60,6 +79,7 @@ DEDUPE_KEY: Final = "target"
 Status = Literal["unavailable", "none", "in_progress", "failed", "ready", "out_of_date"]
 
 _ALREADY_BEING_MADE: Final = "The speech is already being made."
+_SPOKEN_AS_TAKE: Final = "This explainer speaks each scene as one take. Make the scene's take."
 
 
 class SpeechSynthesisError(ValueError):
@@ -98,16 +118,42 @@ class UnitEntry:
 
 
 @dataclass(frozen=True)
+class TakeEntry:
+    """One scene's take of a continuous explainer and where its audio stands (FLOW-003)."""
+
+    # The scene's unit texts joined: what the take says.
+    text: str
+    status: Status
+    # Why out-of-date audio no longer matches the scene, one sentence each.
+    reasons: list[str]
+    voice: Voice | None
+    # The delivery instruction every take of the project uses.
+    instruction: str
+    # The newest stored audio of the take's key, when there is some.
+    audio: SpeechUnitAudio | None
+    error: str | None
+    can_run: bool
+    blocked_reason: str | None
+    job: Job | None
+
+
+@dataclass(frozen=True)
 class SceneAudio:
-    """One scene of the newest list, with its plan and the audio of each of its units."""
+    """One scene of the newest list, with its plan and the audio of each of its units. A
+    continuous explainer's scene also has its `take`; it is None for any other project and for a
+    scene with no units.
+    """
 
     scene: speech_units.SceneEntry
     units: list[UnitEntry]
+    take: TakeEntry | None = None
 
 
 @dataclass(frozen=True)
 class AudioState:
-    """What the story workspace shows. `scenes_version` is None when no list exists."""
+    """What the story workspace shows. `scenes_version` is None when no list exists.
+    `continuous` is true for a continuous explainer, whose scenes are spoken as takes.
+    """
 
     scenes_version: int | None
     scenes: list[SceneAudio]
@@ -116,14 +162,15 @@ class AudioState:
     # The narrator's voice, and each discovered character's by its discovery id.
     narrator: _VoiceChoice
     characters: dict[str, _VoiceChoice]
+    continuous: bool = False
 
 
 @dataclass(frozen=True)
 class Skipped:
-    """A unit that "Make all" did not start, and why."""
+    """A unit that "Make all" did not start, and why. `unit_id` is None for a scene's take."""
 
     scene_id: str
-    unit_id: str
+    unit_id: str | None
     reason: str
 
 
@@ -164,6 +211,36 @@ def audio_key(text: str, voice_id: int, mode: str, instruction: str | None) -> s
     """The hash of what a unit's audio depends on."""
     recorded = json.dumps(
         {"text": text, "voice_id": voice_id, "mode": mode, "instruction": instruction},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(recorded.encode("utf-8")).hexdigest()
+
+
+def is_continuous(project: Project) -> bool:
+    """Whether the project speaks each scene as one take (FLOW-003)."""
+    return project.voice_track == projects.VOICE_CONTINUOUS
+
+
+def take_text(units: list[dict[str, Any]]) -> str:
+    """What a scene's take says: its unit texts in order, joined with one space. Units are slices
+    of the script, so nothing is added: a unit that ends at a comma stays a comma.
+    """
+    return " ".join(str(unit["text"]).strip() for unit in units)
+
+
+def take_key(text: str, voice_id: int, instruction: str) -> str:
+    """The hash of what a scene's take depends on. It records that it is a take, so it can never
+    equal a unit's key even when a scene has one unit that says the same.
+    """
+    recorded = json.dumps(
+        {
+            "take": True,
+            "text": text,
+            "voice_id": voice_id,
+            "mode": TAKE_MODE,
+            "instruction": instruction,
+        },
         sort_keys=True,
         ensure_ascii=False,
     )
@@ -376,6 +453,88 @@ def _unit_entry(
     )
 
 
+def _take_reasons(
+    previous: SpeechUnitAudio, text: str, voice_id: int, instruction: str
+) -> list[str]:
+    """Why a take made for the scene earlier no longer matches it."""
+    reasons: list[str] = []
+    if previous.text != text:
+        reasons.append("The text of this scene has changed since the take was made.")
+    if previous.voice_id != voice_id:
+        reasons.append("The presenter's voice has changed since the take was made.")
+    if previous.instruction != instruction:
+        reasons.append("The delivery has changed since the take was made.")
+    return reasons or ["This scene has changed since the take was made."]
+
+
+def _take_entry(
+    text: str,
+    instruction: str,
+    scene_refusal: str | None,
+    choice: _VoiceChoice,
+    by_key: dict[str, list[SpeechUnitAudio]],
+    earlier_takes: list[SpeechUnitAudio],
+    jobs: dict[int, Job],
+) -> TakeEntry:
+    """The take of one scene. It follows the rules of `_unit_entry`."""
+    voice = choice.voice
+    if voice is None:
+        return TakeEntry(
+            text=text,
+            status="unavailable",
+            reasons=[],
+            voice=None,
+            instruction=instruction,
+            audio=None,
+            error=None,
+            can_run=False,
+            blocked_reason=choice.refusal,
+            job=None,
+        )
+
+    rows = by_key.get(take_key(text, voice.id, instruction), [])
+    stored = next((row for row in rows if row.path is not None), None)
+    newest = rows[0] if rows else None
+    newest_job = jobs.get(newest.job_id) if newest is not None and newest.job_id else None
+
+    status: Status
+    reasons: list[str] = []
+    error: str | None = None
+    if (
+        newest is not None
+        and newest.path is None
+        and (newest_job is not None and newest_job.status in store.ACTIVE_STATUSES)
+    ):
+        status = "in_progress"
+    elif stored is not None:
+        status = "ready"
+    elif newest is not None:
+        status, error = "failed", _job_error(newest_job)
+    else:
+        earlier = next((row for row in earlier_takes if row.path is not None), None)
+        if earlier is None:
+            status = "none"
+        else:
+            status = "out_of_date"
+            reasons = _take_reasons(earlier, text, voice.id, instruction)
+
+    blocked = scene_refusal
+    if blocked is None and status == "in_progress":
+        blocked = _ALREADY_BEING_MADE
+    return TakeEntry(
+        text=text,
+        status=status,
+        reasons=reasons,
+        voice=voice,
+        instruction=instruction,
+        audio=stored,
+        error=error,
+        can_run=blocked is None,
+        blocked_reason=blocked,
+        job=newest_job,
+    )
+
+
 def _scene_refusal(entry: speech_units.SceneEntry) -> str | None:
     """Why this scene's units cannot be made now, from its plan, or None."""
     if entry.row is None:
@@ -396,12 +555,19 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
     jobs = await _jobs_of(session, rows)
     by_key: dict[str, list[SpeechUnitAudio]] = {}
     by_unit: dict[tuple[str, str], list[SpeechUnitAudio]] = {}
+    takes_by_scene: dict[str, list[SpeechUnitAudio]] = {}
     for row in rows:  # newest first, so each list is too
         by_key.setdefault(row.audio_key, []).append(row)
-        by_unit.setdefault((row.scene_id, row.unit_id), []).append(row)
+        if row.kind == KIND_TAKE:
+            takes_by_scene.setdefault(row.scene_id, []).append(row)
+        elif row.unit_id is not None:
+            by_unit.setdefault((row.scene_id, row.unit_id), []).append(row)
 
     narrator = await _narrator_choice(session, project)
     characters = await _character_choices(session, project, names)
+    continuous = is_continuous(project)
+    # One instruction for every take of the project (FLOW-003, F-3).
+    delivery = await explainer.presenter_delivery(session, project) if continuous else ""
 
     scenes: list[SceneAudio] = []
     for entry in planned.entries:
@@ -420,13 +586,31 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
                     unit, entry.item["id"], scene_refusal, choice, by_key, by_unit, jobs, speaker
                 )
             )
-        scenes.append(SceneAudio(scene=entry, units=units))
+        take: TakeEntry | None = None
+        if continuous:
+            # The units are not spoken one by one: the scene is, as one take.
+            units = [
+                replace(unit, can_run=False, blocked_reason=unit.blocked_reason or _SPOKEN_AS_TAKE)
+                for unit in units
+            ]
+            if units:
+                take = _take_entry(
+                    take_text([unit.unit for unit in units]),
+                    delivery,
+                    scene_refusal,
+                    narrator,
+                    by_key,
+                    takes_by_scene.get(entry.item["id"], []),
+                    jobs,
+                )
+        scenes.append(SceneAudio(scene=entry, units=units, take=take))
     return AudioState(
         scenes_version=planned.scenes_version,
         scenes=scenes,
         blocked_reason=planned.blocked_reason,
         narrator=narrator,
         characters=characters,
+        continuous=continuous,
     )
 
 
@@ -542,6 +726,116 @@ async def start_unit(session: AsyncSession, project: Project, scene_id: str, uni
     return job
 
 
+async def _queue_take(
+    session: AsyncSession,
+    project: Project,
+    scene: SceneAudio,
+    take: TakeEntry,
+    choice: _VoiceChoice,
+) -> tuple[Job, bool]:
+    """Queues the job and adds the audio row of one scene's take that `can_run`. Flushes, does
+    not commit. Returns `(job, created)`: the job already making this very take when it was not.
+    The job is the one a unit's speech uses: the take is one long text, made in pieces of at most
+    1000 characters with one voice, seed and guidance (`jobs/synthesize_speech`).
+    """
+    voice, instruction, text = take.voice, take.instruction, take.text
+    assert voice is not None  # `can_run` made sure
+    key = take_key(text, voice.id, instruction)
+    plan_row = scene.scene.row
+    assert plan_row is not None  # the scene refusal made sure
+    scene_id = scene.scene.item["id"]
+
+    job, created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=JOB_TYPE,
+        provider="gpu",
+        input={
+            "requested": JOB_TYPE,
+            DEDUPE_KEY: key,
+            "project_id": project.id,
+            "scene_id": scene_id,
+            "take": True,
+            "mode": TAKE_MODE,
+            "chunks": speech_chunks.split_script(text),
+            "instruction": instruction,
+            "seed": secrets.randbelow(speech_synthesizer.SEED_MAX + 1),
+            "cfg_scale": speech_synthesizer.default_cfg_scale(instruction),
+            # What the job needs of the voice, copied now: a later edit changes nothing for it.
+            "reference": {
+                "voice_id": voice.id,
+                "path": voice.path,
+                "mime": voice.mime,
+                "text": voice.transcript,
+            },
+        },
+        commit=False,
+        dedupe_key=DEDUPE_KEY,
+    )
+    if not created:
+        return job, False
+
+    session.add(
+        SpeechUnitAudio(
+            project_id=project.id,
+            scene_id=scene_id,
+            unit_id=None,
+            kind=KIND_TAKE,
+            speaker_id=None,
+            text=text,
+            mode=TAKE_MODE,
+            instruction=instruction,
+            voice_id=voice.id,
+            audio_key=key,
+            job_id=job.id,
+            inputs={
+                "project_id": project.id,
+                "artifacts": [
+                    {"kind": "speech_units", "id": plan_row.id, "version": plan_row.version}
+                ],
+                "voice": choice.source,
+                "delivery": instruction,
+            },
+        )
+    )
+    await session.flush()
+    _logger.info(
+        "project %d: take started for scene '%s': voice=%d job=%d",
+        project.id,
+        scene_id,
+        voice.id,
+        job.id,
+    )
+    return job, True
+
+
+def _find_take(current: AudioState, scene_id: str) -> tuple[SceneAudio, TakeEntry]:
+    scene = next((item for item in current.scenes if item.scene.item["id"] == scene_id), None)
+    if scene is None:
+        raise SpeechSynthesisError(f"There is no scene '{scene_id}' in the newest list of scenes.")
+    if scene.take is None:
+        raise SpeechSynthesisError(
+            f"Scene '{scene_id}' has no take: only a continuous explainer speaks its scenes as "
+            "takes, and the scene needs speech units."
+        )
+    return scene, scene.take
+
+
+async def start_take(session: AsyncSession, project: Project, scene_id: str) -> Job:
+    """Makes the take of one scene (again if it is made) and commits. Raises
+    SpeechSynthesisError.
+    """
+    current = await state(session, project)
+    if current.blocked_reason is not None:
+        raise SpeechSynthesisError(current.blocked_reason)
+    scene, take = _find_take(current, scene_id)
+    if take.blocked_reason is not None:
+        raise SpeechSynthesisError(take.blocked_reason)
+    job, _created = await _queue_take(session, project, scene, take, current.narrator)
+    await session.commit()
+    return job
+
+
 def _skip_reason(item: UnitEntry) -> str | None:
     """Why "Make all" leaves this unit alone, or None when it starts it."""
     if item.blocked_reason is not None:
@@ -552,8 +846,9 @@ def _skip_reason(item: UnitEntry) -> str | None:
 
 
 async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
-    """Makes every unit that has no current audio and commits once. The others are skipped,
-    with the reason. Raises SpeechSynthesisError when nothing can be made yet.
+    """Makes every unit that has no current audio and commits once (every scene's take for a
+    continuous explainer). The others are skipped, with the reason. Raises SpeechSynthesisError
+    when nothing can be made yet.
     """
     current = await state(session, project)
     if current.blocked_reason is not None:
@@ -562,6 +857,23 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     skipped: list[Skipped] = []
     for scene in current.scenes:
         scene_id = scene.scene.item["id"]
+        if current.continuous:
+            # One take per scene; the units are not spoken one by one.
+            take = scene.take
+            if take is None:
+                continue
+            reason = take.blocked_reason or (
+                "Already made and up to date." if take.status == "ready" else None
+            )
+            if reason is not None:
+                skipped.append(Skipped(scene_id, None, reason))
+                continue
+            job, created = await _queue_take(session, project, scene, take, current.narrator)
+            if created:
+                job_ids.append(job.id)
+            else:
+                skipped.append(Skipped(scene_id, None, "The same take is being made."))
+            continue
         for item in scene.units:
             unit_id = item.unit["id"]
             reason = _skip_reason(item)

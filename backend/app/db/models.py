@@ -1146,7 +1146,9 @@ class SpeechUnitAudio(Base):
 
     `audio_key` is a hash of what the audio depends on (the text, the voice, the Breeze mode and
     the instruction), not of the unit's id, which a new plan renumbers: a unit that did not change
-    keeps its audio. A row is made when the job is queued and is filled in, in the same
+    keeps its audio. A row of kind `take` (FLOW-003) is the one speech of a whole scene of a
+    continuous explainer: it has no `unit_id`, its `text` is the scene's units joined, and its key
+    can never equal a unit's. A row is made when the job is queued and is filled in, in the same
     transaction that finishes the job: `path`, `size_bytes`, `sha256`, `sample_rate` and
     `duration_s`, the length **measured** with ffprobe. They are NULL until then. `inputs` records
     the `speech_units` row and where the voice came from (D-3).
@@ -1154,7 +1156,7 @@ class SpeechUnitAudio(Base):
 
     __tablename__ = "speech_unit_audio"
     __table_args__ = (
-        CheckConstraint("kind IN ('narration', 'dialogue')", name="kind_valid"),
+        CheckConstraint("kind IN ('narration', 'dialogue', 'take')", name="kind_valid"),
         CheckConstraint("mode IN ('clone', 'direction')", name="mode_valid"),
         Index("idx_speech_unit_audio_project_key", "project_id", "audio_key"),
         Index("idx_speech_unit_audio_project_scene", "project_id", "scene_id"),
@@ -1163,9 +1165,10 @@ class SpeechUnitAudio(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
     scene_id: Mapped[str]
-    unit_id: Mapped[str]
+    # NULL for a take (FLOW-003): the one speech of a whole scene of a continuous explainer.
+    unit_id: Mapped[str | None] = mapped_column(default=None)
     kind: Mapped[str]
-    # The discovered character's slug id, NULL for narration.
+    # The discovered character's slug id, NULL for narration and for a take.
     speaker_id: Mapped[str | None] = mapped_column(default=None)
     text: Mapped[str]
     mode: Mapped[str]
