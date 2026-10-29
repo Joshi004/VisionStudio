@@ -579,7 +579,9 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "a speech is made, Parakeet listens to it and its words are matched to the script's "
             "words. At least this share of the script's words must match for the heard times to "
             "be used. Below it, each word is given its share of the speech's length instead, "
-            "and the board marks the speech as estimated."
+            "and the board marks the speech as estimated. The same bar applies to the take of "
+            "a scene of a continuous explainer: a take below it cannot be cut on, and has to "
+            "be made again."
         ),
         value_type="integer",
         default=70,

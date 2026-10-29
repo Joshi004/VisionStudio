@@ -7,7 +7,8 @@ ones. `store_result` stores the WAV under the project's media folder and fills i
 `speech_unit_audio` row the job was queued with (`services/speech_synthesis.py`): the file, its
 checksum and the **measured** length, in one transaction with the finished job. For an explainer
 with captions or callouts on, the job that times the words of the speech is queued in that same
-transaction (`jobs/time_speech_words.py`, EXPLAINER-007).
+transaction (`jobs/time_speech_words.py`, EXPLAINER-007). The same holds for the take of a scene
+of a continuous explainer, which is timed whatever captions and callouts say (FLOW-004).
 """
 
 from __future__ import annotations
@@ -62,11 +63,12 @@ class SynthesizeSpeechUnitHandler(SpeechHandler):
                 # An explainer with captions or callouts on needs the time of each word of
                 # this speech (EXPLAINER-007). The job is saved with the speech.
                 project = await session.get(Project, job.project_id)
-                # A scene's take (FLOW-003) is timed by FLOW-004, not here.
-                if (
-                    project is not None
-                    and row.kind != speech_synthesis.KIND_TAKE
-                    and word_timings.wanted(project)
+                # A scene's take (FLOW-003) is always timed in a continuous explainer, because
+                # the cut planning needs its words (FLOW-004).
+                if project is not None and (
+                    word_timings.times_takes(project)
+                    if row.kind == speech_synthesis.KIND_TAKE
+                    else word_timings.wanted(project)
                 ):
                     await word_timings.queue(session, row, commit=False)
                     queued_timing = True

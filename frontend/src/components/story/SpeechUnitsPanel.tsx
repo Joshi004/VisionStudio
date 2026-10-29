@@ -37,7 +37,7 @@ import { ArtifactViewer } from "./ArtifactViewer";
 import { PromptHoverCard } from "./PromptHoverCard";
 import { ReplaceManualModal } from "./ReplaceManualModal";
 import { SpeechUnitsEditor } from "./SpeechUnitsEditor";
-import { SpeechUnitsView } from "./SpeechUnitsView";
+import { SpeechUnitsView, TimingBadge } from "./SpeechUnitsView";
 
 type SpeechUnitsPanelProps = {
   projectId: number;
@@ -99,6 +99,7 @@ function TakeLine({ take, busy, onMake }: TakeLineProps) {
             {take.voice_name}, directed
           </Text>
         )}
+        {take.word_timing !== null && <TimingBadge timing={take.word_timing} />}
         <Button
           size="compact-xs"
           variant="default"
@@ -125,6 +126,13 @@ function TakeLine({ take, busy, onMake }: TakeLineProps) {
       {take.error !== null && (
         <Text size="xs" c="red">
           {take.error}
+        </Text>
+      )}
+      {take.word_timing?.status === "estimated" && (
+        <Text size="xs" c="red">
+          Too few words matched ({take.word_timing.match_percent ?? 0}% of{" "}
+          {take.word_timing.threshold ?? 0}% needed) to cut on. Make the take
+          again.
         </Text>
       )}
       {take.blocked_reason !== null && take.status !== "in_progress" && (

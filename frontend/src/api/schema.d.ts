@@ -12518,6 +12518,7 @@ export interface components {
             /** Blocked Reason */
             blocked_reason: string | null;
             job: components["schemas"]["DiscoveryJobOut"] | null;
+            word_timing: components["schemas"]["WordTimingOut"] | null;
         };
         /**
          * SpeechUnitAudioOut

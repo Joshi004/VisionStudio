@@ -7,7 +7,7 @@ Today an explainer's speech is made line by line, and each line decides the pict
 
 This plan fixes both at the root: **the voice is made first, as one continuous take per scene, and the picture is cut on top of it.** The same recording plays whether the presenter is seen or not, so the pace cannot change at a cut, and a cut can fall on any word.
 
-- The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) apply unchanged. Table and column details go in `DATABASE_STRUCTURE.md`. The newest migration when this was written was `0074`; the Audio video lab added `0075`, FLOW-002 added `0076` and FLOW-003 added `0077`.
+- The conventions of `Implementation_phases.md` (§3.3 to §3.5, §6) apply unchanged. Table and column details go in `DATABASE_STRUCTURE.md`. The newest migration when this was written was `0074`; the Audio video lab added `0075`, FLOW-002 added `0076` and FLOW-003 added `0077`; FLOW-004 added no migration.
 - Written 2026-10-29, from a design discussion with the owner about narration pace and cutting to B-roll mid-sentence.
 - FLOW-001 is a go/no-go trial. Nothing else starts until it passes. It passed on 2026-10-29 (see its result).
 
@@ -195,7 +195,7 @@ Checked on throwaway data: migration `0077` up, down and up again (with a word t
 
 ### FLOW-004 — Word timings of the take, and each unit's span
 
-**Status:** Not Started
+**Status:** Done (2026-10-29). Playing the timings back against the GPU server is the owner's (see the completion notes).
 
 **Objective.** Give every word of a take its time, and work out where each speech unit starts and ends inside it.
 
@@ -223,11 +223,26 @@ Checked on throwaway data: migration `0077` up, down and up again (with a word t
 - Standard checks.
 
 **Completion checklist.**
-- [ ] Timing on takes, unit spans
-- [ ] Block on a poor match, board
-- [ ] Docs, standard checks
+- [x] Timing on takes, unit spans
+- [x] Block on a poor match, board
+- [x] Docs, standard checks
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Done on 2026-10-29. No migration. Decisions made in planning:
+
+- **Storage.** A take's timing is a `speech_word_timing` row for its `speech_unit_audio` row (kind `take`). No new table, no new job type: `time_speech_words` already times `audio.text` against `audio.duration_s`.
+- **Threshold.** The same setting, `word_timing_match_threshold` (70 percent). A take below it gets estimated timing, as any speech does, and is blocked from cut planning. The setting's help text says so.
+- **Unit spans (tight).** A unit's span is the start of its first word to the end of its last word. Spans are in order and never overlap, and the pauses between units belong to no unit. They are worked out on every read from the take's timed words and the scene's current units, never stored. A take is only `ready` when its text is the current units joined, so the word counts line up; if they do not, the clock is blocked with a message.
+
+What was built:
+
+- `services/word_timings.times_takes(project)` and `wanted(project)`: a continuous explainer is always timed, whatever `captions` and `callouts` say. `synthesize_speech_unit.store_result` queues the timing job in the same transaction that stores a take (for a continuous explainer), and a unit's as before.
+- `services/take_timings.py`: `unit_spans` (pure: each unit takes the next `len(text.split())` words, the split `align` uses) and `scene_clocks`, which gives each scene with a take its words and unit spans, or `blocked_reason`: no current take, being made, out of date, not timed yet or failed, or estimated ("Only X% of this take's words matched what was heard (Y% needed), which is too few to cut on. Make the scene's take again."). FLOW-005 reads it; nothing else does yet.
+- Pipeline step "Time the words": for a continuous explainer, one target per scene take (`take:{scene_id}`). An estimated take is not done and carries the poor-match reason, so a run stops there and says why; a take being made is active. The step graph is unchanged (`shot_plans` does not wait on it), so a `lines` explainer is not affected.
+- Board: `GET .../speech-audio` gives each take a `word_timing`; the take line shows the same badge as a unit ("Words timed", "Timing estimated" and so on) and, for an estimated take, a red line with the match and the threshold. `schema.d.ts` was regenerated from the local code (one new line).
+
+Checked on stand-in data (the state functions replaced by fixed values): `wanted` and `times_takes` for a continuous explainer, a `lines` explainer with captions on, and a story; a three-unit take run through `word_timings.align`, with spans of 0 to 1.9 s, 2.0 to 2.9 s and 3.0 to 4.4 s (in order, no overlap, every word in exactly one unit, a hyphenated word kept whole, a unit with extra spaces); units that give too few words, too many words, or an empty unit refused; `scene_clocks` and the step's targets for a ready and timed take, an estimated one (blocked with the percentages), a take not made, out of date, being made, not timed and failed, and a scene with no units (no clock); a `lines` project has no clocks. Ruff, `npm run lint` and `npm run typecheck` pass. There are no automated tests, as asked. Not run: a real timing job on stored speech (it needs the GPU server).
+
+**Still for the owner (needs the GPU server and listening):** rebuild the backend image (`docker compose up -d --build backend`), then make the takes of one continuous explainer and let the "Time the words" step time them. For a sample of words, play the take and check that the times land within about 0.1 s. Parakeet has only been tried on takes of the length used in FLOW-001, so how well it matches a long scene (and so how often the 70 percent bar blocks a take) is not yet known. No existing take is timed automatically: a take made before this phase is timed by the step the first time it runs.
 
 ### FLOW-005 — Cut planning on the voice
 
@@ -428,7 +443,7 @@ Make project 42's script again as a new continuous explainer, in portrait, with 
 | FLOW-001 | Done | Passed 2026-10-29 in the Audio video lab. Always `fully_copy`; the take is the default voice, with a per-shot switch to the clip's voice (F-9). |
 | FLOW-002 | Done | 2026-10-29. Migration `0076`. Delivery text: owner's, else Story Bible narration, else a default; editable; no scene override. |
 | FLOW-003 | Done | 2026-10-29. Migration `0077`. Takes are `speech_unit_audio` rows (kind `take`), per scene, units joined with one space. Not timed yet (FLOW-004). |
-| FLOW-004 | Not Started | |
+| FLOW-004 | Done | 2026-10-29. No migration. Takes are timed by the same job and table; unit spans are worked out on read (`take_timings`); an estimated take blocks cut planning. Owner checks the timings by playback. |
 | FLOW-005 | Not Started | |
 | FLOW-006 | Not Started | |
 | FLOW-007 | Not Started | |

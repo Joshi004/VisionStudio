@@ -62,6 +62,7 @@ export function useSpeechAudio(projectId: number) {
       current.state.data?.scenes.some(
         (scene) =>
           scene.take?.status === "in_progress" ||
+          scene.take?.word_timing?.status === "in_progress" ||
           scene.units.some(
             (unit) =>
               unit.status === "in_progress" ||

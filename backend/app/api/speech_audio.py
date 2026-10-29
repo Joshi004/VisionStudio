@@ -137,6 +137,9 @@ class SpeechTakeOut(BaseModel):
     can_run: bool
     blocked_reason: str | None
     job: DiscoveryJobOut | None
+    # The time of each word of the stored take (FLOW-004). None until the take has stored audio
+    # (and for a project that does not time its takes).
+    word_timing: WordTimingOut | None
 
 
 class SpeechSceneAudioOut(BaseModel):
@@ -221,7 +224,9 @@ def _audio_out(audio: SpeechUnitAudio | None) -> SpeechAudioOut | None:
     )
 
 
-def _take_out(take: TakeEntry | None) -> SpeechTakeOut | None:
+def _take_out(
+    take: TakeEntry | None, timings: dict[int, word_timings.TimingEntry] | None
+) -> SpeechTakeOut | None:
     if take is None:
         return None
     return SpeechTakeOut(
@@ -236,6 +241,11 @@ def _take_out(take: TakeEntry | None) -> SpeechTakeOut | None:
         can_run=take.can_run,
         blocked_reason=take.blocked_reason,
         job=_job_out(take.job),
+        word_timing=(
+            _word_timing_out(timings.get(take.audio.id))
+            if timings is not None and take.audio is not None
+            else None
+        ),
     )
 
 
@@ -258,7 +268,7 @@ async def get_speech_audio(project_id: int, session: SessionDep) -> SpeechAudioS
             SpeechSceneAudioOut(
                 scene_id=scene.scene.item["id"],
                 units=[_unit_out(item, timings) for item in scene.units],
-                take=_take_out(scene.take),
+                take=_take_out(scene.take, timings),
             )
             for scene in current.scenes
         ],

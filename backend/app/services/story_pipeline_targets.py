@@ -66,6 +66,7 @@ from app.services import (
     story_bible,
     story_renders,
     story_voices,
+    take_timings,
     word_timings,
 )
 from app.services.projects import SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION
@@ -1514,6 +1515,52 @@ async def _evaluate_word_timings(
     targets: list[Target] = []
     for scene in state.scenes:
         scene_id = scene.scene.item["id"]
+        if state.continuous:
+            # A continuous explainer times each scene's take, not its units (FLOW-004).
+            take = scene.take
+            if take is None:
+                continue
+            take_label = f"Scene {scene.scene.item.get('index')}, voice take"
+            take_audio = take.audio
+            if take_audio is None or take.status != "ready":
+                # The speech step owns the take: here it only has to be there before it is timed.
+                targets.append(
+                    Target(
+                        f"take:{scene_id}",
+                        take_label,
+                        False,
+                        active=take.status == "in_progress",
+                        block=None
+                        if take.status == "in_progress"
+                        else take_timings.blocked_reason_of(take, None),
+                        group=scene_id,
+                    )
+                )
+                continue
+            take_entry = timings.get(take_audio.id)
+            take_status = take_entry.status if take_entry is not None else "none"
+            take_timing = take_entry.timing if take_entry is not None else None
+            targets.append(
+                Target(
+                    f"take:{scene_id}",
+                    take_label,
+                    take_status == "timed",
+                    active=take_status == "in_progress",
+                    # Estimated timing is not good enough to cut on: nothing to retry but the take.
+                    block=(
+                        take_timings.poor_match_reason(
+                            take_timing.match_percent if take_timing is not None else None,
+                            take_timing.threshold if take_timing is not None else None,
+                        )
+                        if take_status == "estimated"
+                        else None
+                    ),
+                    last_error=take_entry.error if take_entry is not None else None,
+                    ref=(scene_id, str(take_audio.id)),
+                    group=scene_id,
+                )
+            )
+            continue
         for unit in scene.units:
             unit_id = unit.unit["id"]
             key = f"unit:{scene_id}/{unit_id}"
@@ -1555,7 +1602,8 @@ async def _start_word_timings(
         session,
         targets,
         deadline,
-        lambda target: _ids_of(word_timings.start(session, project, int(target.ref[2]))),
+        # The audio id is the last of the ref: a unit's has three parts, a take's two.
+        lambda target: _ids_of(word_timings.start(session, project, int(target.ref[-1]))),
     )
 
 

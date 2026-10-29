@@ -48,7 +48,7 @@ function timingHint(timing: WordTiming): string | null {
   return timing.status === "failed" ? timing.error : null;
 }
 
-function TimingBadge({ timing }: { timing: WordTiming }) {
+export function TimingBadge({ timing }: { timing: WordTiming }) {
   if (timing.status === "none") {
     return null;
   }

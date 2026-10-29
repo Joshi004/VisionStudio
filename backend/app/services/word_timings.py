@@ -5,6 +5,11 @@ and an end time for each word of its **script** (never a transcript). The TTS pr
 word times, so Parakeet transcribes the speech's WAV (`jobs/time_speech_words.py`) and `align`
 matches the heard words back to the script's words.
 
+The take of a scene of a continuous explainer (FLOW-003) is timed the same way, always, because
+the cut planning needs its words (FLOW-004): it is a `speech_unit_audio` row like a unit's, so
+its timing is a `speech_word_timing` row too. Where each unit sits in the take is
+`services/take_timings.py`.
+
 Two halves:
 
 - `align`: pure rules, no I/O. The script text, the heard words, the speech's length and the
@@ -40,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project, SpeechUnitAudio, SpeechWordTiming
 from app.jobs import store
 from app.providers.transcriber import SpokenWord
+from app.services import projects
 from app.services.dialogue_check import normalize_words
 from app.services.project_kinds import KIND_EXPLAINER
 
@@ -244,11 +250,21 @@ def align(text: str, spoken: Sequence[SpokenWord], duration_s: float, threshold:
 # --- Which projects, queueing, state ------------------------------------------------------
 
 
+def times_takes(project: Project) -> bool:
+    """Whether the project's scene takes get word timings (FLOW-004): a continuous explainer,
+    always, whatever its `captions` and `callouts` say, because the cut planning needs them.
+    """
+    return project.kind == KIND_EXPLAINER and project.voice_track == projects.VOICE_CONTINUOUS
+
+
 def wanted(project: Project) -> bool:
     """Whether the project's speeches get word timings: an explainer whose captions or callouts
-    are on. A story never does.
+    are on, and a continuous explainer always (its takes are timed, FLOW-004). A story never
+    does.
     """
-    return project.kind == KIND_EXPLAINER and (project.captions or project.callouts)
+    return project.kind == KIND_EXPLAINER and (
+        project.captions or project.callouts or times_takes(project)
+    )
 
 
 async def queue(
@@ -340,7 +356,8 @@ async def start(session: AsyncSession, project: Project, audio_id: int) -> Job:
     """Queues the timing of one stored speech and commits. Raises WordTimingError."""
     if not wanted(project):
         raise WordTimingError(
-            "Word timings are only made for an explainer with captions or callouts on."
+            "Word timings are only made for an explainer with captions or callouts on, or one "
+            "that speaks in continuous takes."
         )
     audio = await session.get(SpeechUnitAudio, audio_id)
     if audio is None or audio.project_id != project.id:
