@@ -49,11 +49,11 @@ parse_answer = discovery_writer.parse_answer
 
 # Hidden reasoning is billed as output, and the answer lists every shot, so this leaves room for
 # both. Qwen3.8 ignores it and uses its own limit (`providers/qwen38.py`).
-MAX_TOKENS: Final = 12000
+MAX_TOKENS: Final = 48000
 REASONING_EFFORT: Final = "high"
 
 SHOT_TYPES: Final = ("establishing", "action", "reaction", "dialogue", "insert", "transition")
-MAX_SHOTS: Final = 60
+MAX_SHOTS: Final = 80
 # PHASE-043: a rapid exchange carries two or three lines of dialogue from exactly two speakers
 # who take turns. Three is the most audios the video model takes as references.
 EXCHANGE_MIN_LINES: Final = 2
@@ -117,6 +117,7 @@ needs; a later step decides those.
 How to plan:
 - The number of shots does not have to equal the number of events. Several short events may be \
 shown by one shot, and one event may need several shots.
+- Plan at most {MAX_SHOTS} shots for the scene.
 - A narration event may span several shots while the same recording plays. List the narration \
 event in each of those shots, and list its speech unit in each of them too; those shots must be \
 consecutive, and together they should last at least as long as the unit's measured length.

@@ -234,20 +234,25 @@ def _choice(value: object, allowed: tuple[str, ...], path: str) -> str:
 
 def _faces_side(
     faces: str,
+    own_zone: str,
     state: dict[str, dict[str, Any]],
     zones: dict[str, dict[str, Any]],
 ) -> str | None:
     """The side of the place that `faces` points at: a side itself, the side of a zone, or the
-    side of the zone the other character stands in. None when it is none of these.
+    side of the zone the other character stands in. None when it is none of these, or when that
+    zone is on the character's own side, where the side alone does not tell the direction.
     """
     if faces in SPATIAL_SIDES:
         return faces
     if faces in zones:
-        return str(zones[faces]["side"])
-    other = state.get(faces)
-    if other is not None:
-        return str(zones[other["zone"]]["side"])
-    return None
+        target_side = str(zones[faces]["side"])
+    elif faces in state:
+        target_side = str(zones[state[faces]["zone"]]["side"])
+    else:
+        return None
+    if target_side == zones[own_zone]["side"]:
+        return None
+    return target_side
 
 
 def _check_placing(
@@ -313,7 +318,7 @@ def _check_state(
     they face behind them, and the two characters of the axis have opposite screen sides.
     """
     for character_id, placing in state.items():
-        side = _faces_side(placing["faces"], state, zones)
+        side = _faces_side(placing["faces"], placing["zone"], state, zones)
         if side is not None and side == placing["background_side"]:
             raise ValueError(
                 f"{character_id} {where} has the {side} side of the place behind them while "
