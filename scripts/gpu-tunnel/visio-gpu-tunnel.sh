@@ -15,7 +15,10 @@
 #      connection then asks the cluster whether the gateway is fine. It closes
 #      the tunnel and goes back to step 1 only when the tunnel's ssh has exited
 #      (network drop, Mac woke from sleep), the gateway moved to another node,
-#      or the gateway stopped answering twice in a row.
+#      the gateway stopped answering twice in a row, almost no data moved
+#      on the link to the cluster for a minute of failed checks (it
+#      is stuck), or checks failed for 10 minutes even though data still
+#      moved. While data keeps moving the tunnel is busy, not dead, so it is kept.
 #
 # It uses port 18012, not 8012, so Cursor's port forwarding can never take it.
 # In VisioStudio, set Settings > GPU server URL to http://localhost:18012.
@@ -52,14 +55,25 @@ CHECK_INTERVAL_S=30
 RETRY_DELAY_S=30
 START_COOLDOWN_S=600
 MAX_START_ATTEMPTS=3
-# Checks in a row that fail through the tunnel while the gateway is fine before
-# the tunnel is reopened anyway (2 x 30 s = 1 minute).
+# Checks in a row that fail through the tunnel while the gateway is fine and
+# nothing at all arrives from the cluster before the tunnel is reopened
+# (2 x 30 s = 1 minute): the tunnel is stuck.
 MAX_SLOW_CHECKS=2
+# How long checks may keep failing while data still moves on the link
+# before the tunnel is reopened anyway. Data arriving means the tunnel is busy
+# with uploads and downloads, not dead, and reopening it would cut them off.
+MAX_BUSY_S=600
+# The least data (bytes sent and received on the link to the cluster, between two
+# checks) that counts as "data still moves". ssh's keep-alives alone are about
+# 1 KB per check; uploads at even 1 Mbit/s move almost 4 MB.
+MIN_BUSY_BYTES=50000
 # Exit status of the lookup when the cluster answers but the gateway does not.
 GATEWAY_DOWN=3
 # BatchMode makes ssh fail instead of waiting for a password nobody can type.
-# ssh closes a dead connection itself after 15 s x 3 = 45 s without an answer.
-SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+# ssh closes a dead connection itself after 15 s x 8 = 2 minutes without an
+# answer. Its keep-alives queue behind upload data, so a shorter wait closes
+# busy tunnels; a stuck one is caught sooner by MAX_SLOW_CHECKS.
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
 
 tunnel_pid=""
 start_attempts=0
@@ -129,6 +143,15 @@ gateway_answers_through_tunnel() {
   curl -s -m 10 "http://127.0.0.1:$LOCAL_PORT/v1/health" | grep -q '"status":"ok"'
 }
 
+# Prints how many bytes the tunnel's ssh (pid $1) has sent to and received from
+# the cluster so far, together. Only its connection to the cluster counts, not
+# the local connections the app uses. Prints 0 when nettop gives nothing, so the
+# tunnel is then judged by MAX_SLOW_CHECKS alone.
+bytes_on_cluster_link() {
+  nettop -L 1 -x -n -m tcp -J bytes_in,bytes_out -p "$1" 2>/dev/null \
+    | awk -F, '$1 ~ /<->/ && $1 !~ /127\.0\.0\.1|::1/ { total += $2 + $3 } END { print total + 0 }'
+}
+
 # A hard kill of this script (launchctl kickstart -k, kill -9) cannot run the
 # trap, so the tunnel's ssh can stay behind and keep the port. At startup, close
 # such a leftover. Only ssh processes that forward LOCAL_PORT are touched, and
@@ -189,13 +212,23 @@ while true; do
   gave_up=0
 
   down_checks=0       # lookups in a row that found the gateway down
-  slow_checks=0       # checks in a row that failed through the tunnel while the gateway was fine
+  failed_checks=0     # checks in a row that failed through the tunnel while the gateway was fine
+  slow_checks=0       # of those, the ones in a row with nothing arriving from the cluster
   busy_logged=0
   reconnect_reason=""
+  last_bytes=$(bytes_on_cluster_link "$tunnel_pid")
   while kill -0 "$tunnel_pid" 2>/dev/null && [ -z "$reconnect_reason" ]; do
     pause "$CHECK_INTERVAL_S"
+    bytes=$(bytes_on_cluster_link "$tunnel_pid")
+    # ssh's own keep-alives add a few hundred bytes every check, so only a real
+    # flow of data counts as the tunnel being busy.
+    data_arrived=0
+    [ $((bytes - last_bytes)) -ge "$MIN_BUSY_BYTES" ] && data_arrived=1
+    last_bytes=$bytes
+
     if gateway_answers_through_tunnel; then
       down_checks=0
+      failed_checks=0
       slow_checks=0
       if [ "$busy_logged" = "1" ]; then
         log "The tunnel answers normally again."
@@ -209,14 +242,23 @@ while true; do
     case $? in
       0)
         down_checks=0
+        failed_checks=$((failed_checks + 1))
         if [ "$current" != "$node $port" ]; then
           reconnect_reason="The gateway moved from $node:$port to ${current// /:}."
+        elif [ "$data_arrived" = "1" ]; then
+          slow_checks=0
+          if [ $((failed_checks * CHECK_INTERVAL_S)) -ge "$MAX_BUSY_S" ]; then
+            reconnect_reason="No answer through the tunnel for $((failed_checks * CHECK_INTERVAL_S)) s, although data still moves on the link."
+          elif [ "$busy_logged" = "0" ]; then
+            log "No answer through the tunnel, but data still moves on the link. Keeping the tunnel (it is busy with transfers)."
+            busy_logged=1
+          fi
         else
           slow_checks=$((slow_checks + 1))
           if [ "$slow_checks" -ge "$MAX_SLOW_CHECKS" ]; then
-            reconnect_reason="No answer through the tunnel for $((slow_checks * CHECK_INTERVAL_S)) s although the gateway is fine."
+            reconnect_reason="No answer through the tunnel and almost no data moved for $((slow_checks * CHECK_INTERVAL_S)) s, although the gateway is fine."
           elif [ "$busy_logged" = "0" ]; then
-            log "No answer through the tunnel, but the gateway is fine on $node. Keeping the tunnel (it may be busy with uploads)."
+            log "No answer through the tunnel and almost no data moving, but the gateway is fine on $node. Checking again."
             busy_logged=1
           fi
         fi

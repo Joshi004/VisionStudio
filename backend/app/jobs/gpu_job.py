@@ -58,11 +58,14 @@ def after_gone_result(
 async def note_uploading(job_id: int, phase: str) -> None:
     """Notes that a job is uploading its files (`phase` says which), and has the uploads it makes
     next show `WAITING_TO_UPLOAD` while they wait for one of the upload places, and `phase`
-    again once they have it. Call it in the job's own task, before the uploads.
+    again once they have it. The first call also puts the job's uploads in line from now
+    (`gpu_server.begin_uploads`), ahead of jobs that begin later. Call it in the job's own
+    task, before the uploads.
     """
 
     async def watcher(waiting: bool) -> None:
         await phase_writer.note(job_id, phases.WAITING_TO_UPLOAD if waiting else phase)
 
     gpu_server.watch_uploads(watcher)
+    gpu_server.begin_uploads()
     await phase_writer.note(job_id, phase)

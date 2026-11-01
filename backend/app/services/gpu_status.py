@@ -75,7 +75,9 @@ async def last_connection_test(session: AsyncSession) -> HealthResult | None:
 
 @dataclass(frozen=True)
 class ServerStatus:
-    state: Literal["reachable", "unreachable", "unknown"]
+    # "busy": the health check got no answer in time, but the server answered another call a
+    # moment ago, so it is slow, not down (`HealthResult.busy`).
+    state: Literal["reachable", "busy", "unreachable", "unknown"]
     checked_at: datetime | None
     called_url: str | None
     error: str | None
@@ -100,8 +102,15 @@ class SystemStatus:
 def _server_status(health: HealthResult | None) -> ServerStatus:
     if health is None:
         return ServerStatus(state="unknown", checked_at=None, called_url=None, error=None)
+    state: Literal["reachable", "busy", "unreachable"]
+    if health.reachable:
+        state = "reachable"
+    elif health.busy:
+        state = "busy"
+    else:
+        state = "unreachable"
     return ServerStatus(
-        state="reachable" if health.reachable else "unreachable",
+        state=state,
         checked_at=health.checked_at,
         called_url=health.called_url,
         error=health.error,

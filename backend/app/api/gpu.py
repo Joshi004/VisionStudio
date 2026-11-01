@@ -38,6 +38,9 @@ class _FromObject(BaseModel):
 
 class ConnectionTest(_FromObject):
     reachable: bool
+    # True when the health check got no answer in time but the server answered another call a
+    # moment ago: it is busy, not down. `reachable` is False then.
+    busy: bool
     called_url: str
     elapsed_ms: int
     http_status: int | None
@@ -102,7 +105,7 @@ async def test_connection(session: SessionDep) -> ConnectionTestResult:
 
 
 class ServerStatusOut(_FromObject):
-    state: Literal["reachable", "unreachable", "unknown"]
+    state: Literal["reachable", "busy", "unreachable", "unknown"]
     checked_at: datetime | None
     called_url: str | None
     error: str | None

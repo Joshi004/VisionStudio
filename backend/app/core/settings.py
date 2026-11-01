@@ -922,14 +922,47 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "many jobs the app keeps waiting at the server, not how many run at once: the "
             "server's own capacity page sets that. A high number keeps the server's queue full, "
             "but the server then decides the order, and a job sent later waits behind the "
-            "earlier ones. Files are sent and fetched at most 5 at a time whatever this "
-            "number is. It applies the next time the app looks for work, and running jobs "
-            "are not stopped."
+            "earlier ones. How many files are sent and fetched at once is set by the two "
+            "settings below, whatever this number is. It applies the next time the app looks "
+            "for work, and running jobs are not stopped."
         ),
         value_type="integer",
         default=4,
         min_value=1,
         max_value=1000,
+    ),
+    SettingSpec(
+        key="max_parallel_uploads",
+        group=GROUP_LIMITS,
+        label="Maximum parallel uploads to the GPU server",
+        help=(
+            "How many files (frames, reference pictures, voices, audio) are sent to the GPU "
+            "server at the same time, all jobs together. Through one SSH tunnel they all share "
+            "one connection, so a higher number does not send more data, it only makes each "
+            "file take longer, and a dropped connection then loses more half-sent files. Raise "
+            "it only on a fast, direct connection. It applies from the next check, and "
+            "uploads already running are not stopped."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=1,
+        max_value=10,
+    ),
+    SettingSpec(
+        key="max_parallel_downloads",
+        group=GROUP_LIMITS,
+        label="Maximum parallel downloads from the GPU server",
+        help=(
+            "How many finished results (clips, pictures, audio, transcripts) are fetched from "
+            "the GPU server at the same time, all jobs together. As with uploads, through one "
+            "SSH tunnel a higher number does not fetch more data, it only makes each result "
+            "take longer. It applies from the next check, and downloads already running are "
+            "not stopped."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=1,
+        max_value=10,
     ),
     SettingSpec(
         key="max_parallel_paid_api_calls",

@@ -16,9 +16,11 @@ anything that is not a usable answer, with a `kind` the caller can act on.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,6 +35,9 @@ from app.db.types import utcnow
 
 HEALTH_PATH = "/v1/health"
 HEALTH_TIMEOUT_S = 5.0
+# A health check with no answer still counts as "busy", not "down", when the server answered
+# some other call this recently. About one check interval at the longest back-off.
+BUSY_WINDOW_S = 120.0
 
 UPLOAD_PATH = "/v1/uploads"
 JOBS_PATH = "/v1/jobs"
@@ -45,13 +50,75 @@ PURGE_TIMEOUT_S = 30.0
 DOWNLOAD_TIMEOUT_S = 600.0
 MESSAGE_MAX_CHARS = 2000
 
+
+class TransferSlots:
+    """At most `limit` transfers at once. A rolling window: a transfer that has to wait gets
+    the first place any transfer gives up, not a place in a later batch. Of the transfers
+    waiting, the one with the lowest `order` gets it; for the same order, the one that asked
+    first.
+
+    The limit can change while transfers run. Lowering it stops none of them: no new one starts
+    until fewer than the new limit are running.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._in_use = 0
+        self._waiting: set[tuple[float, int]] = set()
+        self._asked = itertools.count()
+        self._changed = asyncio.Event()
+
+    @property
+    def limit(self) -> int:
+        return self._limit
+
+    def set_limit(self, limit: int) -> None:
+        if limit < 1:
+            raise ValueError("A transfer limit must be at least 1.")
+        self._limit = limit
+        self._changed.set()
+
+    def locked(self) -> bool:
+        """True when a transfer starting now would have to wait."""
+        return self._in_use >= self._limit or bool(self._waiting)
+
+    @asynccontextmanager
+    async def place(self, order: float) -> AsyncIterator[None]:
+        """Holds one place while the block runs, after waiting for one if none is free."""
+        key = (order, next(self._asked))
+        self._waiting.add(key)
+        try:
+            while self._in_use >= self._limit or min(self._waiting) != key:
+                self._changed.clear()
+                await self._changed.wait()
+        finally:
+            # Taken or given up (cancelled): either way the next in line may go now.
+            self._waiting.discard(key)
+            self._changed.set()
+        self._in_use += 1
+        try:
+            yield
+        finally:
+            self._in_use -= 1
+            self._changed.set()
+
+
 # How many files are sent to the server at once, and how many results are fetched from it at
-# once, however many jobs are running. A rolling window: a job that wants to transfer waits for
-# any one transfer to end, not for a whole batch. The server queues the jobs, so waiting here
-# costs nothing, while hundreds of large transfers at once would choke the connection to it.
-MAX_PARALLEL_UPLOADS = 5
-MAX_PARALLEL_DOWNLOADS = 5
-_upload_slots = asyncio.Semaphore(MAX_PARALLEL_UPLOADS)
+# once, however many jobs are running. The server queues the jobs, so waiting here costs nothing,
+# while many large transfers at once choke the connection to it: through one SSH tunnel they
+# share one connection, so more of them do not move more data, each just takes longer. The
+# dispatcher sets both from the settings on every tick; these values hold until its first one.
+DEFAULT_PARALLEL_UPLOADS = 2
+DEFAULT_PARALLEL_DOWNLOADS = 2
+_upload_slots = TransferSlots(DEFAULT_PARALLEL_UPLOADS)
+_download_slots = TransferSlots(DEFAULT_PARALLEL_DOWNLOADS)
+
+
+def set_transfer_limits(uploads: int, downloads: int) -> None:
+    """Sets how many uploads and how many downloads may run at once, from now on."""
+    _upload_slots.set_limit(uploads)
+    _download_slots.set_limit(downloads)
+
 
 # Told by `upload_file` when the upload has to wait for a free place (True) and when it got one
 # (False), so a job can show "waiting to upload" apart from "uploading". It is set per task (a
@@ -65,7 +132,20 @@ def watch_uploads(watcher: UploadWatcher | None) -> None:
     _upload_watcher.set(watcher)
 
 
-_download_slots = asyncio.Semaphore(MAX_PARALLEL_DOWNLOADS)
+# When the current task's job began uploading (`time.monotonic()`), set per task like the
+# watcher. A free upload place goes to the job that began first, so a job sends all its files
+# and submits before later jobs take their turn. In plain arrival order every job would queue
+# again behind all the others for each of its files: all jobs would advance together and none
+# would submit for a long time, while the server deletes an upload that no submitted job uses
+# 60 minutes after it arrived.
+_upload_order: ContextVar[float | None] = ContextVar("upload_order", default=None)
+
+
+def begin_uploads() -> None:
+    """Marks the current task's job as beginning its uploads now, unless it already has."""
+    if _upload_order.get() is None:
+        _upload_order.set(time.monotonic())
+
 
 # The server's own ids are 32 hex characters. Anything else never goes into a URL path.
 _JOB_ID = re.compile(r"[A-Za-z0-9_-]{1,100}")
@@ -77,7 +157,12 @@ RemoteState = Literal["queued", "running", "succeeded", "failed"]
 
 @dataclass(frozen=True)
 class HealthResult:
-    """The outcome of one health check. Unreachable is a normal outcome, not an error."""
+    """The outcome of one health check. Unreachable is a normal outcome, not an error.
+
+    `busy` is set when the health check got no answer in time but the server answered another
+    call a moment ago: the connection to it is full, the server is not down. `reachable` is
+    then still False, because the health check itself did not succeed.
+    """
 
     reachable: bool
     called_url: str
@@ -86,10 +171,12 @@ class HealthResult:
     default_partition: str | None
     error: str | None
     checked_at: datetime
+    busy: bool = False
 
     def to_json(self) -> dict[str, Any]:
         return {
             "reachable": self.reachable,
+            "busy": self.busy,
             "called_url": self.called_url,
             "elapsed_ms": self.elapsed_ms,
             "http_status": self.http_status,
@@ -115,12 +202,15 @@ class HealthResult:
                 default_partition=data["default_partition"],
                 error=data["error"],
                 checked_at=checked_at,
+                # Results stored before `busy` existed have no such key.
+                busy=data.get("busy", False),
             )
         except (KeyError, TypeError, ValueError):
             return None
 
         types_ok = (
             isinstance(result.reachable, bool)
+            and isinstance(result.busy, bool)
             and isinstance(result.called_url, str)
             and isinstance(result.elapsed_ms, int)
             and (result.http_status is None or isinstance(result.http_status, int))
@@ -138,7 +228,10 @@ def health_url(base_url: str) -> str:
 async def check_health(base_url: str) -> HealthResult:
     """Calls `GET /v1/health` on the GPU server. Never raises for a network problem.
 
-    "Reachable" means HTTP 200 with a JSON object whose `status` is "ok".
+    "Reachable" means HTTP 200 with a JSON object whose `status` is "ok". A health check that
+    got no answer in time, while the server answered another call within `BUSY_WINDOW_S`, is
+    reported `busy`: a connection full of uploads answers a small request late, or not within
+    the time limit. A refused or failed connection is never "busy".
     """
     called_url = health_url(base_url)
     checked_at = utcnow()
@@ -150,6 +243,7 @@ async def check_health(base_url: str) -> HealthResult:
         http_status: int | None = None,
         default_partition: str | None = None,
         error: str | None = None,
+        busy: bool = False,
     ) -> HealthResult:
         return HealthResult(
             reachable=reachable,
@@ -159,6 +253,7 @@ async def check_health(base_url: str) -> HealthResult:
             default_partition=default_partition,
             error=error,
             checked_at=checked_at,
+            busy=busy,
         )
 
     try:
@@ -166,6 +261,13 @@ async def check_health(base_url: str) -> HealthResult:
             "GET", join_url(base_url, HEALTH_PATH), timeout_s=HEALTH_TIMEOUT_S
         )
     except outbound.OutboundError as exc:
+        since_answer = outbound.seconds_since_answer(called_url)
+        if exc.reason == "timeout" and since_answer is not None and since_answer <= BUSY_WINDOW_S:
+            return result(
+                reachable=False,
+                busy=True,
+                error=f"{exc} The server answered another request {since_answer:.0f} s ago.",
+            )
         return result(reachable=False, error=str(exc))
 
     status = response.status_code
@@ -377,15 +479,17 @@ async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> st
     The file is read in a thread, so the event loop is never blocked. The server
     decides the file type from the extension of `filename`.
 
-    At most `MAX_PARALLEL_UPLOADS` uploads run at once; the others wait for a free place before
-    the file is even read, so the files waiting are not held in memory. The time limit starts
+    At most the upload limit (`set_transfer_limits`) run at once; the others wait for a free
+    place before the file is even read, so the files waiting are not held in memory. The job
+    that began uploading first gets the next place (`begin_uploads`). The time limit starts
     when the upload does, not while it waits.
     """
     watcher = _upload_watcher.get()
+    order = _upload_order.get()
     waited = watcher is not None and _upload_slots.locked()
     if watcher is not None and waited:
         await watcher(True)
-    async with _upload_slots:
+    async with _upload_slots.place(time.monotonic() if order is None else order):
         if watcher is not None and waited:
             await watcher(False)
         content = await asyncio.to_thread(path.read_bytes)
@@ -496,7 +600,7 @@ async def job_result_json(base_url: str, job_id: str) -> dict[str, Any]:
     with that `status_code`. 404 arrives as "not_found".
     """
     url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/result")
-    async with _download_slots:  # one of `MAX_PARALLEL_DOWNLOADS`
+    async with _download_slots.place(time.monotonic()):  # see `set_transfer_limits`
         try:
             response = await outbound.request("GET", url, timeout_s=RESULT_TIMEOUT_S)
         except outbound.OutboundError as exc:
@@ -511,11 +615,11 @@ async def download_result(base_url: str, job_id: str, dest: Path) -> outbound.Do
     GpuCallError("rejected") with that `status_code`, and 404 as "not_found". Nothing is
     left at `dest` when this raises.
 
-    At most `MAX_PARALLEL_DOWNLOADS` results are fetched at once; the others wait for a free
-    place, and the time limit starts when the download does.
+    At most the download limit (`set_transfer_limits`) are fetched at once; the others wait for
+    a free place, and the time limit starts when the download does.
     """
     url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/result")
-    async with _download_slots:
+    async with _download_slots.place(time.monotonic()):
         try:
             result = await outbound.download_to_file(url, dest, timeout_s=DOWNLOAD_TIMEOUT_S)
         except outbound.OutboundError as exc:

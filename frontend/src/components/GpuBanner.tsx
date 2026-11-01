@@ -5,9 +5,23 @@ import { Link } from "react-router";
 import { useGpuStatus, type GpuStatus } from "../api/gpu";
 import { formatDateTime } from "../format";
 
-/** The red banner: the server does not answer, or its API could not be fetched. */
+/**
+ * The red banner: the server does not answer, or its API could not be fetched. The yellow one:
+ * the server is busy, so it is slow but not down.
+ */
 function serverBanner(status: GpuStatus): ReactNode {
   const { server, contract } = status;
+
+  if (server.state === "busy") {
+    return (
+      <Alert color="yellow" title="GPU server busy">
+        The server did not answer the last check in time
+        {server.checked_at ? ` (${formatDateTime(server.checked_at)})` : ""}, but it answered
+        another request a moment ago. The connection to it is probably full with transfers, so
+        it is slow, not down. Jobs keep going.
+      </Alert>
+    );
+  }
 
   if (server.state === "unreachable") {
     return (

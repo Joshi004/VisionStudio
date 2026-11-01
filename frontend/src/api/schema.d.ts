@@ -5497,6 +5497,8 @@ export interface components {
         ConnectionTest: {
             /** Reachable */
             reachable: boolean;
+            /** Busy */
+            busy: boolean;
             /** Called Url */
             called_url: string;
             /** Elapsed Ms */
@@ -11346,7 +11348,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "reachable" | "unreachable" | "unknown";
+            state: "reachable" | "busy" | "unreachable" | "unknown";
             /** Checked At */
             checked_at: string | null;
             /** Called Url */

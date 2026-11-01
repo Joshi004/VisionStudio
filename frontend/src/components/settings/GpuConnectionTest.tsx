@@ -16,6 +16,10 @@ function Outcome({ result }: { result: ConnectionTest }) {
           Reachable in {result.elapsed_ms} ms
           {result.default_partition ? ` · default partition ${result.default_partition}` : ""}
         </Text>
+      ) : result.busy ? (
+        <Text c="orange" fw={500}>
+          Busy, not down: {result.error ?? "no reason given"}
+        </Text>
       ) : (
         <Text c="red" fw={500}>
           Unreachable: {result.error ?? "no reason given"}
@@ -33,7 +37,7 @@ function ContractLine({ contract }: { contract: ConnectionTestResult["contract"]
   if (contract === null) {
     return (
       <Text size="sm" c="dimmed">
-        API check skipped: the server is unreachable.
+        API check skipped: the server did not answer the health check.
       </Text>
     );
   }

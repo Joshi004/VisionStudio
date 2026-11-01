@@ -59,6 +59,11 @@ _MAX_LOCATION_CHARS = 200
 _logger = logging.getLogger(__name__)
 _client: httpx.AsyncClient | None = None
 
+# When each server last gave an answer (`host:port` -> `time.monotonic()`), so a caller can tell
+# a server that answers slowly, because the connection to it is full, from one that does not
+# answer at all. Only an answer that is not a server error counts.
+_last_answer: dict[str, float] = {}
+
 # Files of a multipart form: `{field: (filename, content, mime)}`, or a list of
 # `(field, (filename, content, mime))` when a field repeats (Phase 13).
 FileParts = Mapping[str, tuple[str, bytes, str]] | Sequence[tuple[str, tuple[str, bytes, str]]]
@@ -342,7 +347,18 @@ async def _call[T](
         raise OutboundError("connection", f"Could not reach {netloc} ({detail}).") from exc
 
     _log_call(method, final_url, started, str(status_code))
+    if status_code < 500:
+        _last_answer[netloc] = time.monotonic()
     return result, status_code
+
+
+def seconds_since_answer(url: str) -> float | None:
+    """How long ago the server behind `url` last answered a call, or None if it has not since
+    the app started. Any call counts, whoever made it, so a busy upload connection that still
+    completes calls shows as alive.
+    """
+    answered = _last_answer.get(urlsplit(docker_mapped(url)).netloc)
+    return None if answered is None else time.monotonic() - answered
 
 
 @dataclass(frozen=True)

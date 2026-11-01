@@ -9,7 +9,8 @@ task handles are in memory.
 Each tick, which happens every poll interval (a setting) or sooner when something nudges
 the loop:
 
-1. Read the poll interval, the running and the queued jobs, and the limit of each pool. There
+1. Read the poll interval and the upload and download limits (`gpu_server.set_transfer_limits`),
+   the running and the queued jobs, and the limit of each pool. There
    are two shared pools, the GPU server and the paid inference API (`jobs/pools.py`): every
    kind of job counts in the pool of its provider, and has no limit of its own. A language-model
    job counts where its calls go, so one answered by Qwen3.8 is in the GPU server's. A local job
@@ -46,10 +47,12 @@ from app.db.models import Job
 from app.db.session import SessionLocal
 from app.jobs import handlers, phase_writer, phases, pools, register_handlers, store
 from app.jobs.handlers import JobHandler
-from app.providers import contract_guard
+from app.providers import contract_guard, gpu_server
 from app.services import gpu_status
 
 POLL_INTERVAL_KEY: Final = "poll_interval_seconds"
+MAX_PARALLEL_UPLOADS_KEY: Final = "max_parallel_uploads"
+MAX_PARALLEL_DOWNLOADS_KEY: Final = "max_parallel_downloads"
 GPU_URL_KEY: Final = "gpu_api_base_url"
 TRANSCRIPTION_URL_KEY: Final = "transcription_url"
 # How many running jobs are asked about at once in one tick. The rest wait for a free place, so
@@ -177,6 +180,10 @@ class _Dispatcher:
 
         async with SessionLocal() as session:
             interval = await settings_service.get_int(session, POLL_INTERVAL_KEY)
+            gpu_server.set_transfer_limits(
+                await settings_service.get_int(session, MAX_PARALLEL_UPLOADS_KEY),
+                await settings_service.get_int(session, MAX_PARALLEL_DOWNLOADS_KEY),
+            )
             running = await self._jobs(session, "running")
             queued = await self._jobs(session, "queued")
             # By pool: every GPU job and Qwen3.8 call shares the GPU server's slots, every paid
@@ -242,11 +249,13 @@ class _Dispatcher:
     ) -> bool:
         """Checks the GPU server and stores the result for the banner.
 
-        When it does not answer, marks the GPU jobs that are waiting on it and backs off.
+        When it does not answer, marks the GPU jobs that are waiting on it and backs off. A busy
+        server (no answer to the health check, but another call was answered a moment ago) is not
+        waited for: holding every job back would not help a connection that is only full.
         """
         async with SessionLocal() as session:
             health = await gpu_status.record_health(session)
-        if health.reachable:
+        if health.reachable or health.busy:
             self._backoff_s = 0.0
             return True
 
