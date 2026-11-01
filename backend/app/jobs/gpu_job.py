@@ -11,7 +11,8 @@ from __future__ import annotations
 import re
 from typing import Final, Literal
 
-from app.jobs import phases
+from app.jobs import phase_writer, phases
+from app.providers import gpu_server
 from app.providers.gpu_server import GpuCallError
 
 GPU_URL_KEY: Final = "gpu_api_base_url"
@@ -52,3 +53,16 @@ def after_gone_result(
     if remote_status == "succeeded" and result_ready and retries < MAX_RESULT_RETRIES:
         return "try_again"
     return "resubmit" if attempt < phases.MAX_ATTEMPTS else "fail"
+
+
+async def note_uploading(job_id: int, phase: str) -> None:
+    """Notes that a job is uploading its files (`phase` says which), and has the uploads it makes
+    next show `WAITING_TO_UPLOAD` while they wait for one of the upload places, and `phase`
+    again once they have it. Call it in the job's own task, before the uploads.
+    """
+
+    async def watcher(waiting: bool) -> None:
+        await phase_writer.note(job_id, phases.WAITING_TO_UPLOAD if waiting else phase)
+
+    gpu_server.watch_uploads(watcher)
+    await phase_writer.note(job_id, phase)

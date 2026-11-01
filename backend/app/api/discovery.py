@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Path, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
@@ -29,7 +29,7 @@ from app.api.jobs import JobStatus
 from app.api.projects import load_project
 from app.db.models import Project
 from app.db.session import SessionDep
-from app.jobs import dispatcher, store
+from app.jobs import dispatcher, phases, store
 from app.services import discovery as discovery_service
 from app.services import discovery_edits
 from app.services import story_bible as story_bible_service
@@ -81,6 +81,12 @@ class DiscoveryJobOut(BaseModel):
     status: JobStatus
     phase: str | None
     error: str | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def stage(self) -> phases.JobStage:
+        """The step the job is in, worked out from `status` and `phase` (`phases.stage_of`)."""
+        return phases.stage_of(self.status, self.phase)
 
 
 class DiscoveryState(BaseModel):

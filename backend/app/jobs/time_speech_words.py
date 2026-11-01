@@ -34,7 +34,12 @@ from app.core.urls import docker_mapped
 from app.db.models import Job, SpeechUnitAudio, SpeechWordTiming
 from app.db.session import SessionLocal
 from app.jobs import phase_writer, phases, store
-from app.jobs.gpu_job import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
+from app.jobs.gpu_job import (
+    SERVER_RETRY_DELAY_S,
+    is_preemption,
+    note_uploading,
+    phase_for_poll_error,
+)
 from app.jobs.handlers import JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
@@ -90,7 +95,7 @@ class TimeSpeechWordsHandler(JobHandler):
         retried_asset = False
         while True:
             try:
-                await self._phase(job_id, phases.UPLOADING_SPEECH_FOR_TRANSCRIPT)
+                await note_uploading(job_id, phases.UPLOADING_SPEECH_FOR_TRANSCRIPT)
                 remote_asset_id = await gpu_server.upload_file(
                     base_url, path, filename, SPEECH_MIME
                 )

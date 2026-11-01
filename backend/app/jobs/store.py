@@ -102,6 +102,17 @@ def can_resubmit(job: Job) -> bool:
     return is_not_found(job)
 
 
+def priority_of(job: Job) -> int:
+    """How early the dispatcher starts a queued job among the others: a higher number goes
+    first, and jobs with the same number go in the order they were made. A job that has no
+    `input.priority` (nearly all of them) is 0. The clips of shots that other shots continue
+    have one (`services/shot_takes._chain_priority`).
+    """
+    recorded = job.input if isinstance(job.input, dict) else {}
+    value = recorded.get("priority")
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 def is_not_found(job: Job) -> bool:
     return job.status == "running" and job.phase == phases.NOT_FOUND
 

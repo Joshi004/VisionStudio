@@ -38,7 +38,12 @@ from app.db.session import SessionLocal
 from app.db.types import utcnow
 from app.jobs import dispatcher, phase_writer, phases, store
 from app.jobs.generate_shot import start_dependents
-from app.jobs.gpu_job import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
+from app.jobs.gpu_job import (
+    SERVER_RETRY_DELAY_S,
+    is_preemption,
+    note_uploading,
+    phase_for_poll_error,
+)
 from app.jobs.handlers import JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
@@ -92,7 +97,7 @@ class CheckTakeDialogueHandler(JobHandler):
         retried_asset = False
         while True:
             try:
-                await self._phase(job_id, phases.UPLOADING_CLIP_FOR_TRANSCRIPT)
+                await note_uploading(job_id, phases.UPLOADING_CLIP_FOR_TRANSCRIPT)
                 remote_asset_id = await gpu_server.upload_file(base_url, path, filename, CLIP_MIME)
                 await self._phase(job_id, phases.SUBMITTING)
                 provider_job_id = await transcriber.submit(base_url, remote_asset_id, partition)

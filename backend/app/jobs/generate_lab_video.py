@@ -41,7 +41,7 @@ from app.core.urls import docker_mapped
 from app.db.models import Job, LabVideoRun
 from app.db.session import SessionLocal
 from app.jobs import phases, store
-from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S
+from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S, note_uploading
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
@@ -402,7 +402,7 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
                         named.append(("last", plan.last_frame))
                     for name, ref in named:
                         temps.append(await self._frame_png(plan, ref, name))
-                    await self._phase(job.id, phases.UPLOADING_FRAMES)
+                    await note_uploading(job.id, phases.UPLOADING_FRAMES)
                     for (_name, ref), temp in zip(named, temps, strict=True):
                         filename = f"lab-frame-{ref.source}-{ref.id}.png"
                         remote_id = await video_generator.upload_frame(base_url, temp, filename)
@@ -415,14 +415,14 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
                     )
                 image_remote_ids: list[str] = []
                 if plan.references:
-                    await self._phase(job.id, phases.UPLOADING_REFERENCE)
+                    await note_uploading(job.id, phases.UPLOADING_REFERENCE)
                     image_remote_ids = await self._upload_references(base_url, plan, uploads)
                 if plan.endpoint == video_generator.H3_AUDIO_TO_VIDEO_PATH:
                     # The audios are references the model reads, not a soundtrack: each is sent
                     # as it is stored, in order (`<Audio 1>` first). There may be none.
                     audio_remote_ids: list[str] = []
                     if plan.audios:
-                        await self._phase(job.id, phases.UPLOADING_VOICE)
+                        await note_uploading(job.id, phases.UPLOADING_VOICE)
                     for audio in plan.audios:
                         filename, audio_remote_id = await self._upload_audio_reference(
                             base_url, audio, plan.request, temps
@@ -434,7 +434,7 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
                     )
                 elif plan.audios:
                     # A lip-synced clip: its one speech, padded to the clip's length.
-                    await self._phase(job.id, phases.UPLOADING_AUDIO)
+                    await note_uploading(job.id, phases.UPLOADING_AUDIO)
                     filename, audio_remote_id = await self._upload_audio(
                         base_url, plan.audios[0], plan.request, temps
                     )

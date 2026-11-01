@@ -8,7 +8,7 @@ cancelled or resubmitted), so every label lives here once.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Final
+from typing import Final, Literal
 
 # A job is tried at most this many times after pre-emption (ANALYSIS.md Section 5.8).
 MAX_ATTEMPTS: Final = 3
@@ -353,3 +353,109 @@ def preempted(next_attempt: int) -> str:
 
 def asking_model(attempt: int, attempts: int) -> str:
     return f"asking the language model (attempt {attempt} of {attempts})"
+
+
+# --- The stage a job shows: worked out from its status and phase ------------------------------
+# Only five statuses are stored, but a remote GPU job goes through many more steps. The stage
+# names the step for people, and nothing is stored: `stage_of` reads `status` and `phase`.
+JobStage = Literal[
+    "waiting",
+    "paused",
+    "resubmitting",
+    "starting",
+    "waiting_to_upload",
+    "uploading",
+    "waiting_for_gpu",
+    "running_on_server",
+    "fetching_result",
+    "server_unreachable",
+    "not_found",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+# The job has a free slot and is waiting for one of the (at most 5) upload places.
+# Written before the first upload, so a job that waits for its turn is not shown as uploading.
+WAITING_TO_UPLOAD: Final = "waiting to upload"
+
+# The steps in which a job sends its files and its request to the GPU server. A label may carry a
+# suffix (`speech_part`: "submitting (part 2 of 3)"), so these are compared as prefixes.
+_UPLOAD_PHASES: Final = (
+    PREPARING_FRAMES,
+    UPLOADING_FRAMES,
+    UPLOADING_REFERENCE,
+    UPLOADING_AUDIO,
+    UPLOADING_VOICE,
+    UPLOADING_MUSIC_SOURCE,
+    UPLOADING_CLIP_FOR_TRANSCRIPT,
+    UPLOADING_SPEECH_FOR_TRANSCRIPT,
+    SUBMITTING,
+)
+
+# The steps in which the server has finished and the result is fetched, checked and stored.
+_FETCH_PHASES: Final = (
+    *sorted(FINISHING_PHASES),
+    RESULT_NOT_READY,
+    IMAGE_NOT_READY,
+    DOWNLOADING_SPEECH,
+    JOINING_SPEECH,
+    CHECKING_SPEECH,
+    SAVING_SPEECH,
+)
+
+_RESUBMITTING_PREFIXES: Final = ("pre-empted:", EXPIRED, RESTARTED)
+_SERVER_PROBLEM_PREFIXES: Final = (
+    SERVER_UNREACHABLE_CHECKING,
+    WAITING_SERVER_UNREACHABLE,
+    WAITING_SERVER_BUSY,
+    "waiting: the server",
+)
+
+
+def _starts_with(phase: str, labels: Sequence[str]) -> bool:
+    return phase.startswith(tuple(labels))
+
+
+def stage_of(status: str, phase: str | None) -> JobStage:
+    """The stage a job is in, for the badge on the Activity page and in the panels.
+
+    Only a job that goes to the GPU server has the stages between `starting` and
+    `fetching_result`. Any other running job (a language model call, a local job) is `running`.
+    """
+    if status == "succeeded":
+        return "completed"
+    if status == "failed":
+        return "failed"
+    if status == "cancelled":
+        return "cancelled"
+
+    label = phase or ""
+    if status == "queued":
+        if label.startswith(PAUSED_PREFIX):
+            return "paused"
+        if _starts_with(label, _SERVER_PROBLEM_PREFIXES):
+            return "server_unreachable"
+        if _starts_with(label, _RESUBMITTING_PREFIXES):
+            return "resubmitting"
+        return "waiting"
+
+    # Running.
+    if not label or label == STARTING:
+        return "starting"
+    if label == NOT_FOUND:
+        return "not_found"
+    if _starts_with(label, _SERVER_PROBLEM_PREFIXES):
+        return "server_unreachable"
+    if label == WAITING_TO_UPLOAD:
+        return "waiting_to_upload"
+    if _starts_with(label, _UPLOAD_PHASES):
+        return "uploading"
+    if label.startswith(QUEUED_ON_CLUSTER):
+        return "waiting_for_gpu"
+    if label.startswith(RUNNING_ON_CLUSTER):
+        return "running_on_server"
+    if _starts_with(label, _FETCH_PHASES):
+        return "fetching_result"
+    return "running"

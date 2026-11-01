@@ -11,14 +11,14 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionDep
-from app.jobs import dispatcher, handlers, pools, store
+from app.jobs import dispatcher, handlers, phases, pools, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
@@ -106,6 +106,12 @@ class JobSummary(BaseModel):
     last_checked_at: datetime | None
     can_cancel: bool
     can_resubmit: bool
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def stage(self) -> phases.JobStage:
+        """The step the job is in, worked out from `status` and `phase` (`phases.stage_of`)."""
+        return phases.stage_of(self.status, self.phase)
 
 
 class JobDetail(JobSummary):

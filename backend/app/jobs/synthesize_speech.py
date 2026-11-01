@@ -44,7 +44,12 @@ from app.core.urls import docker_mapped
 from app.db.models import Job
 from app.db.session import SessionLocal
 from app.jobs import phase_writer, phases, store
-from app.jobs.gpu_job import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
+from app.jobs.gpu_job import (
+    SERVER_RETRY_DELAY_S,
+    is_preemption,
+    note_uploading,
+    phase_for_poll_error,
+)
 from app.jobs.handlers import JobHandler, PollContext
 from app.providers import gpu_server, speech_synthesizer
 from app.providers.gpu_server import GpuCallError
@@ -192,7 +197,7 @@ class SpeechHandler(JobHandler):
         while True:
             try:
                 if plan.reference is not None and remote_reference_id is None:
-                    await self._phase(job.id, phases.UPLOADING_VOICE)
+                    await note_uploading(job.id, phases.UPLOADING_VOICE)
                     remote_reference_id = await self._upload_reference(base_url, plan.reference)
                 await self._phase(job.id, phases.speech_part(phases.SUBMITTING, plan.part, parts))
                 body = speech_synthesizer.build_body(

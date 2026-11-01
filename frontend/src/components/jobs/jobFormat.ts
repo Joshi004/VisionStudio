@@ -88,6 +88,52 @@ export function statusColor(status: JobSummary["status"]): string {
   return STATUS_COLORS[status];
 }
 
+export type JobStage = JobSummary["stage"];
+
+const STAGE_LABELS: Record<JobStage, string> = {
+  waiting: "Waiting",
+  paused: "Paused",
+  resubmitting: "Submitting again",
+  starting: "Starting",
+  waiting_to_upload: "Waiting to upload",
+  uploading: "Uploading",
+  waiting_for_gpu: "On server, waiting for GPUs",
+  running_on_server: "Running on server",
+  fetching_result: "Fetching result",
+  server_unreachable: "Server not answering",
+  not_found: "Not found on server",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+const STAGE_COLORS: Record<JobStage, string> = {
+  waiting: "gray",
+  paused: "orange",
+  resubmitting: "yellow",
+  starting: "blue",
+  waiting_to_upload: "gray",
+  uploading: "cyan",
+  waiting_for_gpu: "yellow",
+  running_on_server: "blue",
+  fetching_result: "teal",
+  server_unreachable: "orange",
+  not_found: "orange",
+  running: "blue",
+  completed: "green",
+  failed: "red",
+  cancelled: "gray",
+};
+
+export function stageLabel(stage: JobStage): string {
+  return STAGE_LABELS[stage];
+}
+
+export function stageColor(stage: JobStage): string {
+  return STAGE_COLORS[stage];
+}
+
 /** "40 s", "1 min 20 s", "1 h 5 min". */
 export function formatElapsed(totalSeconds: number): string {
   const seconds = Math.max(0, Math.round(totalSeconds));

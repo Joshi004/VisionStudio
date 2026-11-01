@@ -37,7 +37,7 @@ from app.core.urls import docker_mapped
 from app.db.models import Job, LabMusicRun
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, phases, store
-from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S
+from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S, note_uploading
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import gpu_server, music_generator
 from app.providers.gpu_server import GpuCallError
@@ -141,7 +141,7 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
                 body = plan.request
                 uploads: list[dict[str, Any]] = []
                 if plan.source is not None:
-                    await self._phase(job_id, phases.UPLOADING_MUSIC_SOURCE)
+                    await note_uploading(job_id, phases.UPLOADING_MUSIC_SOURCE)
                     path = get_storage().get_path(plan.source.path)
                     remote_id = await gpu_server.upload_file(
                         base_url, path, plan.source.filename, plan.source.mime

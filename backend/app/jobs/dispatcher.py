@@ -19,7 +19,8 @@ the loop:
    120 s, or the poll interval if that is longer).
 3. Ask each running remote job's handler to `poll`. A handler that says "ready" gets its
    `finish` started as a task.
-4. Start queued jobs, oldest first, while their pool has free slots. Before the
+4. Start queued jobs while their pool has free slots: the jobs others wait for first
+   (`input.priority`, the clips of shots that other shots continue), then oldest first. Before the
    first GPU job is started, the GPU API is read and recorded (ANALYSIS.md Section 6.5).
    A change in the API never stops a job: the app is updated to match the server, so
    nobody has to approve a new version to keep working.
@@ -212,6 +213,9 @@ class _Dispatcher:
                 self._warn_missing_handler(job.type)
             elif self._retry_after.get(job.id, 0.0) <= now:
                 waiting.append((job, handler))
+
+        # The jobs that others wait for (a shot that another shot continues) start first.
+        waiting.sort(key=lambda pair: (-store.priority_of(pair[0]), pair[0].id))
 
         gpu_blocked = False
         needs_gpu = any(h.provider == "gpu" for _job, h in pollable) or any(

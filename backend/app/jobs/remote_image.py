@@ -37,6 +37,7 @@ from app.jobs.gpu_job import (
     SERVER_RETRY_DELAY_S,
     after_gone_result,
     is_preemption,
+    note_uploading,
     phase_for_poll_error,
 )
 from app.jobs.handlers import JobHandler, PollContext
@@ -97,7 +98,7 @@ class RemoteImageHandler(JobHandler):
         while True:
             try:
                 if build_body is not None:
-                    await self._phase(job_id, phases.UPLOADING_REFERENCE)
+                    await note_uploading(job_id, phases.UPLOADING_REFERENCE)
                     body, uploads = await build_body()
                     if not await self._is_running(job_id):
                         return  # cancelled while uploading: nothing was submitted

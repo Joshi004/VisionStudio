@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,6 +52,19 @@ MESSAGE_MAX_CHARS = 2000
 MAX_PARALLEL_UPLOADS = 5
 MAX_PARALLEL_DOWNLOADS = 5
 _upload_slots = asyncio.Semaphore(MAX_PARALLEL_UPLOADS)
+
+# Told by `upload_file` when the upload has to wait for a free place (True) and when it got one
+# (False), so a job can show "waiting to upload" apart from "uploading". It is set per task (a
+# job's own task), so it is never mixed up between jobs. See `watch_uploads`.
+UploadWatcher = Callable[[bool], Awaitable[None]]
+_upload_watcher: ContextVar[UploadWatcher | None] = ContextVar("upload_watcher", default=None)
+
+
+def watch_uploads(watcher: UploadWatcher | None) -> None:
+    """Sets who is told about the uploads made by the current task from now on (None: nobody)."""
+    _upload_watcher.set(watcher)
+
+
 _download_slots = asyncio.Semaphore(MAX_PARALLEL_DOWNLOADS)
 
 # The server's own ids are 32 hex characters. Anything else never goes into a URL path.
@@ -366,7 +381,13 @@ async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> st
     the file is even read, so the files waiting are not held in memory. The time limit starts
     when the upload does, not while it waits.
     """
+    watcher = _upload_watcher.get()
+    waited = watcher is not None and _upload_slots.locked()
+    if watcher is not None and waited:
+        await watcher(True)
     async with _upload_slots:
+        if watcher is not None and waited:
+            await watcher(False)
         content = await asyncio.to_thread(path.read_bytes)
         try:
             response = await outbound.upload(

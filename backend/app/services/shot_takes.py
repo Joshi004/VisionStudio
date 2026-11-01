@@ -746,6 +746,30 @@ def _predecessor(scene: SceneEntry, shot: ShotEntry) -> ShotEntry | None:
     return next((item for item in scene.shots if item.shot["id"] == shot.continues_from), None)
 
 
+def _chain_priority(scene: SceneEntry, shot: ShotEntry) -> int:
+    """How early the job of this shot should be sent to the GPU server (0: no hurry).
+
+    A shot that continues another one starts from the last frame of that shot's take, so it
+    cannot be sent before the take is done. The shots that others wait for are therefore sent
+    first: the more shots follow this one in its chain (`continues_from`, one after the other),
+    the higher the number. A shot that continues another one but has none after it gets 1, so
+    it is sent before the shots that belong to no chain; a shot of no chain gets 0.
+    """
+    position = next((i for i, item in enumerate(scene.shots) if item is shot), None)
+    if position is None:
+        return 0
+    following = 0
+    current = shot
+    for later in scene.shots[position + 1 :]:
+        if later.continues_from != current.shot["id"]:
+            break
+        following += 1
+        current = later
+    if following == 0 and shot.continues_from is None:
+        return 0
+    return following + 1
+
+
 async def _make_anchor(
     session: AsyncSession,
     project: Project,
@@ -795,6 +819,7 @@ async def _queue(
     *,
     chain: bool = False,
     predecessor: ShotEntry | None = None,
+    priority: int = 0,
 ) -> tuple[Job, bool]:
     """Adds the take and queues the job of one shot that `can_run`. Flushes, does not commit.
     Returns `(job, created)`: the job already generating the shot when it was not created (no
@@ -804,7 +829,9 @@ async def _queue(
     `predecessor` is the shot a continuity shot continues (PHASE-032): the frame its selected
     take ends on is cut now and sent as the clip's first frame, or as one more reference
     picture (`generation_planner`, Q-7). `chain` records that the shot that continues this one
-    is to be queued by itself once this take is selected. Raises ShotTakesError.
+    is to be queued by itself once this take is selected. `priority` (`_chain_priority`) is
+    stored on the job: the dispatcher starts a job with a higher number first. Raises
+    ShotTakesError.
     """
     request_row = (
         await session.get(GenerationRequest, prompt.generation_request_id)
@@ -858,6 +885,8 @@ async def _queue(
             "last_frame": None,
             "references": references,
             "audios": audios,
+            # Read by the dispatcher (`store.priority_of`): the shots others wait for go first.
+            "priority": priority,
         },
         commit=False,
         dedupe_key=DEDUPE_KEY,
@@ -1029,6 +1058,7 @@ async def _start_shots(
                 prompt,
                 chain=True,
                 predecessor=by_id.get(shot.continues_from) if shot.continues_from else None,
+                priority=_chain_priority(scene, shot),
             )
         except ShotTakesError as exc:
             result.skipped.append(Skipped(scene_id, shot_id, title, str(exc)))
@@ -1335,6 +1365,7 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
             # A retry keeps what the failed take was part of: a chain goes on through it.
             chain=_is_chained(take),
             predecessor=_predecessor(scene, shot),
+            priority=_chain_priority(scene, shot) if _is_chained(take) else 0,
         )
     except ShotTakesError as exc:
         await session.rollback()
@@ -1412,6 +1443,7 @@ async def start_dependents(session: AsyncSession, take_id: int) -> Job | None:
             prompt,
             chain=True,
             predecessor=shot,
+            priority=_chain_priority(scene, dependent),
         )
     except ShotTakesError as exc:
         await session.rollback()

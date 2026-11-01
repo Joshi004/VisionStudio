@@ -5955,6 +5955,12 @@ export interface components {
             phase: string | null;
             /** Error */
             error: string | null;
+            /**
+             * Stage
+             * @description The step the job is in, worked out from `status` and `phase` (`phases.stage_of`).
+             * @enum {string}
+             */
+            readonly stage: "waiting" | "paused" | "resubmitting" | "starting" | "waiting_to_upload" | "uploading" | "waiting_for_gpu" | "running_on_server" | "fetching_result" | "server_unreachable" | "not_found" | "running" | "completed" | "failed" | "cancelled";
         };
         /** DiscoveryOut */
         DiscoveryOut: {
@@ -7036,6 +7042,12 @@ export interface components {
             output: unknown;
             /** Result Asset Id */
             result_asset_id: number | null;
+            /**
+             * Stage
+             * @description The step the job is in, worked out from `status` and `phase` (`phases.stage_of`).
+             * @enum {string}
+             */
+            readonly stage: "waiting" | "paused" | "resubmitting" | "starting" | "waiting_to_upload" | "uploading" | "waiting_for_gpu" | "running_on_server" | "fetching_result" | "server_unreachable" | "not_found" | "running" | "completed" | "failed" | "cancelled";
         };
         /**
          * JobPromptOut
@@ -7120,6 +7132,12 @@ export interface components {
             can_cancel: boolean;
             /** Can Resubmit */
             can_resubmit: boolean;
+            /**
+             * Stage
+             * @description The step the job is in, worked out from `status` and `phase` (`phases.stage_of`).
+             * @enum {string}
+             */
+            readonly stage: "waiting" | "paused" | "resubmitting" | "starting" | "waiting_to_upload" | "uploading" | "waiting_for_gpu" | "running_on_server" | "fetching_result" | "server_unreachable" | "not_found" | "running" | "completed" | "failed" | "cancelled";
         };
         /** JoinPartOut */
         JoinPartOut: {
