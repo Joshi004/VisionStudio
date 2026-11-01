@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import CursorResult, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.db.types import UTCDateTime, utcnow
 from app.jobs import phases
+
+if TYPE_CHECKING:
+    from app.jobs.handlers import PollRecord
 
 _logger = logging.getLogger(__name__)
 
@@ -102,10 +106,21 @@ def is_not_found(job: Job) -> bool:
     return job.status == "running" and job.phase == phases.NOT_FOUND
 
 
+def _drop_buffered_phase(job_id: int) -> None:
+    """A phase is being written now, so one still waiting in `phase_writer` is older and must
+    not overwrite it when it is flushed. (Imported here: `phase_writer` imports this module.)
+    """
+    from app.jobs import phase_writer
+
+    phase_writer.discard(job_id)
+
+
 async def _update(
     session: AsyncSession, job_id: int, expected: tuple[str, ...], **values: Any
 ) -> bool:
     """UPDATE the row only while it is in one of the `expected` statuses. No commit."""
+    if "phase" in values:
+        _drop_buffered_phase(job_id)
     statement = (
         update(Job)
         .where(Job.id == job_id, Job.status.in_(expected))
@@ -210,8 +225,13 @@ async def claim(session: AsyncSession, job_id: int) -> bool:
     return claimed
 
 
-async def set_phase(session: AsyncSession, job_id: int, phase: str, *, status: str) -> None:
-    """Changes the phase of a job in `status`. Writes nothing when it is already that phase."""
+async def set_phase(
+    session: AsyncSession, job_id: int, phase: str, *, status: str, commit: bool = True
+) -> None:
+    """Changes the phase of a job in `status`. Writes nothing when it is already that phase.
+    With `commit=False` the caller commits, so it can change many jobs in one transaction.
+    """
+    _drop_buffered_phase(job_id)
     statement = (
         update(Job)
         .where(
@@ -223,6 +243,14 @@ async def set_phase(session: AsyncSession, job_id: int, phase: str, *, status: s
         .execution_options(synchronize_session=False)
     )
     await session.execute(statement)
+    if commit:
+        await session.commit()
+
+
+async def set_phases(session: AsyncSession, phases_by_job: dict[int, str], *, status: str) -> None:
+    """`set_phase` for many jobs, all in `status`, in one transaction."""
+    for job_id, phase in phases_by_job.items():
+        await set_phase(session, job_id, phase, status=status, commit=False)
     await session.commit()
 
 
@@ -295,6 +323,19 @@ async def record_poll(
     if output is not None:
         values["output"] = output
     await _update(session, job_id, ("running",), **values)
+    await session.commit()
+
+
+async def record_polls(session: AsyncSession, records: Iterable[PollRecord]) -> None:
+    """`record_poll` for every poll of one dispatcher tick, in one transaction. A job that is no
+    longer running (it was cancelled while the tick polled) is left alone, as in `record_poll`.
+    """
+    checked_at = utcnow()
+    for record in records:
+        values: dict[str, Any] = {"phase": record.phase, "last_checked_at": checked_at}
+        if record.output is not None:
+            values["output"] = record.output
+        await _update(session, record.job_id, ("running",), **values)
     await session.commit()
 
 

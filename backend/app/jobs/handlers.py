@@ -21,20 +21,50 @@ backend stopped (ANALYSIS.md Section 3.3, "On backend start"):
 - `never_rerun`: a paid LLM job. It is failed, because a paid call never repeats by itself
   (ANALYSIS.md Section 6.2, rule 1).
 
-`start`, `poll` and `finish` open their own database session (`SessionLocal()`), keep
-transactions short, and never hold one across a network call. An unexpected exception
+`start` and `finish` open their own database session (`SessionLocal()`), keep transactions
+short, and never hold one across a network call. `poll` is given the job and a `PollContext`
+instead, so a tick with hundreds of running jobs uses a handful of sessions. An unexpected exception
 from `start` or `finish` is logged and fails the job; the dispatcher does that.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import ClassVar, Literal
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+if TYPE_CHECKING:
+    from app.db.models import Job
+
 RestartRule = Literal["resume", "start_again", "never_rerun"]
 Provider = Literal["gpu", "llm", "image", "local"]
+
+
+@dataclass(frozen=True)
+class PollRecord:
+    """What one poll found: the phase to show and, when it changed, the job's new output."""
+
+    job_id: int
+    phase: str
+    output: dict[str, Any] | None = None
+
+
+@dataclass
+class PollContext:
+    """What a tick gives every `poll`, so a poll opens no database session of its own.
+
+    The URLs are read once per tick. `record` only collects: the dispatcher writes every record of
+    the tick in one session, after all the polls have answered, and before any `finish` starts.
+    """
+
+    gpu_url: str
+    transcription_url: str
+    records: list[PollRecord] = field(default_factory=list)
+
+    def record(self, job_id: int, phase: str, output: dict[str, Any] | None = None) -> None:
+        self.records.append(PollRecord(job_id, phase, output))
 
 
 class JobHandler(ABC):
@@ -58,9 +88,13 @@ class JobHandler(ABC):
     async def start(self, job_id: int) -> None:
         """Runs in its own task after the dispatcher moved the job to `running`."""
 
-    async def poll(self, job_id: int) -> bool:
+    async def poll(self, job: Job, ctx: PollContext) -> bool:
         """Remote handlers only: checks the server. True means the result is ready and
         `finish` should run. Called once per tick, for jobs that have a provider job id.
+
+        `job` is the row the dispatcher read at the start of the tick: do not open a session to
+        read it again. Say what was found with `ctx.record` (written later, in one session).
+        A rare change of state (a failure, a requeue) may still use a session of its own.
         """
         return False
 

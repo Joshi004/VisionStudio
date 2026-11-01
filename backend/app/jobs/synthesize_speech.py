@@ -43,9 +43,9 @@ from app.core import settings as settings_service
 from app.core.urls import docker_mapped
 from app.db.models import Job
 from app.db.session import SessionLocal
-from app.jobs import phases, store
+from app.jobs import phase_writer, phases, store
 from app.jobs.gpu_job import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
-from app.jobs.handlers import JobHandler
+from app.jobs.handlers import JobHandler, PollContext
 from app.providers import gpu_server, speech_synthesizer
 from app.providers.gpu_server import GpuCallError
 from app.services import ffmpeg, speech_audio
@@ -254,32 +254,24 @@ class SpeechHandler(JobHandler):
 
     # --- poll ----------------------------------------------------------------------------------
 
-    async def poll(self, job_id: int) -> bool:
-        async with SessionLocal() as session:
-            job = await store.get_job(session, job_id)
-            base_url = await settings_service.get_str(session, GPU_URL_KEY)
-            await session.commit()
-        if job is None or job.status != "running" or not job.provider_job_id:
+    async def poll(self, job: Job, ctx: PollContext) -> bool:
+        if job.status != "running" or not job.provider_job_id:
             return False
         plan = read_plan(job.input)
         if plan is None:
             return False
 
         try:
-            remote = await gpu_server.job_status(base_url, job.provider_job_id)
+            remote = await gpu_server.job_status(ctx.gpu_url, job.provider_job_id)
         except GpuCallError as exc:
-            await self._record_poll(job_id, phase_for_poll_error(exc))
+            ctx.record(job.id, phase_for_poll_error(exc))
             return False
 
         parts = len(plan.chunks)
         if remote.status == "queued":
-            await self._record_poll(
-                job_id, phases.speech_part(phases.QUEUED_ON_CLUSTER, plan.part, parts)
-            )
+            ctx.record(job.id, phases.speech_part(phases.QUEUED_ON_CLUSTER, plan.part, parts))
         elif remote.status == "running":
-            await self._record_poll(
-                job_id, phases.speech_part(phases.RUNNING_ON_CLUSTER, plan.part, parts)
-            )
+            ctx.record(job.id, phases.speech_part(phases.RUNNING_ON_CLUSTER, plan.part, parts))
         elif remote.status == "succeeded":
             return True
         else:
@@ -430,8 +422,7 @@ class SpeechHandler(JobHandler):
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
+        await phase_writer.note(job_id, phase)
 
     @staticmethod
     async def _record_poll(job_id: int, phase: str) -> None:

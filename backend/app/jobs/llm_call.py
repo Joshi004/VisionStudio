@@ -29,7 +29,7 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Final
 
 from app.db.session import SessionLocal
-from app.jobs import phases, store
+from app.jobs import phase_writer, phases, store
 from app.providers import llm
 from app.providers.llm import LlmCallError
 from app.services import llm_target
@@ -217,5 +217,4 @@ async def _save_progress(job_id: int, outcome: Outcome, keep: dict[str, Any] | N
 
 
 async def _phase(job_id: int, phase: str) -> None:
-    async with SessionLocal() as session:
-        await store.set_phase(session, job_id, phase, status="running")
+    await phase_writer.note(job_id, phase)

@@ -43,7 +43,7 @@ from typing import Any, Final
 
 from app.core.urls import docker_mapped
 from app.db.session import SessionLocal
-from app.jobs import llm_call, phases, store
+from app.jobs import llm_call, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.providers import llm
 from app.services import discovery, llm_target, shot_prompt_writer, shot_prompts, user_feedback
@@ -247,8 +247,7 @@ class CompileShotPromptHandler(JobHandler):
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
+        await phase_writer.note(job_id, phase)
 
     @staticmethod
     async def _fail(job_id: int, message: str) -> None:

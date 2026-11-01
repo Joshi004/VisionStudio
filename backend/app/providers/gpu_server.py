@@ -43,6 +43,15 @@ PURGE_TIMEOUT_S = 30.0
 DOWNLOAD_TIMEOUT_S = 600.0
 MESSAGE_MAX_CHARS = 2000
 
+# How many files are sent to the server at once, and how many results are fetched from it at
+# once, however many jobs are running. A rolling window: a job that wants to transfer waits for
+# any one transfer to end, not for a whole batch. The server queues the jobs, so waiting here
+# costs nothing, while hundreds of large transfers at once would choke the connection to it.
+MAX_PARALLEL_UPLOADS = 5
+MAX_PARALLEL_DOWNLOADS = 5
+_upload_slots = asyncio.Semaphore(MAX_PARALLEL_UPLOADS)
+_download_slots = asyncio.Semaphore(MAX_PARALLEL_DOWNLOADS)
+
 # The server's own ids are 32 hex characters. Anything else never goes into a URL path.
 _JOB_ID = re.compile(r"[A-Za-z0-9_-]{1,100}")
 _REMOTE_STATUSES = ("queued", "running", "succeeded", "failed")
@@ -352,18 +361,23 @@ async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> st
 
     The file is read in a thread, so the event loop is never blocked. The server
     decides the file type from the extension of `filename`.
+
+    At most `MAX_PARALLEL_UPLOADS` uploads run at once; the others wait for a free place before
+    the file is even read, so the files waiting are not held in memory. The time limit starts
+    when the upload does, not while it waits.
     """
-    content = await asyncio.to_thread(path.read_bytes)
-    try:
-        response = await outbound.upload(
-            join_url(base_url, UPLOAD_PATH),
-            filename=filename,
-            content=content,
-            mime=mime,
-            timeout_s=UPLOAD_TIMEOUT_S,
-        )
-    except outbound.OutboundError as exc:
-        raise _transport_error(exc) from exc
+    async with _upload_slots:
+        content = await asyncio.to_thread(path.read_bytes)
+        try:
+            response = await outbound.upload(
+                join_url(base_url, UPLOAD_PATH),
+                filename=filename,
+                content=content,
+                mime=mime,
+                timeout_s=UPLOAD_TIMEOUT_S,
+            )
+        except outbound.OutboundError as exc:
+            raise _transport_error(exc) from exc
     body = _json_object(response, "upload answer")
     return _remote_id(body, "asset_id", "upload answer")
 
@@ -461,10 +475,11 @@ async def job_result_json(base_url: str, job_id: str) -> dict[str, Any]:
     with that `status_code`. 404 arrives as "not_found".
     """
     url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/result")
-    try:
-        response = await outbound.request("GET", url, timeout_s=RESULT_TIMEOUT_S)
-    except outbound.OutboundError as exc:
-        raise _transport_error(exc) from exc
+    async with _download_slots:  # one of `MAX_PARALLEL_DOWNLOADS`
+        try:
+            response = await outbound.request("GET", url, timeout_s=RESULT_TIMEOUT_S)
+        except outbound.OutboundError as exc:
+            raise _transport_error(exc) from exc
     return _json_object(response, "result")
 
 
@@ -474,12 +489,16 @@ async def download_result(base_url: str, job_id: str, dest: Path) -> outbound.Do
     Same errors as `job_result_json`: 409 (not finished yet) and 410 (expired) arrive as
     GpuCallError("rejected") with that `status_code`, and 404 as "not_found". Nothing is
     left at `dest` when this raises.
+
+    At most `MAX_PARALLEL_DOWNLOADS` results are fetched at once; the others wait for a free
+    place, and the time limit starts when the download does.
     """
     url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/result")
-    try:
-        result = await outbound.download_to_file(url, dest, timeout_s=DOWNLOAD_TIMEOUT_S)
-    except outbound.OutboundError as exc:
-        raise _transport_error(exc) from exc
+    async with _download_slots:
+        try:
+            result = await outbound.download_to_file(url, dest, timeout_s=DOWNLOAD_TIMEOUT_S)
+        except outbound.OutboundError as exc:
+            raise _transport_error(exc) from exc
     if result.status_code != 200:
         dest.unlink(missing_ok=True)
         raise _error_for(

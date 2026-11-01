@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, ShotTake
 from app.db.session import SessionLocal
-from app.jobs import dispatcher, phases, store
+from app.jobs import dispatcher, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.services import shot_takes, take_validation
 from app.services.storage import StorageError, get_storage
@@ -122,8 +122,7 @@ class CheckShotTakesHandler(JobHandler):
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
+        await phase_writer.note(job_id, phase)
 
 
 async def _request_body_of(session: AsyncSession, take: ShotTake) -> dict[str, Any] | None:

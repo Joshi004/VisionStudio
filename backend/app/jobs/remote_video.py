@@ -24,14 +24,14 @@ from app.core import outbound
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionLocal
-from app.jobs import phases, store
+from app.jobs import phase_writer, phases, store
 from app.jobs.gpu_job import (
     GPU_URL_KEY,
     after_gone_result,
     is_preemption,
     phase_for_poll_error,
 )
-from app.jobs.handlers import JobHandler
+from app.jobs.handlers import JobHandler, PollContext
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
 from app.services.storage import get_storage
@@ -53,32 +53,29 @@ class RemoteVideoHandler(JobHandler):
 
     # --- poll ---------------------------------------------------------------------
 
-    async def poll(self, job_id: int) -> bool:
-        async with SessionLocal() as session:
-            job = await store.get_job(session, job_id)
-            base_url = await settings_service.get_str(session, GPU_URL_KEY)
-            await session.commit()
-        if job is None or job.status != "running" or not job.provider_job_id:
+    async def poll(self, job: Job, ctx: PollContext) -> bool:
+        if job.status != "running" or not job.provider_job_id:
             return False
+        base_url = ctx.gpu_url
 
         try:
             remote = await video_generator.status(base_url, job.provider_job_id)
         except GpuCallError as exc:
             # Never fails the job: no answer means check again. A 404 shows "not found on
             # this server" (and offers Resubmit), it does not fail.
-            await self._record_poll(job_id, phase_for_poll_error(exc))
+            ctx.record(job.id, phase_for_poll_error(exc))
             return False
 
         # Keep what else the output holds (the count of download retries).
         previous = job.output if isinstance(job.output, dict) else {}
         output = {**previous, "remote": remote.to_json()}
         if remote.status == "queued":
-            await self._record_poll(job_id, phases.QUEUED_ON_CLUSTER, output)
+            ctx.record(job.id, phases.QUEUED_ON_CLUSTER, output)
         elif remote.status == "running":
-            await self._record_poll(job_id, phases.RUNNING_ON_CLUSTER, output)
+            ctx.record(job.id, phases.RUNNING_ON_CLUSTER, output)
         elif remote.status == "succeeded":
             # From here the clip is being fetched: it can no longer be cancelled.
-            await self._record_poll(job_id, phases.DOWNLOADING_CLIP, output)
+            ctx.record(job.id, phases.DOWNLOADING_CLIP, output)
             return True
         else:
             await self._server_reported_failure(job, base_url, remote.error)
@@ -227,13 +224,7 @@ class RemoteVideoHandler(JobHandler):
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
-
-    @staticmethod
-    async def _record_poll(job_id: int, phase: str, output: dict[str, Any] | None = None) -> None:
-        async with SessionLocal() as session:
-            await store.record_poll(session, job_id, phase, output)
+        await phase_writer.note(job_id, phase)
 
     @staticmethod
     async def _fail(job_id: int, message: str) -> None:

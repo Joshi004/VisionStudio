@@ -36,10 +36,10 @@ from app.core.urls import docker_mapped
 from app.db.models import Job, ShotTake
 from app.db.session import SessionLocal
 from app.db.types import utcnow
-from app.jobs import dispatcher, phases, store
+from app.jobs import dispatcher, phase_writer, phases, store
 from app.jobs.generate_shot import start_dependents
 from app.jobs.gpu_job import SERVER_RETRY_DELAY_S, is_preemption, phase_for_poll_error
-from app.jobs.handlers import JobHandler
+from app.jobs.handlers import JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
 from app.services import dialogue_check, shot_takes, take_validation
@@ -136,27 +136,23 @@ class CheckTakeDialogueHandler(JobHandler):
 
     # --- poll --------------------------------------------------------------------
 
-    async def poll(self, job_id: int) -> bool:
-        async with SessionLocal() as session:
-            job = await store.get_job(session, job_id)
-            base_url = await settings_service.get_str(session, TRANSCRIPTION_URL_KEY)
-            await session.commit()
-        if job is None or job.status != "running" or not job.provider_job_id:
+    async def poll(self, job: Job, ctx: PollContext) -> bool:
+        if job.status != "running" or not job.provider_job_id:
             return False
 
         try:
-            remote = await gpu_server.job_status(base_url, job.provider_job_id)
+            remote = await gpu_server.job_status(ctx.transcription_url, job.provider_job_id)
         except GpuCallError as exc:
-            await self._record_poll(job_id, phase_for_poll_error(exc))
+            ctx.record(job.id, phase_for_poll_error(exc))
             return False
 
         if remote.status == "queued":
-            await self._record_poll(job_id, phases.QUEUED_ON_CLUSTER)
+            ctx.record(job.id, phases.QUEUED_ON_CLUSTER)
         elif remote.status == "running":
-            await self._record_poll(job_id, phases.RUNNING_ON_CLUSTER)
+            ctx.record(job.id, phases.RUNNING_ON_CLUSTER)
         elif remote.status == "succeeded":
             # From here the transcript is being fetched: the job can no longer be cancelled.
-            await self._record_poll(job_id, phases.DOWNLOADING_TRANSCRIPT)
+            ctx.record(job.id, phases.DOWNLOADING_TRANSCRIPT)
             return True
         else:
             await self._server_reported_failure(job, remote.error)
@@ -337,13 +333,7 @@ class CheckTakeDialogueHandler(JobHandler):
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
-
-    @staticmethod
-    async def _record_poll(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.record_poll(session, job_id, phase)
+        await phase_writer.note(job_id, phase)
 
     @staticmethod
     async def _fail(job_id: int, message: str) -> None:

@@ -43,12 +43,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionLocal
-from app.jobs import handlers, phases, pools, register_handlers, store
+from app.jobs import handlers, phase_writer, phases, pools, register_handlers, store
 from app.jobs.handlers import JobHandler
 from app.providers import contract_guard
 from app.services import gpu_status
 
 POLL_INTERVAL_KEY: Final = "poll_interval_seconds"
+GPU_URL_KEY: Final = "gpu_api_base_url"
+TRANSCRIPTION_URL_KEY: Final = "transcription_url"
+# How many running jobs are asked about at once in one tick. The rest wait for a free place, so
+# hundreds of running jobs do not make hundreds of calls in the same instant.
+MAX_PARALLEL_POLLS: Final = 20
 MAX_BACKOFF_S: Final = 120.0
 # How long to wait after a tick that failed unexpectedly.
 FALLBACK_WAIT_S: Final = 15.0
@@ -90,6 +95,7 @@ class _Dispatcher:
         except Exception:
             # The tick also puts orphaned jobs right, so the app can still start.
             _logger.exception("dispatcher: recovery after the restart failed")
+        phase_writer.start()
         self._loop_task = asyncio.create_task(self._run(), name="dispatcher")
         _logger.info("dispatcher started")
 
@@ -98,6 +104,7 @@ class _Dispatcher:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await phase_writer.stop()
         self._loop_task = None
         self._tasks.clear()
         _logger.info("dispatcher stopped")
@@ -175,6 +182,11 @@ class _Dispatcher:
             # call the paid API's, and a local job type has its own.
             limits = await pools.limits(session, handlers.all_handlers())
             qwen38_keys = await pools.qwen38_model_keys(session)
+            # Read once here, so no poll opens a session just to learn them.
+            poll_context = handlers.PollContext(
+                gpu_url=await settings_service.get_str(session, GPU_URL_KEY),
+                transcription_url=await settings_service.get_str(session, TRANSCRIPTION_URL_KEY),
+            )
             await session.commit()  # end the read before any network call
         self._interval_s = float(interval)
 
@@ -209,7 +221,8 @@ class _Dispatcher:
             gpu_blocked = not await self._server_answers(interval, pollable, waiting)
 
         await self._poll_running(
-            [(job, h) for job, h in pollable if not (gpu_blocked and h.provider == "gpu")]
+            [(job, h) for job, h in pollable if not (gpu_blocked and h.provider == "gpu")],
+            poll_context,
         )
         await self._start_queued(waiting, running, limits, qwen38_keys, gpu_blocked)
 
@@ -235,38 +248,68 @@ class _Dispatcher:
 
         cap = max(MAX_BACKOFF_S, float(interval))
         self._backoff_s = float(interval) if self._backoff_s == 0 else min(self._backoff_s * 2, cap)
+        # One transaction each, however many jobs wait on the server.
         async with SessionLocal() as session:
-            for job, handler in pollable:
-                if handler.provider == "gpu":
-                    await store.record_poll(session, job.id, phases.SERVER_UNREACHABLE_CHECKING)
-            for job, handler in waiting:
-                if handler.provider == "gpu":
-                    await store.set_phase(
-                        session, job.id, phases.WAITING_SERVER_UNREACHABLE, status="queued"
-                    )
+            await store.record_polls(
+                session,
+                [
+                    handlers.PollRecord(job.id, phases.SERVER_UNREACHABLE_CHECKING)
+                    for job, handler in pollable
+                    if handler.provider == "gpu"
+                ],
+            )
+            await store.set_phases(
+                session,
+                {
+                    job.id: phases.WAITING_SERVER_UNREACHABLE
+                    for job, handler in waiting
+                    if handler.provider == "gpu"
+                },
+                status="queued",
+            )
         _logger.info("GPU server unreachable; checking again in %.0f s", self._backoff_s)
         return False
 
     # --- Step 3: running jobs ------------------------------------------------------
 
-    async def _poll_running(self, pollable: list[tuple[Job, JobHandler]]) -> None:
+    async def _poll_running(
+        self, pollable: list[tuple[Job, JobHandler]], context: handlers.PollContext
+    ) -> None:
+        """Polls every running job (at most `MAX_PARALLEL_POLLS` at once), then writes what the
+        polls found in one session, and only then starts the `finish` of the jobs that are ready:
+        a finishing phase (the job can no longer be cancelled) and the server's last answer
+        are saved before `finish` reads the job.
+        """
         if not pollable:
             return
-        ready = await asyncio.gather(*(self._poll_one(job, h) for job, h in pollable))
+        gate = asyncio.Semaphore(MAX_PARALLEL_POLLS)
+        ready = await asyncio.gather(
+            *(self._poll_one(job, h, context, gate) for job, h in pollable)
+        )
+        if context.records:
+            try:
+                async with SessionLocal() as session:
+                    await store.record_polls(session, context.records)
+            except Exception:
+                # Not fatal: the phases are written again by the next tick's polls.
+                _logger.exception("dispatcher: could not save what the polls found")
         for (job, handler), is_ready in zip(pollable, ready, strict=True):
             if is_ready:
                 self._spawn(job.id, handler.finish(job.id))
 
     @staticmethod
-    async def _poll_one(job: Job, handler: JobHandler) -> bool:
-        try:
-            return await handler.poll(job.id)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # Not fatal for the job: it is checked again at the next tick.
-            _logger.exception("job %d: checking the server failed unexpectedly", job.id)
-            return False
+    async def _poll_one(
+        job: Job, handler: JobHandler, context: handlers.PollContext, gate: asyncio.Semaphore
+    ) -> bool:
+        async with gate:
+            try:
+                return await handler.poll(job, context)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Not fatal for the job: it is checked again at the next tick.
+                _logger.exception("job %d: checking the server failed unexpectedly", job.id)
+                return False
 
     # --- Step 4: queued jobs -------------------------------------------------------
 
@@ -291,6 +334,9 @@ class _Dispatcher:
         # job that needs two slots is not starved by a stream of jobs that need one.
         full_pools: set[str] = set()
         checked_contract = False
+        # What the jobs that must wait should show. Written once after the loop, in one session,
+        # instead of one session for every waiting job.
+        queued_phases: dict[int, str] = {}
 
         for job, handler in waiting:
             if handler.provider == "gpu" and gpu_blocked:
@@ -312,9 +358,9 @@ class _Dispatcher:
                 )
             if blocked:
                 full_pools.add(pool)
-                await self._set_queued_phase(
-                    job.id, _SLOT_PHASES.get(pool, phases.WAITING_FOR_SLOT)
-                )
+                waiting_phase = _SLOT_PHASES.get(pool, phases.WAITING_FOR_SLOT)
+                if job.phase != waiting_phase:  # the row was read at the start of the tick
+                    queued_phases[job.id] = waiting_phase
                 continue
 
             if handler.provider == "gpu" and not checked_contract:
@@ -333,10 +379,9 @@ class _Dispatcher:
             self._retry_after.pop(job.id, None)
             self._spawn(job.id, handler.start(job.id))
 
-    @staticmethod
-    async def _set_queued_phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="queued")
+        if queued_phases:
+            async with SessionLocal() as session:
+                await store.set_phases(session, queued_phases, status="queued")
 
     # --- Tasks ---------------------------------------------------------------------
 
@@ -376,7 +421,11 @@ class _Dispatcher:
           that is busy or down.
         - Still running: nothing to do until the next poll.
         - Finished (any way): a slot is free, so wake the loop.
+
+        First, the last phase the task noted is written (`phase_writer.settle`), so it can never
+        land later, on a job that was queued again and started again by then.
         """
+        await phase_writer.settle(job_id)
         try:
             async with SessionLocal() as session:
                 job = await store.get_job(session, job_id)

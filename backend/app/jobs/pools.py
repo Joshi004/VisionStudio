@@ -17,11 +17,11 @@ A job whose provider is neither (a `local` one, such as a render on this machine
 pool, counted under its job type, and its handler says how many may run at once. No job type
 is local today.
 
-A job takes one slot of its pool, except a MiniMax H3 clip, which holds 4 or 8 GPUs on one node
-as the server decides from the request's size. It takes the number of GPUs the server reported
-(`server_gpus`), and `H3_MIN_GPUS` until the server has said (`slot_cost`). The Qwen3.8 calls
-answer from one GPU however many run at once, so together they hold `QWEN38_GPUS` slots
-(`slots_in_use`). The limit counts slots, not jobs.
+A job takes one slot of its pool, except a MiniMax H3 clip, which always takes `H3_GPUS` slots
+(`slot_cost`). The server really gives a clip 4 or 8 GPUs, but it queues what it cannot start, so
+the app does not follow its choice: one fixed number keeps the count the same before and after
+the server answers. The Qwen3.8 calls answer from one GPU however many run at once, so together
+they hold `QWEN38_GPUS` slots (`slots_in_use`). The limit counts slots, not jobs.
 
 Both settings are read at every tick, so a change on the Settings page applies at once. Running
 jobs are never stopped by a lower number.
@@ -65,9 +65,9 @@ _SETTING_OF_POOL: Final[dict[str, str]] = {
 
 
 # A MiniMax H3 job reserves 4 or 8 H100s on one node, chosen by the server from the request's
-# size (GPU API 0.15.0). It says which only when it accepts the job, so until it does a clip is
-# counted at the smaller of the two.
-H3_MIN_GPUS: Final = 4
+# size (GPU API 0.15.0). A clip is always counted as 4 slots: the server queues whatever it
+# cannot start yet, so the exact number of GPUs it picks does not need to be followed here.
+H3_GPUS: Final = 4
 # The Qwen3.8 text model answers every call at once from the same GPU.
 QWEN38_GPUS: Final = 1
 
@@ -103,13 +103,13 @@ def server_estimate_seconds(job: Job) -> float | None:
 
 
 def slot_cost(job: Job) -> int:
-    """How many slots of its pool a job takes: the GPUs the server gave it when it said so, else
-    `H3_MIN_GPUS` for a MiniMax H3 clip (its endpoint is recorded on the job's input), else 1.
+    """How many slots of its pool a job takes: `H3_GPUS` for a MiniMax H3 clip (its endpoint is
+    recorded on the job's input), else 1. It never changes while the job runs.
     """
     recorded = job.input if isinstance(job.input, dict) else {}
     if not video_generator.is_h3_endpoint(recorded.get("endpoint")):
         return 1
-    return server_gpus(job) or H3_MIN_GPUS
+    return H3_GPUS
 
 
 def fits(free: int, limit: int, cost: int) -> bool:

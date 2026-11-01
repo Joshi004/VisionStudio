@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from app.db.session import SessionLocal
-from app.jobs import phases, store
+from app.jobs import phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.services import (
     callout_render,
@@ -960,8 +960,7 @@ class RenderStoryHandler(JobHandler):
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
+        await phase_writer.note(job_id, phase)
 
 
 # --- Reading the files ----------------------------------------------------------------------

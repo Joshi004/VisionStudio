@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from app.db.session import SessionLocal
-from app.jobs import phases, store
+from app.jobs import phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.jobs.render_story import RenderFailed, run_ffmpeg
 from app.services import av_lab, av_lab_render, ffmpeg
@@ -182,8 +182,7 @@ class RenderAvTestHandler(JobHandler):
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
-        async with SessionLocal() as session:
-            await store.set_phase(session, job_id, phase, status="running")
+        await phase_writer.note(job_id, phase)
 
 
 async def _check(path: Path, total_frames: int, name: str) -> None:

@@ -916,17 +916,20 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "together: video, images, reference pictures, speech "
             "and the language-model calls (the story stages included) set to the GPU server's "
             "Qwen3.8. A job takes one slot, "
-            "except a MiniMax H3 clip (Video lab), which takes the number of GPUs the server "
-            "gives it (4 or 8), and 4 until the server has said. All Qwen3.8 calls together take "
-            "one slot, because the model answers them all from one GPU. Each "
-            "image job loads about 31 GB of model weights first, so pick a number your GPU "
-            "server can actually handle. It applies the next time the app looks for work, and "
-            "running jobs are not stopped."
+            "except a MiniMax H3 clip, which always takes 4. All Qwen3.8 calls together take "
+            "one slot, because the model answers them all from one GPU. The server queues "
+            "the jobs it cannot start yet and runs them as it has room, so this number is how "
+            "many jobs the app keeps waiting at the server, not how many run at once: the "
+            "server's own capacity page sets that. A high number keeps the server's queue full, "
+            "but the server then decides the order, and a job sent later waits behind the "
+            "earlier ones. Files are sent and fetched at most 5 at a time whatever this "
+            "number is. It applies the next time the app looks for work, and running jobs "
+            "are not stopped."
         ),
         value_type="integer",
         default=4,
         min_value=1,
-        max_value=100,
+        max_value=1000,
     ),
     SettingSpec(
         key="max_parallel_paid_api_calls",

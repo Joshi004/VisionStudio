@@ -48,7 +48,7 @@ from app.db import state_memo
 from app.db.models import Job, Project
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, phases, store
-from app.jobs.handlers import JobHandler
+from app.jobs.handlers import JobHandler, PollContext
 from app.services import review_points as review_rules
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline_targets import ADAPTERS
@@ -229,7 +229,7 @@ class StoryPipelineHandler(JobHandler):
         # The first step is done now. The dispatcher skips a job while its `start` task is
         # alive, so waiting for its next tick would delay the first step by a whole interval.
         try:
-            if await self.poll(job_id):
+            if await self._check_run(job_id):
                 await self.finish(job_id)
         except Exception:
             # Not fatal: the next tick checks the run again, as it does after any poll.
@@ -237,8 +237,13 @@ class StoryPipelineHandler(JobHandler):
 
     # --- Poll: every step that can go on, once per tick ----------------------------------
 
-    async def poll(self, job_id: int) -> bool:
-        """Moves the run forward. True when every step is complete (then `finish` runs)."""
+    async def poll(self, job: Job, ctx: PollContext) -> bool:
+        """Moves the run forward. True when every step is complete (then `finish` runs).
+        It reads the project in sessions of its own, so it uses neither `job` nor `ctx`.
+        """
+        return await self._check_run(job.id)
+
+    async def _check_run(self, job_id: int) -> bool:
         try:
             finished = await self._poll(job_id)
         except Exception as exc:
