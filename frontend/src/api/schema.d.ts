@@ -6992,6 +6992,25 @@ export interface components {
             /** Pools */
             pools: components["schemas"]["PoolCapacity"][];
         };
+        /**
+         * JobConnectionOut
+         * @description The GPU server does not answer for this job. The job's `phase` and `last_checked_at` are
+         *     what the server last confirmed. Kept in memory, so it is gone after a restart.
+         */
+        JobConnectionOut: {
+            /** Message */
+            message: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /**
+             * Last Failed At
+             * Format: date-time
+             */
+            last_failed_at: string;
+        };
         /** JobDetail */
         JobDetail: {
             /** Id */
@@ -7036,6 +7055,8 @@ export interface components {
             can_cancel: boolean;
             /** Can Resubmit */
             can_resubmit: boolean;
+            upload?: components["schemas"]["UploadProgressOut"] | null;
+            connection?: components["schemas"]["JobConnectionOut"] | null;
             /** Provider Job Id */
             provider_job_id: string | null;
             /** Input */
@@ -7134,6 +7155,8 @@ export interface components {
             can_cancel: boolean;
             /** Can Resubmit */
             can_resubmit: boolean;
+            upload?: components["schemas"]["UploadProgressOut"] | null;
+            connection?: components["schemas"]["JobConnectionOut"] | null;
             /**
              * Stage
              * @description The step the job is in, worked out from `status` and `phase` (`phases.stage_of`).
@@ -13995,6 +14018,21 @@ export interface components {
             start_s: number;
             /** End S */
             end_s: number;
+        };
+        /**
+         * UploadProgressOut
+         * @description The file a job is sending now. The bytes are those handed to the connection: through the
+         *     SSH tunnel the last few MB can still be on their way when the bar is full.
+         */
+        UploadProgressOut: {
+            /** Filename */
+            filename: string;
+            /** Sent Bytes */
+            sent_bytes: number;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Files Done */
+            files_done: number;
         };
         /** ValidationError */
         ValidationError: {

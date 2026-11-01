@@ -22,6 +22,9 @@ WAITING_FOR_GPU_SLOT: Final = "waiting for a free GPU server slot"
 WAITING_FOR_PAID_API_SLOT: Final = "waiting for a free paid API slot"
 WAITING_SERVER_UNREACHABLE: Final = "waiting: GPU server unreachable"
 WAITING_SERVER_BUSY: Final = "waiting: server busy (HTTP 429)"
+# The upload or the submit got no answer: the job goes back to the queue and sends everything again.
+# The reason is shown next to the badge (`live_status`), not in the label.
+WAITING_TO_START_AGAIN: Final = "waiting to start again"
 RESTARTED: Final = "restarted: starting again"
 EXPIRED: Final = "expired on the server: submitting again"
 

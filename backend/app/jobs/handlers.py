@@ -35,6 +35,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.jobs import live_status
+
 if TYPE_CHECKING:
     from app.db.models import Job
 
@@ -64,6 +66,8 @@ class PollContext:
     records: list[PollRecord] = field(default_factory=list)
 
     def record(self, job_id: int, phase: str, output: dict[str, Any] | None = None) -> None:
+        # A record is always what the server answered, so no problem reaching it is left.
+        live_status.clear_problem(job_id)
         self.records.append(PollRecord(job_id, phase, output))
 
 

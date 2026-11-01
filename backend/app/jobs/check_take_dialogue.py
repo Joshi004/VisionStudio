@@ -42,7 +42,8 @@ from app.jobs.gpu_job import (
     SERVER_RETRY_DELAY_S,
     is_preemption,
     note_uploading,
-    phase_for_poll_error,
+    record_poll_error,
+    requeue_after_no_answer,
 )
 from app.jobs.handlers import JobHandler, PollContext
 from app.providers import gpu_server, transcriber
@@ -131,10 +132,11 @@ class CheckTakeDialogueHandler(JobHandler):
             await store.mark_submitted(session, job_id, provider_job_id, submitted)
 
     async def _give_up_starting(self, job_id: int, exc: GpuCallError) -> None:
+        if exc.kind == "unreachable":
+            await requeue_after_no_answer(job_id, exc)
+            return
         async with SessionLocal() as session:
-            if exc.kind == "unreachable":
-                await store.requeue(session, job_id, phases.WAITING_SERVER_UNREACHABLE)
-            elif exc.kind == "busy":
+            if exc.kind == "busy":
                 await store.requeue(session, job_id, phases.WAITING_SERVER_BUSY)
             else:
                 await store.fail_job(session, job_id, f"Could not start the transcription: {exc}")
@@ -148,7 +150,7 @@ class CheckTakeDialogueHandler(JobHandler):
         try:
             remote = await gpu_server.job_status(ctx.transcription_url, job.provider_job_id)
         except GpuCallError as exc:
-            ctx.record(job.id, phase_for_poll_error(exc))
+            await record_poll_error(job.id, exc, ctx)
             return False
 
         if remote.status == "queued":
@@ -223,7 +225,7 @@ class CheckTakeDialogueHandler(JobHandler):
             elif exc.kind in ("bad_answer", "rejected"):
                 await store.fail_job(session, job.id, f"The transcript could not be used: {exc}")
             else:
-                await store.record_poll(session, job.id, phase_for_poll_error(exc))
+                await record_poll_error(job.id, exc)
 
     async def _compare_and_store(
         self,

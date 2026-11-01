@@ -18,7 +18,7 @@ from app.api.errors import ErrorResponse
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionDep
-from app.jobs import dispatcher, handlers, phases, pools, store
+from app.jobs import dispatcher, handlers, live_status, phases, pools, store
 from app.jobs.store import JobActionError, JobRow
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
@@ -89,6 +89,28 @@ _NOT_ALLOWED = {
 }
 
 
+class UploadProgressOut(BaseModel):
+    """The file a job is sending now. The bytes are those handed to the connection: through the
+    SSH tunnel the last few MB can still be on their way when the bar is full.
+    """
+
+    filename: str
+    sent_bytes: int
+    total_bytes: int
+    # Files of this job the server has accepted already.
+    files_done: int
+
+
+class JobConnectionOut(BaseModel):
+    """The GPU server does not answer for this job. The job's `phase` and `last_checked_at` are
+    what the server last confirmed. Kept in memory, so it is gone after a restart.
+    """
+
+    message: str
+    since: datetime
+    last_failed_at: datetime
+
+
 class JobSummary(BaseModel):
     id: int
     # None for a lab's jobs, which belong to no project (`project_name` then says so).
@@ -106,6 +128,9 @@ class JobSummary(BaseModel):
     last_checked_at: datetime | None
     can_cancel: bool
     can_resubmit: bool
+    # Only for a queued or running job, and only while there is something to say.
+    upload: UploadProgressOut | None = None
+    connection: JobConnectionOut | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -122,8 +147,38 @@ class JobDetail(JobSummary):
     result_asset_id: int | None
 
 
+def _live(job: Job) -> tuple[UploadProgressOut | None, JobConnectionOut | None]:
+    """What `live_status` knows about an active job: its upload, and its trouble reaching the
+    GPU server. The upload is only shown while the job is in a step that sends files.
+    """
+    if job.status not in ("queued", "running"):
+        return None, None
+    upload = None
+    state = live_status.upload_of(job.id)
+    if state is not None and phases.stage_of(job.status, job.phase) in (
+        "uploading",
+        "waiting_to_upload",
+    ):
+        upload = UploadProgressOut(
+            filename=state.filename,
+            sent_bytes=state.sent_bytes,
+            total_bytes=state.total_bytes,
+            files_done=state.files_done,
+        )
+    problem = live_status.problem_of(job.id, needs_gpu=job.provider == "gpu")
+    connection = (
+        None
+        if problem is None
+        else JobConnectionOut(
+            message=problem.message, since=problem.since, last_failed_at=problem.last_failed_at
+        )
+    )
+    return upload, connection
+
+
 def job_summary(row: JobRow) -> JobSummary:
     job = row.job
+    upload, connection = _live(job)
     return JobSummary(
         id=job.id,
         project_id=job.project_id,
@@ -141,6 +196,8 @@ def job_summary(row: JobRow) -> JobSummary:
         last_checked_at=job.last_checked_at,
         can_cancel=store.can_cancel(job),
         can_resubmit=store.can_resubmit(job),
+        upload=upload,
+        connection=connection,
     )
 
 

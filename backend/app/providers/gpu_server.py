@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -25,13 +26,15 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import httpx
 
 from app.core import outbound
 from app.core.urls import docker_mapped, join_url
 from app.db.types import utcnow
+
+_logger = logging.getLogger(__name__)
 
 HEALTH_PATH = "/v1/health"
 HEALTH_TIMEOUT_S = 5.0
@@ -42,6 +45,10 @@ BUSY_WINDOW_S = 120.0
 UPLOAD_PATH = "/v1/uploads"
 JOBS_PATH = "/v1/jobs"
 UPLOAD_TIMEOUT_S = 600.0
+# A file whose connection failed is sent again once, after this pause, before the caller is told
+# the server is unreachable. A connection that fails twice in a row is a real outage.
+UPLOAD_ATTEMPTS = 2
+UPLOAD_RETRY_DELAY_S = 2.0
 SUBMIT_TIMEOUT_S = 30.0
 STATUS_TIMEOUT_S = 10.0
 RESULT_TIMEOUT_S = 30.0
@@ -130,6 +137,32 @@ _upload_watcher: ContextVar[UploadWatcher | None] = ContextVar("upload_watcher",
 def watch_uploads(watcher: UploadWatcher | None) -> None:
     """Sets who is told about the uploads made by the current task from now on (None: nobody)."""
     _upload_watcher.set(watcher)
+
+
+class UploadReporter(Protocol):
+    """Told how each file of the current task's job goes (`watch_upload_progress`)."""
+
+    def started(self, filename: str, total_bytes: int) -> None:
+        """A file begins, or begins again after a failed try."""
+
+    def sent(self, sent_bytes: int) -> None:
+        """Bytes of the file handed to the connection so far."""
+
+    def done(self) -> None:
+        """The server accepted the file."""
+
+
+_upload_reporter: ContextVar[UploadReporter | None] = ContextVar("upload_reporter", default=None)
+
+
+def watch_upload_progress(reporter: UploadReporter | None) -> None:
+    """Sets who is told how the files uploaded by the current task go (None: nobody)."""
+    _upload_reporter.set(reporter)
+
+
+def is_watching_upload_progress() -> bool:
+    """True when the current task already has an upload reporter."""
+    return _upload_reporter.get() is not None
 
 
 # When the current task's job began uploading (`time.monotonic()`), set per task like the
@@ -493,6 +526,22 @@ async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> st
         if watcher is not None and waited:
             await watcher(False)
         content = await asyncio.to_thread(path.read_bytes)
+        response = await _send_file(base_url, content, filename, mime)
+    body = _json_object(response, "upload answer")
+    return _remote_id(body, "asset_id", "upload answer")
+
+
+async def _send_file(
+    base_url: str, content: bytes, filename: str, mime: str
+) -> outbound.OutboundResponse:
+    """Sends one file, and once more if the connection failed (`UPLOAD_ATTEMPTS`). The progress
+    reporter is told when a try begins, as the bytes go out, and when the server accepted them.
+    """
+    reporter = _upload_reporter.get()
+    on_sent = None if reporter is None else lambda sent, _total: reporter.sent(sent)
+    for attempt in range(1, UPLOAD_ATTEMPTS + 1):
+        if reporter is not None:
+            reporter.started(filename, len(content))
         try:
             response = await outbound.upload(
                 join_url(base_url, UPLOAD_PATH),
@@ -500,11 +549,23 @@ async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> st
                 content=content,
                 mime=mime,
                 timeout_s=UPLOAD_TIMEOUT_S,
+                on_sent=on_sent,
             )
         except outbound.OutboundError as exc:
+            if exc.reason == "connection" and attempt < UPLOAD_ATTEMPTS:
+                _logger.warning(
+                    "upload of %s failed (%s); sending it again in %.0f s",
+                    filename,
+                    exc,
+                    UPLOAD_RETRY_DELAY_S,
+                )
+                await asyncio.sleep(UPLOAD_RETRY_DELAY_S)
+                continue
             raise _transport_error(exc) from exc
-    body = _json_object(response, "upload answer")
-    return _remote_id(body, "asset_id", "upload answer")
+        if reporter is not None and response.status_code == 200:
+            reporter.done()
+        return response
+    raise AssertionError("unreachable: the last attempt returns or raises")
 
 
 async def submit(base_url: str, path: str, body: dict[str, Any]) -> SubmitAnswer:

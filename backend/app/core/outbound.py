@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -58,6 +59,10 @@ _MAX_LOCATION_CHARS = 200
 
 _logger = logging.getLogger(__name__)
 _client: httpx.AsyncClient | None = None
+# The client of the file uploads. It keeps no idle connection, so every upload opens its own:
+# an upload that reused the connection of the one before was cut by the server's idle timeout
+# (about 5 s) while its bytes still waited in the SSH tunnel behind the other uploads.
+_upload_client: httpx.AsyncClient | None = None
 
 # When each server last gave an answer (`host:port` -> `time.monotonic()`), so a caller can tell
 # a server that answers slowly, because the connection to it is full, from one that does not
@@ -66,7 +71,35 @@ _last_answer: dict[str, float] = {}
 
 # Files of a multipart form: `{field: (filename, content, mime)}`, or a list of
 # `(field, (filename, content, mime))` when a field repeats (Phase 13).
-FileParts = Mapping[str, tuple[str, bytes, str]] | Sequence[tuple[str, tuple[str, bytes, str]]]
+FileParts = (
+    Mapping[str, tuple[str, bytes | io.BytesIO, str]] | Sequence[tuple[str, tuple[str, bytes, str]]]
+)
+
+# Told how many bytes of an upload have been handed to the connection, and how many there are.
+UploadProgress = Callable[[int, int], None]
+
+
+class _CountingBytes(io.BytesIO):
+    """The bytes of an upload, reporting how many have been read so far. httpx reads a file in
+    pieces as it sends it, so the count follows what was handed to the connection. It starts
+    again from zero when httpx rewinds the file to send it (a retry makes a new object).
+    """
+
+    def __init__(self, content: bytes, on_read: UploadProgress) -> None:
+        super().__init__(content)
+        self._total = len(content)
+        self._on_read = on_read
+
+    def seek(self, offset: int, whence: int = 0, /) -> int:
+        position = super().seek(offset, whence)
+        if offset == 0 and whence == 0:
+            self._on_read(0, self._total)
+        return position
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        chunk = super().read(size)
+        self._on_read(self.tell(), self._total)
+        return chunk
 
 
 class OutboundError(Exception):
@@ -93,25 +126,35 @@ class OutboundResponse:
         return loads(self.body)
 
 
+def _new_client(**options: Any) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=False,
+        # Ignore proxy environment variables and ~/.netrc: they could add
+        # credentials or send traffic somewhere unexpected.
+        trust_env=False,
+        headers={"User-Agent": USER_AGENT},
+        **options,
+    )
+
+
 def start() -> None:
-    """Creates the shared client. Called once at app start (`app/main.py`)."""
-    global _client
+    """Creates the shared clients. Called once at app start (`app/main.py`)."""
+    global _client, _upload_client
     if _client is None:
-        _client = httpx.AsyncClient(
-            follow_redirects=False,
-            # Ignore proxy environment variables and ~/.netrc: they could add
-            # credentials or send traffic somewhere unexpected.
-            trust_env=False,
-            headers={"User-Agent": USER_AGENT},
-        )
+        _client = _new_client()
+    if _upload_client is None:
+        _upload_client = _new_client(limits=httpx.Limits(max_keepalive_connections=0))
 
 
 async def close() -> None:
-    """Closes the shared client. Called once at app shutdown."""
-    global _client
+    """Closes the shared clients. Called once at app shutdown."""
+    global _client, _upload_client
     if _client is not None:
         await _client.aclose()
         _client = None
+    if _upload_client is not None:
+        await _upload_client.aclose()
+        _upload_client = None
 
 
 def auth_headers_for(url: str) -> dict[str, str]:
@@ -138,6 +181,12 @@ def _get_client() -> httpx.AsyncClient:
     if _client is None:
         raise RuntimeError("outbound.start() has not been called")
     return _client
+
+
+def _get_upload_client() -> httpx.AsyncClient:
+    if _upload_client is None:
+        raise RuntimeError("outbound.start() has not been called")
+    return _upload_client
 
 
 async def _read_limited(response: httpx.Response, max_bytes: int) -> bytes:
@@ -197,6 +246,7 @@ async def upload(
     mime: str,
     timeout_s: float,
     max_bytes: int = JSON_MAX_BYTES,
+    on_sent: UploadProgress | None = None,
 ) -> OutboundResponse:
     """POSTs one file as multipart/form-data in the field `file`, as the GPU API's
     `POST /v1/uploads` expects (Phase 5). Every check of `request()` applies.
@@ -204,15 +254,20 @@ async def upload(
     The file is held in memory, which is fine for the 1-minute voiceovers of
     iteration 1. `filename` matters: the GPU server decides the file type from
     its extension.
+
+    The call is made on a connection of its own (`_upload_client`). `on_sent`, when given, is
+    told `(bytes sent, total bytes)` as the file goes out.
     """
+    body: bytes | io.BytesIO = content if on_sent is None else _CountingBytes(content, on_sent)
     return await _send(
         "POST",
         url,
         json=None,
         params=None,
-        files={"file": (filename, content, mime)},
+        files={"file": (filename, body, mime)},
         timeout_s=timeout_s,
         max_bytes=max_bytes,
+        fresh_connection=True,
     )
 
 
@@ -252,6 +307,7 @@ async def _send(
     max_bytes: int,
     data: Mapping[str, str] | None = None,
     idle_timeout_s: float | None = None,
+    fresh_connection: bool = False,
 ) -> OutboundResponse:
     async def read_body(response: httpx.Response, final_url: str) -> OutboundResponse:
         body = await _read_limited(response, max_bytes)
@@ -272,6 +328,7 @@ async def _send(
         timeout_s=timeout_s,
         idle_timeout_s=idle_timeout_s,
         handle=read_body,
+        fresh_connection=fresh_connection,
     )
     return result
 
@@ -287,6 +344,7 @@ async def _call[T](
     handle: Callable[[httpx.Response, str], Awaitable[T]],
     data: Mapping[str, str] | None = None,
     idle_timeout_s: float | None = None,
+    fresh_connection: bool = False,
 ) -> tuple[T, int]:
     """Makes one call with every check of this module, and lets `handle` read the answer.
 
@@ -297,6 +355,9 @@ async def _call[T](
     `timeout_s` limits the whole call. `idle_timeout_s`, when given, limits every single wait
     for more data from the server (httpx's read timeout), the wait for the first byte
     included. A stall is then reported differently from a call that took too long.
+
+    `fresh_connection` makes the call on a new connection that is closed afterwards, never on
+    one that an earlier call left open.
     """
     final_url = docker_mapped(url)
     try:
@@ -304,7 +365,10 @@ async def _call[T](
     except UrlError as exc:
         raise OutboundError("url", str(exc)) from exc
 
-    client = _get_client()
+    client = _get_upload_client() if fresh_connection else _get_client()
+    headers = auth_headers_for(final_url)
+    if fresh_connection:
+        headers["Connection"] = "close"
     netloc = urlsplit(final_url).netloc
     started = time.monotonic()
     timeout = timeout_s if idle_timeout_s is None else httpx.Timeout(timeout_s, read=idle_timeout_s)
@@ -318,7 +382,7 @@ async def _call[T](
                 params=params,
                 data=data,
                 files=files,
-                headers=auth_headers_for(final_url),
+                headers=headers,
                 timeout=timeout,
             ) as response:
                 if response.is_redirect:

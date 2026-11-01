@@ -9,11 +9,15 @@ at the git tag `narration-final`). The image, voice and video handlers (`remote_
 from __future__ import annotations
 
 import re
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
-from app.jobs import phase_writer, phases
+from app.db.session import SessionLocal
+from app.jobs import live_status, phase_writer, phases, store
 from app.providers import gpu_server
 from app.providers.gpu_server import GpuCallError
+
+if TYPE_CHECKING:
+    from app.jobs.handlers import PollContext
 
 GPU_URL_KEY: Final = "gpu_api_base_url"
 
@@ -30,15 +34,34 @@ def is_preemption(error: str) -> bool:
     return _PREEMPTION.search(error) is not None
 
 
-def phase_for_poll_error(exc: GpuCallError) -> str:
-    """What to show while the server cannot be asked. None of these fails the job."""
-    if exc.kind == "unreachable":
-        return phases.SERVER_UNREACHABLE_CHECKING
-    if exc.kind == "not_found":
-        return phases.NOT_FOUND
-    if exc.status_code is not None:
-        return f"waiting: the server answered HTTP {exc.status_code}, checking again"
-    return "waiting: the server's answer was not usable, checking again"
+async def record_poll_error(job_id: int, exc: GpuCallError, ctx: PollContext | None = None) -> None:
+    """What to do when the server could not be asked about a running job. None of this fails
+    the job.
+
+    Only a 404 changes what the job shows ("not found on this server", with Resubmit offered):
+    it is an answer. Any other problem (no answer, an HTTP error, an unusable answer) leaves the
+    job's phase and `last_checked_at` as the server last confirmed them, and is noted in
+    `live_status` for the badge's info mark. With `ctx` the phase is collected for the
+    dispatcher to write; without it, it is written here.
+    """
+    if exc.kind != "not_found":
+        live_status.note_problem(job_id, str(exc))
+        return
+    if ctx is not None:
+        ctx.record(job_id, phases.NOT_FOUND)
+        return
+    live_status.clear_problem(job_id)
+    async with SessionLocal() as session:
+        await store.record_poll(session, job_id, phases.NOT_FOUND)
+
+
+async def requeue_after_no_answer(job_id: int, exc: GpuCallError) -> None:
+    """Puts a job back in the queue because its uploads or its submit got no answer. The
+    files it had sent are not kept, so the next try starts again.
+    """
+    live_status.note_problem(job_id, f"The upload or submit got no answer: {exc}")
+    async with SessionLocal() as session:
+        await store.requeue(session, job_id, phases.WAITING_TO_START_AGAIN)
 
 
 def after_gone_result(
@@ -60,12 +83,32 @@ async def note_uploading(job_id: int, phase: str) -> None:
     next show `WAITING_TO_UPLOAD` while they wait for one of the upload places, and `phase`
     again once they have it. The first call also puts the job's uploads in line from now
     (`gpu_server.begin_uploads`), ahead of jobs that begin later. Call it in the job's own
-    task, before the uploads.
+    task, before the uploads. It also has the progress of each file kept for the job
+    (`live_status`), starting afresh at the first call of a try.
     """
 
     async def watcher(waiting: bool) -> None:
         await phase_writer.note(job_id, phases.WAITING_TO_UPLOAD if waiting else phase)
 
+    if not gpu_server.is_watching_upload_progress():
+        live_status.reset_upload(job_id)
+    gpu_server.watch_upload_progress(_UploadProgress(job_id))
     gpu_server.watch_uploads(watcher)
     gpu_server.begin_uploads()
     await phase_writer.note(job_id, phase)
+
+
+class _UploadProgress:
+    """Keeps the progress of one job's uploads in `live_status`."""
+
+    def __init__(self, job_id: int) -> None:
+        self._job_id = job_id
+
+    def started(self, filename: str, total_bytes: int) -> None:
+        live_status.upload_started(self._job_id, filename, total_bytes)
+
+    def sent(self, sent_bytes: int) -> None:
+        live_status.upload_sent(self._job_id, sent_bytes)
+
+    def done(self) -> None:
+        live_status.upload_done(self._job_id)

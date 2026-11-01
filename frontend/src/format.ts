@@ -25,6 +25,11 @@ export function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+/** The time of day of a time from the API, in the browser's local time: "9:31:13 PM". */
+export function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString();
+}
+
 /** "sha256:00197efee9fe…": enough to tell two versions apart. Show the full value in a title. */
 export function shortFingerprint(fingerprint: string): string {
   return fingerprint.length > 20 ? `${fingerprint.slice(0, 19)}…` : fingerprint;

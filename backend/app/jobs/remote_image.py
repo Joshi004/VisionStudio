@@ -38,7 +38,8 @@ from app.jobs.gpu_job import (
     after_gone_result,
     is_preemption,
     note_uploading,
-    phase_for_poll_error,
+    record_poll_error,
+    requeue_after_no_answer,
 )
 from app.jobs.handlers import JobHandler, PollContext
 from app.providers import image_generator
@@ -131,10 +132,11 @@ class RemoteImageHandler(JobHandler):
             await self._cancel_quietly(base_url, provider_job_id)
 
     async def _give_up_starting(self, job_id: int, exc: GpuCallError) -> None:
+        if exc.kind == "unreachable":
+            await requeue_after_no_answer(job_id, exc)
+            return
         async with SessionLocal() as session:
-            if exc.kind == "unreachable":
-                await store.requeue(session, job_id, phases.WAITING_SERVER_UNREACHABLE)
-            elif exc.kind == "busy":
+            if exc.kind == "busy":
                 await store.requeue(session, job_id, phases.WAITING_SERVER_BUSY)
             else:
                 await store.fail_job(
@@ -155,7 +157,7 @@ class RemoteImageHandler(JobHandler):
         except GpuCallError as exc:
             # Never fails the job: no answer means check again. A 404 shows "not found on
             # this server" (and offers Resubmit), it does not fail.
-            ctx.record(job.id, phase_for_poll_error(exc))
+            await record_poll_error(job.id, exc, ctx)
             return False
 
         # Keep what else the output holds (the count of download retries).
@@ -232,7 +234,7 @@ class RemoteImageHandler(JobHandler):
             if exc.kind in ("bad_answer", "rejected"):
                 await store.fail_job(session, job.id, f"The image could not be downloaded: {exc}")
             else:
-                await store.record_poll(session, job.id, phase_for_poll_error(exc))
+                await record_poll_error(job.id, exc)
 
     async def _result_gone(self, job: Job, base_url: str) -> None:
         """HTTP 410 on the result: the image expired, or the server has not released it yet.
@@ -248,8 +250,7 @@ class RemoteImageHandler(JobHandler):
         try:
             remote = await image_generator.status(base_url, job.provider_job_id or "")
         except GpuCallError as exc:
-            async with SessionLocal() as session:
-                await store.record_poll(session, job.id, phase_for_poll_error(exc))
+            await record_poll_error(job.id, exc)
             return
 
         action = after_gone_result(

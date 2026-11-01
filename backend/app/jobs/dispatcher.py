@@ -45,7 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionLocal
-from app.jobs import handlers, phase_writer, phases, pools, register_handlers, store
+from app.jobs import handlers, live_status, phase_writer, phases, pools, register_handlers, store
 from app.jobs.handlers import JobHandler
 from app.providers import contract_guard, gpu_server
 from app.services import gpu_status
@@ -197,6 +197,7 @@ class _Dispatcher:
             )
             await session.commit()  # end the read before any network call
         self._interval_s = float(interval)
+        live_status.keep_only(job.id for job in (*running, *queued))
 
         pollable: list[tuple[Job, JobHandler]] = []
         for job in running:
@@ -229,7 +230,7 @@ class _Dispatcher:
             h.provider == "gpu" for _job, h in waiting
         )
         if needs_gpu:
-            gpu_blocked = not await self._server_answers(interval, pollable, waiting)
+            gpu_blocked = not await self._server_answers(interval)
 
         await self._poll_running(
             [(job, h) for job, h in pollable if not (gpu_blocked and h.provider == "gpu")],
@@ -241,15 +242,11 @@ class _Dispatcher:
 
     # --- Step 2: the server ------------------------------------------------------
 
-    async def _server_answers(
-        self,
-        interval: int,
-        pollable: list[tuple[Job, JobHandler]],
-        waiting: list[tuple[Job, JobHandler]],
-    ) -> bool:
+    async def _server_answers(self, interval: int) -> bool:
         """Checks the GPU server and stores the result for the banner.
 
-        When it does not answer, marks the GPU jobs that are waiting on it and backs off. A busy
+        When it does not answer, notes it for the GPU jobs that are waiting on it (their phase is
+        not changed: it is still the last thing the server told) and backs off. A busy
         server (no answer to the health check, but another call was answered a moment ago) is not
         waited for: holding every job back would not help a connection that is only full.
         """
@@ -257,29 +254,14 @@ class _Dispatcher:
             health = await gpu_status.record_health(session)
         if health.reachable or health.busy:
             self._backoff_s = 0.0
+            live_status.clear_server_problem()
             return True
 
         cap = max(MAX_BACKOFF_S, float(interval))
         self._backoff_s = float(interval) if self._backoff_s == 0 else min(self._backoff_s * 2, cap)
-        # One transaction each, however many jobs wait on the server.
-        async with SessionLocal() as session:
-            await store.record_polls(
-                session,
-                [
-                    handlers.PollRecord(job.id, phases.SERVER_UNREACHABLE_CHECKING)
-                    for job, handler in pollable
-                    if handler.provider == "gpu"
-                ],
-            )
-            await store.set_phases(
-                session,
-                {
-                    job.id: phases.WAITING_SERVER_UNREACHABLE
-                    for job, handler in waiting
-                    if handler.provider == "gpu"
-                },
-                status="queued",
-            )
+        # The jobs keep the phase the server last confirmed. That the server does not answer is
+        # kept in memory, for the info mark next to their badge, with when it began.
+        live_status.note_server_problem(health.error or "The GPU server did not answer.")
         _logger.info("GPU server unreachable; checking again in %.0f s", self._backoff_s)
         return False
 
