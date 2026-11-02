@@ -448,3 +448,18 @@ through the list field.
 - Compared operations by `METHOD path`, schemas by name, and the guide's markdown with a line diff.
   The guide's own changelog entries for 0.12.0 and 0.13.0 match what the diff shows.
 - Code references are to the working tree as of this date, including uncommitted changes.
+
+## 9. 0.22: skip re-uploading, and resuming result downloads (done)
+
+What the server says (version 0.22.0 of its guide, and checked against the live server):
+
+- `POST /v1/uploads/by-hash` with `{"sha256": ...}` answers 200 with the `asset_id` of a copy the server already holds (`reused: true`), or 404. `POST /v1/uploads` now also answers with the stored file's `sha256` and `size_bytes`. There is still no way to resume a partly sent upload.
+- `GET /v1/jobs/{job_id}/result` answers `Range` requests with 206 and `Content-Range`, with a strong `ETag` and `Accept-Ranges: bytes`. `If-Range` with that ETag gives the rest, an ETag that no longer matches gives the whole file (200). A ranged request never counts as the one-time download of an incognito job.
+
+What the app does with it:
+
+- `gpu_server.upload_file` asks by hash before uploading (no upload place is needed for that), uses the existing asset when there is one, and checks the upload answer's SHA-256 and size. The jobs' existing resend on "invalid asset reference" covers a shared copy that was removed in between.
+- `outbound.download_to_file` and `gpu_server.download_result` keep a cut-off download in `tmp/<job id>.part` and continue it with `Range` and `If-Range`. A resumed file is hashed from its start, so the SHA-256 and size handlers see are those of the whole file.
+- The job badge shows "N files sent (M already on the server)" for uploads and "Result: X of Y (P%), continued from Z" for downloads.
+
+Left out on purpose: partial files of jobs that fail or are cancelled stay until the next restart, and the small JSON results (`job_result_json`) are not resumed.

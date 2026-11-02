@@ -16,6 +16,7 @@ anything that is not a usable answer, with a `kind` the caller can act on.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import itertools
 import logging
 import re
@@ -33,6 +34,8 @@ import httpx
 from app.core import outbound
 from app.core.urls import docker_mapped, join_url
 from app.db.types import utcnow
+from app.jobs import live_status
+from app.services.storage import get_storage
 
 _logger = logging.getLogger(__name__)
 
@@ -43,6 +46,13 @@ HEALTH_TIMEOUT_S = 5.0
 BUSY_WINDOW_S = 120.0
 
 UPLOAD_PATH = "/v1/uploads"
+# Version 0.22.0 of the server's guide: asks whether the server already holds a file, by its
+# SHA-256. 200 gives the existing asset id, 404 says to upload the file as usual.
+UPLOAD_BY_HASH_PATH = "/v1/uploads/by-hash"
+BY_HASH_TIMEOUT_S = 15.0
+# An upload answer that does not match the file sent (SHA-256 or size) is sent again this many
+# times in all, then the connection is treated as unreliable.
+UPLOAD_INTEGRITY_ATTEMPTS = 2
 JOBS_PATH = "/v1/jobs"
 UPLOAD_TIMEOUT_S = 600.0
 # A file whose connection failed is sent again once, after this pause, before the caller is told
@@ -150,6 +160,9 @@ class UploadReporter(Protocol):
 
     def done(self) -> None:
         """The server accepted the file."""
+
+    def reused(self, filename: str, total_bytes: int) -> None:
+        """The server already had the file (found by its SHA-256), so nothing was sent."""
 
 
 _upload_reporter: ContextVar[UploadReporter | None] = ContextVar("upload_reporter", default=None)
@@ -507,16 +520,32 @@ def _remote_id(body: dict[str, Any], field: str, what: str) -> str:
 
 
 async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> str:
-    """Uploads a file with `POST /v1/uploads` and returns the server's asset id.
+    """Gets a file onto the server and returns the server's asset id.
 
-    The file is read in a thread, so the event loop is never blocked. The server
-    decides the file type from the extension of `filename`.
+    First asks the server whether it already holds the file (`POST /v1/uploads/by-hash`, version
+    0.22.0 of its guide). If it does, its asset id is used and nothing is sent: this is what
+    makes a job that was put back in the queue skip the files it had already sent. Any other
+    answer (404, an error, no answer, an older server) goes on to the upload itself.
+
+    The upload is `POST /v1/uploads`. The file is read in a thread, so the event loop is never
+    blocked. The server decides the file type from the extension of `filename`. The answer's
+    SHA-256 and size are compared with the bytes sent; a file that arrived damaged is sent once
+    more, and then reported as `unreachable` so the job is put back in the queue.
 
     At most the upload limit (`set_transfer_limits`) run at once; the others wait for a free
     place before the file is even read, so the files waiting are not held in memory. The job
     that began uploading first gets the next place (`begin_uploads`). The time limit starts
-    when the upload does, not while it waits.
+    when the upload does, not while it waits. Asking the server about a file needs no place.
     """
+    reporter = _upload_reporter.get()
+    sha256, size_bytes = await asyncio.to_thread(_hash_file, path)
+    known_id = await _find_by_hash(base_url, sha256, size_bytes)
+    if known_id is not None:
+        _logger.info("upload of %s skipped: the server already has it (%s)", filename, known_id)
+        if reporter is not None:
+            reporter.reused(filename, size_bytes)
+        return known_id
+
     watcher = _upload_watcher.get()
     order = _upload_order.get()
     waited = watcher is not None and _upload_slots.locked()
@@ -526,16 +555,79 @@ async def upload_file(base_url: str, path: Path, filename: str, mime: str) -> st
         if watcher is not None and waited:
             await watcher(False)
         content = await asyncio.to_thread(path.read_bytes)
-        response = await _send_file(base_url, content, filename, mime)
-    body = _json_object(response, "upload answer")
+        sent_sha256 = await asyncio.to_thread(lambda: hashlib.sha256(content).hexdigest())
+        for attempt in range(1, UPLOAD_INTEGRITY_ATTEMPTS + 1):
+            response = await _send_file(base_url, content, filename, mime)
+            body = _json_object(response, "upload answer")
+            if _arrived_intact(body, sent_sha256, len(content)):
+                break
+            _logger.warning(
+                "the server stored %s differently from what was sent (try %d of %d)",
+                filename,
+                attempt,
+                UPLOAD_INTEGRITY_ATTEMPTS,
+            )
+        else:
+            raise GpuCallError(
+                "unreachable",
+                "The server's copy of the uploaded file did not match what was sent, twice.",
+            )
+    if reporter is not None:
+        reporter.done()
     return _remote_id(body, "asset_id", "upload answer")
+
+
+def _hash_file(path: Path) -> tuple[str, int]:
+    """The SHA-256 (hex) and size of a file, read in pieces so it is never held whole."""
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            size += len(chunk)
+            digest.update(chunk)
+    return digest.hexdigest(), size
+
+
+def _arrived_intact(body: dict[str, Any], sha256: str, size_bytes: int) -> bool:
+    """Does the server's upload answer describe the file that was sent? An answer without the
+    field (a server older than 0.22.0) cannot be checked, and counts as fine.
+    """
+    stored_sha256 = body.get("sha256")
+    if isinstance(stored_sha256, str) and stored_sha256.lower() != sha256:
+        return False
+    stored_size = body.get("size_bytes")
+    if isinstance(stored_size, int) and not isinstance(stored_size, bool):
+        return stored_size == size_bytes
+    return True
+
+
+async def _find_by_hash(base_url: str, sha256: str, size_bytes: int) -> str | None:
+    """The asset id of a copy of the file the server already holds, or None when it has none or
+    could not be asked. Never raises: not knowing means the file is uploaded.
+    """
+    try:
+        response = await outbound.request(
+            "POST",
+            join_url(base_url, UPLOAD_BY_HASH_PATH),
+            json={"sha256": sha256},
+            timeout_s=BY_HASH_TIMEOUT_S,
+        )
+        body = _json_object(response, "by-hash answer")
+        asset_id = _remote_id(body, "asset_id", "by-hash answer")
+    except (outbound.OutboundError, GpuCallError) as exc:
+        _logger.info("the server was not asked for a copy of the file (%s)", exc)
+        return None
+    # A copy that is not the file asked for is never used.
+    if not _arrived_intact(body, sha256, size_bytes):
+        return None
+    return asset_id
 
 
 async def _send_file(
     base_url: str, content: bytes, filename: str, mime: str
 ) -> outbound.OutboundResponse:
     """Sends one file, and once more if the connection failed (`UPLOAD_ATTEMPTS`). The progress
-    reporter is told when a try begins, as the bytes go out, and when the server accepted them.
+    reporter is told when a try begins and as the bytes go out.
     """
     reporter = _upload_reporter.get()
     on_sent = None if reporter is None else lambda sent, _total: reporter.sent(sent)
@@ -543,7 +635,7 @@ async def _send_file(
         if reporter is not None:
             reporter.started(filename, len(content))
         try:
-            response = await outbound.upload(
+            return await outbound.upload(
                 join_url(base_url, UPLOAD_PATH),
                 filename=filename,
                 content=content,
@@ -562,9 +654,6 @@ async def _send_file(
                 await asyncio.sleep(UPLOAD_RETRY_DELAY_S)
                 continue
             raise _transport_error(exc) from exc
-        if reporter is not None and response.status_code == 200:
-            reporter.done()
-        return response
     raise AssertionError("unreachable: the last attempt returns or raises")
 
 
@@ -669,24 +758,92 @@ async def job_result_json(base_url: str, job_id: str) -> dict[str, Any]:
     return _json_object(response, "result")
 
 
+@dataclass(frozen=True)
+class _PartialDownload:
+    """What a cut-off download needs to continue: the server's ETag of the file it was fetching.
+    The bytes themselves are the file `Storage.partial_download_path` names.
+    """
+
+    etag: str
+    total_bytes: int
+
+
+# Keyed by the server's job id. Memory only, like the temp folder the partial files are in,
+# which is cleared when the app starts: after a restart there is neither, so they never
+# disagree. A partial file without an entry here is never used.
+_partial_downloads: dict[str, _PartialDownload] = {}
+
+
+def _resume_point(job_id: str, partial: Path) -> tuple[int, str | None]:
+    """How many bytes of this job's result are on disk from an earlier try, and the ETag to ask
+    for the rest with. (0, None) when there is nothing usable: any leftover is removed.
+    """
+    known = _partial_downloads.get(job_id)
+    size = partial.stat().st_size if partial.is_file() else 0
+    if known is not None and size > 0:
+        return size, known.etag
+    _forget_partial(job_id, partial)
+    return 0, None
+
+
+def _forget_partial(job_id: str, partial: Path) -> None:
+    partial.unlink(missing_ok=True)
+    _partial_downloads.pop(job_id, None)
+
+
 async def download_result(base_url: str, job_id: str, dest: Path) -> outbound.DownloadResult:
-    """Downloads a finished job's result file (a video) into the new file `dest`.
+    """Downloads a finished job's result file (a video, an image, a sound) to the new file
+    `dest`.
 
     Same errors as `job_result_json`: 409 (not finished yet) and 410 (expired) arrive as
     GpuCallError("rejected") with that `status_code`, and 404 as "not_found". Nothing is
     left at `dest` when this raises.
 
+    A download that is cut off (no answer, a stall, a lost connection) keeps what it received,
+    in a partial file of the temp folder. The next call for the same job asks the server for
+    the rest only (`Range` with `If-Range`), so every try adds to the file instead of starting
+    again. A server that changed the file in between sends it whole. The partial file is
+    removed when the server says the result is gone (404, 410). `dest` only appears when the
+    whole file is there.
+
     At most the download limit (`set_transfer_limits`) are fetched at once; the others wait for
     a free place, and the time limit starts when the download does.
     """
     url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/result")
-    async with _download_slots.place(time.monotonic()):
-        try:
-            result = await outbound.download_to_file(url, dest, timeout_s=DOWNLOAD_TIMEOUT_S)
-        except outbound.OutboundError as exc:
-            raise _transport_error(exc) from exc
+    partial = get_storage().partial_download_path(job_id)
+    resume_from, etag = _resume_point(job_id, partial)
+
+    def on_progress(progress: outbound.DownloadProgress) -> None:
+        if progress.etag is None:
+            _partial_downloads.pop(job_id, None)  # without an ETag the file cannot be continued
+        else:
+            _partial_downloads[job_id] = _PartialDownload(progress.etag, progress.total_bytes)
+        live_status.download_progress(
+            job_id, progress.received_bytes, progress.total_bytes, progress.resumed_from
+        )
+
+    try:
+        async with _download_slots.place(time.monotonic()):
+            try:
+                result = await outbound.download_to_file(
+                    url,
+                    partial,
+                    timeout_s=DOWNLOAD_TIMEOUT_S,
+                    resume_from=resume_from,
+                    if_range=etag,
+                    keep_partial=True,
+                    on_progress=on_progress,
+                )
+            except outbound.OutboundError as exc:
+                raise _transport_error(exc) from exc
+    finally:
+        live_status.download_ended(job_id)
+        if not partial.exists():
+            _partial_downloads.pop(job_id, None)  # the download removed it: nothing to continue
+
     if result.status_code != 200:
-        dest.unlink(missing_ok=True)
+        if result.status_code in (404, 410):
+            _forget_partial(job_id, partial)
         raise _error_for(
             outbound.OutboundResponse(
                 url=result.url,
@@ -694,6 +851,14 @@ async def download_result(base_url: str, job_id: str, dest: Path) -> outbound.Do
                 headers=httpx.Headers(),
                 body=result.error_body,
             )
+        )
+    await asyncio.to_thread(partial.replace, dest)
+    _partial_downloads.pop(job_id, None)
+    if resume_from > 0:
+        _logger.info(
+            "result of server job %s fetched in more than one try (%d bytes were kept)",
+            job_id,
+            resume_from,
         )
     return result
 

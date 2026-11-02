@@ -9,6 +9,7 @@ type BadgeJob = Pick<JobSummary, "status" | "phase"> & {
   stage?: JobSummary["stage"];
   /** Missing on the small job models: no upload line and no info mark are shown. */
   upload?: JobSummary["upload"];
+  download?: JobSummary["download"];
   connection?: JobSummary["connection"];
   last_checked_at?: JobSummary["last_checked_at"];
 };
@@ -48,8 +49,10 @@ function NotAnsweringMark({
   );
 }
 
-function filesSentText(filesDone: number): string {
-  return `${filesDone} ${filesDone === 1 ? "file" : "files"} sent`;
+/** "3 files sent", or "3 files sent (2 already on the server)" when the server had some. */
+function filesSentText(filesDone: number, filesReused: number): string {
+  const sent = `${filesDone} ${filesDone === 1 ? "file" : "files"} sent`;
+  return filesReused === 0 ? sent : `${sent} (${filesReused} already on the server)`;
 }
 
 /**
@@ -69,7 +72,7 @@ function UploadLine({
     }
     return (
       <Text size="xs" c="dimmed">
-        {filesSentText(upload.files_done)}, waiting for a free upload place
+        {filesSentText(upload.files_done, upload.files_reused)}, waiting for a free upload place
       </Text>
     );
   }
@@ -77,7 +80,8 @@ function UploadLine({
     upload.total_bytes > 0
       ? Math.min(100, Math.floor((upload.sent_bytes / upload.total_bytes) * 100))
       : 0;
-  const filesText = upload.files_done === 0 ? "" : `, ${filesSentText(upload.files_done)}`;
+  const filesText =
+    upload.files_done === 0 ? "" : `, ${filesSentText(upload.files_done, upload.files_reused)}`;
   return (
     <Tooltip
       label="Bytes handed to the connection. Through the tunnel the last few MB can still be on their way when the bar is full."
@@ -97,18 +101,41 @@ function UploadLine({
 }
 
 /**
+ * "Result: 420 KB of 858 KB (48%), continued from 300 KB", with a bar. A download that was cut
+ * off keeps what it received, so a later try continues from there instead of starting again.
+ */
+function DownloadLine({ download }: { download: NonNullable<JobSummary["download"]> }) {
+  const known = download.total_bytes > 0;
+  const percent = known
+    ? Math.min(100, Math.floor((download.received_bytes / download.total_bytes) * 100))
+    : 0;
+  const size = known
+    ? `${formatBytes(download.received_bytes)} of ${formatBytes(download.total_bytes)} (${percent}%)`
+    : formatBytes(download.received_bytes);
+  const resumed =
+    download.resumed_from > 0 ? `, continued from ${formatBytes(download.resumed_from)}` : "";
+  return (
+    <Stack gap={2} maw={320}>
+      {known && <Progress value={percent} size="sm" />}
+      <Text size="xs" c="dimmed">
+        Result: {size}
+        {resumed}
+      </Text>
+    </Stack>
+  );
+}
+
+/**
  * The job's stage as a coloured badge (its status when the stage is not known), with the phase
  * next to it while the job is active. An info mark follows when the GPU server does not answer
- * (the badge is then the last known state), and an upload in progress shows its bar below.
+ * (the badge is then the last known state), and an upload or a download of the result in
+ * progress shows its bar below.
  */
 export function JobStatusBadge({ job }: { job: BadgeJob }) {
   const stage = job.stage;
   const row = (
     <Group gap={6} wrap="nowrap">
-      <Badge
-        color={stage ? stageColor(stage) : statusColor(job.status)}
-        variant="light"
-      >
+      <Badge color={stage ? stageColor(stage) : statusColor(job.status)} variant="light">
         {stage ? stageLabel(stage) : job.status}
       </Badge>
       {job.phase && showsPhase(job.status) && (
@@ -122,13 +149,14 @@ export function JobStatusBadge({ job }: { job: BadgeJob }) {
     </Group>
   );
 
-  if (!job.upload) {
+  if (!job.upload && !job.download) {
     return row;
   }
   return (
     <Stack gap={4}>
       {row}
-      <UploadLine upload={job.upload} waiting={stage === "waiting_to_upload"} />
+      {job.upload && <UploadLine upload={job.upload} waiting={stage === "waiting_to_upload"} />}
+      {job.download && <DownloadLine download={job.download} />}
     </Stack>
   );
 }

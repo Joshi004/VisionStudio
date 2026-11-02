@@ -6031,6 +6031,20 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * DownloadProgressOut
+         * @description The result file of a finished server job being fetched. `received_bytes` counts the file
+         *     on disk, the part kept from an earlier try included; `resumed_from` is how many bytes that
+         *     part was (0 for a download from the start). `total_bytes` is 0 when the server did not say.
+         */
+        DownloadProgressOut: {
+            /** Received Bytes */
+            received_bytes: number;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Resumed From */
+            resumed_from: number;
+        };
         /** EditModelOut */
         EditModelOut: {
             /**
@@ -7056,6 +7070,7 @@ export interface components {
             /** Can Resubmit */
             can_resubmit: boolean;
             upload?: components["schemas"]["UploadProgressOut"] | null;
+            download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
             /** Provider Job Id */
             provider_job_id: string | null;
@@ -7156,6 +7171,7 @@ export interface components {
             /** Can Resubmit */
             can_resubmit: boolean;
             upload?: components["schemas"]["UploadProgressOut"] | null;
+            download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
             /**
              * Stage
@@ -14033,6 +14049,8 @@ export interface components {
             total_bytes: number;
             /** Files Done */
             files_done: number;
+            /** Files Reused */
+            files_reused: number;
         };
         /** ValidationError */
         ValidationError: {

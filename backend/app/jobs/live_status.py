@@ -1,9 +1,11 @@
 """What is known about a job right now, kept in memory, never in the database.
 
-Two things change too often to be written to the `job` row, and are worth nothing after a
+Three things change too often to be written to the `job` row, and are worth nothing after a
 restart:
 
 - Upload progress: which file a job is sending, and how many bytes of it have gone out.
+- Download progress: how much of a finished job's result file has been received, and where a
+  resumed download took up again.
 - Connection problems: the GPU server did not answer. This is not a state of the job. A job that
   was "queued on cluster" still is, we just cannot see it for now. So the job's `phase` is left
   as it was, and the problem is kept here, with when it began and when it last failed. The
@@ -29,7 +31,22 @@ class UploadState:
     filename: str
     sent_bytes: int
     total_bytes: int
+    # Files the server accepted, those it already had included.
     files_done: int
+    # Of `files_done`, the files the server already had, so nothing was sent for them.
+    files_reused: int = 0
+
+
+@dataclass
+class DownloadState:
+    """A result file being fetched from the server. `received_bytes` counts the file on disk,
+    the part kept from an earlier try included, and `resumed_from` is how many bytes that was.
+    `total_bytes` is 0 when the server did not say.
+    """
+
+    received_bytes: int
+    total_bytes: int
+    resumed_from: int
 
 
 @dataclass
@@ -42,6 +59,8 @@ class ConnectionProblem:
 
 
 _uploads: dict[int, UploadState] = {}
+# Keyed by the server's job id, which is what a download knows.
+_downloads: dict[str, DownloadState] = {}
 _job_problems: dict[int, ConnectionProblem] = {}
 # The GPU server did not answer the health check. It applies to every job that needs the server.
 _server_problem: ConnectionProblem | None = None
@@ -63,6 +82,7 @@ def upload_started(job_id: int, filename: str, total_bytes: int) -> None:
         sent_bytes=0,
         total_bytes=total_bytes,
         files_done=previous.files_done if previous else 0,
+        files_reused=previous.files_reused if previous else 0,
     )
 
 
@@ -82,8 +102,42 @@ def upload_done(job_id: int) -> None:
     clear_problem(job_id)
 
 
+def upload_reused(job_id: int, filename: str, total_bytes: int) -> None:
+    """The server already had a file, so none of it was sent. It counts as sent and as reused."""
+    previous = _uploads.get(job_id)
+    _uploads[job_id] = UploadState(
+        filename=filename,
+        sent_bytes=total_bytes,
+        total_bytes=total_bytes,
+        files_done=(previous.files_done if previous else 0) + 1,
+        files_reused=(previous.files_reused if previous else 0) + 1,
+    )
+    clear_problem(job_id)
+
+
 def upload_of(job_id: int) -> UploadState | None:
     return _uploads.get(job_id)
+
+
+# --- Download progress --------------------------------------------------------------------
+
+
+def download_progress(
+    provider_job_id: str, received_bytes: int, total_bytes: int, resumed_from: int
+) -> None:
+    """Bytes of a result file received so far (called as the file is written)."""
+    _downloads[provider_job_id] = DownloadState(
+        received_bytes=received_bytes, total_bytes=total_bytes, resumed_from=resumed_from
+    )
+
+
+def download_ended(provider_job_id: str) -> None:
+    """A try to fetch the result ended, finished or not. What it had received is on disk."""
+    _downloads.pop(provider_job_id, None)
+
+
+def download_of(provider_job_id: str) -> DownloadState | None:
+    return _downloads.get(provider_job_id)
 
 
 # --- Connection problems ------------------------------------------------------------------

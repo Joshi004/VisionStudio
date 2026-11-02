@@ -97,8 +97,21 @@ class UploadProgressOut(BaseModel):
     filename: str
     sent_bytes: int
     total_bytes: int
-    # Files of this job the server has accepted already.
+    # Files of this job the server has accepted already, those it already had included.
     files_done: int
+    # Of `files_done`, the files the server already held (found by SHA-256): not sent again.
+    files_reused: int
+
+
+class DownloadProgressOut(BaseModel):
+    """The result file of a finished server job being fetched. `received_bytes` counts the file
+    on disk, the part kept from an earlier try included; `resumed_from` is how many bytes that
+    part was (0 for a download from the start). `total_bytes` is 0 when the server did not say.
+    """
+
+    received_bytes: int
+    total_bytes: int
+    resumed_from: int
 
 
 class JobConnectionOut(BaseModel):
@@ -130,6 +143,7 @@ class JobSummary(BaseModel):
     can_resubmit: bool
     # Only for a queued or running job, and only while there is something to say.
     upload: UploadProgressOut | None = None
+    download: DownloadProgressOut | None = None
     connection: JobConnectionOut | None = None
 
     @computed_field  # type: ignore[prop-decorator]
@@ -147,23 +161,37 @@ class JobDetail(JobSummary):
     result_asset_id: int | None
 
 
-def _live(job: Job) -> tuple[UploadProgressOut | None, JobConnectionOut | None]:
-    """What `live_status` knows about an active job: its upload, and its trouble reaching the
-    GPU server. The upload is only shown while the job is in a step that sends files.
+def _live(
+    job: Job,
+) -> tuple[UploadProgressOut | None, DownloadProgressOut | None, JobConnectionOut | None]:
+    """What `live_status` knows about an active job: its upload, the download of its result,
+    and its trouble reaching the GPU server. The upload is only shown while the job is in a step
+    that sends files, and the download while it fetches its result.
     """
     if job.status not in ("queued", "running"):
-        return None, None
+        return None, None, None
+    stage = phases.stage_of(job.status, job.phase)
     upload = None
     state = live_status.upload_of(job.id)
-    if state is not None and phases.stage_of(job.status, job.phase) in (
-        "uploading",
-        "waiting_to_upload",
-    ):
+    if state is not None and stage in ("uploading", "waiting_to_upload"):
         upload = UploadProgressOut(
             filename=state.filename,
             sent_bytes=state.sent_bytes,
             total_bytes=state.total_bytes,
             files_done=state.files_done,
+            files_reused=state.files_reused,
+        )
+    download = None
+    received = (
+        live_status.download_of(job.provider_job_id)
+        if stage == "fetching_result" and job.provider_job_id
+        else None
+    )
+    if received is not None:
+        download = DownloadProgressOut(
+            received_bytes=received.received_bytes,
+            total_bytes=received.total_bytes,
+            resumed_from=received.resumed_from,
         )
     problem = live_status.problem_of(job.id, needs_gpu=job.provider == "gpu")
     connection = (
@@ -173,12 +201,12 @@ def _live(job: Job) -> tuple[UploadProgressOut | None, JobConnectionOut | None]:
             message=problem.message, since=problem.since, last_failed_at=problem.last_failed_at
         )
     )
-    return upload, connection
+    return upload, download, connection
 
 
 def job_summary(row: JobRow) -> JobSummary:
     job = row.job
-    upload, connection = _live(job)
+    upload, download, connection = _live(job)
     return JobSummary(
         id=job.id,
         project_id=job.project_id,
@@ -197,6 +225,7 @@ def job_summary(row: JobRow) -> JobSummary:
         can_cancel=store.can_cancel(job),
         can_resubmit=store.can_resubmit(job),
         upload=upload,
+        download=download,
         connection=connection,
     )
 

@@ -40,6 +40,7 @@ _logger = logging.getLogger(__name__)
 
 MEDIA_URL_PREFIX = "/media/"
 _EXTENSION = re.compile(r"[a-z0-9]{1,5}")
+_PARTIAL_KEY = re.compile(r"[A-Za-z0-9_-]{1,100}")
 # The folder is a project id, or `lab` for the Image lab, which belongs to no project (Phase 13).
 LAB_FOLDER = "lab"
 _RELATIVE_PATH = re.compile(rf"(?:[0-9]+|{LAB_FOLDER})/[0-9a-f]{{32}}\.[a-z0-9]{{1,5}}")
@@ -106,6 +107,15 @@ class Storage:
         if not _EXTENSION.fullmatch(suffix):
             raise StorageError(f"Not a valid file extension: {suffix!r}")
         return self._tmp_dir / f"{uuid.uuid4().hex}.{suffix}"
+
+    def partial_download_path(self, key: str) -> Path:
+        """The path of the half of a download that was cut off, named after `key` (the server's
+        job id), so the next try finds it. It sits directly in the temp folder like every temp
+        file, so `discard` accepts it and `clear_tmp` removes it when the app starts.
+        """
+        if not _PARTIAL_KEY.fullmatch(key):
+            raise StorageError(f"Not a valid download key: {key!r}")
+        return self._tmp_dir / f"{key}.part"
 
     async def describe_temp(self, path: Path) -> TempFile:
         """Counts the bytes and hashes a temp file that a caller wrote itself (a render), so

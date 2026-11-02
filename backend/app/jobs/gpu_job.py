@@ -57,7 +57,9 @@ async def record_poll_error(job_id: int, exc: GpuCallError, ctx: PollContext | N
 
 async def requeue_after_no_answer(job_id: int, exc: GpuCallError) -> None:
     """Puts a job back in the queue because its uploads or its submit got no answer. The
-    files it had sent are not kept, so the next try starts again.
+    files it had sent are not kept on our side, but the server still holds them for a while, and
+    the next try finds them again by their SHA-256 (`gpu_server.upload_file`) instead of
+    sending them again.
     """
     live_status.note_problem(job_id, f"The upload or submit got no answer: {exc}")
     async with SessionLocal() as session:
@@ -112,3 +114,6 @@ class _UploadProgress:
 
     def done(self) -> None:
         live_status.upload_done(self._job_id)
+
+    def reused(self, filename: str, total_bytes: int) -> None:
+        live_status.upload_reused(self._job_id, filename, total_bytes)
