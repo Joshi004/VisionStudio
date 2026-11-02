@@ -259,6 +259,10 @@ class GraphicEngineOut(BaseModel):
     label: str
     # False until the engine's own phase has built it: its card then says "not built yet".
     built: bool
+    # False while the engine can be started (`built`) but its renderer does not exist yet (the two
+    # template engines have a spec before they have a renderer): the card then shows the input
+    # and says that the renderer is not built yet.
+    renderer_built: bool
     # Every render made for this engine, newest first.
     renders: list[GraphicRenderOut]
 
@@ -405,6 +409,7 @@ def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
                 key=engine.key,
                 label=engine.label,
                 built=engine.built,
+                renderer_built=engine.renderer_built,
                 renders=by_engine[engine.key],
             )
             for engine in graphics_engines.ENGINES.values()

@@ -24,7 +24,8 @@
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), and the Audio video lab of a character (`time_lab_speech_words.py`,
   `render_av_test.py`), and the brief and the word timing of a Graphics lab run
-  (`write_lab_graphic_brief.py`, `time_lab_graphic_words.py`) and the video of a Graphics lab render
+  (`write_lab_graphic_brief.py`, `time_lab_graphic_words.py`), the template spec of a Graphics lab
+  run (`write_lab_graphic_template_spec.py`) and the video of a Graphics lab render
   (`render_lab_graphic.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
@@ -89,6 +90,7 @@ def register_handlers() -> None:
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
     from app.jobs.write_lab_graphic_brief import WriteLabGraphicBriefHandler
+    from app.jobs.write_lab_graphic_template_spec import WriteLabGraphicTemplateSpecHandler
     from app.jobs.write_lab_music_prompt import WriteLabMusicPromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
     from app.jobs.write_music_bible import WriteMusicBibleHandler
@@ -146,4 +148,5 @@ def register_handlers() -> None:
     handlers.register(RenderAvTestHandler())
     handlers.register(WriteLabGraphicBriefHandler())
     handlers.register(TimeLabGraphicWordsHandler())
+    handlers.register(WriteLabGraphicTemplateSpecHandler())
     handlers.register(RenderLabGraphicHandler())

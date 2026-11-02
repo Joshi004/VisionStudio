@@ -2,6 +2,13 @@ import { Badge, Box, Group, Paper, Stack, Text } from "@mantine/core";
 
 import type { GraphicEngine } from "../../api/graphicsLab";
 import { GraphicsRenderVerdict } from "./GraphicsRenderVerdict";
+import { GraphicsTemplateSpec } from "./GraphicsTemplateSpec";
+
+/** The engines that draw from a template spec (GFX-006). */
+const TEMPLATE_ENGINES: ReadonlyArray<GraphicEngine["key"]> = [
+  "remotion_templates",
+  "python_templates",
+];
 
 type GraphicsEngineCardProps = {
   engine: GraphicEngine;
@@ -11,9 +18,10 @@ type GraphicsEngineCardProps = {
 };
 
 /**
- * One of the four engines of a run. For now every card says "not built yet": an engine is built
- * by its own phase, and its card then shows the newest video and the verdict. The full
- * comparison (the four videos played together) is a later phase.
+ * One of the four engines of a run. An engine that is not built says so. A template engine
+ * (GFX-006) shows its spec, or why no template fits, before its renderer exists; once an engine
+ * has a video, its card shows it and the verdict. The full comparison (the four videos played
+ * together) is a later phase.
  */
 export function GraphicsEngineCard({ engine, width, height }: GraphicsEngineCardProps) {
   // The renders are newest first.
@@ -29,6 +37,11 @@ export function GraphicsEngineCard({ engine, width, height }: GraphicsEngineCard
           {!engine.built && (
             <Badge variant="light" color="gray">
               Not built yet
+            </Badge>
+          )}
+          {engine.built && !engine.renderer_built && (
+            <Badge variant="light" color="gray">
+              Renderer not built yet
             </Badge>
           )}
         </Group>
@@ -63,6 +76,9 @@ export function GraphicsEngineCard({ engine, width, height }: GraphicsEngineCard
               Attempt {newest.attempt}
               {engine.renders.length > 1 ? ` of ${engine.renders.length}` : ""}
             </Text>
+            {TEMPLATE_ENGINES.includes(engine.key) && (
+              <GraphicsTemplateSpec render={newest} />
+            )}
             {newest.last_error !== null && (
               <Text size="xs" c="red" style={{ wordBreak: "break-word" }}>
                 {newest.last_error}

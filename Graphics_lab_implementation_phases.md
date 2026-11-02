@@ -250,6 +250,23 @@ The catalogue (field limits are checked by code, and long text is never cut):
 
 A phase that has to change a look rule records the change in this section and in its notes. The other template phase follows it.
 
+**The text layout (decided in GFX-006).** GFX-006's checks also decide how every text is laid out, so that GFX-007 and GFX-008 draw exactly the same text and only the renderer differs (G-5). The result is stored in the spec under `text`, keyed by the field path (`title`, `caption`, `bars.0.label`, `points.1.label`, `nodes.2.label`, `items.0.text`), as `{font, size, lines}`: `font` is `display` or `text` (the two fonts of G-11), `size` the font size in pixels and `lines` the text split onto one or two lines. A renderer draws those sizes and lines and makes no fitting decision of its own. A line of text is `1.2` times its size high.
+
+- **Sizes.** A title is the display font at `round(0.06 h)` (landscape, 65 px) or `round(0.036 h)` (portrait, 69 px). Body text is the text font at `round(0.032 h)` (35 px) or `round(0.024 h)` (46 px). A `statement` item is the display font at the title size.
+- **Spaces** (the width a text has, as a share of the safe area's width W): a title and a `statement` item, W; a `kpi_card` caption, W (`center`) or W/2 (`split`); a `bar_comparison` label, 0.9 W / n (`vertical`) or 0.3 W (`horizontal`); a `line_trend` label, W / n; a `flow_diagram` label, 0.85 of the node's width, which is `(W - (n - 1) x 0.06 W) / n` (`horizontal`), or 0.7 W (`vertical`); a `bullet_build` item in a `list`, 0.92 W. The on-screen text of a number is written by code and is not fitted. Only widths are checked: where a text sits vertically, inside the safe area and out of the caption area, is for the renderer.
+- **The fit rule.** A text is measured in its font file (Pillow, at the size it is drawn at) and must be within 97 percent of the width of its space; the rest leaves room for the small differences between two renderers' kerning. It is tried on one line at the largest whole-pixel size from 100 down to 70 percent of its size. If that fails, it is tried on two lines, split at the word break that keeps the longer line shortest, again from 100 down to 70 percent. If that fails too, or the text is one word, the spec is refused with the text and the width of its space.
+- **The spec shape of each template** (all but the template and the beats are checked; an unknown key is refused; a `null` key counts as absent):
+
+| Template | `fields` | `beats` |
+|---|---|---|
+| `kpi_card` | `title`, `value` (ref), `change?` (ref), `caption?` | `title`, `value`, and `change` and `caption` when the field is given |
+| `bar_comparison` | `title`, `bars` (2 to 6 of `{label, value, emphasis?}`), `highlight?` (`{value, beat}`) | `title`, `bars` (one beat id for each bar, never going backwards) |
+| `line_trend` | `title`, `points` (3 to 12 of `{label, value}`), `end_label?` (ref) | `title`, `points` (one beat id for each), `end_label` when given |
+| `flow_diagram` | `title`, `nodes` (2 to 6 of `{label, beat}`, never going backwards) | `title` |
+| `bullet_build` | `title?`, `items` (1 to 4 of `{text, beat}` for `list`, exactly 1 for `statement`) | `title` when the title is given |
+
+`variant` may be left out: the first one is used, and `vertical` for a `flow_diagram` in a portrait video. The stored spec is `{template, variant, fields, beats, text, catalogue_version}`, or `{template: null, reason, catalogue_version}` when no template fits.
+
 #### 4.5.2 Block scene (GFX-009)
 
 The model designs the scene freely from blocks we wrote once. Code checks it, and the motion service measures it.
@@ -402,7 +419,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-003 | Director call: the brief and its timing | Code | 002 | In Progress (built; the live check with the real model is open) |
 | GFX-004 | Voice and word timings | Code | 003 | In Progress (built; the live check with a real voice is open) |
 | GFX-005 | Motion service and the render job | Code | 002 | In Progress (built and checked; the owner's rebuild and click on the Docker stack is open) |
-| GFX-006 | Template catalogue and the template-spec call | Code | 003 | Not Started |
+| GFX-006 | Template catalogue and the template-spec call | Code | 003 | In Progress (built and checked; the live check with the real model is open) |
 | GFX-007 | Remotion templates | Code | 005, 006 | Not Started |
 | GFX-008 | Python templates | Code | 005, 006 | Not Started |
 | GFX-009 | Building blocks | Code | 003, 005 | Not Started |
@@ -763,7 +780,7 @@ What was built:
 
 ### GFX-006 — Template catalogue and the template-spec call
 
-**Status:** Not Started
+**Status:** In Progress (built and checked against a stand-in model server on 2026-11-03; the live check on excerpts 1, 5, 8 and 9 with the real model is open)
 
 **Objective.** The five templates' field schemas (§4.5.1), and one model call that turns a brief into a checked template spec, or into a reasoned "no template fits". The two template engines share that spec.
 
@@ -801,11 +818,30 @@ What was built:
 
 **Completion checklist.**
 
-- [ ] Catalogue and checks
-- [ ] Writer, job, registry entries, cards show the spec
-- [ ] Docs, standard checks
+- [x] Catalogue and checks
+- [x] Writer, job, registry entries, cards show the spec
+- [x] Docs, standard checks (ruff, ESLint, `tsc`, `gen:api` and the production build pass)
+- [ ] Live check: excerpts 1, 5, 8 and 9 with the real model (four spec calls, plus any brief not written yet; owner's click)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration, no new setting. The "Planning decides" items are settled in §4.5.1 (the text layout, the fit rule, the sizes and spaces). The rest:
+
+- **Modules.** `services/graphics_templates.py` (pure: `CATALOGUE`, `TEMPLATES`, `measure`, `fit_text`, `check_spec(answer, line, resolved)`, `default_variant`, `CATALOGUE_VERSION` 1), `services/graphics_template_spec_writer.py` (pure: the instructions and `build_request(line, orientation, brief, resolved, model=...)`), `services/graphics_template_engine.py` (`start`), `jobs/write_lab_graphic_template_spec.py`. `check_spec` takes the resolved brief only, not the brief: refs, units, beat ids and frames, safe area and size are all in it.
+- **Text measuring.** `font_metrics.measure` was not reused (it measures ASS cell sizes and knows only Montserrat). `graphics_templates.measure(text, role, size)` loads `Montserrat-ExtraBold.ttf` and `Inter-Medium.ttf` with Pillow at 1000 px and scales: the width at a font size in pixels (the em), as a browser and Pillow draw it. Pillow's basic layout applies the font's kerning table only, which is why a text may fill only 97 percent of its space. GFX-007 should compare a long label's width in Chrome with `text[path].lines` once it exists, and say in its notes if the margin has to change.
+- **`max_tokens`** 32,000 and `reasoning_effort` `high`, as for the brief.
+- **Job** `write_lab_graphic_template_spec`: `llm`, `never_rerun`, the story model, no project, deduped by `run_id`. Input `{requested, run_id}`; the line, the orientation, the brief and the resolved brief are read from the run when it starts. In one transaction with `finish_job` the answer becomes the `input` of every render row whose `input_job_id` is the job, and a render job is queued (`graphics_lab.queue_render`) for each of those rows whose engine has `renderer_built` when the answer has a template. A failure puts its message on those rows' `last_error`. The phase `saving the template spec` is new (`phases.SAVING_TEMPLATE_SPEC`).
+- **One call, two rows.** `graphics_template_engine.start` is the `start` of both template entries of the registry. Whichever is called first checks whether a template-engine render of the run already has a spec job; if so it returns that job. Otherwise it creates the job and one render row for each template engine, both with `input_job_id` set. So **Make all** makes one call, and a second click makes nothing.
+- **A change to the registry (for GFX-007 and GFX-008).** `Engine` has a new flag `renderer_built` (default false). `built` still means "can be started" (`start` is set), and both template engines are `built` now. **GFX-007 and GFX-008 do not set `start`: each only sets `renderer_built=True` on its entry** (and `python_renderer` or the `Templates` composition), and the spec job then queues its render. A card with `built` and no `renderer_built` shows the spec and a "Renderer not built yet" badge. The API's `GraphicEngineOut` has `renderer_built`.
+- **GFX-007 and GFX-008 read** `render.input` (the spec with `text`) and the run's `resolved`; the look rules and the text layout of §4.5.1 are the contract between them. If a renderer finds a spec it cannot draw, the card shows the failure like any other render.
+- **Frontend.** `GraphicsTemplateSpec` (on the two template cards: "Writing the template spec" with the job's phase while the call runs, the template and variant, the spec as folded JSON, or "No template fits" with the reason), `readTemplateInput` and `TEMPLATE_LABELS` in `graphicsLabView.ts`, the badge in `GraphicsEngineCard`, and `schema.d.ts` regenerated.
+
+**Checked.** `ruff check`, `ruff format --check`, `npm run lint`, `typecheck` and `build` pass. Pure checks on excerpt 1's brief and resolved brief (landscape and portrait): a good `bar_comparison` is accepted (title 65 px landscape and 69 px portrait, labels 35 px); an unknown template, seven bars, a bar label "2022 sales" (a number the line does not say), an unknown beat, beats that go backwards, bars of two units, an extra key, an unknown variant, a title over 32 characters, a title that does not fit even on two lines (portrait) and a refusal with no reason are each refused with a message; a `kpi_card`, a `line_trend` with an end label, a vertical `flow_diagram` in portrait (the default variant) and a `statement` were accepted, and a `statement` with two items was refused. On a throwaway `DATA_DIR`, with the language-model URL pointed at a stand-in server that answered fixed JSON: Make all on a ready brief made one spec job and two render rows sharing `input_job_id`; the stand-in's first answer (a label "2022 sales") was refused and the corrected retry (the reason was in the request) was saved as the same `input` on both rows; a second Make all made nothing; no render job was queued; a "no template fits" answer showed its reason on both cards (portrait run); two refused answers failed the job with the reason on both cards. In headless Chrome the cards showed the badge, the template, "Show the spec" and the reason. No paid call was made, and the real database was not touched.
+
+**Still to do for this phase.** The live check: with the real model, press Make all on excerpts 1, 5, 8 and 9 and read the specs (excerpt 1 should give a `bar_comparison` with three bars and the highlight on `d1`, 5 a `flow_diagram`, 8 "no template fits" with a reason, 9 a `bullet_build`). Each run is one brief call and one spec call. Update the status when it is done. The owner has to rebuild the Docker backend (`docker compose up -d --build backend`); there is no migration.
+
+**For the later phases.**
+
+- GFX-007 and GFX-008: set only `renderer_built=True` (see above), and draw `input.text[path]` exactly.
+- GFX-011's **Ask again** on a template engine cannot just call `start` again: `start` returns the run's existing spec job and adds nothing, so that Make all never makes a second call. GFX-011 has to add its own way to make a new spec job and a new pair of render rows (the next `attempt`), for example a `force` argument to `graphics_template_engine.start`.
 
 ### GFX-007 — Remotion templates
 
@@ -819,7 +855,7 @@ What was built:
 
 - **`motion/src/templates/`:** the five templates and their variants, the four background styles, the effects and their timing from beats, text fitting, and the colour roles.
 - **The `Templates` composition** reads `{resolved, input}`.
-- **Registry:** `remotion_templates` is marked as built, and its `start` queues `render_lab_graphic` once the spec is saved.
+- **Registry:** `remotion_templates` sets `renderer_built=True` (its `start` is GFX-006's), and the spec job queues `render_lab_graphic` once the spec is saved. The renderer draws `input.text` exactly (§4.5.1).
 - **Planning decides:** any change to a look rule (recorded in §4.5.1 for GFX-008).
 
 **Out of scope.** Blocks and generated code. The Python renderer.
@@ -859,7 +895,7 @@ What was built:
   - the five templates, variants, backgrounds, effects, text fitting and colour roles of §4.5.1, using the G-11 font files;
   - frames sent as raw video into FFmpeg, encoded with GFX-005's settings.
 - **The drawing runs off the event loop** (a thread or a process), so the API keeps answering during a render.
-- **Registry:** `python_templates` is marked as built, and its `start` queues `render_lab_graphic` once the spec is saved.
+- **Registry:** `python_templates` sets `renderer_built=True` (its `start` is GFX-006's), and the spec job queues `render_lab_graphic` once the spec is saved. The renderer draws `input.text` exactly (§4.5.1).
 - **Planning decides:**
   - the drawing library (Pillow with supersampling for smooth edges, `skia-python`, or `pycairo`; check each one's licence, and whether it needs system packages in the image);
   - thread or process;
@@ -1159,3 +1195,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-03 | GFX-003 | In Progress | Director call built: brief writer and checks, resolver (timing, frames, number text, theme, zones), job `write_lab_graphic_brief`, the three clicks (brief, Make all, Ask again), brief panel on the run page, setting `graphics_words_per_minute`. Checked against a stand-in model server; the live check on excerpts 1 and 8 is open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-004 | In Progress | Voice built: optional saved voice on the form, speech made when the run is made, job `time_lab_graphic_words` (Parakeet), the brief waits for the timing, estimated fallback with a note, `voice_audio_of`, Graphics runs counted as users of a speech, voice panel on the run page. Checked on a throwaway database; the live check with a real voice is open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-005 | In Progress | Motion service and render job built: the `motion` container (Remotion 4.0.540, Fastify, isolated, hardened), the provider, job `render_lab_graphic` (checks, voice, metrics), two settings, the test card button. Checked on a throwaway database and in the arm64 image; the owner's rebuild and click are open. Notes for the later phases are in the completion notes. |
+| 2026-11-03 | GFX-006 | In Progress | Template catalogue (five templates, the checks, the text-fit rule with both fonts), the spec writer, job `write_lab_graphic_template_spec`, one call and two render rows for the two template engines, `renderer_built` on the registry, spec and "no template fits" on the cards. Checked against a stand-in model server; the live check on excerpts 1, 5, 8 and 9 is open. Notes for the later phases are in the completion notes. |

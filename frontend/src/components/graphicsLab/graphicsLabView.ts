@@ -111,3 +111,33 @@ export const TIMING_SOURCE_LABELS: Record<string, string> = {
   estimated: "estimated from a speaking pace",
   parakeet: "timed from the voice",
 };
+
+export const TEMPLATE_LABELS: Record<string, string> = {
+  kpi_card: "KPI card",
+  bar_comparison: "Bar comparison",
+  line_trend: "Line trend",
+  flow_diagram: "Flow diagram",
+  bullet_build: "Bullet build",
+};
+
+/**
+ * What the template engines hold as their input (GFX-006): a template with its variant, or the
+ * reason that no template fits. Null for an input that is not one of the two (not written yet).
+ */
+export type TemplateInput =
+  | { kind: "spec"; template: string; variant: string | null }
+  | { kind: "no_fit"; reason: string };
+
+export function readTemplateInput(input: unknown): TemplateInput | null {
+  if (typeof input !== "object" || input === null) {
+    return null;
+  }
+  const { template, variant, reason } = input as Record<string, unknown>;
+  if (template === null) {
+    return { kind: "no_fit", reason: typeof reason === "string" ? reason : "No reason was given." };
+  }
+  if (typeof template === "string") {
+    return { kind: "spec", template, variant: typeof variant === "string" ? variant : null };
+  }
+  return null;
+}

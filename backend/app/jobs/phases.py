@@ -169,6 +169,9 @@ SAVING_CALLOUT_PLAN: Final = "saving the callout plan"
 # --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
 # `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_GRAPHIC_BRIEF: Final = "saving the graphic brief"
+# `write_lab_graphic_template_spec` (GFX-006) also uses PREPARING_PROMPT and `asking_model` from
+# above (one call).
+SAVING_TEMPLATE_SPEC: Final = "saving the template spec"
 
 # --- Running: the music cues (MUSIC-009) -------------------------------------------------
 # `write_music_cue` and `audit_music_cues` also use PREPARING_PROMPT and `asking_model` from above

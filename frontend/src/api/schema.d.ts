@@ -7182,6 +7182,8 @@ export interface components {
             label: string;
             /** Built */
             built: boolean;
+            /** Renderer Built */
+            renderer_built: boolean;
             /** Renders */
             renders: components["schemas"]["GraphicRenderOut"][];
         };
