@@ -142,7 +142,8 @@ class Job(Base):
         # the rewrite of a rejected take's prompt, since revision 0069, and the placement of the
         # music on the timeline, since revision 0070, and the preview of a music mix, since revision
         # 0071, and the timing of a speech's words, since revision 0073, and the callout plan,
-        # since revision 0074.
+        # since revision 0074, and the two Audio video lab jobs, since revision 0075, and the six
+        # Graphics lab jobs, since revision 0079.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -158,7 +159,10 @@ class Job(Base):
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
             "'audit_music_cues', 'rewrite_music_prompt', 'place_music', "
             "'preview_music_mix', 'time_speech_words', 'write_callout_plan', "
-            "'time_lab_speech_words', 'render_av_test')",
+            "'time_lab_speech_words', 'render_av_test', "
+            "'write_lab_graphic_brief', 'write_lab_graphic_template_spec', "
+            "'write_lab_graphic_block_scene', 'write_lab_graphic_component', "
+            "'render_lab_graphic', 'time_lab_graphic_words')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -2699,3 +2703,104 @@ class AvLabSegment(Base):
     take_id: Mapped[int | None] = mapped_column(
         ForeignKey("character_take.id", ondelete="SET NULL"), default=None
     )
+
+
+class LabGraphicRun(Base):
+    """One line of an explainer script the Graphics lab makes graphics for (GFX-002, revision
+    0079). It belongs to no project.
+
+    The owner types only `line_text` and an `orientation` (and, from GFX-004, picks a saved
+    `voice_id`). Everything else is filled by the later phases: the speech (`speech_run_id`) and
+    the time of every word (`timing_job_id`, `timing`) by GFX-004, the director's `brief`
+    (`brief_job_id`) and the `resolved` brief that code works out from it (the frame count, the
+    number texts, the theme, the safe area) by GFX-003, and `trial_case_key` by the trial batch
+    (GFX-012). Asking the director again makes a new run, so a brief never changes under the
+    renders made from it. What a run is doing is worked out on every read from the jobs and the
+    stored fields; only `last_error` is stored, for a failure that no job holds.
+    """
+
+    __tablename__ = "lab_graphic_run"
+    __table_args__ = (
+        CheckConstraint("orientation IN ('landscape', 'portrait')", name="orientation_valid"),
+        Index("idx_lab_graphic_run_created", "created_at"),
+        Index("idx_lab_graphic_run_trial_case", "trial_case_key"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    line_text: Mapped[str]
+    orientation: Mapped[str]
+    # The saved voice that speaks the line, and the Voice lab speech that was made (GFX-004).
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    speech_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_voice_run.id", ondelete="SET NULL"), default=None
+    )
+    # The `time_lab_graphic_words` job and the times of the line's words (GFX-004).
+    timing_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    timing: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The `write_lab_graphic_brief` job and the brief it wrote (GFX-003).
+    brief_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    brief: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The resolved brief that every engine's input is checked against (GFX-003).
+    resolved: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The case of the trial batch this run belongs to (GFX-012).
+    trial_case_key: Mapped[str | None] = mapped_column(default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+
+
+class LabGraphicRender(Base):
+    """One engine's attempt at a Graphics lab run (GFX-002, revision 0079).
+
+    `engine` is one of the four engines. `input` is what the engine draws from (the template
+    spec, the block scene or the component code) and `input_job_id` the model call that wrote it;
+    the two template engines share one spec but have a render each. `attempt` counts the renders
+    of one engine of a run from 1: asking the model again, or rendering again, adds one.
+    `repeat_of` names the render a "render again" was made from, with the same input and no
+    model call. `render_job_id` and `media_path` (under `media/lab/`) are the render and its
+    video, `metrics` and `warnings` what was measured, and `verdict` and `note` what the owner
+    decided after watching.
+    """
+
+    __tablename__ = "lab_graphic_render"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('remotion_templates', 'python_templates', 'remotion_blocks', "
+            "'generated_component')",
+            name="engine_valid",
+        ),
+        CheckConstraint(
+            "verdict IS NULL OR verdict IN ('good', 'usable', 'bad')", name="verdict_valid"
+        ),
+        UniqueConstraint("run_id", "engine", "attempt"),
+        Index("idx_lab_graphic_render_run_engine", "run_id", "engine"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    run_id: Mapped[int] = mapped_column(ForeignKey("lab_graphic_run.id", ondelete="CASCADE"))
+    engine: Mapped[str]
+    attempt: Mapped[int]
+    input_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    repeat_of: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_graphic_render.id", ondelete="SET NULL"), default=None
+    )
+    render_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    # The finished video, NULL until the render job has stored it.
+    media_path: Mapped[str | None] = mapped_column(default=None)
+    metrics: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # What a person decided after watching: good, usable or bad. NULL until then.
+    verdict: Mapped[str | None] = mapped_column(default=None)
+    note: Mapped[str | None] = mapped_column(default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)

@@ -16,6 +16,7 @@ const SAMPLE_NAMES: Record<LabSampleKind, string> = {
   voice_run: "this speech",
   music_run: "this music run",
   av_test: "this Audio video test",
+  graphic_run: "this Graphics run",
 };
 
 /** What goes with the sample, said before the user confirms. */
@@ -26,6 +27,7 @@ const WHAT_GOES: Record<LabSampleKind, string> = {
   music_run: "This deletes the run and its sound file.",
   av_test:
     "This deletes the test, its clips, its two videos and its speech. A speech or a clip that a copy of the test still uses is kept.",
+  graphic_run: "This deletes the run, its brief and every video its engines made.",
 };
 
 type DeleteLabSampleModalProps = {
@@ -87,6 +89,22 @@ export function DeleteLabSampleModal({
             </Text>
             <Text size="sm">{WHAT_GOES[kind]} It cannot be undone.</Text>
 
+            {blocked === null && data.also_deletes.length > 0 && (
+              <Alert color="orange" title="The take that made it goes too">
+                <Stack gap="xs">
+                  <List size="sm">
+                    {data.also_deletes.map((take) => (
+                      <List.Item key={take}>{take}</List.Item>
+                    ))}
+                  </List>
+                  <Text size="sm">
+                    It leaves the character&apos;s gallery. Whatever else it made or used stays
+                    in its lab.
+                  </Text>
+                </Stack>
+              </Alert>
+            )}
+
             {blocked && (
               <Alert color="red" title="It cannot be deleted now">
                 <Stack gap="xs">
@@ -102,7 +120,8 @@ export function DeleteLabSampleModal({
               </Alert>
             )}
 
-            {blocked === null && (
+            {/* A Graphics run is made on this machine: the GPU server holds nothing of it. */}
+            {blocked === null && kind !== "graphic_run" && (
               <ServerCleanupCheckbox
                 checked={purgeServer}
                 onChange={setPurgeServer}

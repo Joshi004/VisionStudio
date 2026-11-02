@@ -48,6 +48,12 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_callout_plan: "Callout plan",
   time_lab_speech_words: "Time test speech words",
   render_av_test: "Render audio video test",
+  write_lab_graphic_brief: "Graphics lab brief",
+  write_lab_graphic_template_spec: "Graphics lab template spec",
+  write_lab_graphic_block_scene: "Graphics lab block scene",
+  write_lab_graphic_component: "Graphics lab component",
+  render_lab_graphic: "Graphics lab render",
+  time_lab_graphic_words: "Graphics lab word timing",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
@@ -81,6 +87,13 @@ export function labPathFor(type: JobSummary["type"]): string {
     case "time_lab_speech_words":
     case "render_av_test":
       return "/lab/characters";
+    case "write_lab_graphic_brief":
+    case "write_lab_graphic_template_spec":
+    case "write_lab_graphic_block_scene":
+    case "write_lab_graphic_component":
+    case "render_lab_graphic":
+    case "time_lab_graphic_words":
+      return "/lab/graphics";
     case "write_environment_prompt":
       return "/lab/environments";
     default:

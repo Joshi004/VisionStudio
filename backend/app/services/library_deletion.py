@@ -42,6 +42,7 @@ from app.db.models import (
     EnvironmentViewState,
     GenerationRequest,
     Job,
+    LabGraphicRender,
     LabImage,
     LabMusicRun,
     LabMusicSource,
@@ -604,6 +605,7 @@ async def path_in_use(session: AsyncSession, path: str) -> bool:
         CharacterReference.cutout_path,
         AvLabTest.mixed_path,
         AvLabTest.tts_path,
+        LabGraphicRender.media_path,
     ):
         found = await session.execute(select(exists().where(column == path)))
         if found.scalar():

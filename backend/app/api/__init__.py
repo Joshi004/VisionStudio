@@ -20,6 +20,7 @@ from app.api import (
     environment_views,
     generation_requests,
     gpu,
+    graphics_lab,
     health,
     image_lab,
     jobs,
@@ -84,6 +85,7 @@ api_router.include_router(image_lab.router, tags=["image-lab"])
 api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
 api_router.include_router(music_lab.router, tags=["music-lab"])
+api_router.include_router(graphics_lab.router, tags=["graphics-lab"])
 api_router.include_router(character_lab.router, tags=["character-lab"])
 api_router.include_router(av_lab.router, tags=["av-lab"])
 api_router.include_router(environment_lab.router, tags=["environment-lab"])

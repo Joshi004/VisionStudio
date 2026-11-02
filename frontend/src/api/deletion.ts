@@ -5,6 +5,7 @@ import { api } from "./client";
 import { CHARACTER_LAB_KEY } from "./characterLab";
 import { ENVIRONMENT_LAB_KEY } from "./environmentLab";
 import { ApiError, detailMessage } from "./errors";
+import { GRAPHICS_LAB_KEY } from "./graphicsLab";
 import { LAB_KEY } from "./imageLab";
 import { invalidateAfterJobAction } from "./jobs";
 import { MUSIC_LAB_KEY } from "./musicLab";
@@ -19,7 +20,7 @@ export type LibraryDeletionPreview = components["schemas"]["LibraryDeletionPrevi
 export type ProjectUse = components["schemas"]["ProjectUseOut"];
 export type MissingItem = components["schemas"]["MissingItemOut"];
 export type LabSampleDeletionPreview = components["schemas"]["LabSampleDeletionPreviewOut"];
-/** The kinds of lab sample that can be deleted: image_run, video_run, voice_run, music_run, av_test. */
+/** The kinds of lab sample that can be deleted: image_run, video_run, voice_run, music_run, av_test, graphic_run. */
 export type LabSampleKind = LabSampleDeletionPreview["kind"];
 
 function failure(error: unknown, status: number, what: string): ApiError {
@@ -40,6 +41,7 @@ function refreshAfterDeletion(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: VOICE_LAB_KEY }),
     queryClient.invalidateQueries({ queryKey: VIDEO_LAB_KEY }),
     queryClient.invalidateQueries({ queryKey: MUSIC_LAB_KEY }),
+    queryClient.invalidateQueries({ queryKey: GRAPHICS_LAB_KEY }),
     queryClient.invalidateQueries({ queryKey: VOICES_KEY }),
     invalidateAfterJobAction(queryClient),
   ]);
@@ -200,9 +202,9 @@ export function useDeleteEnvironment() {
 // --- Lab samples ------------------------------------------------------------------------------
 
 /**
- * Where a lab sample (an image run, a video run, a speech, a music run or an Audio video test)
- * is still used, and why it cannot be deleted now, if so. It is read when the dialog opens and
- * is never kept: what uses the sample can change at any time.
+ * Where a lab sample (an image run, a video run, a speech, a music run, an Audio video test or a
+ * Graphics run) is still used, and why it cannot be deleted now, if so. It is read when the
+ * dialog opens and is never kept: what uses the sample can change at any time.
  */
 export function useLabSampleDeletionPreview(kind: LabSampleKind | null, sampleId: number | null) {
   return useQuery({

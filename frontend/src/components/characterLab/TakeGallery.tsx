@@ -13,9 +13,9 @@ type TakeGalleryProps = {
 };
 
 /**
- * Everything made with this character, newest first, a page at a time. Takes are never
- * deleted. While one is running the page asks again by itself, and the clock of each running
- * step counts up.
+ * Everything made with this character, newest first, a page at a time. A take goes only with
+ * the picture, speech or clip it made, deleted in its lab. While one is running the page asks
+ * again by itself, and the clock of each running step counts up.
  */
 export function TakeGallery({ characterId, onReuse }: TakeGalleryProps) {
   const gallery = useCharacterTakes(characterId);

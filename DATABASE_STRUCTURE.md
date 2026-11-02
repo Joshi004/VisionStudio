@@ -180,6 +180,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (skip uploads the server already has, resume cut-off result downloads, 2026-11-01):** no migration, no new table, no new column, no new job type, no new setting. Uses version 0.22.0 of the server's guide. (1) **A file is first looked up on the server by its SHA-256** (`POST /v1/uploads/by-hash`, `gpu_server.upload_file`): a 200 gives the `asset_id` of a copy the server already holds and nothing is sent, any other answer (404, an error, no answer) goes on to the normal upload. A job put back in the queue after a dropped connection therefore skips the files it had already sent. (2) **The upload answer is checked**: its `sha256` and `size_bytes` must match the bytes sent, otherwise the file is sent once more, and then reported as unreachable (the job is put back in the queue, not failed). (3) **A result download that is cut off keeps what it received** in `tmp/<server job id>.part` and the next try asks only for the rest (`Range` with `If-Range` and the server's ETag, `outbound.download_to_file`); the ETag is kept in memory only, and the temp folder is cleared at start, so after a restart nothing is continued. A changed file (ETag no longer matches) or any answer that cannot be used to continue starts again from byte 0. (4) **Two new live fields**, in memory like the upload progress and gone after a restart: `upload.files_reused` (of `files_done`, the files the server already had) and `download` (`received_bytes`, `total_bytes`, `resumed_from`) on the job summary, only while the job is in the stage `fetching_result`. A single file that is cut off in the middle of an upload still starts again from byte 0: the server has no partial-upload resume.
 
+**Update (GFX-002 Graphics lab foundation, 2026-11-02):** migration `0079`. **The Lab gets a Graphics tab: a line of an explainer script is stored, and four engines will each draw a graphic for it.** (1) **Two new tables**, `lab_graphic_run` (Section 4.73) and `lab_graphic_render` (Section 4.74). A run belongs to no project. A run holds the line, the orientation and, once later phases fill them, the speech, the word times, the director's brief and the brief as resolved by code; a render is one engine's attempt at a run (its input, its video, what was measured and the owner's verdict). (2) **`job.type` gains six types**, `write_lab_graphic_brief`, `write_lab_graphic_template_spec`, `write_lab_graphic_block_scene`, `write_lab_graphic_component`, `render_lab_graphic` and `time_lab_graphic_words`: the CHECK is rebuilt in batch mode, so `job` now has fifty-three types. They are added in one migration for the whole lab; **no handler is registered for any of them yet** (GFX-003 onwards), so nothing can queue one. (3) **Deleting a run** is the shared lab-sample delete with the new kind `graphic_run` (`services/lab_deletion`): it is refused (409) while a job of the run is running, deletes the run's renders and then the video files that no remaining row uses (`lab_graphic_render.media_path` is now one of the places `library_deletion.path_in_use` looks at). (4) **What a run is doing is computed on read** (`services/graphics_lab.run_state`); only `last_error` is stored. **No new setting**, no existing row is changed and nothing is backfilled. (5) **A new font file**, `backend/app/assets/fonts/Inter-Medium.ttf` (licence `assets/licenses/Inter-OFL.txt`), is the text font of the Graphics lab (G-11); the display font stays Montserrat ExtraBold. See Sections 4.73 and 4.74 and `Graphics_lab_implementation_phases.md`.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -435,6 +437,14 @@ erDiagram
 | `lab_voice_run` | `voice_id` | `voice.id` | Yes (the saved voice that read the text; `SET NULL`). Phase 21 |
 | `lab_voice_run` | `project_id` | `project.id` | Yes (the project the pipeline made the sample for; `SET NULL`; NULL for a run made by hand). PHASE-011 |
 | `lab_voice_run` | `design_job_id` | `job.id` | Yes (the `design_voice` job that wrote the description; `SET NULL`). PHASE-011 |
+| `lab_graphic_run` | `voice_id` | `voice.id` | Yes (the saved voice that speaks the line; `SET NULL`). GFX-002 |
+| `lab_graphic_run` | `speech_run_id` | `lab_voice_run.id` | Yes (the Voice lab speech of the line; `SET NULL`). GFX-002 |
+| `lab_graphic_run` | `timing_job_id` | `job.id` | Yes (the `time_lab_graphic_words` job; `SET NULL`). GFX-002 |
+| `lab_graphic_run` | `brief_job_id` | `job.id` | Yes (the `write_lab_graphic_brief` job; `SET NULL`). GFX-002 |
+| `lab_graphic_render` | `run_id` | `lab_graphic_run.id` | No (`CASCADE`). GFX-002 |
+| `lab_graphic_render` | `input_job_id` | `job.id` | Yes (the job that wrote the engine's input; `SET NULL`). GFX-002 |
+| `lab_graphic_render` | `repeat_of` | `lab_graphic_render.id` | Yes (the render a "render again" was made from; `SET NULL`). GFX-002 |
+| `lab_graphic_render` | `render_job_id` | `job.id` | Yes (the `render_lab_graphic` job; `SET NULL`). GFX-002 |
 | `narrator_voice` | `project_id` | `project.id` | No (`CASCADE`). PHASE-011 |
 | `narrator_voice` | `voice_id` | `voice.id` | Yes (the saved voice; `SET NULL`). PHASE-011 |
 | `narrator_voice` | `job_id` | `job.id` | Yes (the `design_voice` job of an `ai` version; `SET NULL`; NULL for a manual one). PHASE-011 |
@@ -3381,6 +3391,91 @@ CREATE TABLE shot_voice_source (
     UNIQUE (project_id, scene_id, shot_id)
 );
 CREATE INDEX idx_shot_voice_source_project ON shot_voice_source (project_id);
+```
+
+### 4.73 `lab_graphic_run`
+
+*Added in GFX-002 (migration `0079`).* One line of an explainer script that the Graphics lab makes graphics for. It belongs to no project. The owner types only `line_text` and `orientation`; the other columns are filled by later phases (GFX-003 the brief, GFX-004 the speech and the word times, GFX-012 the trial case). Asking the director again makes a **new** run, so a brief never changes under the renders made from it. What a run is doing (`new`, `writing_brief`, `brief_ready` or `brief_failed`) is worked out on every read from the jobs and the stored fields (`services/graphics_lab.run_state`); only `last_error` is stored, for a failure that no job holds. The size of every video of a run is worked out from `orientation` (landscape 1920 x 1080, portrait 1080 x 1920, 24 frames a second) and is not stored.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `line_text` | TEXT | NOT NULL | — | The line, trimmed, 1 to 300 characters (`graphics_lab.LINE_MAX_CHARS`; checked by the service) |
+| `orientation` | TEXT | NOT NULL | — | `landscape` or `portrait` (`CHECK`) |
+| `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice that speaks the line (GFX-004). `ON DELETE SET NULL` |
+| `speech_run_id` | INTEGER, FK → `lab_voice_run.id` | NULL | — | The Voice lab speech of the line (GFX-004). `ON DELETE SET NULL` |
+| `timing_job_id` | INTEGER, FK → `job.id` | NULL | — | The `time_lab_graphic_words` job (GFX-004). `ON DELETE SET NULL` |
+| `timing` | JSON | NULL | — | The start and end of each word of the line (GFX-004). NULL until timed |
+| `brief_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_lab_graphic_brief` job (GFX-003). `ON DELETE SET NULL` |
+| `brief` | JSON | NULL | — | What the director model wrote (GFX-003). NULL until written |
+| `resolved` | JSON | NULL | — | The brief as code resolved it: frame count, number texts, theme, safe area (GFX-003). Every engine's input is checked against it |
+| `trial_case_key` | TEXT | NULL | — | The case of the trial batch the run belongs to (GFX-012) |
+| `last_error` | TEXT | NULL | — | A failure that no job holds |
+
+```sql
+CREATE TABLE lab_graphic_run (
+    id             INTEGER PRIMARY KEY,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    line_text      TEXT NOT NULL,
+    orientation    TEXT NOT NULL CHECK (orientation IN ('landscape', 'portrait')),
+    voice_id       INTEGER REFERENCES voice(id) ON DELETE SET NULL,
+    speech_run_id  INTEGER REFERENCES lab_voice_run(id) ON DELETE SET NULL,
+    timing_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    timing         JSON,
+    brief_job_id   INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    brief          JSON,
+    resolved       JSON,
+    trial_case_key TEXT,
+    last_error     TEXT
+);
+CREATE INDEX idx_lab_graphic_run_created ON lab_graphic_run (created_at);
+CREATE INDEX idx_lab_graphic_run_trial_case ON lab_graphic_run (trial_case_key);
+```
+
+### 4.74 `lab_graphic_render`
+
+*Added in GFX-002 (migration `0079`).* One engine's attempt at a run. `engine` is `remotion_templates`, `python_templates`, `remotion_blocks` or `generated_component` (`CHECK`; the registry is `services/graphics_engines.ENGINES`). `attempt` counts the renders of one engine of a run from 1: asking the model again, or rendering again, adds one, and nothing is ever replaced. `input` is what the engine draws from (the template spec, the block scene or the component code) and `input_job_id` the model call that wrote it; the two template engines share one spec but have a render each. `repeat_of` names the render a "render again" was made from (the same input, no model call). `media_path` is the finished video under `media/lab/` (NULL until stored); `verdict` and `note` are what the owner decided after watching. Deleting the run deletes its renders (`CASCADE`); the video files are deleted by code, and only when no remaining row uses them.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `run_id` | INTEGER, FK → `lab_graphic_run.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (run_id, engine, attempt)` |
+| `engine` | TEXT | NOT NULL | — | One of the four engine keys (`CHECK`) |
+| `attempt` | INTEGER | NOT NULL | — | From 1, for each engine of a run |
+| `input_job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote `input`. `ON DELETE SET NULL` |
+| `input` | JSON | NULL | — | The engine's input |
+| `repeat_of` | INTEGER, FK → `lab_graphic_render.id` | NULL | — | The render this one repeats. `ON DELETE SET NULL` |
+| `render_job_id` | INTEGER, FK → `job.id` | NULL | — | The `render_lab_graphic` job. `ON DELETE SET NULL` |
+| `media_path` | TEXT | NULL | — | The video, under `media/lab/` (`lab/<32 hex>.<ext>`) |
+| `metrics` | JSON | NULL | — | What was measured on the video |
+| `warnings` | JSON | NULL | — | What the checks found that is not an error |
+| `verdict` | TEXT | NULL | — | `good`, `usable` or `bad` (`CHECK`); NULL until the owner decides. Changed with `PATCH /api/lab/graphics/renders/{id}` |
+| `note` | TEXT | NULL | — | The owner's note, trimmed, at most 1000 characters (checked by the service) |
+| `last_error` | TEXT | NULL | — | A failure no job holds |
+
+```sql
+CREATE TABLE lab_graphic_render (
+    id            INTEGER PRIMARY KEY,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    run_id        INTEGER NOT NULL REFERENCES lab_graphic_run(id) ON DELETE CASCADE,
+    engine        TEXT NOT NULL CHECK (engine IN ('remotion_templates', 'python_templates',
+                                                  'remotion_blocks', 'generated_component')),
+    attempt       INTEGER NOT NULL,
+    input_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    input         JSON,
+    repeat_of     INTEGER REFERENCES lab_graphic_render(id) ON DELETE SET NULL,
+    render_job_id INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    media_path    TEXT,
+    metrics       JSON,
+    warnings      JSON,
+    verdict       TEXT CHECK (verdict IS NULL OR verdict IN ('good', 'usable', 'bad')),
+    note          TEXT,
+    last_error    TEXT,
+    UNIQUE (run_id, engine, attempt)
+);
+CREATE INDEX idx_lab_graphic_render_run_engine ON lab_graphic_render (run_id, engine);
 ```
 
 ---
