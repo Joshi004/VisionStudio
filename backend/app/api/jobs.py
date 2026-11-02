@@ -251,19 +251,61 @@ async def _load_row(session: AsyncSession, job_id: int) -> JobRow:
     return row
 
 
-@router.get("/jobs", response_model=list[JobSummary])
+@router.get(
+    "/jobs",
+    response_model=list[JobSummary],
+    responses={
+        422: {
+            "model": ErrorResponse,
+            "description": "A value breaks a rule, or `project_id` and `no_project` are both set.",
+        }
+    },
+)
 async def list_jobs(
     session: SessionDep,
     response: Response,
     project_id: Annotated[int | None, Query(ge=1, le=_MAX_JOB_ID)] = None,
+    no_project: Annotated[
+        bool, Query(description="Only the jobs of the labs, which belong to no project.")
+    ] = False,
+    job_status: Annotated[
+        list[JobStatus] | None,
+        Query(alias="status", description="Only jobs with one of these statuses (repeat it)."),
+    ] = None,
+    job_type: Annotated[
+        list[JobType] | None,
+        Query(alias="type", description="Only jobs of one of these types (repeat it)."),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[JobSummary]:
-    """Jobs, newest first: all of them, or those of one project; `limit` jobs from `offset`.
-    The header `X-Total-Count` is how many jobs there are in all (of that project).
+    """Jobs, newest first: all of them, or only those that match the filters (one project or
+    the labs, any of some statuses, any of some types); `limit` jobs from `offset`.
+    The header `X-Total-Count` is how many jobs match in all, not only on this page.
     """
-    response.headers["X-Total-Count"] = str(await store.count_jobs(session, project_id=project_id))
-    rows = await store.list_jobs(session, project_id=project_id, limit=limit, offset=offset)
+    if project_id is not None and no_project:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Give a project or no_project, not both.",
+        )
+    response.headers["X-Total-Count"] = str(
+        await store.count_jobs(
+            session,
+            project_id=project_id,
+            no_project=no_project,
+            statuses=job_status,
+            types=job_type,
+        )
+    )
+    rows = await store.list_jobs(
+        session,
+        project_id=project_id,
+        no_project=no_project,
+        statuses=job_status,
+        types=job_type,
+        limit=limit,
+        offset=offset,
+    )
     return [job_summary(row) for row in rows]
 
 

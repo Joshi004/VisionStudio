@@ -1308,8 +1308,9 @@ export interface paths {
         };
         /**
          * List Jobs
-         * @description Jobs, newest first: all of them, or those of one project; `limit` jobs from `offset`.
-         *     The header `X-Total-Count` is how many jobs there are in all (of that project).
+         * @description Jobs, newest first: all of them, or only those that match the filters (one project or
+         *     the labs, any of some statuses, any of some types); `limit` jobs from `offset`.
+         *     The header `X-Total-Count` is how many jobs match in all, not only on this page.
          */
         get: operations["list_jobs_api_jobs_get"];
         put?: never;
@@ -17645,6 +17646,12 @@ export interface operations {
         parameters: {
             query?: {
                 project_id?: number | null;
+                /** @description Only the jobs of the labs, which belong to no project. */
+                no_project?: boolean;
+                /** @description Only jobs with one of these statuses (repeat it). */
+                status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
+                /** @description Only jobs of one of these types (repeat it). */
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test")[] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -17663,13 +17670,13 @@ export interface operations {
                     "application/json": components["schemas"]["JobSummary"][];
                 };
             };
-            /** @description Validation Error */
+            /** @description A value breaks a rule, or `project_id` and `no_project` are both set. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

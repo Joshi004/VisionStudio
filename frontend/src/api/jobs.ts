@@ -50,16 +50,39 @@ export function useJobs(projectId?: number) {
   });
 }
 
-/** One page of the jobs, and how many jobs there are in all (of the project, when one is given). */
+export type JobStatus = JobSummary["status"];
+export type JobType = JobSummary["type"];
+
+/**
+ * Which jobs the Activity page lists. `project` is one project's id, "lab" for the jobs of the
+ * labs (they belong to no project), or null for any. A job must have one of `statuses` and one
+ * of `types`; an empty list means any status or any type.
+ */
+export type JobsFilter = {
+  project: number | "lab" | null;
+  statuses: JobStatus[];
+  types: JobType[];
+};
+
+/** One page of the jobs, and how many jobs match the filter in all (not only on this page). */
 export type JobsPage = { jobs: JobSummary[]; total: number };
 
 async function fetchJobsPage(
-  projectId: number | undefined,
+  filter: JobsFilter,
   page: number,
   pageSize: number,
 ): Promise<JobsPage> {
   const { data, response } = await api.GET("/api/jobs", {
-    params: { query: { project_id: projectId, limit: pageSize, offset: (page - 1) * pageSize } },
+    params: {
+      query: {
+        project_id: typeof filter.project === "number" ? filter.project : undefined,
+        no_project: filter.project === "lab" ? true : undefined,
+        status: filter.statuses.length > 0 ? filter.statuses : undefined,
+        type: filter.types.length > 0 ? filter.types : undefined,
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      },
+    },
   });
   if (!data) {
     throw new ApiError(`Could not load the jobs (HTTP ${response.status}).`, response.status);
@@ -69,13 +92,21 @@ async function fetchJobsPage(
 }
 
 /**
- * The newest jobs, `pageSize` at a time (pages start at 1), all of them or those of one
- * project. The page is loaded again every few seconds while any job on it is waiting or running.
+ * The newest jobs that match `filter`, `pageSize` at a time (pages start at 1). The page is
+ * loaded again every few seconds while any job on it is waiting or running.
  */
-export function useJobsPage(projectId: number | undefined, page: number, pageSize: number) {
+export function useJobsPage(filter: JobsFilter, page: number, pageSize: number) {
   return useQuery({
-    queryKey: [...JOBS_KEY, "page", projectId ?? "all", pageSize, page],
-    queryFn: () => fetchJobsPage(projectId, page, pageSize),
+    queryKey: [
+      ...JOBS_KEY,
+      "page",
+      filter.project ?? "all",
+      filter.statuses,
+      filter.types,
+      pageSize,
+      page,
+    ],
+    queryFn: () => fetchJobsPage(filter, page, pageSize),
     placeholderData: keepPreviousData,
     refetchInterval: (query) =>
       query.state.data?.jobs.some(isJobActive) ? ACTIVE_POLL_MS : false,

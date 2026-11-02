@@ -54,6 +54,18 @@ export function jobTypeLabel(type: JobSummary["type"]): string {
   return TYPE_LABELS[type];
 }
 
+/** True when `value` is one of the job types (a stray value from the address is not). */
+export function isJobType(value: string): value is JobSummary["type"] {
+  return Object.hasOwn(TYPE_LABELS, value);
+}
+
+/** Every job type with its label, in the order of the labels, for a picker. */
+export function jobTypeOptions(): { value: JobSummary["type"]; label: string }[] {
+  return (Object.keys(TYPE_LABELS) as JobSummary["type"][])
+    .map((type) => ({ value: type, label: TYPE_LABELS[type] }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 /** The Lab tab a job that belongs to no project is shown in. */
 export function labPathFor(type: JobSummary["type"]): string {
   switch (type) {
@@ -86,6 +98,20 @@ const STATUS_COLORS: Record<JobSummary["status"], string> = {
 
 export function statusColor(status: JobSummary["status"]): string {
   return STATUS_COLORS[status];
+}
+
+/** The five statuses a job is stored with, in the order it goes through them, with labels. */
+export const JOB_STATUSES: { value: JobSummary["status"]; label: string }[] = [
+  { value: "queued", label: "Queued" },
+  { value: "running", label: "Running" },
+  { value: "succeeded", label: "Succeeded" },
+  { value: "failed", label: "Failed" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+/** True when `value` is one of the job statuses (a stray value from the address is not). */
+export function isJobStatus(value: string): value is JobSummary["status"] {
+  return JOB_STATUSES.some((status) => status.value === value);
 }
 
 export type JobStage = JobSummary["stage"];

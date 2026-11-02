@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Anchor,
   Button,
   Group,
   Loader,
+  MultiSelect,
   Pagination,
   Select,
   Stack,
@@ -23,7 +24,16 @@ import { JobDetailDrawer } from "../components/jobs/JobDetailDrawer";
 import { JobStatusBadge } from "../components/jobs/JobStatusBadge";
 import { PoolCapacityPanel } from "../components/jobs/PoolCapacityPanel";
 import { SchedulerHealthPanel } from "../components/jobs/SchedulerHealthPanel";
-import { elapsedText, jobTypeLabel, labPathFor } from "../components/jobs/jobFormat";
+import {
+  JOB_STATUSES,
+  elapsedText,
+  isJobStatus,
+  isJobType,
+  jobTypeLabel,
+  jobTypeOptions,
+  labPathFor,
+} from "../components/jobs/jobFormat";
+import { useActivityFilters } from "../components/jobs/useActivityFilters";
 import { formatDateTime } from "../format";
 import { useNow } from "../hooks/useNow";
 
@@ -36,44 +46,84 @@ function firstLine(text: string | null): string {
 
 const PAGE_SIZE = 50;
 
+/** The project filter's choice for the jobs of the labs, above the projects. */
+const LAB_OPTION = { value: "lab", label: "Labs (no project)" };
+
+const TYPE_OPTIONS = jobTypeOptions();
+
 export function ActivityPage() {
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
   const [openJobId, setOpenJobId] = useState<number | null>(null);
+  const { filter, page, hasFilters, setProject, setStatuses, setTypes, setPage, clear } =
+    useActivityFilters();
 
   const projects = useProjects();
-  const projectId = projectFilter === null ? undefined : Number(projectFilter);
-  const { data, isLoading, isError, error, dataUpdatedAt } = useJobsPage(projectId, page, PAGE_SIZE);
+  const { data, isLoading, isError, error, dataUpdatedAt } = useJobsPage(filter, page, PAGE_SIZE);
   const jobs = data?.jobs;
   const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
-  // If the jobs of the page are gone (a smaller list after a change), go to the last page.
-  if (data && page > pageCount) {
-    setPage(pageCount);
-  }
+  // If the jobs of the page are gone (a smaller list after a change, or a page number typed in
+  // the address that is too high), go to the last page.
+  useEffect(() => {
+    if (data && page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [data, page, pageCount, setPage]);
   // Elapsed times are worked out from the stored times and the clock, which ticks once a
   // second while any job in the list is waiting or running.
   const now = useNow(jobs?.some(isJobActive) ?? false, dataUpdatedAt);
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
-        <Title order={2}>Activity</Title>
+      <Title order={2}>Activity</Title>
+
+      <Group align="flex-end" gap="sm">
         <Select
           aria-label="Filter by project"
           placeholder="All projects"
           clearable
-          data={(projects.data ?? []).map((project) => ({
-            value: String(project.id),
-            label: project.name,
-          }))}
-          value={projectFilter}
+          data={[
+            LAB_OPTION,
+            ...(projects.data ?? []).map((project) => ({
+              value: String(project.id),
+              label: project.name,
+            })),
+          ]}
+          value={filter.project === null ? null : String(filter.project)}
           onChange={(value) => {
-            setProjectFilter(value);
-            // Another project's jobs start at the first page.
-            setPage(1);
+            if (value === null) {
+              setProject(null);
+            } else if (value === LAB_OPTION.value) {
+              setProject("lab");
+            } else {
+              setProject(Number(value));
+            }
           }}
+          w={240}
+        />
+        <MultiSelect
+          aria-label="Filter by status"
+          placeholder={filter.statuses.length === 0 ? "All statuses" : undefined}
+          clearable
+          data={JOB_STATUSES}
+          value={filter.statuses}
+          onChange={(values) => setStatuses(values.filter(isJobStatus))}
           w={260}
         />
+        <MultiSelect
+          aria-label="Filter by job type"
+          placeholder={filter.types.length === 0 ? "All job types" : undefined}
+          searchable
+          clearable
+          nothingFoundMessage="No such job type"
+          data={TYPE_OPTIONS}
+          value={filter.types}
+          onChange={(values) => setTypes(values.filter(isJobType))}
+          w={320}
+        />
+        {hasFilters && (
+          <Button variant="default" onClick={clear}>
+            Clear filters
+          </Button>
+        )}
       </Group>
 
       <PoolCapacityPanel />
@@ -87,7 +137,9 @@ export function ActivityPage() {
         </Alert>
       )}
 
-      {jobs && jobs.length === 0 && page === 1 && <Text c="dimmed">No jobs yet.</Text>}
+      {jobs && jobs.length === 0 && page === 1 && (
+        <Text c="dimmed">{hasFilters ? "No jobs match these filters." : "No jobs yet."}</Text>
+      )}
 
       {jobs && jobs.length > 0 && (
         <Table.ScrollContainer minWidth={900}>

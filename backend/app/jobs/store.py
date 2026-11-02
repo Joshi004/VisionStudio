@@ -552,22 +552,73 @@ def _rows_statement() -> Any:
     )
 
 
-async def list_jobs(
-    session: AsyncSession, *, project_id: int | None, limit: int, offset: int = 0
-) -> list[JobRow]:
-    """Jobs with their project names, newest first."""
-    statement = _rows_statement().order_by(Job.id.desc()).limit(limit).offset(offset)
+def _apply_filters(
+    statement: Any,
+    *,
+    project_id: int | None,
+    no_project: bool,
+    statuses: Iterable[str] | None,
+    types: Iterable[str] | None,
+) -> Any:
+    """Narrows a statement over `Job` to the jobs the Activity page asked for. A filter that is
+    not given (None or empty) leaves the jobs as they are. The list and the count both use it,
+    so the total always matches the list.
+    """
     if project_id is not None:
         statement = statement.where(Job.project_id == project_id)
+    if no_project:
+        statement = statement.where(Job.project_id.is_(None))
+    if statuses:
+        statement = statement.where(Job.status.in_(list(statuses)))
+    if types:
+        statement = statement.where(Job.type.in_(list(types)))
+    return statement
+
+
+async def list_jobs(
+    session: AsyncSession,
+    *,
+    project_id: int | None,
+    limit: int,
+    offset: int = 0,
+    no_project: bool = False,
+    statuses: Iterable[str] | None = None,
+    types: Iterable[str] | None = None,
+) -> list[JobRow]:
+    """Jobs with their project names, newest first. `no_project` keeps only the jobs of the
+    labs; `statuses` and `types` keep only jobs with one of those values.
+    """
+    statement = _rows_statement().order_by(Job.id.desc()).limit(limit).offset(offset)
+    statement = _apply_filters(
+        statement,
+        project_id=project_id,
+        no_project=no_project,
+        statuses=statuses,
+        types=types,
+    )
     result = await session.execute(statement)
     return [JobRow(job=job, project_name=owner_name(job, name)) for job, name in result.all()]
 
 
-async def count_jobs(session: AsyncSession, *, project_id: int | None) -> int:
-    """How many jobs there are: all of them, or those of one project."""
+async def count_jobs(
+    session: AsyncSession,
+    *,
+    project_id: int | None,
+    no_project: bool = False,
+    statuses: Iterable[str] | None = None,
+    types: Iterable[str] | None = None,
+) -> int:
+    """How many jobs there are that `list_jobs` would find with the same filters, whatever
+    the page.
+    """
     statement = select(func.count()).select_from(Job)
-    if project_id is not None:
-        statement = statement.where(Job.project_id == project_id)
+    statement = _apply_filters(
+        statement,
+        project_id=project_id,
+        no_project=no_project,
+        statuses=statuses,
+        types=types,
+    )
     return (await session.execute(statement)).scalar_one()
 
 
