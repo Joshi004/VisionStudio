@@ -28,3 +28,7 @@ spikes/**/output/
 
 # OS cruft
 .DS_Store
+
+# Motion service (GFX-005): the fonts are copied in, the bundle is built
+motion/public/fonts/
+motion/build/

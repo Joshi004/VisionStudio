@@ -291,6 +291,18 @@ RENDERING_AV_PICTURE: Final = "making the picture"
 MIXING_AV_CLIP_SOUND: Final = "adding the speech and the clips' sound"
 MIXING_AV_TTS_SOUND: Final = "adding the speech alone"
 SAVING_AV_VIDEOS: Final = "saving the videos"
+# The video of a Graphics lab render (GFX-005): the motion service (or the Python renderer) draws
+# it, then the backend checks it, adds the voice and stores it.
+SENDING_GRAPHIC: Final = "sending the graphic to the motion service"
+DRAWING_GRAPHIC_IN_PYTHON: Final = "drawing the graphic in Python"
+DOWNLOADING_GRAPHIC: Final = "downloading the video"
+CHECKING_GRAPHIC: Final = "checking the video"
+ADDING_GRAPHIC_VOICE: Final = "adding the voice"
+SAVING_GRAPHIC: Final = "saving the video"
+
+
+def rendering_graphic(percent: int) -> str:
+    return f"rendering the graphic: {percent}%"
 
 
 def trimming_shot(number: int, total: int) -> str:

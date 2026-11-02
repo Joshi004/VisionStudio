@@ -195,6 +195,11 @@ CALLOUTS_PER_MINUTE_MAX_KEY = "callouts_per_minute_max"
 # (GFX-003).
 GRAPHICS_WPM_KEY = "graphics_words_per_minute"
 
+# Where the motion service (Remotion and headless Chrome, GFX-005) is, and how many of its renders
+# the app asks for at once.
+MOTION_URL_KEY = "motion_service_url"
+GRAPHICS_MAX_RENDERS_KEY = "graphics_max_parallel_renders"
+
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
 SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
@@ -953,6 +958,34 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=160,
         min_value=60,
         max_value=300,
+    ),
+    SettingSpec(
+        key=MOTION_URL_KEY,
+        group=GROUP_GRAPHICS,
+        label="Graphics lab: motion service URL",
+        help=(
+            "Address of the motion service, the container that draws the Remotion videos of the "
+            "Graphics lab. The default is the container that Docker Compose starts next to the "
+            "backend. Change it only to point at a motion service run some other way."
+        ),
+        value_type="string",
+        default="http://motion:8090",
+        is_url=True,
+    ),
+    SettingSpec(
+        key=GRAPHICS_MAX_RENDERS_KEY,
+        group=GROUP_GRAPHICS,
+        label="Graphics lab: maximum parallel renders",
+        help=(
+            "How many Graphics lab videos are rendered at the same time, all engines together. "
+            "Each render uses the motion service's CPU and memory, and several at once do not "
+            "finish sooner, so 1 is the default. It applies the next time the app looks for "
+            "work, and running renders are not stopped."
+        ),
+        value_type="integer",
+        default=1,
+        min_value=1,
+        max_value=4,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

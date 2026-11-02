@@ -202,6 +202,10 @@ class VideoProbe:
     duration_s: float | None
     # The first audio stream, or None when the clip has no sound.
     audio: AudioStream | None
+    # The video stream's codec (`h264`) and pixel format (`yuv420p`), None when ffprobe did not say
+    # (the Graphics lab's render job checks them, GFX-005).
+    codec_name: str | None = None
+    pix_fmt: str | None = None
 
 
 async def probe_video(path: Path, *, timeout_s: float = 120.0) -> VideoProbe | None:
@@ -349,6 +353,8 @@ def _parse_video_probe(data: Any) -> VideoProbe | None:
         frame_count=frame_count,
         duration_s=_number(video.get("duration")) or format_duration,
         audio=audio,
+        codec_name=video.get("codec_name") if isinstance(video.get("codec_name"), str) else None,
+        pix_fmt=video.get("pix_fmt") if isinstance(video.get("pix_fmt"), str) else None,
     )
 
 

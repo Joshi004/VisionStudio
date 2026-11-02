@@ -29,6 +29,7 @@ The engines (GFX-005 to GFX-010) fill in the rest, and read the names this modul
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Collection
 from dataclasses import dataclass, replace
 from typing import Any, Final, Literal
@@ -43,14 +44,18 @@ from app.jobs import store
 from app.services import (
     explainer,
     graphics_engines,
+    graphics_render,
     graphics_resolve,
+    library_deletion,
     projects,
     voice_lab,
 )
+from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
 
 BRIEF_JOB_TYPE: Final = "write_lab_graphic_brief"
+RENDER_JOB_TYPE: Final = "render_lab_graphic"
 TIMING_JOB_TYPE: Final = "time_lab_graphic_words"
 # Two presses on one run make one timing job.
 TIMING_DEDUPE_KEY: Final = "run_id"
@@ -696,3 +701,127 @@ async def ask_again(session: AsyncSession, run_id: int) -> RunRow | None:
     await session.commit()
     _logger.info("lab graphic run %d created as a copy of run %d, with its voice", copy.id, run_id)
     return await start_brief(session, copy.id)
+
+
+# --- Rendering (GFX-005) ----------------------------------------------------------------------
+
+
+async def queue_render(session: AsyncSession, render: LabGraphicRender) -> Job:
+    """Queues the job that makes the render's video from the input the render holds, and links it
+    as the render's `render_job_id`. No commit: the caller commits it together with the render
+    row, as an engine's `start` does. Two presses on one render make one job (the existing job is
+    returned).
+    """
+    job, _created = await store.create_job(
+        session,
+        project_id=None,
+        type=RENDER_JOB_TYPE,
+        provider="local",
+        input={
+            "requested": graphics_render.REQUESTED_RENDER,
+            graphics_render.RENDER_DEDUPE_KEY: render.id,
+        },
+        commit=False,
+        dedupe_key=graphics_render.RENDER_DEDUPE_KEY,
+    )
+    render.render_job_id = job.id
+    render.last_error = None
+    return job
+
+
+async def start_test_card(session: AsyncSession, orientation: object, frames: object) -> Job:
+    """Starts the job that renders the test card of the Graphics tab at a size and a length.
+    Commits. It belongs to no run and is no paid call: it only needs the motion service.
+
+    Raises GraphicsLabInputError for an unknown orientation or a length outside what a graphic
+    can be, and GraphicsLabConflictError while another test card is being made.
+    """
+    checked_orientation = check_orientation(orientation)
+    low, high = graphics_render.TEST_CARD_MIN_FRAMES, graphics_render.TEST_CARD_MAX_FRAMES
+    if not isinstance(frames, int) or isinstance(frames, bool) or not low <= frames <= high:
+        raise GraphicsLabInputError(
+            f"The test card must be from {low} to {high} frames "
+            f"({low / FPS:g} to {high / FPS:g} seconds)."
+        )
+    job, created = await store.create_job(
+        session,
+        project_id=None,
+        type=RENDER_JOB_TYPE,
+        provider="local",
+        input={
+            "requested": graphics_render.REQUESTED_TEST_CARD,
+            "orientation": checked_orientation,
+            "frames": frames,
+        },
+        dedupe_key=graphics_render.TEST_CARD_DEDUPE_KEY,
+    )
+    if not created:
+        raise GraphicsLabConflictError("A test card is already being rendered.")
+    _logger.info("test card job %d started: %s, %d frames", job.id, checked_orientation, frames)
+    return job
+
+
+async def _test_card_jobs(session: AsyncSession) -> list[Job]:
+    """The jobs that render a test card, newest first."""
+    statement = (
+        select(Job)
+        .where(
+            Job.type == RENDER_JOB_TYPE,
+            Job.input["requested"].as_string() == graphics_render.REQUESTED_TEST_CARD,
+        )
+        .order_by(Job.id.desc())
+        .execution_options(populate_existing=True)
+    )
+    return list((await session.execute(statement)).scalars())
+
+
+async def newest_test_card(session: AsyncSession) -> tuple[Job | None, Job | None]:
+    """The newest test card job (whatever it is doing, or how it ended), and the newest one that
+    succeeded and still has its video. Either may be None.
+    """
+    jobs = await _test_card_jobs(session)
+    newest = jobs[0] if jobs else None
+    stored = next(
+        (
+            job
+            for job in jobs
+            if job.status == "succeeded"
+            and isinstance(job.output, dict)
+            and isinstance(job.output.get("path"), str)
+        ),
+        None,
+    )
+    return newest, stored
+
+
+# A test card's file is only ever a `lab/<32 hex>.mp4`; any other path in a job's output is left
+# alone.
+_TEST_CARD_PATH = re.compile(r"lab/[0-9a-f]{32}\.mp4")
+
+
+async def prune_test_cards(session: AsyncSession, *, keep_job_id: int) -> int:
+    """Removes the video files of the test cards older than job `keep_job_id`, so only the newest
+    stays (the owner's decision in GFX-005). A file that another row still uses is kept. Commits.
+    Returns how many files were removed.
+    """
+    removed = 0
+    storage = get_storage()
+    for job in await _test_card_jobs(session):
+        if job.id >= keep_job_id or job.status != "succeeded":
+            continue
+        output = job.output if isinstance(job.output, dict) else {}
+        path = output.get("path")
+        if not isinstance(path, str):
+            continue
+        if _TEST_CARD_PATH.fullmatch(path) and not await library_deletion.path_in_use(
+            session, path
+        ):
+            try:
+                removed += int(await storage.delete_media(path))
+            except StorageError:
+                _logger.warning("test card file %s could not be removed", path)
+                continue
+        # The file is gone (or was never ours to remove): the job no longer points at it.
+        job.output = {key: value for key, value in output.items() if key != "path"}
+    await session.commit()
+    return removed

@@ -1,11 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
-import { Alert, Paper, Stack, Text } from "@mantine/core";
+import { Alert, Paper, Stack, Text, Title } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import { useCreateGraphicsRun } from "../../api/graphicsLab";
 import { GraphicsLabForm } from "../graphicsLab/GraphicsLabForm";
 import { GraphicsRunList } from "../graphicsLab/GraphicsRunList";
 import { GraphicsRunPage } from "../graphicsLab/GraphicsRunPage";
+import { GraphicsTestCardPanel } from "../graphicsLab/GraphicsTestCardPanel";
 import { toRequest, type GraphicsLabFormState } from "../graphicsLab/graphicsLabView";
 import { useOpenGraphicsRun } from "../graphicsLab/useOpenGraphicsRun";
 
@@ -66,6 +67,13 @@ export function GraphicsLabPanel({ form, onFormChange }: GraphicsLabPanelProps) 
 
       <Paper withBorder p="md" radius="md">
         <GraphicsRunList onOpen={openRun} />
+      </Paper>
+
+      <Paper withBorder p="md" radius="md">
+        <Stack gap="xs">
+          <Title order={4}>Motion service test card</Title>
+          <GraphicsTestCardPanel />
+        </Stack>
       </Paper>
     </Stack>
   );

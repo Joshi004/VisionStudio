@@ -19,6 +19,11 @@ then starts every engine that is built, and `POST .../runs/{id}/ask-again` makes
 the same line and writes its brief. A run's `brief` is what the director decided, and `resolved`
 is what code worked out from it (§4.3 and §4.4 of `Graphics_lab_implementation_phases.md`).
 
+The **test card** (GFX-005) proves the motion service and the render job: `POST .../test-cards`
+renders a card of a chosen orientation and length, and `GET .../test-cards/newest` answers the
+newest one and the video of the newest that succeeded. It belongs to no run and costs nothing;
+only the newest video is kept.
+
 A run is deleted through the shared lab-sample delete (`DELETE /api/lab/samples/graphic_run/{id}`,
 `api/deletion.py`), which refuses while any of its jobs is still running and removes the videos.
 """
@@ -181,6 +186,40 @@ class GraphicRunCreate(BaseModel):
     # A saved voice of the Voice lab that speaks the line. Left out: no voice, and the times of
     # the words are estimated.
     voice_id: StrictInt | None = Field(default=None, ge=1, le=_MAX_ID)
+
+
+class GraphicTestCardCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The service checks both and answers with a sentence the page can show.
+    orientation: StrictStr = Field(max_length=20)
+    frames: StrictInt = Field(ge=-_MAX_ID, le=_MAX_ID)
+
+
+class GraphicTestCardResultOut(BaseModel):
+    """A test card that was rendered and whose video is still stored."""
+
+    job_id: int
+    orientation: Orientation
+    width: int
+    height: int
+    frames: int
+    # The video, from /media.
+    url: str
+    size_bytes: int
+    # What was measured (§4.7): the render time, the checks, the versions of Remotion and Chrome.
+    metrics: Any
+    # A sentence for each check that failed. Empty when every check passed.
+    warnings: list[str]
+
+
+class GraphicTestCardOut(BaseModel):
+    # The newest test card job, whatever it is doing or how it ended. None before the first.
+    job: JobSummary | None
+    orientation: Orientation | None
+    frames: int | None
+    # The newest test card that succeeded and still has its video. None before the first.
+    result: GraphicTestCardResultOut | None
 
 
 class GraphicRenderUpdate(BaseModel):
@@ -487,3 +526,55 @@ async def ask_again(run_id: int, session: SessionDep) -> GraphicRunOut:
     was asked on is not changed. The answer is the new run.
     """
     return await _brief_click(session, run_id, graphics_lab.ask_again)
+
+
+def test_card_out(newest: Job | None, stored: Job | None) -> GraphicTestCardOut:
+    """The newest test card job and the video of the newest one that succeeded."""
+    recorded = newest.input if newest is not None and isinstance(newest.input, dict) else {}
+    result: GraphicTestCardResultOut | None = None
+    if stored is not None and isinstance(stored.output, dict):
+        output = stored.output
+        result = GraphicTestCardResultOut(
+            job_id=stored.id,
+            orientation=output["orientation"],
+            width=output["width"],
+            height=output["height"],
+            frames=output["frames"],
+            url=media_url(output["path"]),
+            size_bytes=output["size_bytes"],
+            metrics=output.get("metrics"),
+            warnings=output.get("warnings") or [],
+        )
+    return GraphicTestCardOut(
+        job=_job_out(newest),
+        orientation=recorded.get("orientation"),
+        frames=recorded.get("frames"),
+        result=result,
+    )
+
+
+@router.post(
+    "/lab/graphics/test-cards",
+    response_model=GraphicTestCardOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_CONFLICT, **_INVALID},
+)
+async def render_test_card(body: GraphicTestCardCreate, session: SessionDep) -> GraphicTestCardOut:
+    """Renders the test card at an orientation and a length (72 to 360 frames) in the motion
+    service. Refused (409) while another test card is being rendered. Nothing is paid for.
+    """
+    try:
+        await graphics_lab.start_test_card(session, body.orientation, body.frames)
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    newest, stored = await graphics_lab.newest_test_card(session)
+    return test_card_out(newest, stored)
+
+
+@router.get("/lab/graphics/test-cards/newest", response_model=GraphicTestCardOut)
+async def get_newest_test_card(session: SessionDep) -> GraphicTestCardOut:
+    """The newest test card job and the video of the newest one that succeeded."""
+    newest, stored = await graphics_lab.newest_test_card(session)
+    return test_card_out(newest, stored)

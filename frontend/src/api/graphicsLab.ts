@@ -210,3 +210,47 @@ export function useAskGraphicsAgain() {
     ),
   );
 }
+
+export type GraphicTestCard = components["schemas"]["GraphicTestCardOut"];
+export type GraphicTestCardResult = components["schemas"]["GraphicTestCardResultOut"];
+
+const testCardKey = [...GRAPHICS_LAB_KEY, "test-card"] as const;
+
+/**
+ * The newest test card of the motion service: its job, and the newest video that was stored. It
+ * is loaded again every few seconds while the job is waiting or running.
+ */
+export function useNewestGraphicsTestCard() {
+  return useQuery({
+    queryKey: testCardKey,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/lab/graphics/test-cards/newest");
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not load the test card (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    refetchInterval: (query) => (isJobActive(query.state.data?.job) ? ACTIVE_POLL_MS : false),
+  });
+}
+
+/** Renders a test card in the motion service. It is free: no model is called. */
+export function useRenderGraphicsTestCard() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { orientation: GraphicOrientation; frames: number }) => {
+      const { data, error, response } = await api.POST("/api/lab/graphics/test-cards", { body });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `The test card was not started (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: testCardKey }),
+  });
+}

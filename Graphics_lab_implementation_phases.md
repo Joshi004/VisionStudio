@@ -321,7 +321,7 @@ A new folder `motion/` holds a Node project with Remotion. It builds into a thir
 | Endpoint | Phase | What it does |
 |---|---|---|
 | `GET /health` | 005 | Versions of Remotion, Chrome, the template catalogue and the block library |
-| `POST /renders` | 005 | Starts a render: `{engine, width, height, fps, frames, resolved, input, code?}`. Answers `{render_id}` |
+| `POST /renders` | 005 | Starts a render: `{engine, width, height, fps, frames, resolved, input, code?, encoding?, time_limit_s?}`. `engine` is `test_card`, `remotion_templates`, `remotion_blocks` or `generated_component`. Answers `202 {render_id}` |
 | `GET /renders/{id}` | 005 | `queued`, `rendering`, `done` or `failed`, with progress, the error and the times |
 | `GET /renders/{id}/file` | 005 | The finished MP4 |
 | `DELETE /renders/{id}` | 005 | Removes the file from the service |
@@ -330,18 +330,19 @@ A new folder `motion/` holds a Node project with Remotion. It builds into a thir
 
 - **Compositions:** `TestCard` (GFX-005), `Templates` (GFX-007), `Blocks` (GFX-009), `Generated` (GFX-010). GFX-005 registers all four, with the last three showing a "not built yet" card, so each engine phase only fills in its own folder.
 - **Isolation:** the container is only on an `internal: true` Docker network that the backend also joins. It has a read-only root filesystem, a `tmpfs` for its work, a non-root user, CPU, memory and time limits, and no environment secrets. The browser is downloaded when the image is built, because the container has no internet when it runs.
-- **Concurrency:** one render at a time by default. A setting can raise it.
+- **Concurrency:** one render at a time by default (the `graphics_max_parallel_renders` setting, 1 to 4, limits the backend's jobs). The service itself runs at most four at once and queues the rest.
+- **Sandbox (built in GFX-005):** Chrome's own sandbox cannot be on, because Remotion always starts it with `--no-sandbox`; the container is the boundary.
 
 ### 4.7 The render job and its checks (GFX-005)
 
 One job type, `render_lab_graphic`, makes every engine's video:
 
 1. It sends the work to the engine's renderer: the motion service for the three Remotion engines, or the Python renderer in the backend for `python_templates` (GFX-008).
-2. It checks the file with `ffprobe`: exact frame count, size, 24 fps, H.264 `yuv420p`.
+2. It checks the file with `ffprobe`: exact frame count, size, 24 fps, H.264 `yuv420p`. A check that fails is a warning on the render, not a failure.
 3. When the run has a voice, it adds the voice with FFmpeg, copying the video stream. Every engine gets the same audio. A run without a voice gives a video with no audio track.
 4. It stores the video as lab media and records the metrics.
 
-All engines encode with the same settings (codec, CRF, preset). **Planning decides** (GFX-005) the values, and GFX-008 uses the same ones.
+All engines encode with the same settings, decided in GFX-005: libx264, CRF 18, preset medium, `yuv420p`, BT.709, PNG frames, no audio (`services/graphics_render.ENCODING`). GFX-008 uses the same ones.
 
 **Metrics kept with each render:**
 
@@ -400,7 +401,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-002 | Lab foundation: storage, run form, engine slots | Code | none | Done (2026-11-02) |
 | GFX-003 | Director call: the brief and its timing | Code | 002 | In Progress (built; the live check with the real model is open) |
 | GFX-004 | Voice and word timings | Code | 003 | In Progress (built; the live check with a real voice is open) |
-| GFX-005 | Motion service and the render job | Code | 002 | Not Started |
+| GFX-005 | Motion service and the render job | Code | 002 | In Progress (built and checked; the owner's rebuild and click on the Docker stack is open) |
 | GFX-006 | Template catalogue and the template-spec call | Code | 003 | Not Started |
 | GFX-007 | Remotion templates | Code | 005, 006 | Not Started |
 | GFX-008 | Python templates | Code | 005, 006 | Not Started |
@@ -670,7 +671,7 @@ What was built:
 
 ### GFX-005 — Motion service and the render job
 
-**Status:** Not Started
+**Status:** In Progress (built and checked on 2026-11-03: the image was built and run as `linux/arm64`, and the job and the page were checked on a throwaway database; the owner's rebuild of the real stack and one click of the test card are open)
 
 **Objective.** A third container that renders a Remotion composition to an exact MP4 while isolated from the internet and from the app's files. Also the one render job every engine uses, proven with a test card.
 
@@ -718,12 +719,47 @@ What was built:
 
 **Completion checklist.**
 
-- [ ] `motion/` project, server, compositions, fonts
-- [ ] Compose service, internal network, hardening
-- [ ] Provider, `render_lab_graphic`, `ffprobe` checks, voice, metrics
-- [ ] Test card button, docs, standard checks
+- [x] `motion/` project, server, compositions, fonts
+- [x] Compose service, internal network, hardening
+- [x] Provider, `render_lab_graphic`, `ffprobe` checks, voice, metrics
+- [x] Test card button, docs, standard checks (ruff, ESLint, `tsc`, `gen:api` and the production builds pass)
+- [ ] Live check on the owner's Docker stack (`docker compose up -d --build`, then the **Motion service test card** on the Graphics tab, in both orientations)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration. Two new settings (`motion_service_url`, `graphics_max_parallel_renders`). The "Planning decides" items:
+
+- **HTTP framework:** Fastify 5, run with Node 24's built-in type stripping (`node src/server/index.ts`, no build step for the server). The compositions are bundled with `@remotion/bundler` when the image is built.
+- **Fonts:** the compose file adds the backend's font folder as a named build context (`additional_contexts: fonts: ./backend/app/assets/fonts`), and the `Dockerfile` copies `Montserrat-ExtraBold.ttf` and `Inter-Medium.ttf` from it. They are the same files the backend uses (G-11). The compositions load them with `@remotion/fonts` and wait for them before the first frame. `npm run fonts` copies them for a run outside Docker.
+- **Encoding for every engine:** libx264, CRF 18, preset medium, `yuv420p`, BT.709, PNG frames, no audio. It is defined once as `services/graphics_render.ENCODING` and sent with every render; GFX-008 must use the same values.
+- **Pool:** a `local` job with its own pool of `graphics_max_parallel_renders` slots (default 1, up to 4). The motion service has its own queue (at most `MAX_PARALLEL`, default 4, at once, and 2 browser tabs for each render).
+- **Time limit:** 300 s a render in the service (a request can ask for 10 to 900 s with `time_limit_s`); the backend waits up to 60 s longer. A render over the limit is stopped and the job says "The render ran past its time limit of 300 s and was stopped."
+- **Chrome sandbox:** it cannot stay on. Remotion always starts Chrome with `--no-sandbox`, and the container does not give Chrome the permissions its sandbox needs (all capabilities are dropped). The container is the boundary (G-8): no internet (`internal: true` network), no volume, no secrets, a read-only root with a 1 GB `tmpfs`, a non-root user (uid 10002), `cap_drop: ALL`, `no-new-privileges`, 4 CPUs, 4 GB of memory and 512 processes.
+- **Where the test card's result is stored:** in its job's `output` (the file under `media/lab/` and the metrics), because it belongs to no run. **Only the newest test card is kept** (the owner's decision): storing a new one deletes the older files (`graphics_lab.prune_test_cards`, which checks that nothing else uses a file).
+
+What was built:
+
+- **`motion/`:** `package.json` (Remotion 4.0.540, Fastify, Node 24), `Dockerfile` (`node:24-bookworm-slim`, the libraries Chrome needs, `npm ci`, the fonts, `scripts/bundle.ts`, which bundles the compositions, downloads Chrome Headless Shell for the image's architecture and writes `build/versions.json`), `src/Root.tsx` (compositions `TestCard`, `Templates`, `Blocks` and `Generated`; the last three show a "not built yet" card; each takes its size, frame rate and length from the render's props), `src/TestCard.tsx` (deterministic: the safe-area box, the caption zone, the title, size and rate, a frame counter and a progress bar), `src/server/` (`index.ts` routes, `schema.ts` validation, `renders.ts` the queue, the time limit and the sweep of old files after 30 minutes, `versions.ts`).
+- **Endpoints:** `GET /health` (`ok`, `remotion`, `chrome`, `node`, `templates` and `blocks` null until GFX-006 and GFX-009, `max_parallel`, `queued`, `rendering`), `POST /renders` (202 `{render_id}`; 400 for a body that does not fit the schema: even sizes 64 to 4096, 1 to 60 fps, at most 720 frames, 1 MB), `GET /renders/{id}`, `GET /renders/{id}/file`, `DELETE /renders/{id}` (204).
+- **Backend:** `providers/motion_renderer.py` (health, start, status, download, delete; an unreachable service gives "The motion service (URL) did not answer: ... Check that it is running"), `services/graphics_render.py` (the encoding, the request body, the checks of the probe, and `python_renderer`, the hook GFX-008 fills in), `jobs/render_lab_graphic.py` (the job), `services/graphics_lab.py` (`queue_render` for GFX-007 to GFX-010 to call, `start_test_card`, `newest_test_card`, `prune_test_cards`), `services/ffmpeg.probe_video` now also returns `codec_name` and `pix_fmt`, and the phases of the job (sending, drawing with a percent, downloading, checking, adding the voice, saving).
+- **API:** `POST /api/lab/graphics/test-cards` (`{orientation, frames}`, frames 72 to 360, 201, 409 while one is active, 422) and `GET /api/lab/graphics/test-cards/newest` (the newest job and the newest stored video).
+- **Frontend:** `GraphicsTestCardPanel` (orientation, frames, **Render test card**, the job's phase or error, the video, and badges for the frame count, size, frame rate, codec and pixel format, with the render time and file size) in a "Motion service test card" box on the Graphics tab, polled while the job runs. `schema.d.ts` regenerated.
+
+**Checked.**
+
+- **Apple silicon (GQ-2):** the image builds and runs as `linux/arm64`, and Chrome Headless Shell for `linux-arm64` downloads and renders in the container.
+- **Repeatability (GQ-3):** the same 101-frame test card rendered twice in the container gave identical `framemd5` (same machine, same container image).
+- **Isolation:** from inside the `motion` container an outside address fails, `/data` does not exist, the root is read-only, and the service stays healthy after a render was stopped by its time limit.
+- **Through the backend**, on a throwaway `DATA_DIR` with the motion service run on the host: a 101-frame test card at 1920 x 1080 and at 1080 x 1920 had exactly 101 frames, the right size, 24 fps, H.264 and `yuv420p` (all five checks true, no warnings); a second press while one was active gave 409; storing the portrait card deleted the landscape file; a run with a voice (an 8 s tone as its speech) gave a video of 101 frames with an AAC track of 4.208 s (101 / 24, cut to the frame count) and a run without one had no audio track; `remotion_templates` and `remotion_blocks` renders drew the "not built yet" compositions and stored their metrics (`composition` `Templates` or `Blocks`, `voice` true or false); a `python_templates` render failed with "The Python renderer is not built yet (GFX-008)."; an unreachable motion service failed the job with a message that names it. The real database and the real stack were not touched.
+
+**Still to do for this phase.** The owner has to rebuild (`docker compose up -d --build`; the first build downloads the browser and takes a few minutes; Docker needs at least 4 GB of memory for `motion`), then press **Render test card** on the Graphics tab in both orientations. There is no migration. Update the status when it is done.
+
+**For the later phases.**
+
+- GFX-007 to GFX-010 call `graphics_lab.queue_render(session, render)` (no commit; deduped by `render_id`) after they have stored the render row's `input`. The job reads the run's `resolved` brief, so the run must have one.
+- A composition gets `{engine, width, height, fps, frames, resolved, input, code}` as its props (`motion/src/types.ts` `GraphicInput`). Replace the body of `Templates`, `Blocks` or `Generated` in `Root.tsx` and add its own folder; compositions import without file extensions (the bundler), the server code with `.ts`.
+- The motion service has no `POST /layout` or `POST /checks` yet (GFX-009, GFX-010), and `/health` reports `templates` and `blocks` as null until GFX-006 and GFX-009 fill them in.
+- GFX-008 sets `graphics_render.python_renderer` to an async `(body, dest)` that writes an H.264 MP4 with no audio, using `graphics_render.ENCODING`; the job checks the file and adds the voice as for Remotion.
+- A check that is false is a warning on the render, not a failure (§4.9 counts them). The metrics already hold `checks`, `render_s`, `size_bytes`, `timing_source` and `voice`.
+- "Render again" and the repeatability check (§4.7) are not built here; they need only another call of `queue_render` and `ffmpeg -f framemd5` on the two files.
 
 ### GFX-006 — Template catalogue and the template-spec call
 
@@ -1074,8 +1110,8 @@ The rules of `Implementation_phases.md` §6 apply. Update a phase's **Status** l
 | # | Question or risk | Where it is settled |
 |---|------------------|---------------------|
 | GQ-1 | **Remotion's licence.** Closed on 2026-11-02: the owner confirmed there is no licence issue. | GFX-001 (done) |
-| GQ-2 | **Apple silicon.** The motion image must run as `linux/arm64`, and the headless browser Remotion downloads must exist for it. Not checked. | GFX-005 |
-| GQ-3 | **Repeatability of browser rendering.** The same machine should give identical frames. Another machine (a different CPU or browser build) may not. The trial checks the same machine only. | GFX-005, GFX-011 |
+| GQ-2 | **Apple silicon.** The motion image must run as `linux/arm64`, and the headless browser Remotion downloads must exist for it. **Closed in GFX-005:** the image builds and runs as `linux/arm64`, and Chrome Headless Shell for `linux-arm64` renders in it. | GFX-005 (done) |
+| GQ-3 | **Repeatability of browser rendering.** The same machine should give identical frames. Another machine (a different CPU or browser build) may not. The trial checks the same machine only. GFX-005 checked it for the test card: two renders in the same container gave identical `framemd5`. | GFX-005 (test card), GFX-011 |
 | GQ-4 | **Generated code is the riskiest engine.** The static checks can be bypassed by clever code. The real protection is the container (no internet, no files, no secrets, limits). A browser escape inside the container would still be contained, but this is not a guarantee. | GFX-005, GFX-010 |
 | GQ-5 | **GLM-5.3's skill at Remotion code is unknown.** The trial measures it. A long component may need a large `max_tokens`, and each call costs more than the other engines' calls. | GFX-010, GFX-012 |
 | GQ-6 | **Python drawing quality.** Without a vector library, edges and text may look rougher than in the browser. The library choice decides this. | GFX-008 |
@@ -1122,3 +1158,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-02 | GFX-002 | Done | Migration `0079` (two tables, six job types), service, engine registry, API, Graphics tab with form, run list and run page, shared delete with the `graphic_run` kind, Inter Medium as the text font (G-11). Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-003 | In Progress | Director call built: brief writer and checks, resolver (timing, frames, number text, theme, zones), job `write_lab_graphic_brief`, the three clicks (brief, Make all, Ask again), brief panel on the run page, setting `graphics_words_per_minute`. Checked against a stand-in model server; the live check on excerpts 1 and 8 is open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-004 | In Progress | Voice built: optional saved voice on the form, speech made when the run is made, job `time_lab_graphic_words` (Parakeet), the brief waits for the timing, estimated fallback with a note, `voice_audio_of`, Graphics runs counted as users of a speech, voice panel on the run page. Checked on a throwaway database; the live check with a real voice is open. Notes for the later phases are in the completion notes. |
+| 2026-11-03 | GFX-005 | In Progress | Motion service and render job built: the `motion` container (Remotion 4.0.540, Fastify, isolated, hardened), the provider, job `render_lab_graphic` (checks, voice, metrics), two settings, the test card button. Checked on a throwaway database and in the arm64 image; the owner's rebuild and click are open. Notes for the later phases are in the completion notes. |

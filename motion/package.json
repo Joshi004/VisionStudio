@@ -1,0 +1,31 @@
+{
+  "name": "visio-motion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The motion service of the Graphics lab: Remotion and headless Chrome behind a small HTTP server (GFX-005).",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "fonts": "node scripts/copy-fonts.ts",
+    "bundle": "node scripts/bundle.ts",
+    "serve": "node src/server/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.540",
+    "@remotion/cli": "4.0.540",
+    "@remotion/fonts": "4.0.540",
+    "@remotion/renderer": "4.0.540",
+    "fastify": "5.12.8",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "remotion": "4.0.540"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

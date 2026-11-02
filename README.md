@@ -1,7 +1,11 @@
 # Visio Studio
 
-A two-container app: `frontend` (nginx serving a built React app) and
-`backend` (FastAPI with SQLite on a named volume).
+A three-container app: `frontend` (nginx serving a built React app),
+`backend` (FastAPI with SQLite on a named volume) and `motion` (the Graphics
+lab's renderer: Remotion and headless Chrome, with no internet, no volume and
+no secrets; only the backend can reach it). `motion` needs at least 4 GB of
+memory in Docker and takes a few minutes to build the first time, because the
+image downloads the browser.
 
 What it does today:
 
@@ -41,7 +45,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Check both services came up healthy:
+Check all three services came up healthy:
 
 ```bash
 docker compose ps
@@ -95,7 +99,13 @@ are not touched by the migration, so they are not part of this copy.
 ```bash
 docker compose logs -f backend
 docker compose logs -f frontend
+docker compose logs -f motion
 ```
+
+The motion service is only needed to make Graphics lab videos. If a render
+fails with a message that names the motion service, check `docker compose ps`
+and start it with `docker compose up -d motion`. The **Motion service test
+card** on the Graphics tab renders a test video to show that it works.
 
 ## Regenerating API types
 

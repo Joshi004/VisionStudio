@@ -24,7 +24,8 @@
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), and the Audio video lab of a character (`time_lab_speech_words.py`,
   `render_av_test.py`), and the brief and the word timing of a Graphics lab run
-  (`write_lab_graphic_brief.py`, `time_lab_graphic_words.py`).
+  (`write_lab_graphic_brief.py`, `time_lab_graphic_words.py`) and the video of a Graphics lab render
+  (`render_lab_graphic.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -70,6 +71,7 @@ def register_handlers() -> None:
     from app.jobs.plan_shots import PlanShotsHandler
     from app.jobs.preview_music_mix import PreviewMusicMixHandler
     from app.jobs.render_av_test import RenderAvTestHandler
+    from app.jobs.render_lab_graphic import RenderLabGraphicHandler
     from app.jobs.render_story import RenderStoryHandler
     from app.jobs.repair_shot_cut import RepairShotCutHandler
     from app.jobs.resolve_looks_states import ResolveLooksStatesHandler
@@ -144,3 +146,4 @@ def register_handlers() -> None:
     handlers.register(RenderAvTestHandler())
     handlers.register(WriteLabGraphicBriefHandler())
     handlers.register(TimeLabGraphicWordsHandler())
+    handlers.register(RenderLabGraphicHandler())

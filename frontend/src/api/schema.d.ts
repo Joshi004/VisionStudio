@@ -2180,6 +2180,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/graphics/test-cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render Test Card
+         * @description Renders the test card at an orientation and a length (72 to 360 frames) in the motion
+         *     service. Refused (409) while another test card is being rendered. Nothing is paid for.
+         */
+        post: operations["render_test_card_api_lab_graphics_test_cards_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/test-cards/newest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Newest Test Card
+         * @description The newest test card job and the video of the newest one that succeeded.
+         */
+        get: operations["get_newest_test_card_api_lab_graphics_test_cards_newest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters": {
         parameters: {
             query?: never;
@@ -7359,6 +7400,49 @@ export interface components {
              * @enum {string}
              */
             state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
+        };
+        /** GraphicTestCardCreate */
+        GraphicTestCardCreate: {
+            /** Orientation */
+            orientation: string;
+            /** Frames */
+            frames: number;
+        };
+        /** GraphicTestCardOut */
+        GraphicTestCardOut: {
+            job: components["schemas"]["JobSummary"] | null;
+            /** Orientation */
+            orientation: ("landscape" | "portrait") | null;
+            /** Frames */
+            frames: number | null;
+            result: components["schemas"]["GraphicTestCardResultOut"] | null;
+        };
+        /**
+         * GraphicTestCardResultOut
+         * @description A test card that was rendered and whose video is still stored.
+         */
+        GraphicTestCardResultOut: {
+            /** Job Id */
+            job_id: number;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Frames */
+            frames: number;
+            /** Url */
+            url: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Metrics */
+            metrics: unknown;
+            /** Warnings */
+            warnings: string[];
         };
         /**
          * GraphicVoiceOut
@@ -20015,6 +20099,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    render_test_card_api_lab_graphics_test_cards_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicTestCardCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTestCardOut"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_newest_test_card_api_lab_graphics_test_cards_newest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTestCardOut"];
                 };
             };
         };
