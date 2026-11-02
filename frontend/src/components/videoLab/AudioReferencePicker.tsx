@@ -22,7 +22,7 @@ function keyOf(choice: Pick<AudioChoice, "source" | "id">): string {
   return `${choice.source}:${choice.id}`;
 }
 
-/** Any recording with a length can be tried: the GPU server decides what it does with it. */
+/** Any recording with a length can be tried: the remote server decides what it does with it. */
 function fits(durationS: number): boolean {
   return durationS > 0;
 }

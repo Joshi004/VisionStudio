@@ -5,7 +5,7 @@ It is the Video lab's clip job (`GenerateLabVideoHandler`) with another place to
 (`endpoint`, `request`, the ordered `references` and the ordered `audios`, the same shape the lab
 writes), so the pictures and the dialogue audio are uploaded in order, the request is submitted,
 and a pre-emption sends the same request again. Polling, the download, the clean-up on the server,
-cancelling and the GPU slots (an H3 clip counts as 4 slots, `pools.slot_cost`) are the shared ones
+cancelling and the remote server's job limit (every clip counts as one job) are the shared ones
 of `RemoteVideoHandler`.
 
 Only `_check_and_store` differs. The clip is read with ffprobe and decoded to the end, stored

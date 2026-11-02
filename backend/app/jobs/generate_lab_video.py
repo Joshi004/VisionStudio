@@ -42,6 +42,7 @@ from app.db.models import Job, LabVideoRun
 from app.db.session import SessionLocal
 from app.jobs import phases, store
 from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S, note_uploading
+from app.jobs.handlers import MODEL_H3, MODEL_LTX
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
@@ -216,6 +217,15 @@ class AudioUnavailable(Exception):
 
 class GenerateLabVideoHandler(RemoteVideoHandler):
     job_type = JOB_TYPE
+
+    def gpu_model_of(self, job: Job) -> str | None:
+        """MiniMax H3 or LTX, by the endpoint recorded on the job's input. The endpoint is saved
+        when the job is queued, so it is there before it starts.
+        """
+        recorded = job.input if isinstance(job.input, dict) else {}
+        if video_generator.is_h3_endpoint(recorded.get("endpoint")):
+            return MODEL_H3
+        return MODEL_LTX
 
     # --- start: upload the first frame (if any) and submit --------------------------------
 

@@ -14,7 +14,7 @@ function serverBanner(status: GpuStatus): ReactNode {
 
   if (server.state === "busy") {
     return (
-      <Alert color="yellow" title="GPU server busy">
+      <Alert color="yellow" title="Remote server busy">
         The server did not answer the last check in time
         {server.checked_at ? ` (${formatDateTime(server.checked_at)})` : ""}, but it answered
         another request a moment ago. The connection to it is probably full with transfers, so
@@ -25,7 +25,7 @@ function serverBanner(status: GpuStatus): ReactNode {
 
   if (server.state === "unreachable") {
     return (
-      <Alert color="red" title="GPU server unreachable">
+      <Alert color="red" title="Remote server unreachable">
         Last checked {server.checked_at ? formatDateTime(server.checked_at) : "recently"} at{" "}
         {server.called_url}: {server.error ?? "no answer"}. Jobs that need it wait until it
         answers.
@@ -35,7 +35,7 @@ function serverBanner(status: GpuStatus): ReactNode {
 
   if (contract.state === "unreachable") {
     return (
-      <Alert color="red" title="The GPU API could not be checked">
+      <Alert color="red" title="The remote server API could not be checked">
         {contract.message ?? "The server did not answer."}
         {contract.checked_at ? ` (checked ${formatDateTime(contract.checked_at)})` : ""}
       </Alert>
@@ -54,10 +54,10 @@ function contractBanner(status: GpuStatus): ReactNode {
       .filter((item) => item.status === "changed" || item.status === "unreadable")
       .map((item) => item.name);
     return (
-      <Alert color="yellow" title="GPU API changed">
+      <Alert color="yellow" title="Remote server API changed">
         {names.length > 0 ? names.join(", ") : "The recorded API"} differs from the approved
         version
-        {contract.checked_at ? ` (found ${formatDateTime(contract.checked_at)})` : ""}. New GPU
+        {contract.checked_at ? ` (found ${formatDateTime(contract.checked_at)})` : ""}. New remote server
         jobs wait until you review and approve the change. Jobs waiting: {waitingJobs}.{" "}
         <Anchor component={Link} to="/settings" size="sm">
           Review in Settings
@@ -68,8 +68,8 @@ function contractBanner(status: GpuStatus): ReactNode {
 
   if (contract.state === "not_approved") {
     return (
-      <Alert color="blue" title="GPU API not approved yet">
-        The GPU API has not been approved yet. GPU jobs cannot start until you approve it in{" "}
+      <Alert color="blue" title="Remote server API not approved yet">
+        The remote server API has not been approved yet. Remote server jobs cannot start until you approve it in{" "}
         <Anchor component={Link} to="/settings" size="sm">
           Settings
         </Anchor>
@@ -82,8 +82,8 @@ function contractBanner(status: GpuStatus): ReactNode {
 }
 
 /**
- * Warnings about the GPU server and its API, on every page. It reads stored
- * state only, so it never waits for the GPU server. It shows nothing while the
+ * Warnings about the remote server and its API, on every page. It reads stored
+ * state only, so it never waits for the remote server. It shows nothing while the
  * status loads or if it cannot be loaded: the backend status in the header
  * already covers a backend that is down.
  */

@@ -34,7 +34,7 @@ async function fetchConnection() {
   return data;
 }
 
-/** The last stored test result. This reads the database; it never calls the GPU server. */
+/** The last stored test result. This reads the database; it never calls the remote server. */
 export function useGpuConnection() {
   return useQuery({ queryKey: GPU_CONNECTION_KEY, queryFn: fetchConnection });
 }
@@ -66,7 +66,7 @@ async function fetchStatus() {
 }
 
 /**
- * What the banner reads. Stored state only: it never calls the GPU server. It is loaded
+ * What the banner reads. Stored state only: it never calls the remote server. It is loaded
  * again every 30 seconds, so a change shows without a Refresh.
  */
 export function useGpuStatus() {
@@ -81,7 +81,7 @@ async function fetchContract() {
   const { data, response } = await api.GET("/api/gpu/contract");
   if (!data) {
     throw new ApiError(
-      `Could not load the recorded GPU API (HTTP ${response.status}).`,
+      `Could not load the recorded remote server API (HTTP ${response.status}).`,
       response.status,
     );
   }

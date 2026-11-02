@@ -97,7 +97,7 @@ class RemoteVideoHandler(JobHandler):
                     session, job.id, phases.preempted(job.attempt + 1), next_attempt=True
                 )
                 return
-            await store.fail_job(session, job.id, f"The GPU server reported an error: {message}")
+            await store.fail_job(session, job.id, f"The remote server reported an error: {message}")
             await store.merge_output(session, job.id, {"purge": purge})
 
     # --- finish: download, check, store ---------------------------------------------

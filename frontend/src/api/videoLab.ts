@@ -48,7 +48,7 @@ export function useLabVideoRuns() {
 }
 
 /**
- * Starts one run per chosen model and returns at once. Each run is a paid GPU job of 5 to 10
+ * Starts one run per chosen model and returns at once. Each run is a paid remote server job of 5 to 10
  * minutes: the page follows them by itself.
  */
 export function useCreateLabVideoRuns() {
@@ -75,8 +75,7 @@ export function useCreateLabVideoRuns() {
 
 /**
  * Starts one MiniMax H3 reference clip (1 to 9 pictures and 0 to 2 voices) and returns at once
- * with that one run. It is a paid GPU job on 4 or 8 GPUs (the server says which) and can take
- * more than 10 minutes.
+ * with that one run. It is a paid remote server job and can take more than 10 minutes.
  */
 export function useCreateH3ReferenceRun() {
   const queryClient = useQueryClient();

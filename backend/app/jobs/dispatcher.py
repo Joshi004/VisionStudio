@@ -21,9 +21,11 @@ the loop:
 3. Ask each running remote job's handler to `poll`. A handler that says "ready" gets its
    `finish` started as a task. The story pipeline run, whose poll takes many seconds, is polled
    in a task of its own, so the tick does not wait for it.
-4. Start queued jobs while their pool has free slots: the jobs others wait for first
-   (`input.priority`, the clips of shots that other shots continue), then oldest first. Before the
-   first GPU job is started, the GPU API is read and recorded (ANALYSIS.md Section 6.5).
+4. Start queued jobs while their pool has room and, for a remote server job, its model family is
+   under its own limit (a family at its limit holds back only its own jobs): the jobs others
+   wait for first (`input.priority`, the clips of shots that other shots continue), then oldest
+   first. Before the first GPU job is started, the GPU API is read and recorded (ANALYSIS.md
+   Section 6.5).
    A change in the API never stops a job: the app is updated to match the server, so
    nobody has to approve a new version to keep working.
 5. Wait.
@@ -233,6 +235,8 @@ class _Dispatcher:
             # By pool: every GPU job and Qwen3.8 call shares the GPU server's slots, every paid
             # call the paid API's, and a local job type has its own.
             limits = await pools.limits(session, handlers.all_handlers())
+            # And by model family on the GPU server: a limit of its own, counted in jobs.
+            model_limits = await pools.model_limits(session)
             qwen38_keys = await pools.qwen38_model_keys(session)
             # Read once here, so no poll opens a session just to learn them.
             poll_context = handlers.PollContext(
@@ -289,7 +293,9 @@ class _Dispatcher:
             poll_context,
         )
         start_began = time.monotonic()
-        started = await self._start_queued(waiting, running, limits, qwen38_keys, gpu_blocked)
+        started = await self._start_queued(
+            waiting, running, limits, model_limits, qwen38_keys, gpu_blocked
+        )
         self._record_tick(
             tick_began, read_done, polls_began, start_began, started, len(waiting), slowest_poll
         )
@@ -350,8 +356,8 @@ class _Dispatcher:
         self._backoff_s = float(interval) if self._backoff_s == 0 else min(self._backoff_s * 2, cap)
         # The jobs keep the phase the server last confirmed. That the server does not answer is
         # kept in memory, for the info mark next to their badge, with when it began.
-        live_status.note_server_problem(health.error or "The GPU server did not answer.")
-        _logger.info("GPU server unreachable; checking again in %.0f s", self._backoff_s)
+        live_status.note_server_problem(health.error or "The remote server did not answer.")
+        _logger.info("Remote server unreachable; checking again in %.0f s", self._backoff_s)
         return False
 
     # --- Step 3: running jobs ------------------------------------------------------
@@ -445,23 +451,24 @@ class _Dispatcher:
         waiting: list[tuple[Job, JobHandler]],
         running: list[Job],
         limits: dict[str, int],
+        model_limits: dict[str, int],
         qwen38_keys: frozenset[str],
         gpu_blocked: bool,
     ) -> int:
-        """Starts what the pools have room for and returns how many jobs it started."""
+        """Starts what the pools have room for and returns how many jobs it started. A GPU job
+        also needs room under the limit of its model family (0 is no limit of its own).
+        """
         started = 0
-        # The limits count slots: a job takes one, except a MiniMax H3 clip (the GPUs the server
-        # gave it, 4 until it says), and the Qwen3.8 calls, which share one.
+        # The limits count jobs: every job is one, whatever it is.
         running_with_handlers = [(job, handlers.get_handler(job.type)) for job in running]
-        used_by_pool = pools.slots_in_use(running_with_handlers, qwen38_keys)
-        qwen38_held = any(
-            handler is not None and pools.on_qwen38(job, handler, qwen38_keys)
-            for job, handler in running_with_handlers
-        )
+        used_by_pool = pools.jobs_in_use(running_with_handlers, qwen38_keys)
         free = {pool: limit - used_by_pool[pool] for pool, limit in limits.items()}
-        # A pool in which a job is waiting for slots lets no later job start in this tick, so a
-        # job that needs two slots is not starved by a stream of jobs that need one.
+        # A pool that is full lets no later job of that pool start in this tick.
         full_pools: set[str] = set()
+        # The same for a model family at its own limit. It holds back only that family's later
+        # jobs, and does not mark the GPU pool full, so the other models' jobs still start.
+        used_by_model = pools.jobs_by_model(running_with_handlers, qwen38_keys)
+        full_models: set[str] = set()
         checked_contract = False
         # What the jobs that must wait should show. Written once after the loop, in one session,
         # instead of one session for every waiting job.
@@ -471,21 +478,21 @@ class _Dispatcher:
             if handler.provider == "gpu" and gpu_blocked:
                 continue  # `_server_answers` already set the phase
 
-            is_qwen38 = pools.on_qwen38(job, handler, qwen38_keys)
-            if is_qwen38:
-                pool = pools.GPU_POOL
-                cost = 0 if qwen38_held else pools.QWEN38_GPUS
-            else:
-                pool = pools.pool_of(handler)
-                cost = pools.slot_cost(job)
-            if cost == 0:
-                # Joins the GPU the Qwen3.8 calls already hold: only a limit of 0 stops it.
-                blocked = limits.get(pool, 0) == 0
-            else:
-                blocked = pool in full_pools or not pools.fits(
-                    free.get(pool, 0), limits.get(pool, 0), cost
-                )
-            if blocked:
+            model = pools.model_of(job, handler, qwen38_keys)
+            model_limit = model_limits.get(model, 0) if model is not None else 0
+            if (
+                model is not None
+                and model_limit > 0
+                and (model in full_models or used_by_model[model] >= model_limit)
+            ):
+                full_models.add(model)
+                model_phase = phases.waiting_for_model_slot(pools.MODEL_LABELS[model])
+                if job.phase != model_phase:
+                    queued_phases[job.id] = model_phase
+                continue
+
+            pool = pools.job_pool(job, handler, qwen38_keys)
+            if pool in full_pools or free.get(pool, 0) <= 0:
                 full_pools.add(pool)
                 waiting_phase = _SLOT_PHASES.get(pool, phases.WAITING_FOR_SLOT)
                 if job.phase != waiting_phase:  # the row was read at the start of the tick
@@ -503,8 +510,9 @@ class _Dispatcher:
                 claimed = await store.claim(session, job.id)
             if not claimed:
                 continue  # cancelled in the meantime
-            free[pool] -= cost
-            qwen38_held = qwen38_held or is_qwen38
+            free[pool] -= 1
+            if model is not None:
+                used_by_model[model] += 1
             self._retry_after.pop(job.id, None)
             started += 1
             # From creation, so a job put back in the queue shows its whole wait.

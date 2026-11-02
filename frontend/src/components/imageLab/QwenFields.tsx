@@ -19,7 +19,7 @@ type QwenFieldsProps = {
 };
 
 /**
- * The form of one Qwen-Image-2.1 run: text to image on your GPU server. A run is a job that takes
+ * The form of one Qwen-Image-2.1 run: text to image on your remote server. A run is a job that takes
  * minutes, so pressing Run only starts it: it shows below while it works, and in the history.
  * Several can be started one after another.
  */
@@ -90,14 +90,14 @@ export function QwenFields({ state, onChange, onRun, starting }: QwenFieldsProps
 
       <Group gap="sm" align="center">
         <Button onClick={onRun} disabled={blocked !== null} loading={starting} size="md">
-          Run on the GPU server
+          Run on the remote server
         </Button>
         <Text size="sm" c="dimmed">
           {blocked ?? "Takes a few minutes. You can leave this page: the image appears below and in the history."}
         </Text>
       </Group>
       <Text size="xs" c="dimmed">
-        Runs on your GPU server, so there is no price per image. Each run loads the model first,
+        Runs on your remote server, so there is no price per image. Each run loads the model first,
         and the server runs a couple at a time. The license is non-commercial (Qwen Research
         License).
       </Text>

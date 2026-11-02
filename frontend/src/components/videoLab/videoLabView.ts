@@ -19,7 +19,7 @@ export type LabKind = "generate" | "h3_reference";
 
 export const DURATION_MIN_S = 1;
 export const DURATION_MAX_S = 20;
-// MiniMax H3 has no length limit here: the GPU server documents 5.17 to 14.4 seconds of video
+// MiniMax H3 has no length limit here: the remote server documents 5.17 to 14.4 seconds of video
 // and 2 to 15 seconds of audio, but the app sends what was asked and shows the server's answer.
 export const H3_STEPS_MIN = 4;
 export const H3_STEPS_MAX = 100;
@@ -105,8 +105,8 @@ export type VideoLabFormState = {
 export const DEFAULT_FORM: VideoLabFormState = {
   kind: "generate",
   prompt: "",
-  // MiniMax H3 is the app's default video model, so it is the one chosen to begin with. It holds
-  // several GPUs and takes longer than LTX: add an LTX model to compare the two.
+  // MiniMax H3 is the app's default video model, so it is the one chosen to begin with. It takes
+  // longer than LTX: add an LTX model to compare the two.
   models: [H3_MODEL],
   mode: "quality",
   orientation: "portrait",
@@ -388,15 +388,13 @@ export function toReferenceRequest(state: VideoLabFormState): H3ReferenceRunCrea
   };
 }
 
-// The GPU server decides how many GPUs and how long: the number is shown on the run once the
-// server has answered, so this line says only what is certain beforehand.
-const H3_COST_TEXT =
-  "MiniMax H3 is a GPU job that holds 4 or 8 GPUs (the server says which once it accepts the run) and can take more than 10 minutes.";
+// The remote server decides how long: the estimate is shown on the run once the server has
+// answered, so this line says only what is certain beforehand.
+const H3_COST_TEXT = "MiniMax H3 is a remote server job that can take more than 10 minutes.";
 
 /**
- * What a click costs, for the line under the button: "5 to 10 minutes on one GPU" for an LTX
- * run, doubled for two, and MiniMax H3's GPUs (the server's choice) and longer wait said on
- * their own.
+ * What a click costs, for the line under the button: "5 to 10 minutes" for an LTX run, doubled
+ * for two, and MiniMax H3's longer wait said on its own.
  */
 export function costText(models: LabVideoModel[]): string {
   const h3 = models.includes(H3_MODEL);
@@ -409,8 +407,8 @@ export function costText(models: LabVideoModel[]): string {
 
 function ltxCostText(count: number, noun: string): string {
   return count === 1
-    ? `One ${noun}: a GPU job of 5 to 10 minutes.`
-    : `${count} ${noun}s: ${count} GPU jobs of 5 to 10 minutes each, sharing the GPU job slots.`;
+    ? `One ${noun}: a remote server job of 5 to 10 minutes.`
+    : `${count} ${noun}s: ${count} remote server jobs of 5 to 10 minutes each, sharing the job limit.`;
 }
 
 /** What a MiniMax H3 reference clip costs. */
@@ -566,10 +564,6 @@ export function runStats(run: LabVideoRun): string {
   }
   if (run.duration_s !== null) {
     parts.push(`${run.duration_s.toFixed(2)} s`);
-  }
-  // MiniMax H3 only: the GPUs the server said it used.
-  if (run.gpus !== null) {
-    parts.push(`${run.gpus} GPUs`);
   }
   if (run.url !== null) {
     parts.push(run.audio_codec !== null ? `sound: ${run.audio_codec}` : "no sound");

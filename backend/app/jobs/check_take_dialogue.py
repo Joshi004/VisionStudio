@@ -45,7 +45,7 @@ from app.jobs.gpu_job import (
     record_poll_error,
     requeue_after_no_answer,
 )
-from app.jobs.handlers import JobHandler, PollContext
+from app.jobs.handlers import MODEL_TRANSCRIPTION, JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
 from app.services import dialogue_check, shot_takes, take_validation
@@ -63,6 +63,7 @@ CLIP_MIME: Final = "video/mp4"
 class CheckTakeDialogueHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "gpu"
+    gpu_model = MODEL_TRANSCRIPTION
     restart_rule = "resume"
 
     # --- start: upload and submit -----------------------------------------------
@@ -174,7 +175,7 @@ class CheckTakeDialogueHandler(JobHandler):
                 )
             else:
                 await store.fail_job(
-                    session, job.id, f"The GPU server reported an error: {message}"
+                    session, job.id, f"The remote server reported an error: {message}"
                 )
 
     # --- finish: download, compare, store ---------------------------------------------

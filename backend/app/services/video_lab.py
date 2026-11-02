@@ -579,7 +579,7 @@ async def create_audio_run(
         video_generator.check_size(sizes.gen_width, sizes.gen_height)
     except ValueError as exc:
         raise LabVideoInputError(
-            f"Lip-sync: {exc} If the GPU server has this endpoint, test the connection in "
+            f"Lip-sync: {exc} If the remote server has this endpoint, test the connection in "
             "Settings, so the app reads its current API."
         ) from exc
     request = video_generator.build_request(
@@ -714,7 +714,7 @@ async def create_h3_reference_run(
         video_generator.check_size(width, height)
     except ValueError as exc:
         raise LabVideoInputError(
-            f"{video_models.label(video_models.H3_MODEL)}: {exc} If the GPU server has this "
+            f"{video_models.label(video_models.H3_MODEL)}: {exc} If the remote server has this "
             "endpoint, test the connection in Settings, so the app reads its current API."
         ) from exc
     request = video_generator.build_request(

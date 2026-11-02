@@ -515,7 +515,7 @@ export function visibleFields(form: TakeFormState, character: LibraryCharacter):
   };
 }
 
-/** The lengths a clip can have: the same for every model (the GPU server has the last word). */
+/** The lengths a clip can have: the same for every model (the remote server has the last word). */
 export function lengthLimits(): { min: number; max: number } {
   return { min: LIMITS.durationMin, max: LIMITS.durationMax };
 }
@@ -606,10 +606,10 @@ export function takeCostNote(form: TakeFormState, character: LibraryCharacter): 
   const fields = visibleFields(form, character);
   const speaks = effectiveDialogue(form, fields) !== null;
   if (form.output === "image") {
-    return "One call to the language model and one picture (a GPU job of a few minutes).";
+    return "One call to the language model and one picture (a remote server job of a few minutes).";
   }
   if (form.output === "audio") {
-    return "One call to the language model and one speech (a GPU job of one to three minutes).";
+    return "One call to the language model and one speech (a remote server job of one to three minutes).";
   }
   if (fields.h3) {
     // Only what the take makes is paid for: a picture or a speech that is picked is free.
@@ -623,7 +623,7 @@ export function takeCostNote(form: TakeFormState, character: LibraryCharacter): 
     if (fields.h3Speech && form.audioMode === "make") {
       parts.push("one speech");
     }
-    parts.push("one MiniMax H3 clip (5 to 10 minutes or more, on the 4 or 8 GPUs the server picks)");
+    parts.push("one MiniMax H3 clip (5 to 10 minutes or more)");
     const text = joinParts(parts);
     return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
   }

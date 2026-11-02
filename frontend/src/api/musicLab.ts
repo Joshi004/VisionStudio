@@ -105,7 +105,7 @@ export function useCreateMusicPromptDraft() {
   });
 }
 
-/** Starts one run per chosen model and seed, and returns at once. Each is a paid GPU job. */
+/** Starts one run per chosen model and seed, and returns at once. Each is a paid remote server job. */
 export function useCreateMusicLabRuns() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -217,7 +217,7 @@ export function useJoinMusicSources() {
   });
 }
 
-/** Starts one edit job per variant. Each is a paid GPU job, like a run. */
+/** Starts one edit job per variant. Each is a paid remote server job, like a run. */
 export function useCreateMusicEdits() {
   const queryClient = useQueryClient();
   return useMutation({

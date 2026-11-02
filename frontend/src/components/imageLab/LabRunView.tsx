@@ -92,7 +92,7 @@ export function LabRunView({ run, onUseAsReference, onLoad }: LabRunViewProps) {
       </Text>
 
       {run.status === "running" && (
-        <Alert color="blue" title="Running on the GPU server">
+        <Alert color="blue" title="Running on the remote server">
           <Group gap="sm" align="center">
             <Loader size="xs" />
             <Text size="sm">

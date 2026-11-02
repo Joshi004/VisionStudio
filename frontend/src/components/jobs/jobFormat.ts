@@ -97,7 +97,7 @@ const STAGE_LABELS: Record<JobStage, string> = {
   starting: "Starting",
   waiting_to_upload: "Waiting to upload",
   uploading: "Uploading",
-  waiting_for_gpu: "On server, waiting for GPUs",
+  waiting_for_gpu: "On server, waiting to start",
   running_on_server: "Running on server",
   fetching_result: "Fetching result",
   server_unreachable: "Server not answering",
@@ -164,22 +164,15 @@ export function typicalText(typicalSeconds: number | null): string {
 }
 
 /**
- * What the GPU server said about a job when it took it: "4 GPUs, about 12 min to run". The
- * estimate leaves out the wait in the server's own queue. Null when the server said neither,
+ * What the remote server said about a job when it took it: "about 12 min to run". The
+ * estimate leaves out the wait in the server's own queue. Null when the server said nothing,
  * so the caller can say it is still waiting for the answer.
  */
-export function serverEstimateText(
-  gpus: number | null,
-  estimatedRunSeconds: number | null,
-): string | null {
-  const parts: string[] = [];
-  if (gpus !== null) {
-    parts.push(`${gpus} GPUs`);
+export function serverEstimateText(estimatedRunSeconds: number | null): string | null {
+  if (estimatedRunSeconds === null || estimatedRunSeconds <= 0) {
+    return null;
   }
-  if (estimatedRunSeconds !== null && estimatedRunSeconds > 0) {
-    parts.push(`about ${roughElapsed(estimatedRunSeconds)} to run`);
-  }
-  return parts.length === 0 ? null : parts.join(", ");
+  return `about ${roughElapsed(estimatedRunSeconds)} to run`;
 }
 
 type Timed = Pick<

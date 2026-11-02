@@ -1433,7 +1433,7 @@ export interface paths {
         put?: never;
         /**
          * Resubmit Job
-         * @description Queues a job the GPU server does not know again, as a new attempt.
+         * @description Queues a job the remote server does not know again, as a new attempt.
          */
         post: operations["resubmit_job_api_jobs__job_id__resubmit_post"];
         delete?: never;
@@ -8038,6 +8038,22 @@ export interface components {
             /** Notes */
             notes: string | null;
         };
+        /**
+         * ModelCapacity
+         * @description One model family of the remote server: its own limit, and what it has now.
+         */
+        ModelCapacity: {
+            /** Model */
+            model: string;
+            /** Label */
+            label: string;
+            /** Limit */
+            limit: number;
+            /** Running */
+            running: number;
+            /** Queued */
+            queued: number;
+        };
         /** ModelFieldsIn */
         ModelFieldsIn: {
             /**
@@ -9828,6 +9844,8 @@ export interface components {
             queued: number;
             /** By Type */
             by_type: components["schemas"]["PoolTypeCount"][];
+            /** Models */
+            models: components["schemas"]["ModelCapacity"][];
         };
         /**
          * PoolTypeCount
@@ -17823,7 +17841,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description The GPU server did not answer the cancel, so nothing changed. */
+            /** @description The remote server did not answer the cancel, so nothing changed. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -17970,7 +17988,7 @@ export interface operations {
                     "application/json": components["schemas"]["LabRunOut"];
                 };
             };
-            /** @description The form is not acceptable (an empty prompt, steps in fast mode, a seed out of range), or the approved GPU API has no image endpoint yet. */
+            /** @description The form is not acceptable (an empty prompt, steps in fast mode, a seed out of range), or the approved remote server API has no image endpoint yet. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -23984,7 +24002,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -24024,7 +24042,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -24065,7 +24083,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -24107,7 +24125,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -24150,7 +24168,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -24196,7 +24214,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the GPU API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
             422: {
                 headers: {
                     [name: string]: unknown;

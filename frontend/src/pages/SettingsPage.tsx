@@ -1,10 +1,26 @@
-import { Alert, Badge, Group, Loader, Paper, Stack, Text, Title } from "@mantine/core";
+import { useState } from "react";
+import {
+  Alert,
+  Badge,
+  Group,
+  Loader,
+  Paper,
+  SimpleGrid,
+  Stack,
+  Tabs,
+  Text,
+  Title,
+} from "@mantine/core";
 
 import { describeError } from "../api/errors";
 import { useSettings, type SettingItem } from "../api/settings";
 import { ContractSection } from "../components/settings/ContractSection";
 import { GpuConnectionTest } from "../components/settings/GpuConnectionTest";
 import { SettingRow } from "../components/settings/SettingRow";
+
+/** The group (tab) that also holds the connection test and the API contract. */
+const GPU_GROUP = "Remote server";
+const SECRETS_TAB = "Secrets";
 
 /** Groups settings by their `group`, keeping the order the backend sent them in. */
 function groupSettings(settings: SettingItem[]): [string, SettingItem[]][] {
@@ -19,9 +35,14 @@ function groupSettings(settings: SettingItem[]): [string, SettingItem[]][] {
 
 export function SettingsPage() {
   const { data, isLoading, isError, error } = useSettings();
+  const [chosenTab, setChosenTab] = useState<string | null>(null);
+
+  const groups = data ? groupSettings(data.settings) : [];
+  // Until a tab is chosen, the first group is shown.
+  const activeTab = chosenTab ?? groups[0]?.[0] ?? SECRETS_TAB;
 
   return (
-    <Stack gap="lg" maw={760}>
+    <Stack gap="lg" maw={1000}>
       <Title order={2}>Settings</Title>
 
       {isLoading && <Loader size="sm" />}
@@ -33,28 +54,53 @@ export function SettingsPage() {
       )}
 
       {data && (
-        <>
-          <GpuConnectionTest />
-          <ContractSection />
+        <Tabs value={activeTab} onChange={setChosenTab} keepMounted={false}>
+          <Tabs.List style={{ flexWrap: "wrap" }}>
+            {groups.map(([group, settings]) => {
+              const savedCount = settings.filter((setting) => setting.source === "saved").length;
+              return (
+                <Tabs.Tab
+                  key={group}
+                  value={group}
+                  rightSection={
+                    savedCount > 0 ? (
+                      <Badge size="xs" circle color="blue" title={`${savedCount} saved`}>
+                        {savedCount}
+                      </Badge>
+                    ) : undefined
+                  }
+                >
+                  {group}
+                </Tabs.Tab>
+              );
+            })}
+            <Tabs.Tab value={SECRETS_TAB}>{SECRETS_TAB}</Tabs.Tab>
+          </Tabs.List>
 
-          {groupSettings(data.settings).map(([group, settings]) => (
-            <Stack key={group} gap="md">
-              <Title order={4}>{group}</Title>
-              <Paper withBorder p="md" radius="md">
-                <Stack gap="lg">
-                  {settings.map((setting) => (
-                    <SettingRow
-                      key={`${setting.key}|${setting.source}|${setting.value}`}
-                      setting={setting}
-                    />
-                  ))}
-                </Stack>
-              </Paper>
-            </Stack>
+          {groups.map(([group, settings]) => (
+            <Tabs.Panel key={group} value={group} pt="md">
+              <Stack gap="lg">
+                {group === GPU_GROUP && (
+                  <>
+                    <GpuConnectionTest />
+                    <ContractSection />
+                  </>
+                )}
+                <Paper withBorder p="md" radius="md">
+                  <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg" verticalSpacing="lg">
+                    {settings.map((setting) => (
+                      <SettingRow
+                        key={`${setting.key}|${setting.source}|${setting.value}`}
+                        setting={setting}
+                      />
+                    ))}
+                  </SimpleGrid>
+                </Paper>
+              </Stack>
+            </Tabs.Panel>
           ))}
 
-          <Stack gap="md">
-            <Title order={4}>Secrets</Title>
+          <Tabs.Panel value={SECRETS_TAB} pt="md">
             <Paper withBorder p="md" radius="md">
               <Stack gap="md">
                 {data.secrets.map((secret) => (
@@ -72,8 +118,8 @@ export function SettingsPage() {
                 ))}
               </Stack>
             </Paper>
-          </Stack>
-        </>
+          </Tabs.Panel>
+        </Tabs>
       )}
     </Stack>
   );

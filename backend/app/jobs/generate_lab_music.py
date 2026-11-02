@@ -38,6 +38,7 @@ from app.db.models import Job, LabMusicRun
 from app.db.session import SessionLocal
 from app.jobs import dispatcher, phases, store
 from app.jobs.gpu_job import GPU_URL_KEY, SERVER_RETRY_DELAY_S, note_uploading
+from app.jobs.handlers import MODEL_MUSIC
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import gpu_server, music_generator
 from app.providers.gpu_server import GpuCallError
@@ -115,6 +116,7 @@ def _plan(recorded: object) -> _Plan | None:
 
 class GenerateLabMusicHandler(RemoteVideoHandler):
     job_type = JOB_TYPE
+    gpu_model = MODEL_MUSIC
 
     # --- start: submit -----------------------------------------------------------------------
 

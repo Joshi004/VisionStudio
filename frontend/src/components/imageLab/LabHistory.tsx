@@ -8,7 +8,7 @@ import { engineText, runStatusColor, sizeText } from "./labView";
 /**
  * Every run, newest first, so results can be compared later. A run opens in a drawer. Reads
  * the database only, and refreshes after a run, on returning to the tab and on Refresh. It also
- * refreshes by itself while a run on the GPU server is still running.
+ * refreshes by itself while a run on the remote server is still running.
  */
 export function LabHistory({ onOpen }: { onOpen: (runId: number) => void }) {
   const runs = useLabRuns();

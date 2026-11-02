@@ -41,7 +41,7 @@ from app.jobs.gpu_job import (
     record_poll_error,
     requeue_after_no_answer,
 )
-from app.jobs.handlers import JobHandler, PollContext
+from app.jobs.handlers import MODEL_IMAGE, JobHandler, PollContext
 from app.providers import image_generator
 from app.providers.gpu_server import GpuCallError
 from app.services.storage import StorageError, get_storage
@@ -55,6 +55,7 @@ BuildBody = Callable[[], Awaitable[tuple[dict[str, Any], dict[str, Any]]]]
 
 class RemoteImageHandler(JobHandler):
     provider = "gpu"
+    gpu_model = MODEL_IMAGE
     restart_rule = "resume"
 
     @abstractmethod
@@ -190,7 +191,7 @@ class RemoteImageHandler(JobHandler):
                     session, job.id, phases.preempted(job.attempt + 1), next_attempt=True
                 )
                 return
-            await store.fail_job(session, job.id, f"The GPU server reported an error: {message}")
+            await store.fail_job(session, job.id, f"The remote server reported an error: {message}")
             await store.merge_output(session, job.id, {"purge": purge})
 
     # --- finish: download ------------------------------------------------------------------

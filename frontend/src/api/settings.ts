@@ -21,7 +21,7 @@ export function useSettings() {
   return useQuery({ queryKey: SETTINGS_KEY, queryFn: fetchSettings });
 }
 
-/** A changed URL also changes which stored GPU results (connection, API, banner) still apply. */
+/** A changed URL also changes which stored remote server results (connection, API, banner) still apply. */
 function useRefreshAfterChange() {
   const queryClient = useQueryClient();
   return () =>

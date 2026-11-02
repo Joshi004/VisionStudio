@@ -239,7 +239,7 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
               label="Make the clip as long as the first voice"
               description={
                 hasVoice
-                  ? "The GPU server decides the final length: see the measured length on the run. Untick it to choose the length above."
+                  ? "The remote server decides the final length: see the measured length on the run. Untick it to choose the length above."
                   : "Needs a voice. Without one, the length above is used."
               }
               checked={state.matchAudio && hasVoice}
@@ -327,7 +327,7 @@ export function VideoLabForm({ state, onChange, onRun, running }: VideoLabFormPr
         {!isReference && (
           <Textarea
             label="Negative prompt (LTX-2.3 only)"
-            description="Empty: the GPU server's own default negative prompt. LTX-2.5 and MiniMax H3 have no negative prompt and are sent none."
+            description="Empty: the remote server's own default negative prompt. LTX-2.5 and MiniMax H3 have no negative prompt and are sent none."
             value={state.negativePrompt}
             onChange={(event) => update({ negativePrompt: event.currentTarget.value })}
             disabled={!has23}

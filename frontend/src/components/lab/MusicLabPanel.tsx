@@ -26,10 +26,10 @@ type MusicLabPanelProps = {
 };
 
 /**
- * The Music lab tab: trying the music and sound models of the GPU server (ACE-Step 1.5, YuE 2,
+ * The Music lab tab: trying the music and sound models of the remote server (ACE-Step 1.5, YuE 2,
  * Stable Audio 3, Stable Audio Open and LTX audio) on the same brief, to hear which kind of
  * sound each does best. A language model can write each model's fields from the brief. Each run
- * is a paid GPU job. It belongs to no project and changes none.
+ * is a paid remote server job. It belongs to no project and changes none.
  */
 export function MusicLabPanel({ form, onFormChange, editForm, onEditFormChange }: MusicLabPanelProps) {
   const catalog = useMusicCatalog();
@@ -107,10 +107,10 @@ export function MusicLabPanel({ form, onFormChange, editForm, onEditFormChange }
       {view === "make" && (
         <>
           <Text size="sm" c="dimmed">
-            Try the music and sound models of the GPU server on one brief and listen to them side by
+            Try the music and sound models of the remote server on one brief and listen to them side by
             side. Choose the kind of sound, describe it, and the models that make it. The language
             model can write each model's fields in the way that model reads them, and you can edit
-            them before you run. Each run is a paid GPU job, and it belongs to no project.
+            them before you run. Each run is a paid remote server job, and it belongs to no project.
           </Text>
 
           <Paper withBorder p="md" radius="md">
@@ -137,7 +137,7 @@ export function MusicLabPanel({ form, onFormChange, editForm, onEditFormChange }
           )}
           {create.isSuccess && (
             <Alert color="green" title="Started">
-              {count === 1 ? "The run is" : `${count} runs are`} waiting for a free GPU slot and will
+              {count === 1 ? "The run is" : `${count} runs are`} waiting for a free place at the remote server and will
               appear below. You can leave this page: it keeps going.
             </Alert>
           )}

@@ -147,7 +147,7 @@ function JoinSource({ onDone }: { onDone: (source: MusicSource) => void }) {
 /**
  * Editing a sound the lab already made or one you bring: choose the source, what to do with it
  * (repaint a window, make a cover, inpaint or extend, or transform), and the settings of that
- * operation. Each edit is a paid GPU job and shows below, on the runs list, with its source.
+ * operation. Each edit is a paid remote server job and shows below, on the runs list, with its source.
  */
 export function MusicEditPanel({ state, onChange, catalog }: MusicEditPanelProps) {
   const runs = useMusicLabRuns();
@@ -196,7 +196,7 @@ export function MusicEditPanel({ state, onChange, catalog }: MusicEditPanelProps
           </Text>
           <Text size="xs" c="dimmed">
             Change part of a sound, make a cover of it, extend it, or transform it. The source is a
-            run above, a recording you upload, or two runs joined. Each edit is a paid GPU job and
+            run above, a recording you upload, or two runs joined. Each edit is a paid remote server job and
             appears in the runs below.
           </Text>
         </Stack>
@@ -376,7 +376,7 @@ export function MusicEditPanel({ state, onChange, catalog }: MusicEditPanelProps
         {create.isSuccess && (
           <Alert color="green" title="Started">
             {create.data.length === 1 ? "The edit is" : `${create.data.length} edits are`} waiting
-            for a free GPU slot and will appear below. You can leave this page: it keeps going.
+            for a free place at the remote server and will appear below. You can leave this page: it keeps going.
           </Alert>
         )}
       </Stack>

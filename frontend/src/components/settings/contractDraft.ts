@@ -5,7 +5,7 @@ export const MAX_SOURCES = 5;
 export type SourceBase = "gpu" | "transcription";
 
 export const BASE_OPTIONS: { value: SourceBase; label: string }[] = [
-  { value: "gpu", label: "GPU server URL" },
+  { value: "gpu", label: "Remote server URL" },
   { value: "transcription", label: "Transcription URL" },
 ];
 

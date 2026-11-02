@@ -27,7 +27,7 @@ export type QwenShape = QwenLabRunRequest["aspect_ratio"];
 export type LabFormState = {
   /** Which model the form is for. The fields below belong to one or the other. */
   engine: LabEngine;
-  // --- Qwen-Image-2.1 (the GPU server): text to image only ---
+  // --- Qwen-Image-2.1 (the remote server): text to image only ---
   qwenMode: QwenMode;
   aspectRatio: QwenShape;
   /** Quality mode only. Empty: the server's own number of steps. */
@@ -79,7 +79,7 @@ export const SIZE_PRESETS = [
 export const DEFAULT_MODEL = "seedream-5.0-lite";
 
 export const ENGINE_LABELS: Record<LabEngine, string> = {
-  qwen: "Qwen-Image-2.1 (your GPU server)",
+  qwen: "Qwen-Image-2.1 (your remote server)",
   seedream: "Seedream (Bitdeer)",
 };
 

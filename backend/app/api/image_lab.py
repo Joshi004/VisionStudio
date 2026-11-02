@@ -335,7 +335,7 @@ async def create_run(body: LabRunRequest, session: SessionDep) -> LabRunOut:
         422: {
             "model": ErrorResponse,
             "description": "The form is not acceptable (an empty prompt, steps in fast mode, a "
-            "seed out of range), or the approved GPU API has no image endpoint yet.",
+            "seed out of range), or the approved remote server API has no image endpoint yet.",
         }
     },
 )

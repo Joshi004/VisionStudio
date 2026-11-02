@@ -13,7 +13,7 @@ export type LabReferenceIn = components["schemas"]["LabReferenceIn"];
 export type LabRunRequest = components["schemas"]["LabRunRequest"];
 export type QwenLabRunRequest = components["schemas"]["QwenLabRunRequest"];
 export type LabMode = LabRun["mode"];
-/** Which model made a run: Bitdeer's Seedream, or Qwen-Image-2.1 on the GPU server. */
+/** Which model made a run: Bitdeer's Seedream, or Qwen-Image-2.1 on the remote server. */
 export type LabEngine = LabRun["engine"];
 export type ProjectFrame = components["schemas"]["ProjectFrameOut"];
 
@@ -44,7 +44,7 @@ async function fetchRuns(beforeId: number | undefined) {
 
 /**
  * The history, newest first, a page at a time. Reads the database only. It is loaded again every
- * few seconds while any run on the GPU server is still running, so its image appears by itself.
+ * few seconds while any run on the remote server is still running, so its image appears by itself.
  */
 export function useLabRuns() {
   return useInfiniteQuery({
@@ -154,7 +154,7 @@ export function useRunLab() {
 }
 
 /**
- * Starts one run of Qwen-Image-2.1 on the GPU server and returns at once with the run, which is
+ * Starts one run of Qwen-Image-2.1 on the remote server and returns at once with the run, which is
  * still `running`. It takes minutes, so the page follows it with `useLabRun`. Only a form the
  * server refuses (422), such as an API that was not approved yet, is an error here.
  */

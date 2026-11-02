@@ -1,4 +1,4 @@
-"""The pools of running slots the dispatcher counts jobs in.
+"""The pools the dispatcher counts running jobs in.
 
 Only two things limit how much work can run at once, so only two numbers are enforced, and every
 kind of job shares them:
@@ -17,13 +17,18 @@ A job whose provider is neither (a `local` one, such as a render on this machine
 pool, counted under its job type, and its handler says how many may run at once. No job type
 is local today.
 
-A job takes one slot of its pool, except a MiniMax H3 clip, which always takes `H3_GPUS` slots
-(`slot_cost`). The server really gives a clip 4 or 8 GPUs, but it queues what it cannot start, so
-the app does not follow its choice: one fixed number keeps the count the same before and after
-the server answers. The Qwen3.8 calls answer from one GPU however many run at once, so together
-they hold `QWEN38_GPUS` slots (`slots_in_use`). The limit counts slots, not jobs.
+Every job counts as one in its pool (`jobs_in_use`), whatever it is: the remote server decides
+by itself how many of its GPUs a job uses, and it queues what it cannot start yet. The limit is
+how many jobs the app keeps at the remote server (or at the paid API) at once.
 
-Both settings are read at every tick, so a change on the Settings page applies at once. Running
+On top of the remote server's shared limit, each model family on it has a limit of its own, also
+counted in jobs (`MODEL_LABELS`: MiniMax H3, LTX, Qwen-Image, Breeze TTS, Parakeet, music and
+Qwen3.8). A family at its limit holds back only its own jobs: they do not mark the pool full,
+so the jobs of the other families still start. A limit of 0 means the family has no limit of its
+own. Without them, hundreds of clips fill the server's queue, and a short job made later (a
+transcription a finished clip waits for) waits behind all of them.
+
+The settings are read at every tick, so a change on the Settings page applies at once. Running
 jobs are never stopped by a lower number.
 
 This module does not import the handler registry: the dispatcher and the capacity endpoint pass
@@ -39,7 +44,16 @@ from typing import TYPE_CHECKING, Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.providers import qwen38, video_generator
+from app.jobs.handlers import (
+    MODEL_H3,
+    MODEL_IMAGE,
+    MODEL_LTX,
+    MODEL_MUSIC,
+    MODEL_QWEN38,
+    MODEL_TRANSCRIPTION,
+    MODEL_TTS,
+)
+from app.providers import qwen38
 from app.services import llm_target
 
 if TYPE_CHECKING:
@@ -54,7 +68,7 @@ MAX_PARALLEL_PAID_API_KEY: Final = "max_parallel_paid_api_calls"
 
 # What the page calls each shared pool.
 POOL_LABELS: Final[dict[str, str]] = {
-    GPU_POOL: "GPU server",
+    GPU_POOL: "Remote server",
     PAID_API_POOL: "Paid inference API",
 }
 
@@ -63,13 +77,27 @@ _SETTING_OF_POOL: Final[dict[str, str]] = {
     PAID_API_POOL: MAX_PARALLEL_PAID_API_KEY,
 }
 
+# What the page calls each model family of the GPU server, in the order the page lists them.
+MODEL_LABELS: Final[dict[str, str]] = {
+    MODEL_H3: "MiniMax H3 video",
+    MODEL_LTX: "LTX video",
+    MODEL_IMAGE: "Qwen-Image",
+    MODEL_TTS: "Breeze TTS",
+    MODEL_TRANSCRIPTION: "Parakeet transcription",
+    MODEL_MUSIC: "Music models",
+    MODEL_QWEN38: "Qwen3.8 text",
+}
 
-# A MiniMax H3 job reserves 4 or 8 H100s on one node, chosen by the server from the request's
-# size (GPU API 0.15.0). A clip is always counted as 4 slots: the server queues whatever it
-# cannot start yet, so the exact number of GPUs it picks does not need to be followed here.
-H3_GPUS: Final = 4
-# The Qwen3.8 text model answers every call at once from the same GPU.
-QWEN38_GPUS: Final = 1
+# The setting that limits each family. 0 means no limit of its own.
+_SETTING_OF_MODEL: Final[dict[str, str]] = {
+    MODEL_H3: "max_parallel_h3_jobs",
+    MODEL_LTX: "max_parallel_ltx_jobs",
+    MODEL_IMAGE: "max_parallel_image_jobs",
+    MODEL_TTS: "max_parallel_tts_jobs",
+    MODEL_TRANSCRIPTION: "max_parallel_transcription_jobs",
+    MODEL_MUSIC: "max_parallel_music_jobs",
+    MODEL_QWEN38: "max_parallel_qwen38_calls",
+}
 
 
 def _server_value(job: Job, field: str) -> object:
@@ -100,25 +128,6 @@ def server_estimate_seconds(job: Job) -> float | None:
     if isinstance(seconds, bool) or not isinstance(seconds, int | float):
         return None
     return float(seconds) if seconds >= 0 else None
-
-
-def slot_cost(job: Job) -> int:
-    """How many slots of its pool a job takes: `H3_GPUS` for a MiniMax H3 clip (its endpoint is
-    recorded on the job's input), else 1. It never changes while the job runs.
-    """
-    recorded = job.input if isinstance(job.input, dict) else {}
-    if not video_generator.is_h3_endpoint(recorded.get("endpoint")):
-        return 1
-    return H3_GPUS
-
-
-def fits(free: int, limit: int, cost: int) -> bool:
-    """Whether a job that takes `cost` slots may start when `free` of the pool's `limit` slots
-    are free. A job that costs more than the whole pool (an H3 clip with a limit of 1) would
-    never start, so it may start when nothing else is running in the pool. A limit of 0 still
-    stops everything.
-    """
-    return free >= cost or (limit > 0 and free == limit)
 
 
 def pool_of(handler: JobHandler) -> str:
@@ -160,23 +169,41 @@ def job_pool(job: Job, handler: JobHandler, qwen38_keys: frozenset[str]) -> str:
     return GPU_POOL if on_qwen38(job, handler, qwen38_keys) else pool_of(handler)
 
 
-def slots_in_use(
+def model_of(job: Job, handler: JobHandler, qwen38_keys: frozenset[str]) -> str | None:
+    """The model family of the GPU server one job runs on, or None when it does not run there
+    (a paid API call, a local job) or its handler names no family.
+    """
+    if on_qwen38(job, handler, qwen38_keys):
+        return MODEL_QWEN38
+    if handler.provider != "gpu":
+        return None
+    return handler.gpu_model_of(job)
+
+
+def jobs_by_model(
     running: Iterable[tuple[Job, JobHandler | None]], qwen38_keys: frozenset[str]
 ) -> Counter[str]:
-    """The slots the running jobs hold, by pool. Every running Qwen3.8 call together holds
-    `QWEN38_GPUS` of the GPU server's. A job with no handler counts under its job type.
+    """How many of the running jobs each model family has. It counts jobs, not slots: an H3 clip
+    is one, and so is each Qwen3.8 call.
     """
     used: Counter[str] = Counter()
-    qwen38_running = False
     for job, handler in running:
-        if handler is None:
-            used[job.type] += slot_cost(job)
-        elif on_qwen38(job, handler, qwen38_keys):
-            qwen38_running = True
-        else:
-            used[pool_of(handler)] += slot_cost(job)
-    if qwen38_running:
-        used[GPU_POOL] += QWEN38_GPUS
+        model = None if handler is None else model_of(job, handler, qwen38_keys)
+        if model is not None:
+            used[model] += 1
+    return used
+
+
+def jobs_in_use(
+    running: Iterable[tuple[Job, JobHandler | None]], qwen38_keys: frozenset[str]
+) -> Counter[str]:
+    """How many of the running jobs each pool has: one for every job. A Qwen3.8 call counts in
+    the remote server's pool, and a job with no handler counts under its job type.
+    """
+    used: Counter[str] = Counter()
+    for job, handler in running:
+        pool = job.type if handler is None else job_pool(job, handler, qwen38_keys)
+        used[pool] += 1
     return used
 
 
@@ -184,6 +211,14 @@ async def shared_limits(session: AsyncSession) -> dict[str, int]:
     """How many jobs may be running in each of the two shared pools right now."""
     return {
         pool: await settings_service.get_int(session, key) for pool, key in _SETTING_OF_POOL.items()
+    }
+
+
+async def model_limits(session: AsyncSession) -> dict[str, int]:
+    """How many jobs of each model family may be running right now. 0 means no limit of its own."""
+    return {
+        model: await settings_service.get_int(session, key)
+        for model, key in _SETTING_OF_MODEL.items()
     }
 
 

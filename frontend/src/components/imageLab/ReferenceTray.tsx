@@ -344,7 +344,7 @@ export function ProjectPicker({ opened, onClose, onPick }: PickerProps) {
         {frames.data?.length === 0 && <Text c="dimmed">This project has no frames.</Text>}
         {frames.data && frames.data.length > 0 && (
           <Text size="sm" c="dimmed">
-            Newest first. "derived" frames are the exact files sent to the GPU server. Click one to
+            Newest first. "derived" frames are the exact files sent to the remote server. Click one to
             add it.
           </Text>
         )}

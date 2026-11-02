@@ -88,8 +88,8 @@ EXTENSIONS: Final[dict[MusicModel, str]] = {
 
 def no_endpoint_message(endpoint: str) -> str:
     return (
-        f"The GPU API has no {endpoint} endpoint. Open Settings and test the GPU connection, "
-        "so the app reads the server's current API."
+        f"The remote server API has no {endpoint} endpoint. Open Settings and test the remote "
+        "server connection, so the app reads the server's current API."
     )
 
 

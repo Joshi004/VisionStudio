@@ -17,7 +17,7 @@ type VoiceLabPanelProps = {
 
 /**
  * The Voice lab tab: trying Breeze TTS: a voice made from a description, a saved voice reading
- * a text, or a saved voice steered by an instruction. Each run is a paid GPU job of one to three
+ * a text, or a saved voice steered by an instruction. Each run is a paid remote server job of one to three
  * minutes. A speech can be saved as a voice, and a saved voice can speak a project's script. It
  * belongs to no project and changes none.
  */
@@ -33,9 +33,9 @@ export function VoiceLabPanel({ form, onFormChange }: VoiceLabPanelProps) {
     <Stack gap="lg" maw={1100}>
       <Stack gap={4}>
         <Text size="sm" c="dimmed">
-          Try Breeze TTS 2, the speech model on the GPU server, in English or Chinese. Describe a
+          Try Breeze TTS 2, the speech model on the remote server, in English or Chinese. Describe a
           voice and the model invents it, or choose a saved voice (a clean recording and its exact
-          words) and the model reads your text in it. Each run is a paid GPU job of one to three
+          words) and the model reads your text in it. Each run is a paid remote server job of one to three
           minutes, and it belongs to no project.
         </Text>
         <LicenseNotice />
@@ -58,7 +58,7 @@ export function VoiceLabPanel({ form, onFormChange }: VoiceLabPanelProps) {
       )}
       {create.isSuccess && (
         <Alert color="green" title="Started">
-          The run is waiting for a free GPU slot and will appear below. You can leave this page: it
+          The run is waiting for a free place at the remote server and will appear below. You can leave this page: it
           keeps going.
         </Alert>
       )}

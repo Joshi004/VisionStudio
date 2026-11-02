@@ -146,7 +146,7 @@ export function VoiceLabForm({ state, onChange, onRun, running, voices }: VoiceL
             </Alert>
           )}
           <Text size="xs" c="dimmed">
-            A GPU job of one to three minutes. It starts only when you press the button.
+            A remote server job of one to three minutes. It starts only when you press the button.
           </Text>
           <LicenseNotice />
         </Stack>

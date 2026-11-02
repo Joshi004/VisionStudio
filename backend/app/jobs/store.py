@@ -440,7 +440,7 @@ async def cancel_job(session: AsyncSession, job_id: int) -> Job:
                 "longer be cancelled. Wait a moment and refresh."
             )
         elif job.status == "running" and job.provider == "gpu":
-            message = "This job is already running on the GPU server and cannot be cancelled."
+            message = "This job is already running on the remote server and cannot be cancelled."
         elif job.status == "running":
             message = "This job is already running and cannot be cancelled."
         else:

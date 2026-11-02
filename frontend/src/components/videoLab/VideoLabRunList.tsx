@@ -56,9 +56,9 @@ function groupRuns(runs: LabVideoRun[]): RunGroup[] {
 
 /** What a waiting or running MiniMax H3 clip shows: the server's own numbers, once it has them. */
 function h3WaitText(run: LabVideoRun): string {
-  const server = serverEstimateText(run.gpus, run.estimated_run_seconds);
+  const server = serverEstimateText(run.estimated_run_seconds);
   return server === null
-    ? "MiniMax H3 is a long GPU job. The server's GPUs and estimate show here once it has answered. This page updates by itself."
+    ? "MiniMax H3 is a long remote server job. The server's estimate shows here once it has answered. This page updates by itself."
     : `The server says: ${server}. This page updates by itself.`;
 }
 

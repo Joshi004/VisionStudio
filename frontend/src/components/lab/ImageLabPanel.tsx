@@ -30,7 +30,7 @@ type ImageLabPanelProps = {
 
 /**
  * The Image lab tab: testing two image models by hand and comparing what they make.
- * Qwen-Image-2.1 runs on your GPU server (text to image, a few minutes, no price). Seedream is
+ * Qwen-Image-2.1 runs on your remote server (text to image, a few minutes, no price). Seedream is
  * Bitdeer's paid API (text to image, image to image and an edit, with references from an upload,
  * an earlier result or a project's frames). Every run is kept with its exact request and answer,
  * so results can be compared later. It belongs to no project and changes none.
@@ -76,7 +76,7 @@ export function ImageLabPanel({ form, onFormChange: setForm }: ImageLabPanelProp
     <Stack gap="lg" maw={1100}>
       <Stack gap={4}>
         <Text size="sm" c="dimmed">
-          Try an image model by hand and compare what comes back: Qwen-Image-2.1 on your GPU server
+          Try an image model by hand and compare what comes back: Qwen-Image-2.1 on your remote server
           (the model that makes the first frames) or Seedream on Bitdeer. Each setting is sent as
           you set it, and the answer is shown as it came, including a setting the model ignored or a
           call it refused. Seedream is a paid call (about $0.035 per image). Nothing here belongs

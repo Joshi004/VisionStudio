@@ -101,7 +101,7 @@ LICENSES: Final[dict[MusicModel, LicenseNote]] = {
     ),
     "ltx-audio": LicenseNote(
         "unknown",
-        "The GPU server's documentation states no licence for LTX audio. Check the LTX-2 "
+        "The remote server's documentation states no licence for LTX audio. Check the LTX-2 "
         "licence before using its output commercially.",
     ),
 }

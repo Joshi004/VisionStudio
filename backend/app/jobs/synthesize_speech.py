@@ -51,7 +51,7 @@ from app.jobs.gpu_job import (
     record_poll_error,
     requeue_after_no_answer,
 )
-from app.jobs.handlers import JobHandler, PollContext
+from app.jobs.handlers import MODEL_TTS, JobHandler, PollContext
 from app.providers import gpu_server, speech_synthesizer
 from app.providers.gpu_server import GpuCallError
 from app.services import ffmpeg, speech_audio
@@ -151,6 +151,7 @@ def read_plan(recorded: object) -> Plan | None:
 
 class SpeechHandler(JobHandler):
     provider = "gpu"
+    gpu_model = MODEL_TTS
     restart_rule = "resume"
 
     @abstractmethod
@@ -294,7 +295,7 @@ class SpeechHandler(JobHandler):
                 )
             else:
                 await store.fail_job(
-                    session, job.id, f"The GPU server reported an error: {message}"
+                    session, job.id, f"The remote server reported an error: {message}"
                 )
 
     # --- finish: the next piece, or join and store -------------------------------------------

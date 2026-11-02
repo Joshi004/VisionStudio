@@ -15,12 +15,21 @@ MAX_ATTEMPTS: Final = 3
 
 # --- Queued: the job has not started, or is waiting to start again ----------------
 WAITING_TO_START: Final = "waiting to start"
-WAITING_FOR_SLOT: Final = "waiting for a free slot"
+WAITING_FOR_SLOT: Final = "waiting: job limit reached"
 # The two shared pools (`jobs/pools.py`): every GPU job waits for the first, every paid language
 # model call for the second, whatever kind of job it is.
-WAITING_FOR_GPU_SLOT: Final = "waiting for a free GPU server slot"
-WAITING_FOR_PAID_API_SLOT: Final = "waiting for a free paid API slot"
-WAITING_SERVER_UNREACHABLE: Final = "waiting: GPU server unreachable"
+WAITING_FOR_GPU_SLOT: Final = "waiting: remote server job limit reached"
+WAITING_FOR_PAID_API_SLOT: Final = "waiting: paid API job limit reached"
+
+
+def waiting_for_model_slot(model_label: str) -> str:
+    """A job at the remote server held back by the limit of its own model (`pools.MODEL_LABELS`),
+    not by the shared one: other models' jobs still start.
+    """
+    return f"waiting: {model_label} job limit reached"
+
+
+WAITING_SERVER_UNREACHABLE: Final = "waiting: remote server unreachable"
 WAITING_SERVER_BUSY: Final = "waiting: server busy (HTTP 429)"
 # The upload or the submit got no answer: the job goes back to the queue and sends everything again.
 # The reason is shown next to the badge (`live_status`), not in the label.
@@ -36,7 +45,13 @@ STARTING: Final = "starting"
 SUBMITTING: Final = "submitting"
 QUEUED_ON_CLUSTER: Final = "queued on cluster"
 RUNNING_ON_CLUSTER: Final = "running on cluster"
-SERVER_UNREACHABLE_CHECKING: Final = "GPU server unreachable, checking again"
+SERVER_UNREACHABLE_CHECKING: Final = "remote server unreachable, checking again"
+# What these two labels said before the wording changed. Jobs saved with them keep showing them
+# until their next phase is written, so `stage_of` still reads them.
+_OLD_SERVER_PROBLEM_LABELS: Final = (
+    "waiting: GPU server unreachable",
+    "GPU server unreachable, checking again",
+)
 NOT_FOUND: Final = "not found on this server"
 
 # --- Running: video generation (Phase 9) -----------------------------------------------
@@ -419,6 +434,7 @@ _SERVER_PROBLEM_PREFIXES: Final = (
     WAITING_SERVER_UNREACHABLE,
     WAITING_SERVER_BUSY,
     "waiting: the server",
+    *_OLD_SERVER_PROBLEM_LABELS,
 )
 
 

@@ -241,7 +241,7 @@ export function useSetVoiceSource(projectId: number) {
 
 /**
  * "Check takes": starts the local job that checks the clips made before the checks existed. It
- * starts no generation, so it costs seconds and no GPU time.
+ * starts no generation, so it costs seconds and no remote server time.
  */
 export function useCheckShotTakes(projectId: number) {
   const queryClient = useQueryClient();

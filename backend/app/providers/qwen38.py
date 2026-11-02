@@ -111,7 +111,7 @@ async def _wait_for_job(base_url: str, job_id: str, deadline: float) -> None:
             if status.status == "succeeded":
                 return
             if status.status == "failed":
-                message = status.error or "The Qwen3.8 request failed on the GPU server."
+                message = status.error or "The Qwen3.8 request failed on the remote server."
                 raise LlmCallError("server_error", message)
             delay = POLL_QUEUED_S if status.status == "queued" else POLL_RUNNING_S
         await asyncio.sleep(min(delay, max(0.0, deadline - time.monotonic())))

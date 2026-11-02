@@ -451,7 +451,7 @@ export function useStartAuditionLine() {
 }
 
 /**
- * Starts three samples of one line, read in the voice description. Each is a paid GPU job of
+ * Starts three samples of one line, read in the voice description. Each is a paid remote server job of
  * one to three minutes. The samples are not kept on the character: follow each with
  * `useVoiceLabRun(sample.voice_run_id)`.
  */
@@ -534,7 +534,7 @@ export function useCharacterTakes(characterId: number | null) {
 
 /**
  * Saves a take and starts its first step, and returns at once. Each step is a paid call: the
- * prompts a call to the language model, a picture and a speech GPU jobs of a few minutes, a
+ * prompts a call to the language model, a picture and a speech remote server jobs of a few minutes, a
  * clip one of 5 to 10 minutes or more.
  */
 export function useCreateTake() {

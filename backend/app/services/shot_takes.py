@@ -713,7 +713,7 @@ async def _build_body(
         video_generator.check_size(content["width"], content["height"])
     except ValueError as exc:
         raise ShotTakesError(
-            f"{video_models.label(video_models.H3_MODEL)}: {exc} If the GPU server has this "
+            f"{video_models.label(video_models.H3_MODEL)}: {exc} If the remote server has this "
             "endpoint, test the connection in Settings, so the app reads its current API."
         ) from exc
     return video_generator.build_request(

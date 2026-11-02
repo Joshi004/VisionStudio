@@ -272,7 +272,7 @@ function CaseCard({ trial, catalog }: { trial: MusicTrialCase; catalog: MusicCat
 /**
  * Round 2 of the music trials: one card for each case, with what to verify, the audio it started
  * from, what was done, what came out (each result rated Good, Usable or Bad) and your answer.
- * Nothing here starts a GPU job: the runs are started by the trial helper, and they stay.
+ * Nothing here starts a remote server job: the runs are started by the trial helper, and they stay.
  */
 export function MusicTrialsPanel() {
   const trials = useMusicTrials();

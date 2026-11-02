@@ -102,14 +102,15 @@ class SettingSpec:
             raise ValueError(f"{self.key}: set both min_value and max_value, or neither")
 
 
-GROUP_GPU = "GPU server"
+GROUP_GPU = "Remote server"
 GROUP_LLM = "Language model"
 GROUP_IMAGE = "Image model"
 GROUP_DURATION = "Shot duration"
 GROUP_SPEECH = "Speech"
 GROUP_STORY = "Story"
 GROUP_MUSIC = "Music"
-GROUP_LIMITS = "Limits"
+GROUP_LIMITS = "Job limits"
+GROUP_MODEL_LIMITS = "Remote server limits per model"
 
 # The most themes a story's Music Bible may hold, the main theme included (MUSIC-006, QM-6). The
 # model decides how many the story needs and is asked for fewer in a short story; code refuses
@@ -159,7 +160,7 @@ NARRATION_UNIT_MAX_KEY = "narration_unit_max_seconds"
 DIALOGUE_MARGIN_KEY = "dialogue_shot_margin_seconds"
 
 # The shot-duration policy (PHASE-002). All four values are whole seconds. The hard maximum can
-# never pass the longest clip the GPU server accepts: 345 frames at 24 fps is 14.375 s, so 14.
+# never pass the longest clip the remote server accepts: 345 frames at 24 fps is 14.375 s, so 14.
 H3_MAX_WHOLE_SECONDS = H3_MAX_FRAMES // H3_FPS
 
 H3_MIN_SHOT_KEY = "h3_min_shot_seconds"
@@ -232,7 +233,7 @@ def duration_order_problem(values: dict[str, int]) -> str | None:
 
 
 # Where a language-model role is answered: the paid Bitdeer API (GLM), or the Qwen3.8 text
-# model on your own GPU server. Each of the three roles has its own choice.
+# model on your own remote server. Each of the three roles has its own choice.
 PROVIDER_BITDEER = "bitdeer"
 PROVIDER_QWEN38 = "qwen38"
 LLM_PROVIDER_KEY = "llm_provider"
@@ -241,17 +242,40 @@ IMAGE_PROMPT_PROVIDER_KEY = "image_prompt_llm_provider"
 
 _PROVIDER_CHOICES: tuple[SettingChoice, ...] = (
     SettingChoice(PROVIDER_BITDEER, "Bitdeer (the GLM model below)"),
-    SettingChoice(PROVIDER_QWEN38, "GPU server: Qwen3.8-27B (reasoning on)"),
+    SettingChoice(PROVIDER_QWEN38, "Remote server: Qwen3.8-27B (reasoning on)"),
 )
 
 
 def _provider_help(role: str) -> str:
     return (
-        f"Which language model {role}. Bitdeer uses the URL and model below. GPU server "
-        "uses Qwen3.8-27B on your GPU server (the GPU server URL), with reasoning on. The "
+        f"Which language model {role}. Bitdeer uses the URL and model below. Remote server "
+        "uses Qwen3.8-27B on your remote server (the remote server URL), with reasoning on. The "
         "first call after 20 idle minutes waits several minutes while the server starts. "
         "Answers are limited to 49,152 tokens, reasoning included, and the prompt to 32,000 "
         "characters."
+    )
+
+
+def _model_limit_spec(key: str, label: str, covers: str) -> SettingSpec:
+    """The limit on how many jobs of one model run on the remote server at once. 0 means the
+    model has no limit of its own (only the overall one applies).
+    """
+    return SettingSpec(
+        key=key,
+        group=GROUP_MODEL_LIMITS,
+        label=label,
+        help=(
+            f"How many jobs of this model may run on the remote server at the same time. Covers: "
+            f"{covers} When the limit is reached, only this model's later jobs wait; jobs of "
+            "other models still start. 0 means no limit of its own, so only the overall "
+            "maximum of remote server jobs applies. The overall maximum still applies on top of "
+            "this number. It applies the next time the app looks for work, and running jobs "
+            "are not stopped."
+        ),
+        value_type="integer",
+        default=0,
+        min_value=0,
+        max_value=1000,
     )
 
 
@@ -261,9 +285,9 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="gpu_api_base_url",
         group=GROUP_GPU,
-        label="GPU server URL",
+        label="Remote server URL",
         help=(
-            "Address of your GPU server. Change it whenever the server's address changes. "
+            "Address of your remote server. Change it whenever the server's address changes. "
             "localhost and 127.0.0.1 are replaced by host.docker.internal when the app calls it."
         ),
         value_type="string",
@@ -275,7 +299,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         key="transcription_url",
         group=GROUP_GPU,
         label="Transcription URL",
-        help="Address of the transcription API. Leave blank to use the GPU server URL.",
+        help="Address of the transcription API. Leave blank to use the remote server URL.",
         value_type="string",
         default="",
         is_url=True,
@@ -285,9 +309,9 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="gpu_partition",
         group=GROUP_GPU,
-        label="GPU partition",
+        label="Remote server partition",
         help=(
-            "Cluster partition for new GPU jobs, for example main. Leave blank for the "
+            "Cluster partition for new remote server jobs, for example main. Leave blank for the "
             "cluster's own default. The cluster ignores a name it does not know."
         ),
         value_type="string",
@@ -305,7 +329,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         help=(
             "OpenAI-compatible address used by every role set to Bitdeer below. The Bitdeer "
             "key is sent only to api-inference.bitdeer.ai, never to another address. A role "
-            "set to the GPU server does not use it."
+            "set to the remote server does not use it."
         ),
         value_type="string",
         default="https://api-inference.bitdeer.ai/v1",
@@ -394,7 +418,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_IMAGE,
         label="Image mode",
         help=(
-            "How Qwen-Image-2.1 on your GPU server makes the Character lab's pictures. Quality "
+            "How Qwen-Image-2.1 on your remote server makes the Character lab's pictures. Quality "
             "uses the base model (40 steps) and fast uses the Turbo model (8 steps). Either way an "
             "image takes a few minutes, because the server loads the model for each one. The two "
             "modes are different models, so the same seed gives a different picture in each. "
@@ -451,7 +475,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_DURATION,
         label="H3 longest shot (seconds)",
         help=(
-            "The longest shot MiniMax H3 may be asked for, in whole seconds. The GPU server "
+            "The longest shot MiniMax H3 may be asked for, in whole seconds. The remote server "
             f"makes at most {H3_MAX_FRAMES} frames ({H3_MAX_FRAMES / H3_FPS:.3f} s), so the "
             f"highest value is {H3_MAX_WHOLE_SECONDS}. It must not be below the planning target "
             "maximum."
@@ -485,8 +509,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "When a generated clip fails its technical check (it cannot be read, it has no "
             "sound, or its size or number of frames is not what was asked), the shot is "
             "generated again automatically with another seed, up to this many times. Each retry "
-            "is a new GPU run of 10 to 20 minutes. 0 turns automatic retries off. Pressing "
-            "Generate yourself starts the count again."
+            "is a new remote server job of 10 to 20 minutes. 0 turns automatic retries off. "
+            "Pressing Generate yourself starts the count again."
         ),
         value_type="integer",
         default=2,
@@ -502,8 +526,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "transcribed and compared with the shot's dialogue lines (case and punctuation are "
             "ignored). The clip passes when at least this percent of the words match. A clip "
             "below it fails and is generated again automatically, like any failed clip, which "
-            "is a new GPU run of 10 to 20 minutes. 100 needs every word to match; 0 accepts any "
-            "speech."
+            "is a new remote server job of 10 to 20 minutes. 100 needs every word to match; "
+            "0 accepts any speech."
         ),
         value_type="integer",
         default=80,
@@ -690,7 +714,8 @@ REGISTRY: tuple[SettingSpec, ...] = (
         help=(
             "How many recordings of each theme are made for the first one that passes the "
             "technical check to become the theme's canonical recording (you can choose another). "
-            "Each is a paid GPU run of about a minute. It applies the next time a theme is made."
+            "Each is a paid remote server job of about a minute. It applies the next time a "
+            "theme is made."
         ),
         value_type="integer",
         default=3,
@@ -777,7 +802,7 @@ REGISTRY: tuple[SettingSpec, ...] = (
             "When a take of a cue fails its technical check (too short, clipping, a long "
             "silence, no real ending where one was planned), another take is made with the "
             "same prompt and a new seed, until one passes. This is the most retries for one "
-            "cue or hit in one round. 0 never retries. Each retry is a paid GPU run."
+            "cue or hit in one round. 0 never retries. Each retry is a paid remote server job."
         ),
         value_type="integer",
         default=2,
@@ -910,33 +935,32 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="max_parallel_gpu_jobs",
         group=GROUP_LIMITS,
-        label="Maximum parallel GPU server jobs",
+        label="Maximum jobs at the remote server",
         help=(
-            "How many slots may be in use on your GPU server at the same time, all kinds of job "
-            "together: video, images, reference pictures, speech "
-            "and the language-model calls (the story stages included) set to the GPU server's "
-            "Qwen3.8. A job takes one slot, "
-            "except a MiniMax H3 clip, which always takes 4. All Qwen3.8 calls together take "
-            "one slot, because the model answers them all from one GPU. The server queues "
-            "the jobs it cannot start yet and runs them as it has room, so this number is how "
-            "many jobs the app keeps waiting at the server, not how many run at once: the "
-            "server's own capacity page sets that. A high number keeps the server's queue full, "
-            "but the server then decides the order, and a job sent later waits behind the "
-            "earlier ones. How many files are sent and fetched at once is set by the two "
-            "settings below, whatever this number is. It applies the next time the app looks "
-            "for work, and running jobs are not stopped."
+            "How many jobs the app keeps at the remote server at the same time, all kinds of "
+            "job together: video, images, reference pictures, speech and the language-model "
+            "calls (the story stages included) set to the remote server's Qwen3.8. Every job "
+            "counts as one. The server queues the jobs it cannot start yet and runs them as it "
+            "has room, so this number is how many jobs the app keeps waiting at the server, not "
+            "how many run at once: the server decides that by itself. A high number keeps the "
+            "server's queue full, but the server then decides the order, and a job sent later "
+            "waits behind the earlier ones. How many files are sent and fetched at once is set "
+            "by the two settings below, whatever this number is. Each model also has its own "
+            "limit in the group Remote server limits per model, so one model cannot fill the "
+            "server's queue. It applies the next time the app looks for work, and running jobs "
+            "are not stopped."
         ),
         value_type="integer",
         default=4,
         min_value=1,
-        max_value=1000,
+        max_value=10_000,
     ),
     SettingSpec(
         key="max_parallel_uploads",
         group=GROUP_LIMITS,
-        label="Maximum parallel uploads to the GPU server",
+        label="Maximum parallel uploads to the remote server",
         help=(
-            "How many files (frames, reference pictures, voices, audio) are sent to the GPU "
+            "How many files (frames, reference pictures, voices, audio) are sent to the remote "
             "server at the same time, all jobs together. Through one SSH tunnel they all share "
             "one connection, so a higher number does not send more data, it only makes each "
             "file take longer, and a dropped connection then loses more half-sent files. Raise "
@@ -951,10 +975,10 @@ REGISTRY: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="max_parallel_downloads",
         group=GROUP_LIMITS,
-        label="Maximum parallel downloads from the GPU server",
+        label="Maximum parallel downloads from the remote server",
         help=(
             "How many finished results (clips, pictures, audio, transcripts) are fetched from "
-            "the GPU server at the same time, all jobs together. As with uploads, through one "
+            "the remote server at the same time, all jobs together. As with uploads, through one "
             "SSH tunnel a higher number does not fetch more data, it only makes each result "
             "take longer. It applies from the next check, and downloads already running are "
             "not stopped."
@@ -985,13 +1009,52 @@ REGISTRY: tuple[SettingSpec, ...] = (
         group=GROUP_LIMITS,
         label="Poll interval (seconds)",
         help=(
-            "How often the backend checks running jobs. The GPU server recommends 10 to 15. "
+            "How often the backend checks running jobs. The remote server recommends 10 to 15. "
             "It applies from the next check."
         ),
         value_type="integer",
         default=15,
         min_value=10,
         max_value=300,
+    ),
+    _model_limit_spec(
+        "max_parallel_h3_jobs",
+        "MiniMax H3 video: maximum parallel jobs",
+        "MiniMax H3 video clips (the shot clips of a story and the Video lab runs on H3). "
+        "One clip counts as one job.",
+    ),
+    _model_limit_spec(
+        "max_parallel_ltx_jobs",
+        "LTX video: maximum parallel jobs",
+        "LTX 2.3 and LTX 2.5 video clips (the shot clips of a story and the Video lab runs "
+        "on LTX).",
+    ),
+    _model_limit_spec(
+        "max_parallel_image_jobs",
+        "Qwen-Image: maximum parallel jobs",
+        "Qwen-Image pictures on your remote server (the Image lab runs).",
+    ),
+    _model_limit_spec(
+        "max_parallel_tts_jobs",
+        "Breeze TTS: maximum parallel jobs",
+        "Speech made by Breeze TTS (the speech of a story and the voice lab).",
+    ),
+    _model_limit_spec(
+        "max_parallel_transcription_jobs",
+        "Parakeet: maximum parallel jobs",
+        "Transcriptions by Parakeet: the check that a dialogue clip says its lines, and the "
+        "timing of the words of a speech.",
+    ),
+    _model_limit_spec(
+        "max_parallel_music_jobs",
+        "Music models: maximum parallel jobs",
+        "Music and sound made by ACE-Step, YuE2, Stable Audio and the LTX audio model.",
+    ),
+    _model_limit_spec(
+        "max_parallel_qwen38_calls",
+        "Qwen3.8 text: maximum parallel calls",
+        "Language-model calls answered by Qwen3.8 on your remote server (the roles whose provider "
+        "is the remote server). Each call counts as one job of the overall limit.",
     ),
 )
 
@@ -1272,7 +1335,7 @@ MAX_CONTRACT_PATH_CHARS = 500
 
 ContractBase = Literal["gpu", "transcription"]
 
-# The URL setting each base reads. A blank transcription URL falls back to the GPU server URL.
+# The URL setting each base reads. A blank transcription URL falls back to the remote server URL.
 BASE_SETTING: dict[ContractBase, str] = {
     "gpu": "gpu_api_base_url",
     "transcription": "transcription_url",
@@ -1352,7 +1415,7 @@ def _validate_contract_source(number: int, item: object) -> ContractSource:
     base = _BASE_BY_TEXT.get(item["base"].strip())
     if base is None:
         raise SettingValueError(
-            f'Source "{name}": choose the GPU server URL or the Transcription URL.'
+            f'Source "{name}": choose the remote server URL or the Transcription URL.'
         )
 
     path = item["path"].strip()

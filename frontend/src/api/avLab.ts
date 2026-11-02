@@ -82,7 +82,7 @@ export function useAvTests(characterId: number | null) {
 }
 
 /**
- * Starts a test: one speech of the whole text (a paid GPU job), then, by itself, the timing of
+ * Starts a test: one speech of the whole text (a paid remote server job), then, by itself, the timing of
  * its words and one paid video clip for each marked part. It returns at once.
  */
 export function useCreateAvTest() {

@@ -244,7 +244,7 @@ export function VoiceAudition({ character }: { character: LibraryCharacter }) {
               </Alert>
             )}
             <Text size="xs" c="dimmed">
-              Three GPU jobs of one to three minutes. They start only when you press the button, and
+              Three remote server jobs of one to three minutes. They start only when you press the button, and
               they also appear in the Voice tab.
             </Text>
             <LicenseNotice />

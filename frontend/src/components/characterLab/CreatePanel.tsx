@@ -151,7 +151,7 @@ export function CreatePanel({ character, form, onChange }: CreatePanelProps) {
               description={
                 `What the character says, in its own voice. ${form.dialogue.length} of ${LIMITS.speech} characters.` +
                 (fields.h3Speech
-                  ? " The GPU server documents 2 to 15 seconds of speech for MiniMax H3; other lengths are sent as they are."
+                  ? " The remote server documents 2 to 15 seconds of speech for MiniMax H3; other lengths are sent as they are."
                   : "") +
                 (fields.h3Speech && form.audioMode === "pick" && copiesSpeech
                   ? " With a copy marker, write exactly what the recording says."
@@ -297,7 +297,7 @@ export function CreatePanel({ character, form, onChange }: CreatePanelProps) {
               label="Length"
               description={
                 fields.h3
-                  ? `Seconds, from ${lengths.min} to ${lengths.max}. The GPU server decides what MiniMax H3 makes of it.`
+                  ? `Seconds, from ${lengths.min} to ${lengths.max}. The remote server decides what MiniMax H3 makes of it.`
                   : `Seconds, from ${lengths.min} to ${lengths.max}. With speech, the clip is as long as the speech.`
               }
               inputMode="decimal"

@@ -11,6 +11,7 @@ export type JobSummary = components["schemas"]["JobSummary"];
 export type JobDetail = components["schemas"]["JobDetail"];
 export type JobCapacity = components["schemas"]["JobCapacity"];
 export type PoolCapacity = components["schemas"]["PoolCapacity"];
+export type ModelCapacity = components["schemas"]["ModelCapacity"];
 export type JobDiagnostics = components["schemas"]["JobDiagnostics"];
 export type SeriesStats = components["schemas"]["SeriesStats"];
 
@@ -85,7 +86,7 @@ async function fetchCapacity() {
   const { data, response } = await api.GET("/api/jobs/capacity");
   if (!data) {
     throw new ApiError(
-      `Could not load the GPU and API slots (HTTP ${response.status}).`,
+      `Could not load the job limits (HTTP ${response.status}).`,
       response.status,
     );
   }
@@ -93,7 +94,7 @@ async function fetchCapacity() {
 }
 
 /**
- * The two shared pools of running slots, the GPU server's and the paid inference API's: the
+ * The two shared pools of running jobs, the remote server's and the paid inference API's: the
  * limit, what is running and waiting, and which kinds of job. It is loaded again every few
  * seconds while anything is running or waiting in a pool, and now and then otherwise.
  */

@@ -23,7 +23,7 @@ import { ApiOperations } from "./ApiOperations";
 import { ContractDiff } from "./ContractDiff";
 import { ContractSourcesEditor } from "./ContractSourcesEditor";
 
-const BASE_LABELS = { gpu: "GPU server", transcription: "Transcription" } as const;
+const BASE_LABELS = { gpu: "Remote server", transcription: "Transcription" } as const;
 
 const OUTCOME_LABELS: Record<ApproveResponse["sources"][number]["outcome"], string> = {
   approved: "Approved",
@@ -144,7 +144,7 @@ function ApproveOutcome({ result }: { result: ApproveResponse }) {
   );
 }
 
-/** The approved GPU API, any change waiting for review, and the editor for its sources. */
+/** The approved remote server API, any change waiting for review, and the editor for its sources. */
 export function ContractSection() {
   const { data, isLoading, isError, error } = useContract();
   const approve = useApproveContract();
@@ -154,7 +154,7 @@ export function ContractSection() {
     body = <Loader size="sm" />;
   } else if (isError || !data) {
     body = (
-      <Alert color="red" title="Could not load the recorded GPU API">
+      <Alert color="red" title="Could not load the recorded remote server API">
         {describeError(error)} Press Refresh to try again.
       </Alert>
     );
@@ -224,10 +224,10 @@ export function ContractSection() {
     <Paper withBorder p="md" radius="md">
       <Stack gap="sm">
         <Stack gap={2}>
-          <Text fw={600}>GPU API</Text>
+          <Text fw={600}>Remote server API</Text>
           <Text size="sm" c="dimmed">
-            The app records your GPU server&apos;s API (its guide and its OpenAPI spec). Once you
-            approve it, any difference blocks new GPU jobs until you review and approve the change.
+            The app records your remote server&apos;s API (its guide and its OpenAPI spec). Once you
+            approve it, any difference blocks new remote server jobs until you review and approve the change.
           </Text>
           {data?.last_check ? (
             <Text size="xs" c="dimmed">

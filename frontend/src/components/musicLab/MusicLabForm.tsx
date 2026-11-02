@@ -169,7 +169,7 @@ export function MusicLabForm({ state, onChange, catalog, onRun, running, onWrite
           <Text size="xs" c="dimmed">
             Each model has its own fields and reads them differently, so each is written and
             edited on its own below. The first run on a model can take a few minutes: the
-            GPU server stops idle workers after 10 minutes.
+            Remote server stops idle workers after 10 minutes.
           </Text>
         </Stack>
 

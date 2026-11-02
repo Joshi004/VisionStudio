@@ -4,8 +4,8 @@ import { describeError } from "../../api/errors";
 import { useCancelJob, useResubmitJob, type JobSummary } from "../../api/jobs";
 
 /**
- * Cancel (a job that has not started, or one the GPU server does not know) and Resubmit
- * (a job the GPU server does not know). It shows nothing when neither applies.
+ * Cancel (a job that has not started, or one the remote server does not know) and Resubmit
+ * (a job the remote server does not know). It shows nothing when neither applies.
  */
 export function JobActions({ job }: { job: Pick<JobSummary, "id" | "can_cancel" | "can_resubmit"> }) {
   const cancel = useCancelJob();

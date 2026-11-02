@@ -80,7 +80,7 @@ export function useVoiceLabRun(runId: number | null) {
   });
 }
 
-/** Starts one run and returns at once. A run is a paid GPU job of one to three minutes. */
+/** Starts one run and returns at once. A run is a paid remote server job of one to three minutes. */
 export function useCreateVoiceLabRun() {
   const queryClient = useQueryClient();
   return useMutation({

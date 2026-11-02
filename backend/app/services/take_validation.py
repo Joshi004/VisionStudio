@@ -132,7 +132,7 @@ def _plan_problems(expected: Expected, policy: DurationPolicy) -> list[Problem]:
             Problem(
                 OUTSIDE_HARD_BOUNDS,
                 f"The request asked for {expected.num_frames} frames, more than the "
-                f"{H3_MAX_FRAMES} the GPU server makes. Plan the scene's shots again.",
+                f"{H3_MAX_FRAMES} the remote server makes. Plan the scene's shots again.",
             )
         )
     return problems

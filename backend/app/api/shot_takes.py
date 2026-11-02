@@ -69,9 +69,9 @@ _INVALID = {
     422: {
         "model": ErrorResponse,
         "description": "The shot's prompt is not compiled and current, a picture or an audio "
-        "file is missing, the GPU API has no such endpoint, the take has no clip or its checks "
-        "are not done, or the scene, shot or take is not in the newest list of scenes and shot "
-        "plan.",
+        "file is missing, the remote server API has no such endpoint, the take has no clip or "
+        "its checks are not done, or the scene, shot or take is not in the newest list of "
+        "scenes and shot plan.",
     }
 }
 

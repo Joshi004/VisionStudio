@@ -17,7 +17,7 @@ type BadgeJob = Pick<JobSummary, "status" | "phase"> & {
 type Connection = NonNullable<JobSummary["connection"]>;
 
 /**
- * An info mark for a job whose GPU server does not answer. The badge next to it still shows the
+ * An info mark for a job whose remote server does not answer. The badge next to it still shows the
  * last thing the server told, so the hover says since when the server has not answered, and when
  * that status was last confirmed.
  */
@@ -30,7 +30,7 @@ function NotAnsweringMark({
 }) {
   const confirmed = lastChecked ? formatTime(lastChecked) : "not yet";
   const label =
-    `GPU server not answering since ${formatTime(connection.since)} ` +
+    `Remote server not answering since ${formatTime(connection.since)} ` +
     `(last try ${formatTime(connection.last_failed_at)}). ${connection.message} ` +
     `This status was last confirmed by the server at ${confirmed}.`;
   return (
@@ -40,7 +40,7 @@ function NotAnsweringMark({
         size="sm"
         c="orange"
         fw={700}
-        aria-label="The GPU server is not answering"
+        aria-label="The remote server is not answering"
         style={{ cursor: "help" }}
       >
         ⓘ
@@ -127,7 +127,7 @@ function DownloadLine({ download }: { download: NonNullable<JobSummary["download
 
 /**
  * The job's stage as a coloured badge (its status when the stage is not known), with the phase
- * next to it while the job is active. An info mark follows when the GPU server does not answer
+ * next to it while the job is active. An info mark follows when the remote server does not answer
  * (the badge is then the last known state), and an upload or a download of the result in
  * progress shows its bar below.
  */

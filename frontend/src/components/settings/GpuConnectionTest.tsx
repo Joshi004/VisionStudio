@@ -55,14 +55,14 @@ function ContractLine({ contract }: { contract: ConnectionTestResult["contract"]
         .map((item) => item.name);
       return (
         <Text size="sm" c="orange">
-          API changed ({names.join(", ")}). Review it under GPU API below.
+          API changed ({names.join(", ")}). Review it under remote server API below.
         </Text>
       );
     }
     case "not_approved":
       return (
         <Text size="sm" c="blue">
-          API not approved yet. Approve it under GPU API below.
+          API not approved yet. Approve it under remote server API below.
         </Text>
       );
     case "unreachable": {
@@ -108,9 +108,9 @@ export function GpuConnectionTest() {
       <Stack gap="sm">
         <Group justify="space-between" align="flex-start">
           <Stack gap={2}>
-            <Text fw={600}>GPU server connection</Text>
+            <Text fw={600}>Remote server connection</Text>
             <Text size="sm" c="dimmed">
-              Tests the saved GPU server URL by calling its health endpoint, then checks its API
+              Tests the saved remote server URL by calling its health endpoint, then checks its API
               against the approved version. Nothing else in the app calls the server while a page
               loads.
             </Text>

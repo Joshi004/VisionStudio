@@ -227,7 +227,7 @@ def clip_mode_for(endpoint: object, recorded_mode: object = None) -> ClipMode | 
 
 
 def no_endpoint_message(endpoint: str) -> str:
-    return f"The GPU API has no {endpoint} endpoint."
+    return f"The remote server API has no {endpoint} endpoint."
 
 
 @dataclass(frozen=True)
@@ -273,7 +273,9 @@ def frame_limits(spec: dict[str, Any], endpoint: str) -> FrameLimits:
     schema = schemas.get(schema_name) if isinstance(schemas, dict) else None
     properties = schema.get("properties") if isinstance(schema, dict) else None
     if not isinstance(properties, dict) or "num_frames" not in properties:
-        raise ValueError(f"The GPU API has no num_frames field on the {endpoint} request.")
+        raise ValueError(
+            f"The remote server API has no num_frames field on the {endpoint} request."
+        )
 
     declared = _number_schema(properties["num_frames"])
     minimum = _whole(declared.get("minimum"))

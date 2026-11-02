@@ -50,6 +50,17 @@ Provider = Literal["gpu", "llm", "image", "local"]
 # database error) before it is failed. With the first run, a job has this many plus one attempts.
 MAX_AUTOMATIC_RERUNS: Final = 2
 
+# The model families on the GPU server. Each has its own limit on how many of its jobs run at
+# once (`jobs/pools.py`), on top of the limit all GPU jobs share. They live here, not in
+# `pools.py`, so a handler can name its family without importing the pools.
+MODEL_H3: Final = "h3"
+MODEL_LTX: Final = "ltx"
+MODEL_IMAGE: Final = "qwen_image"
+MODEL_TTS: Final = "breeze_tts"
+MODEL_TRANSCRIPTION: Final = "parakeet"
+MODEL_MUSIC: Final = "music"
+MODEL_QWEN38: Final = "qwen38"
+
 
 @dataclass(frozen=True)
 class PollRecord:
@@ -93,6 +104,15 @@ class JobHandler(ABC):
     # by itself, up to `MAX_AUTOMATIC_RERUNS` times. False for a job that would repeat something
     # already saved if it ran again from the start.
     rerun_automatically: ClassVar[bool] = True
+    # A `gpu` handler only: the model family its jobs run on (`MODEL_*` above). Each family has
+    # its own limit on top of the GPU server's. None means the jobs have no family limit.
+    gpu_model: ClassVar[str | None] = None
+
+    def gpu_model_of(self, job: Job) -> str | None:
+        """The model family one job runs on. A handler whose jobs can run on different models
+        (video: MiniMax H3 or LTX) overrides this and looks at the job.
+        """
+        return self.gpu_model
 
     async def concurrency_limit(self, session: AsyncSession) -> int:
         """How many jobs of this type may be running at once. Only a `local` handler is asked:

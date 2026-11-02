@@ -37,7 +37,7 @@ function Row({ label, value, hint }: RowProps) {
   );
 }
 
-const POOL_LABELS: Record<string, string> = { gpu: "GPU server", paid_api: "Paid inference API" };
+const POOL_LABELS: Record<string, string> = { gpu: "Remote server", paid_api: "Paid inference API" };
 
 /**
  * Where the time goes between a job being wanted and running: the dispatcher's loop, the story

@@ -43,8 +43,8 @@ MAX_STEPS: Final = 100
 
 def no_endpoint_message(path: str = GENERATE_PATH) -> str:
     return (
-        f"The GPU API has no {path} endpoint. Open Settings and test the GPU connection, "
-        "so the app reads the server's current API."
+        f"The remote server API has no {path} endpoint. Open Settings and test the remote "
+        "server connection, so the app reads the server's current API."
     )
 
 

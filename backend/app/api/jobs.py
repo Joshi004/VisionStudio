@@ -275,6 +275,17 @@ class PoolTypeCount(BaseModel):
     queued: int
 
 
+class ModelCapacity(BaseModel):
+    """One model family of the remote server: its own limit, and what it has now."""
+
+    model: str
+    label: str
+    # The setting, counted in jobs. 0 means the family has no limit of its own.
+    limit: int
+    running: int
+    queued: int
+
+
 class PoolCapacity(BaseModel):
     """One of the two shared pools: how many jobs may run in it, and what is in it now."""
 
@@ -283,13 +294,16 @@ class PoolCapacity(BaseModel):
     # The setting. Running jobs are never stopped when it is lowered, so `running` can be
     # above it for a while.
     limit: int
-    # How many jobs are running, and how many of the `limit` slots they hold. They differ when a
-    # MiniMax H3 run is going: it is one job but takes a slot for each GPU the server gave it.
+    # How many jobs are running, and how many of the `limit` they count for. Every job counts as
+    # one, so both numbers are the same.
     running: int
     slots_used: int
     queued: int
     # Only the kinds of job that have a job running or queued in the pool.
     by_type: list[PoolTypeCount]
+    # The GPU server's pool only: the model families that have a limit or a job running or
+    # queued. Empty for the paid API.
+    models: list[ModelCapacity]
 
 
 class JobCapacity(BaseModel):
@@ -349,9 +363,29 @@ async def get_capacity(session: SessionDep) -> JobCapacity:
         else:
             entry.queued += 1
 
-    slots_used = pools.slots_in_use(
+    jobs_running = pools.jobs_in_use(
         [(job, handler) for job, handler in active if job.status == "running"], qwen38_keys
     )
+
+    # The model families of the GPU server, in the order the settings page lists them.
+    model_limits = await pools.model_limits(session)
+    running_by_model = pools.jobs_by_model(
+        [(job, handler) for job, handler in active if job.status == "running"], qwen38_keys
+    )
+    queued_by_model = pools.jobs_by_model(
+        [(job, handler) for job, handler in active if job.status != "running"], qwen38_keys
+    )
+    models = [
+        ModelCapacity(
+            model=model,
+            label=pools.MODEL_LABELS[model],
+            limit=limit,
+            running=running_by_model[model],
+            queued=queued_by_model[model],
+        )
+        for model, limit in model_limits.items()
+        if limit > 0 or running_by_model[model] > 0 or queued_by_model[model] > 0
+    ]
 
     return JobCapacity(
         pools=[
@@ -360,9 +394,10 @@ async def get_capacity(session: SessionDep) -> JobCapacity:
                 label=pools.POOL_LABELS[pool],
                 limit=limit,
                 running=sum(entry.running for entry in by_type[pool].values()),
-                slots_used=slots_used[pool],
+                slots_used=jobs_running[pool],
                 queued=sum(entry.queued for entry in by_type[pool].values()),
                 by_type=list(by_type[pool].values()),
+                models=models if pool == pools.GPU_POOL else [],
             )
             for pool, limit in limits.items()
         ]
@@ -459,7 +494,7 @@ async def _cancel_on_server(base_url: str, provider_job_id: str) -> dict[str, An
             return {"cancelled": False, "error": str(exc)}
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "The GPU server did not answer, so the job was not cancelled. Try again.",
+            "The remote server did not answer, so the job was not cancelled. Try again.",
         ) from exc
 
 
@@ -471,7 +506,7 @@ async def _cancel_on_server(base_url: str, provider_job_id: str) -> dict[str, An
         **_NOT_ALLOWED,
         503: {
             "model": ErrorResponse,
-            "description": "The GPU server did not answer the cancel, so nothing changed.",
+            "description": "The remote server did not answer the cancel, so nothing changed.",
         },
     },
 )
@@ -531,7 +566,7 @@ async def cancel_job(job_id: int, session: SessionDep) -> JobDetail:
     responses={**_NOT_FOUND, **_NOT_ALLOWED},
 )
 async def resubmit_job(job_id: int, session: SessionDep) -> JobDetail:
-    """Queues a job the GPU server does not know again, as a new attempt."""
+    """Queues a job the remote server does not know again, as a new attempt."""
     await _load_row(session, job_id)
     try:
         await store.resubmit_job(session, job_id)

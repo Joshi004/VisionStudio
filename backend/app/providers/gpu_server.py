@@ -331,7 +331,7 @@ async def check_health(base_url: str) -> HealthResult:
         return result(
             reachable=False,
             http_status=status,
-            error="The answer is not the GPU API's health response.",
+            error="The answer is not the remote server API's health response.",
         )
 
     partition = body.get("default_partition")

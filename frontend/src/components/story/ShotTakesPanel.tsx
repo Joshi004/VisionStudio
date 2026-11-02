@@ -814,7 +814,7 @@ function SceneRow({
  * The shot generation stage: each shot's compiled prompt, pictures and dialogue audio are sent to
  * the video model, and the clip is stored as a take of the shot. Every press makes one more
  * take; the take that finished (or was selected) last is the selected one. Nothing starts by
- * itself: a clip holds 4 to 8 GPUs for minutes. Each clip is checked in code when it is stored;
+ * itself: a clip takes minutes. Each clip is checked in code when it is stored;
  * one that failed is generated again by the server with another seed, up to the limit in
  * Settings (PHASE-029). A clip of a shot with dialogue is then transcribed, and its speech must
  * match the lines closely enough (a setting) to be selected by itself; one that does not is
@@ -906,7 +906,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             <Text size="sm" c="dimmed">
               Sends each shot&apos;s prompt, pictures and dialogue speech to the
               video model and keeps the clip as a take of the shot. Shots run
-              side by side when the GPU server has room. Each press adds a take,
+              side by side when the remote server has room. Each press adds a take,
               and the take that finished or was selected last is the one used.
               Each clip gets a technical check (it decodes, has sound, and has
               the size and number of frames asked for), and for a shot with
