@@ -109,6 +109,7 @@ GROUP_DURATION = "Shot duration"
 GROUP_SPEECH = "Speech"
 GROUP_STORY = "Story"
 GROUP_MUSIC = "Music"
+GROUP_GRAPHICS = "Graphics lab"
 GROUP_LIMITS = "Job limits"
 GROUP_MODEL_LIMITS = "Remote server limits per model"
 
@@ -189,6 +190,10 @@ WORD_TIMING_MATCH_THRESHOLD_KEY = "word_timing_match_threshold"
 # them and records the values it was checked with.
 CALLOUT_MIN_GAP_MS_KEY = "callout_min_gap_ms"
 CALLOUTS_PER_MINUTE_MAX_KEY = "callouts_per_minute_max"
+
+# The pace that gives the words of a Graphics lab line their times when the run has no voice
+# (GFX-003).
+GRAPHICS_WPM_KEY = "graphics_words_per_minute"
 
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
@@ -931,6 +936,23 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=-1,
         min_value=-3,
         max_value=0,
+    ),
+    SettingSpec(
+        key=GRAPHICS_WPM_KEY,
+        group=GROUP_GRAPHICS,
+        label="Graphics lab: speech pace without a voice (words per minute)",
+        help=(
+            "A Graphics lab run with no voice has no real speech, so each word of its line is "
+            "given a time from this pace: the speech lasts its number of words divided by this "
+            "pace, shared out by the length of each word. The beats of the graphic and its "
+            "length follow these times. 160 is near the pace of the presenter voices; it is a "
+            "starting value, not a measurement. It applies to the next brief that is asked "
+            "for; a run keeps the timing it was made with."
+        ),
+        value_type="integer",
+        default=160,
+        min_value=60,
+        max_value=300,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

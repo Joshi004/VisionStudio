@@ -11,6 +11,12 @@ for each engine, every render made for it (newest first).
 `PATCH .../renders/{id}` records what a person decided after watching a render: a verdict and a
 note.
 
+The director call (GFX-003) is three clicks, each a paid call that starts only from the click:
+`POST .../runs/{id}/brief` writes the brief of a run, `POST .../runs/{id}/make-all` writes it and
+then starts every engine that is built, and `POST .../runs/{id}/ask-again` makes a new run with
+the same line and writes its brief. A run's `brief` is what the director decided, and `resolved`
+is what code worked out from it (§4.3 and §4.4 of `Graphics_lab_implementation_phases.md`).
+
 A run is deleted through the shared lab-sample delete (`DELETE /api/lab/samples/graphic_run/{id}`,
 `api/deletion.py`), which refuses while any of its jobs is still running and removes the videos.
 """
@@ -44,10 +50,120 @@ _REQUEST_LINE_MAX: Final = 2000
 
 _INVALID = {422: {"model": ErrorResponse, "description": "The form breaks a rule."}}
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No run or render has this id."}}
+_CONFLICT = {409: {"model": ErrorResponse, "description": "The run's state does not allow it."}}
 
 Orientation = Literal["landscape", "portrait"]
 RunStateOut = Literal["new", "writing_brief", "brief_ready", "brief_failed"]
 Verdict = Literal["good", "usable", "bad"]
+BriefKind = Literal["kpi", "comparison", "trend", "process", "list", "statement", "concept"]
+DerivedOp = Literal["pct_change", "difference", "ratio", "sum"]
+
+
+class GraphicFactOut(BaseModel):
+    """A number the line says."""
+
+    id: str
+    label: str
+    # As the line says it: 12 for "12 billion dollars", with `scale` "billion".
+    value: float
+    unit: str
+    scale: str
+    said_as: str
+
+
+class GraphicDerivedOut(BaseModel):
+    """A value code works out from facts."""
+
+    id: str
+    label: str
+    op: DerivedOp
+    of: list[str]
+
+
+class GraphicBeatOut(BaseModel):
+    id: str
+    phrase: str
+    shows: str
+    refs: list[str]
+
+
+class GraphicBriefThemeOut(BaseModel):
+    palette: str
+    accent: str | None
+    background: str
+    motion: str
+    mood: str
+
+
+class GraphicBriefOut(BaseModel):
+    """What the director decided (§4.3)."""
+
+    kind: BriefKind
+    intent: str
+    visual_brief: str
+    facts: list[GraphicFactOut]
+    derived: list[GraphicDerivedOut]
+    beats: list[GraphicBeatOut]
+    theme: GraphicBriefThemeOut
+
+
+class GraphicResolvedValueOut(BaseModel):
+    label: str
+    # The full value, with the scale applied.
+    value: float
+    unit: str
+    # The text that appears on screen, written by code.
+    display: str
+
+
+class GraphicResolvedBeatOut(BaseModel):
+    frame: int
+    shows: str
+
+
+class GraphicResolvedThemeOut(BaseModel):
+    background: str
+    surface: str
+    text: str
+    muted: str
+    accent: str
+    positive: str
+    negative: str
+    number: str
+    background_style: str
+    motion: str
+
+
+class GraphicBoxOut(BaseModel):
+    left: int
+    top: int
+    right: int
+    bottom: int
+
+
+class GraphicZoneOut(BaseModel):
+    top: int
+    bottom: int
+
+
+class GraphicResolvedOut(BaseModel):
+    """What code worked out from the brief, and what every engine is checked against (§4.4)."""
+
+    width: int
+    height: int
+    fps: int
+    frames: int
+    # `estimated` or `parakeet`.
+    timing_source: str
+    facts: dict[str, GraphicResolvedValueOut]
+    derived: dict[str, GraphicResolvedValueOut]
+    beats: dict[str, GraphicResolvedBeatOut]
+    theme: GraphicResolvedThemeOut
+    fonts: dict[str, str]
+    safe_area: GraphicBoxOut
+    caption_zone: GraphicZoneOut
+    # What code changed in the brief (for example a replaced accent colour).
+    notes: list[str]
 
 
 class GraphicRunCreate(BaseModel):
@@ -119,8 +235,9 @@ class GraphicRunOut(GraphicRunSummaryOut):
     speech_run_id: int | None
     # The words of the line with their times (GFX-004).
     timing: Any | None
-    # What the director decided (GFX-003), and the job that wrote it.
-    brief: Any | None
+    # What the director decided (GFX-003), what code worked out from it, and the job that wrote it.
+    brief: GraphicBriefOut | None
+    resolved: GraphicResolvedOut | None
     brief_job: JobSummary | None
     last_error: str | None
     # The four engines in the order of the design, each with its renders.
@@ -184,6 +301,7 @@ def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
         speech_run_id=run.speech_run_id,
         timing=run.timing,
         brief=run.brief,
+        resolved=run.resolved,
         brief_job=_job_out(row.brief_job),
         last_error=run.last_error,
         engines=[
@@ -258,3 +376,53 @@ async def update_render(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Render {render_id} does not exist.")
     return render_out(row)
+
+
+async def _brief_click(session: SessionDep, run_id: int, action: Any) -> GraphicRunOut:
+    """Runs one of the director clicks and answers the run: 404, 409 and 422 as the service says."""
+    try:
+        row = await action(session, run_id) if 1 <= run_id <= _MAX_ID else None
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
+    return run_out(row)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/brief",
+    response_model=GraphicRunOut,
+    responses={**_NOT_FOUND, **_CONFLICT, **_INVALID},
+)
+async def write_brief(run_id: int, session: SessionDep) -> GraphicRunOut:
+    """Starts the paid call that writes the run's brief. Refused (409) while it is being written
+    or is written, and (422) for a line whose speech is longer than 15 s, before any call.
+    """
+    return await _brief_click(session, run_id, graphics_lab.start_brief)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/make-all",
+    response_model=GraphicRunOut,
+    responses={**_NOT_FOUND, **_CONFLICT, **_INVALID},
+)
+async def make_all(run_id: int, session: SessionDep) -> GraphicRunOut:
+    """Writes the brief, then starts every engine that is built. With the brief already written,
+    it only starts the built engines that have no render. An engine that is not built is skipped.
+    """
+    return await _brief_click(session, run_id, graphics_lab.make_all)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/ask-again",
+    response_model=GraphicRunOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def ask_again(run_id: int, session: SessionDep) -> GraphicRunOut:
+    """Makes a new run with the same line and orientation, and starts its brief. The run this
+    was asked on is not changed. The answer is the new run.
+    """
+    return await _brief_click(session, run_id, graphics_lab.ask_again)

@@ -11,6 +11,8 @@ export type GraphicRunCreate = components["schemas"]["GraphicRunCreate"];
 export type GraphicEngine = components["schemas"]["GraphicEngineOut"];
 export type GraphicRender = components["schemas"]["GraphicRenderOut"];
 export type GraphicRunState = GraphicRunSummary["state"];
+export type GraphicBrief = components["schemas"]["GraphicBriefOut"];
+export type GraphicResolved = components["schemas"]["GraphicResolvedOut"];
 export type GraphicOrientation = GraphicRunSummary["orientation"];
 export type GraphicVerdict = NonNullable<GraphicRender["verdict"]>;
 
@@ -133,4 +135,68 @@ export function useUpdateGraphicsRender() {
     // The run page shows every render of the run, so the run is read again.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: GRAPHICS_LAB_KEY }),
   });
+}
+
+type ClickResult = {
+  data?: GraphicRun;
+  error?: unknown;
+  response: Response;
+};
+
+function unwrapClick(result: ClickResult, failed: string): GraphicRun {
+  if (!result.data) {
+    throw new ApiError(
+      detailMessage(result.error, `${failed} (HTTP ${result.response.status}).`),
+      result.response.status,
+    );
+  }
+  return result.data;
+}
+
+/**
+ * The paid clicks of the director call (GFX-003). Each starts a model call and nothing else
+ * runs it, so a button calls one of these only from a click. The runs are read again afterwards.
+ */
+function useBriefClick(send: (runId: number) => Promise<GraphicRun>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: GRAPHICS_LAB_KEY }),
+  });
+}
+
+/** Writes the brief of a run (one paid model call). */
+export function useStartGraphicsBrief() {
+  return useBriefClick(async (runId) =>
+    unwrapClick(
+      await api.POST("/api/lab/graphics/runs/{run_id}/brief", {
+        params: { path: { run_id: runId } },
+      }),
+      "The brief was not started",
+    ),
+  );
+}
+
+/** Writes the brief, then starts every engine that is built. */
+export function useMakeAllGraphics() {
+  return useBriefClick(async (runId) =>
+    unwrapClick(
+      await api.POST("/api/lab/graphics/runs/{run_id}/make-all", {
+        params: { path: { run_id: runId } },
+      }),
+      "Make all was not started",
+    ),
+  );
+}
+
+/** Makes a new run with the same line and writes its brief. The answer is the new run. */
+export function useAskGraphicsAgain() {
+  return useBriefClick(async (runId) =>
+    unwrapClick(
+      await api.POST("/api/lab/graphics/runs/{run_id}/ask-again", {
+        params: { path: { run_id: runId } },
+      }),
+      "The new run was not made",
+    ),
+  );
 }

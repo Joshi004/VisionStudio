@@ -167,10 +167,10 @@ Fields and the code checks (a failing answer is refused with the reasons, and `a
 
 - `kind`: one of `kpi`, `comparison`, `trend`, `process`, `list`, `statement`, `concept`. `concept` means an idea no data chart fits (for example, how attention works).
 - `intent`: at most 160 characters. `visual_brief`: at most 600 characters, in words. It is the "prompt for what is needed", and every engine's call receives it.
-- `facts`: 0 to 12. `unit` is one of `usd`, `percent`, `points`, `multiple`, `count`, `none`. `scale` is one of `none`, `thousand`, `million`, `billion`, `trillion`. `said_as` must be found in the line (`locate_phrase`), and the fact's value must be a number that `numbers_in` reads in that phrase, either as written (`12`) or with its scale applied (`12,000,000,000`). **Planning decides** (GFX-003) the exact matching rule and records it here.
+- `facts`: 0 to 12. `unit` is one of `usd`, `percent`, `points`, `multiple`, `count`, `none`. `scale` is one of `none`, `thousand`, `million`, `billion`, `trillion`. `said_as` must be found in the line (`locate_phrase`), and the fact's value must be a number that `numbers_in` reads in that phrase, either as written (`12`) or with its scale applied (`12,000,000,000`). **The matching rule (decided in GFX-003).** The line is split on whitespace into words, and each word into the tokens `normalize_words` makes. `said_as` is found among the tokens with `locate_phrase`. The fact's number must then be one that `numbers_in` reads in the *original words* behind the found tokens (not in the tokens, because normalising turns `6.5` into `6 5`): the value as written or with its scale applied. The sign is ignored, so a fall said as "down 6.5 percent" is a fact with the value -6.5. A scale (other than `none`) only goes with the units `usd` and `count`. A derived value's facts all have one unit, `pct_change` needs a first fact that is not zero and `ratio` a second one that is not zero. Ids are 1 to 16 letters, digits or underscores starting with a letter, and are unique among the facts and derived values. A beat's phrase is searched from the start of the beat before it: found there, it is placed there; found only earlier, the brief is refused as out of order; not found, as not in the line. Two beats may start on the same word.
 - `derived`: 0 to 4. `op` is one of `pct_change`, `difference`, `ratio`, `sum`, and `of` lists existing fact ids (two facts, or two or more for `sum`). The model never gives the value: code computes it.
 - `beats`: 1 to 8. Each `phrase` must be found in the line, and the phrases must come in the order of the line (a later beat never starts before an earlier one). `shows` is at most 120 characters. `refs` names facts or derived values.
-- `theme`: `palette` is `dark` or `light`. `accent` is a `#RRGGBB` colour that is readable on the palette's background, otherwise code replaces it with a default and adds a note (**Planning decides** the contrast rule; `check_accent` measures against black, which only fits a dark palette). `background` is one of `solid`, `gradient`, `grid`, `glow`. `motion` is one of `snappy`, `smooth`, `calm`. `mood` is at most 40 characters.
+- `theme`: `palette` is `dark` or `light`. `accent` is a `#RRGGBB` colour that is readable on the palette's background, otherwise code replaces it with a default and adds a note (the contrast rule is in §4.4: at least 3.0 against the palette's background; `check_accent` is not used, because it measures against black). `background` is one of `solid`, `gradient`, `grid`, `glow`. `motion` is one of `snappy`, `smooth`, `calm`. `mood` is at most 40 characters.
 
 No text that appears on screen (titles, labels) is in the brief. The engine calls write it, and the number rule (G-7) applies to that text: any number shown must be a fact or a derived value.
 
@@ -202,8 +202,8 @@ No text that appears on screen (titles, labels) is in the brief. The engine call
 }
 ```
 
-- The `display` text is written by code (G-7). **Planning decides** (GFX-003) the rounding: for example, no decimals at 10 or more, one decimal below 10, a sign on changes, `B`, `M` and `K` for the scales, `x` for a multiple, `pts` for points.
-- The palette colours, the safe area and the caption area are worked out by code (**Planning decides** the exact values in GFX-003). The caption area comes from `caption_plan.style_for` for the same size, so a graphic made in the lab would leave room for explainer captions.
+- The `display` text is written by code (G-7). **The rounding (decided in GFX-003).** `$` before dollars; `%`, `x` and ` pts` after percents, multiples and points; `K`, `M`, `B` and `T` for the units `usd` and `count` from 1,000 up (any other unit shows its plain number, with commas from 10,000); a minus sign when negative. A fact shows at most two decimals. A derived value shows no decimals at 10 or more and one below 10. Trailing zeros are dropped, and rounding is half up. A change (`pct_change`, `difference`) has its sign when it is not zero (`+158%`, `-6.5%`). The difference of two `percent` facts is in `pts`, and a `ratio` is a `multiple`. In the resolved brief, `value` is the full number (the scale applied) and each entry also has its `unit`, and `notes` lists what code changed (for example a replaced accent).
+- The palette colours, the safe area and the caption area are worked out by code (decided in GFX-003). **Colours:** dark `#0B0F17` background, `#161C28` surface, `#FFFFFF` text, `#9AA4B2` muted, `#2ED573` positive, `#FF4D4D` negative, `#FFB000` number, `#4DA3FF` default accent; light `#F7F8FA`, `#E6E9EF`, `#0B0F17`, `#5B6472`, `#15803D`, `#C62828`, `#B45309`, `#1D4ED8`. Every colour except the surface measures at least 4.5 against its background. The director's accent must reach a contrast of 3.0 (the WCAG minimum for large text and graphics) on the background, otherwise the palette's default is used and a note says so. **Safe area:** 5 percent from every edge (landscape 96, 54, 1824, 1026; portrait 54, 96, 1026, 1824). **Caption area:** from `caption_plan.style_for` for the same size, the one-line band `top = height - margin_v - font_size - round(font_size / 2)` to `bottom = height - margin_v + round(font_size / 2)` (landscape 878 to 1018, portrait 1261 to 1422), so a graphic made in the lab leaves room for explainer captions. **Timing:** the estimated timing has one entry for each whitespace-separated word of the line; the speech lasts `words x 60 / pace`, and the pace is the setting `graphics_words_per_minute` (160).
 
 ### 4.5 Engine inputs
 
@@ -398,7 +398,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 |----|-------|------|-------------------|--------|
 | GFX-001 | Owner checks: Remotion licence, excerpts, voice | Manual | none | In Progress (licence and voice done; excerpts open) |
 | GFX-002 | Lab foundation: storage, run form, engine slots | Code | none | Done (2026-11-02) |
-| GFX-003 | Director call: the brief and its timing | Code | 002 | Not Started |
+| GFX-003 | Director call: the brief and its timing | Code | 002 | In Progress (built; the live check with the real model is open) |
 | GFX-004 | Voice and word timings | Code | 003 | Not Started |
 | GFX-005 | Motion service and the render job | Code | 002 | Not Started |
 | GFX-006 | Template catalogue and the template-spec call | Code | 003 | Not Started |
@@ -531,7 +531,7 @@ GFX-002 ─┬─ GFX-003 ─┬─ GFX-004                                 │
 
 ### GFX-003 — Director call: the brief and its timing
 
-**Status:** Not Started
+**Status:** In Progress (built and checked against a stand-in model server on 2026-11-03; the live check on excerpts 1 and 8 with the real model is open)
 
 **Objective.** One click asks the model for the brief of a run's line. Code checks the brief and resolves it (timing, beat frames, number text, colours, zones), and the run page shows it. **Make all** starts the brief and then every engine that is built.
 
@@ -576,11 +576,31 @@ GFX-002 ─┬─ GFX-003 ─┬─ GFX-004                                 │
 
 **Completion checklist.**
 
-- [ ] Writer, checks, resolver
-- [ ] Job, API, run page, Make all
-- [ ] Setting, docs, standard checks
+- [x] Writer, checks, resolver
+- [x] Job, API, run page, Make all
+- [x] Setting, docs, standard checks (ruff, ESLint, `tsc`, `gen:api` and the production build pass)
+- [ ] Live check: excerpt 1 (three facts and `+158%`) and excerpt 8 (no facts, `concept`) with the real model (two paid calls, owner's click)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration. The "Planning decides" items are settled in §4.3 (matching rule) and §4.4 (rounding, colours, safe area, caption area, timing). The rest:
+
+- **Modules.** `services/graphics_brief_writer.py` (instructions, `build_request`, `line_words`, `line_tokens`, `phrase_starts`, `check_brief`, the enums), `services/graphics_resolve.py` (`estimated_timing`, `ensure_fits`, `frames_of`, `display_text`, `derived_value`, `theme_for`, `safe_area`, `caption_zone`, `resolve(brief, timing, width, height, fps, fonts)`), `jobs/write_lab_graphic_brief.py`. `resolve` finds the beat phrases again in the timing's words, so GFX-004 calls it again with Parakeet timing and no model call. The timing has one entry (`{text, start, end}`) for each word of `line.split()`; GFX-004's timing must keep that shape.
+- **`max_tokens`** 32,000 and `reasoning_effort` `high` (the brief is about 2,000 tokens; the cap only bounds the call).
+- **Setting** `graphics_words_per_minute` (160, 60 to 300, group `Graphics lab`). A run keeps the timing it was first given (stored in `lab_graphic_run.timing` when the brief is first asked for), so a changed setting applies to the next run.
+- **Job** `write_lab_graphic_brief`: `llm`, `never_rerun`, the story model, no project, deduped by `run_id`. Input `{run_id, line_text, orientation, timing, then_start_engines}`. The brief and the resolved brief are saved on the run in the same transaction as `finish_job`. A failure sets `run.last_error`; the panel also shows the job's own error when a restart or a cancel ended it. The Activity page names all six Graphics job types "Graphics lab" (`store.owner_name`, `GRAPHICS_LAB_JOB_TYPES`).
+- **API** (all in `api/graphics_lab.py`): `POST /api/lab/graphics/runs/{id}/brief` (200; 409 while the brief is being written or is written; 422 for a line whose estimated speech is over 15 s, before any job is made), `POST .../make-all` (200; writes the brief and starts the built engines, or with a ready brief only the built engines that have no render) and `POST .../ask-again` (201; a new run with the same line and orientation and its brief started; the old run is not changed). `GET .../runs/{id}` has typed `brief` and `resolved`.
+- **Make all and engine failures.** `graphics_lab.start_engines(session, run_id)` starts each built engine that has no render, committing after each one, so one failure never undoes another (a savepoint was not used, to stay clear of SQLite's savepoint quirks). A failed start becomes a render row of that engine with `last_error` ("The engine could not be started: ..."), which its card already shows. An engine phase fills in its `start` in `graphics_engines.ENGINES` and gets this for free. No engine is built yet, so that path was checked with stand-in engines only.
+- **One extension of the plan:** a derived value's facts must all have the same unit, for all four operations (the plan named `difference` and `sum`), because a percent change or ratio across units means nothing.
+- **Frontend:** `components/graphicsLab/GraphicsBriefPanel.tsx` (buttons, the brief, facts and derived values with their on-screen text, beats with their time, theme swatches, notes), `useStartGraphicsBrief`, `useMakeAllGraphics` and `useAskGraphicsAgain` in `api/graphicsLab.ts`, and `schema.d.ts` regenerated.
+
+**Checked.** `ruff check`, `ruff format --check`, `npm run lint`, `typecheck` and `build` pass. Pure checks: excerpt 1's brief gives `$12B`, `$19B`, `$31B` and `+158%`, 255 frames and beats at frames 0, 63, 109, 148 and 192; a number the line does not say, a phrase not in the line, beats out of order, an unknown kind and a scale on a percent are each refused with a reason; rounding cases (`2.4x`, `+$7B`, `-3.2 pts`, `1M` for 999,999). On a throwaway `DATA_DIR`, with the language-model URL pointed at a stand-in server that answered fixed briefs: a 45-word line got 422 from the brief, Make all and Ask again with no job made; Make all on excerpt 1 queued one job, a second click got 409, the stand-in's first answer (a fact of 13 billion) was refused and the corrected retry (the reason was sent in the request) was saved, the run showed `brief_ready` with the resolved brief above; Write the brief on a ready brief got 409; Make all on a ready brief with no engine built made no render; excerpt 8's stand-in answer (`concept`, no facts) showed "No numbers" and an unreadable accent was replaced with a note; Ask again made a new run and a new job. Make all with stand-in engines (one ok, one raising) kept the failure as a render row and skipped engines that had one on the second click. In headless Chrome the run page showed the brief panel. No paid call was made, and the real database was not touched.
+
+**Still to do for this phase.** The live check: with the real model, press Write the brief (or Make all) on excerpt 1 and on excerpt 8 and read the briefs. Each is one paid call (two at most). Update this status when it is done.
+
+**For the later phases.**
+
+- GFX-004 sets `speech_run_id`, so it must add a Graphics run to `lab_deletion._voice_run_uses` (still not done). It stores its timing in `lab_graphic_run.timing` in the shape above (`source` `parakeet`, one entry per word of `line.split()`), then calls `graphics_resolve.resolve` again and saves `run.resolved`. `graphics_lab.start_brief` already reuses a stored timing and refuses one whose speech is over 15 s.
+- An engine phase (GFX-006 onwards) reads `run.brief` and `run.resolved` and fills in its `Engine.start`; Make all calls it through `graphics_lab.start_engines`. `start` must add its rows and job and not commit.
+- The facts of a brief keep the model's `value` and `scale`; `resolved.facts[id].value` is the full number. Engines refer to numbers by id and show `display`.
 
 ### GFX-004 — Voice and word timings
 
@@ -1075,3 +1095,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-02 | — | Document written | From the design discussion with the owner. |
 | 2026-11-02 | GFX-001 | In Progress | The owner confirmed the Remotion licence (GQ-1 closed) and that any Voice lab voice may be used. The excerpts are still to be approved. |
 | 2026-11-02 | GFX-002 | Done | Migration `0079` (two tables, six job types), service, engine registry, API, Graphics tab with form, run list and run page, shared delete with the `graphic_run` kind, Inter Medium as the text font (G-11). Notes for the later phases are in the completion notes. |
+| 2026-11-03 | GFX-003 | In Progress | Director call built: brief writer and checks, resolver (timing, frames, number text, theme, zones), job `write_lab_graphic_brief`, the three clicks (brief, Make all, Ask again), brief panel on the run page, setting `graphics_words_per_minute`. Checked against a stand-in model server; the live check on excerpts 1 and 8 is open. Notes for the later phases are in the completion notes. |

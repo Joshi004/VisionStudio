@@ -166,6 +166,10 @@ SAVING_MUSIC_PLAN: Final = "saving the music plan"
 # `write_callout_plan` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_PLAN: Final = "saving the callout plan"
 
+# --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
+# `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_GRAPHIC_BRIEF: Final = "saving the graphic brief"
+
 # --- Running: the music cues (MUSIC-009) -------------------------------------------------
 # `write_music_cue` and `audit_music_cues` also use PREPARING_PROMPT and `asking_model` from above
 # (once per call: the cue's detail, then one call per prompt to write; or the audit).

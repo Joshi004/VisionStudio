@@ -1,4 +1,9 @@
-import type { GraphicOrientation, GraphicRunCreate, GraphicRunState } from "../../api/graphicsLab";
+import type {
+  GraphicBrief,
+  GraphicOrientation,
+  GraphicRunCreate,
+  GraphicRunState,
+} from "../../api/graphicsLab";
 
 /** The longest line the lab takes. The server stays the judge; the form only says so early. */
 export const LINE_MAX_CHARS = 300;
@@ -56,3 +61,31 @@ export function snippet(text: string, max = 140): string {
   const space = cut.lastIndexOf(" ");
   return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
+
+export const KIND_LABELS: Record<GraphicBrief["kind"], string> = {
+  kpi: "One big number",
+  comparison: "Comparison",
+  trend: "Trend",
+  process: "Process",
+  list: "List",
+  statement: "Statement",
+  concept: "Concept",
+};
+
+/** How a derived value is worked out, in words. */
+export const OP_LABELS: Record<GraphicBrief["derived"][number]["op"], string> = {
+  pct_change: "percent change",
+  difference: "difference",
+  ratio: "ratio",
+  sum: "sum",
+};
+
+/** A frame as seconds into the graphic, to one decimal ("2.6 s"). */
+export function secondsAt(frame: number, fps: number): string {
+  return `${(frame / fps).toFixed(1)} s`;
+}
+
+export const TIMING_SOURCE_LABELS: Record<string, string> = {
+  estimated: "estimated from a speaking pace",
+  parakeet: "timed from the voice",
+};

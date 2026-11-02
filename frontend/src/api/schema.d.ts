@@ -2116,6 +2116,69 @@ export interface paths {
         patch: operations["update_render_api_lab_graphics_renders__render_id__patch"];
         trace?: never;
     };
+    "/api/lab/graphics/runs/{run_id}/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Brief
+         * @description Starts the paid call that writes the run's brief. Refused (409) while it is being written
+         *     or is written, and (422) for a line whose speech is longer than 15 s, before any call.
+         */
+        post: operations["write_brief_api_lab_graphics_runs__run_id__brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/runs/{run_id}/make-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make All
+         * @description Writes the brief, then starts every engine that is built. With the brief already written,
+         *     it only starts the built engines that have no render. An engine that is not built is skipped.
+         */
+        post: operations["make_all_api_lab_graphics_runs__run_id__make_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/runs/{run_id}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Again
+         * @description Makes a new run with the same line and orientation, and starts its brief. The run this
+         *     was asked on is not changed. The answer is the new run.
+         */
+        post: operations["ask_again_api_lab_graphics_runs__run_id__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters": {
         parameters: {
             query?: never;
@@ -6992,6 +7055,80 @@ export interface components {
             /** Waiting Jobs */
             waiting_jobs: number;
         };
+        /** GraphicBeatOut */
+        GraphicBeatOut: {
+            /** Id */
+            id: string;
+            /** Phrase */
+            phrase: string;
+            /** Shows */
+            shows: string;
+            /** Refs */
+            refs: string[];
+        };
+        /** GraphicBoxOut */
+        GraphicBoxOut: {
+            /** Left */
+            left: number;
+            /** Top */
+            top: number;
+            /** Right */
+            right: number;
+            /** Bottom */
+            bottom: number;
+        };
+        /**
+         * GraphicBriefOut
+         * @description What the director decided (§4.3).
+         */
+        GraphicBriefOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "kpi" | "comparison" | "trend" | "process" | "list" | "statement" | "concept";
+            /** Intent */
+            intent: string;
+            /** Visual Brief */
+            visual_brief: string;
+            /** Facts */
+            facts: components["schemas"]["GraphicFactOut"][];
+            /** Derived */
+            derived: components["schemas"]["GraphicDerivedOut"][];
+            /** Beats */
+            beats: components["schemas"]["GraphicBeatOut"][];
+            theme: components["schemas"]["GraphicBriefThemeOut"];
+        };
+        /** GraphicBriefThemeOut */
+        GraphicBriefThemeOut: {
+            /** Palette */
+            palette: string;
+            /** Accent */
+            accent: string | null;
+            /** Background */
+            background: string;
+            /** Motion */
+            motion: string;
+            /** Mood */
+            mood: string;
+        };
+        /**
+         * GraphicDerivedOut
+         * @description A value code works out from facts.
+         */
+        GraphicDerivedOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "pct_change" | "difference" | "ratio" | "sum";
+            /** Of */
+            of: string[];
+        };
         /** GraphicEngineOut */
         GraphicEngineOut: {
             /**
@@ -7005,6 +7142,24 @@ export interface components {
             built: boolean;
             /** Renders */
             renders: components["schemas"]["GraphicRenderOut"][];
+        };
+        /**
+         * GraphicFactOut
+         * @description A number the line says.
+         */
+        GraphicFactOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /** Unit */
+            unit: string;
+            /** Scale */
+            scale: string;
+            /** Said As */
+            said_as: string;
         };
         /** GraphicRenderOut */
         GraphicRenderOut: {
@@ -7053,6 +7208,84 @@ export interface components {
             /** Note */
             note?: string | null;
         };
+        /** GraphicResolvedBeatOut */
+        GraphicResolvedBeatOut: {
+            /** Frame */
+            frame: number;
+            /** Shows */
+            shows: string;
+        };
+        /**
+         * GraphicResolvedOut
+         * @description What code worked out from the brief, and what every engine is checked against (§4.4).
+         */
+        GraphicResolvedOut: {
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Fps */
+            fps: number;
+            /** Frames */
+            frames: number;
+            /** Timing Source */
+            timing_source: string;
+            /** Facts */
+            facts: {
+                [key: string]: components["schemas"]["GraphicResolvedValueOut"];
+            };
+            /** Derived */
+            derived: {
+                [key: string]: components["schemas"]["GraphicResolvedValueOut"];
+            };
+            /** Beats */
+            beats: {
+                [key: string]: components["schemas"]["GraphicResolvedBeatOut"];
+            };
+            theme: components["schemas"]["GraphicResolvedThemeOut"];
+            /** Fonts */
+            fonts: {
+                [key: string]: string;
+            };
+            safe_area: components["schemas"]["GraphicBoxOut"];
+            caption_zone: components["schemas"]["GraphicZoneOut"];
+            /** Notes */
+            notes: string[];
+        };
+        /** GraphicResolvedThemeOut */
+        GraphicResolvedThemeOut: {
+            /** Background */
+            background: string;
+            /** Surface */
+            surface: string;
+            /** Text */
+            text: string;
+            /** Muted */
+            muted: string;
+            /** Accent */
+            accent: string;
+            /** Positive */
+            positive: string;
+            /** Negative */
+            negative: string;
+            /** Number */
+            number: string;
+            /** Background Style */
+            background_style: string;
+            /** Motion */
+            motion: string;
+        };
+        /** GraphicResolvedValueOut */
+        GraphicResolvedValueOut: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /** Unit */
+            unit: string;
+            /** Display */
+            display: string;
+        };
         /** GraphicRunCreate */
         GraphicRunCreate: {
             /** Line Text */
@@ -7093,8 +7326,8 @@ export interface components {
             speech_run_id: number | null;
             /** Timing */
             timing: unknown | null;
-            /** Brief */
-            brief: unknown | null;
+            brief: components["schemas"]["GraphicBriefOut"] | null;
+            resolved: components["schemas"]["GraphicResolvedOut"] | null;
             brief_job: components["schemas"]["JobSummary"] | null;
             /** Last Error */
             last_error: string | null;
@@ -7122,6 +7355,13 @@ export interface components {
              * @enum {string}
              */
             state: "new" | "writing_brief" | "brief_ready" | "brief_failed";
+        };
+        /** GraphicZoneOut */
+        GraphicZoneOut: {
+            /** Top */
+            top: number;
+            /** Bottom */
+            bottom: number;
         };
         /** H3ReferenceRunCreate */
         H3ReferenceRunCreate: {
@@ -19575,6 +19815,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GraphicRenderOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    write_brief_api_lab_graphics_runs__run_id__brief_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    make_all_api_lab_graphics_runs__run_id__make_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_again_api_lab_graphics_runs__run_id__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
                 };
             };
             /** @description No run or render has this id. */

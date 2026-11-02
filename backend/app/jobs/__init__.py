@@ -23,7 +23,7 @@
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), and the Audio video lab of a character (`time_lab_speech_words.py`,
-  `render_av_test.py`).
+  `render_av_test.py`), and the brief of a Graphics lab run (`write_lab_graphic_brief.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -84,6 +84,7 @@ def register_handlers() -> None:
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
+    from app.jobs.write_lab_graphic_brief import WriteLabGraphicBriefHandler
     from app.jobs.write_lab_music_prompt import WriteLabMusicPromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
     from app.jobs.write_music_bible import WriteMusicBibleHandler
@@ -139,3 +140,4 @@ def register_handlers() -> None:
     handlers.register(WriteCalloutPlanHandler())
     handlers.register(TimeLabSpeechWordsHandler())
     handlers.register(RenderAvTestHandler())
+    handlers.register(WriteLabGraphicBriefHandler())

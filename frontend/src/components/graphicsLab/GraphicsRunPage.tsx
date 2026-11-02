@@ -3,14 +3,22 @@ import { Alert, Badge, Button, Group, Loader, Paper, SimpleGrid, Stack, Text, Ti
 import { describeError } from "../../api/errors";
 import { useGraphicsRun } from "../../api/graphicsLab";
 import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
+import { GraphicsBriefPanel } from "./GraphicsBriefPanel";
 import { GraphicsEngineCard } from "./GraphicsEngineCard";
-import { ORIENTATION_LABELS, stateText } from "./graphicsLabView";
+import { ORIENTATION_LABELS } from "./graphicsLabView";
+
+type GraphicsRunPageProps = {
+  runId: number;
+  onBack: () => void;
+  /** Opens another run (Ask again makes one). */
+  onOpenRun: (id: number) => void;
+};
 
 /**
- * One run: its line, the brief area (empty until the director call exists) and the four engine
- * cards. A landscape run shows the cards two by two, a portrait run in four columns.
+ * One run: its line, its brief (GFX-003) and the four engine cards. A landscape run shows the
+ * cards two by two, a portrait run in four columns.
  */
-export function GraphicsRunPage({ runId, onBack }: { runId: number; onBack: () => void }) {
+export function GraphicsRunPage({ runId, onBack, onOpenRun }: GraphicsRunPageProps) {
   const run = useGraphicsRun(runId);
   const data = run.data;
 
@@ -51,21 +59,7 @@ export function GraphicsRunPage({ runId, onBack }: { runId: number; onBack: () =
             </Stack>
           </Paper>
 
-          <Paper withBorder p="md" radius="md">
-            <Stack gap={4}>
-              <Text size="xs" fw={600} c="dimmed">
-                Brief
-              </Text>
-              <Text size="sm" c="dimmed">
-                {stateText(data.state)}.
-              </Text>
-              {data.last_error !== null && (
-                <Text size="sm" c="red" style={{ wordBreak: "break-word" }}>
-                  {data.last_error}
-                </Text>
-              )}
-            </Stack>
-          </Paper>
+          <GraphicsBriefPanel run={data} onOpenRun={onOpenRun} />
 
           <SimpleGrid cols={data.orientation === "portrait" ? { base: 2, md: 4 } : { base: 1, sm: 2 }}>
             {data.engines.map((engine) => (

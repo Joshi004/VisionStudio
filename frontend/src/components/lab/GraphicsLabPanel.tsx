@@ -17,9 +17,10 @@ type GraphicsLabPanelProps = {
 
 /**
  * The Graphics tab: deterministic graphics (charts, diagrams and text cards drawn by code) made
- * from one line of an explainer script by four engines, to be compared side by side. This is the
- * foundation: a line becomes a run with four engine cards that are not built yet. The run is
- * the list, or one run's page when the address says which (`?run=`). It belongs to no project.
+ * from one line of an explainer script by four engines, to be compared side by side. A line becomes
+ * a run, whose page holds the director's brief (a paid call, from a click) and four engine cards.
+ * The panel is the list, or one run's page when the address says which (`?run=`). It belongs to
+ * no project.
  */
 export function GraphicsLabPanel({ form, onFormChange }: GraphicsLabPanelProps) {
   const [openId, openRun] = useOpenGraphicsRun();
@@ -28,7 +29,7 @@ export function GraphicsLabPanel({ form, onFormChange }: GraphicsLabPanelProps) 
   if (openId !== null) {
     return (
       <Stack maw={1100}>
-        <GraphicsRunPage runId={openId} onBack={() => openRun(null)} />
+        <GraphicsRunPage runId={openId} onBack={() => openRun(null)} onOpenRun={openRun} />
       </Stack>
     );
   }
@@ -38,8 +39,9 @@ export function GraphicsLabPanel({ form, onFormChange }: GraphicsLabPanelProps) 
       <Text size="sm" c="dimmed">
         Type one line of an explainer script and make a run. A run is where the graphic for that line
         is made by four engines (Remotion templates, Python templates, Remotion building blocks and a
-        generated component) and compared. The engines are built one by one: for now a run only shows
-        its four empty cards. Making a run costs nothing, and it belongs to no project.
+        generated component) and compared. The engines are built one by one. Making a run costs nothing;
+        writing its brief is a paid model call that starts only when you press the button. A run
+        belongs to no project.
       </Text>
 
       <Paper withBorder p="md" radius="md">
