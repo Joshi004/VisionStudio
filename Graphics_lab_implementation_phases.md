@@ -399,7 +399,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-001 | Owner checks: Remotion licence, excerpts, voice | Manual | none | In Progress (licence and voice done; excerpts open) |
 | GFX-002 | Lab foundation: storage, run form, engine slots | Code | none | Done (2026-11-02) |
 | GFX-003 | Director call: the brief and its timing | Code | 002 | In Progress (built; the live check with the real model is open) |
-| GFX-004 | Voice and word timings | Code | 003 | Not Started |
+| GFX-004 | Voice and word timings | Code | 003 | In Progress (built; the live check with a real voice is open) |
 | GFX-005 | Motion service and the render job | Code | 002 | Not Started |
 | GFX-006 | Template catalogue and the template-spec call | Code | 003 | Not Started |
 | GFX-007 | Remotion templates | Code | 005, 006 | Not Started |
@@ -598,13 +598,13 @@ GFX-002 ─┬─ GFX-003 ─┬─ GFX-004                                 │
 
 **For the later phases.**
 
-- GFX-004 sets `speech_run_id`, so it must add a Graphics run to `lab_deletion._voice_run_uses` (still not done). It stores its timing in `lab_graphic_run.timing` in the shape above (`source` `parakeet`, one entry per word of `line.split()`), then calls `graphics_resolve.resolve` again and saves `run.resolved`. `graphics_lab.start_brief` already reuses a stored timing and refuses one whose speech is over 15 s.
+- GFX-004 sets `speech_run_id`, so it must add a Graphics run to `lab_deletion._voice_run_uses` (done in GFX-004). It stores its timing in `lab_graphic_run.timing` in the shape above (`source` `parakeet`, one entry per word of `line.split()`), then calls `graphics_resolve.resolve` again and saves `run.resolved`. `graphics_lab.start_brief` already reuses a stored timing and refuses one whose speech is over 15 s.
 - An engine phase (GFX-006 onwards) reads `run.brief` and `run.resolved` and fills in its `Engine.start`; Make all calls it through `graphics_lab.start_engines`. `start` must add its rows and job and not commit.
 - The facts of a brief keep the model's `value` and `scale`; `resolved.facts[id].value` is the full number. Engines refer to numbers by id and show `display`.
 
 ### GFX-004 — Voice and word timings
 
-**Status:** Not Started
+**Status:** In Progress (built and checked on a throwaway database on 2026-11-03; the live check with a real saved voice, one GPU speech and one Parakeet call, is open)
 
 **Objective.** When a saved voice is chosen, the line is spoken in it, Parakeet times the words, beat frames follow the real voice, and the voice is added to every engine's video.
 
@@ -637,11 +637,36 @@ GFX-002 ─┬─ GFX-003 ─┬─ GFX-004                                 │
 
 **Completion checklist.**
 
-- [ ] Voice field, speech, timing job
-- [ ] Beats worked out again from the timing, `voice_audio_of`
-- [ ] Run page, docs, standard checks
+- [x] Voice field, speech, timing job
+- [x] Beats worked out from the timing, `voice_audio_of`
+- [x] Run page, docs, standard checks (ruff, ESLint, `tsc`, `gen:api` and the production build pass)
+- [ ] Live check: excerpt 1 in a saved voice, beat times within about 0.1 s of the spoken words (one GPU speech and one Parakeet call, owner's click)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration, no new setting (the job uses `word_timing_match_threshold` and `transcription_url`). The "Planning decides" items:
+
+- **When the speech starts:** when the run is made (the click on **Make run**). The brief waits for the voice: `Write the brief`, `Make all` and `Ask again` are refused with 409 while the speech is made or its words timed, and when the voice failed. The brief is therefore resolved once, from the voice timing, with no race between two jobs and no new model call.
+- **Changing a run's voice:** not possible; a different voice is a new run. **Ask again** on a run with a voice makes a run that shares the same `lab_voice_run` and copies the timing, so it costs no new speech and its brief starts at once.
+- **Delivery:** `direction` mode with `explainer.DEFAULT_PRESENTER_DELIVERY` (`graphics_lab.SPEECH_DELIVERY`), the line as the text, a random seed.
+- **Below the match threshold:** `word_timings.align` gives estimated times over the *real* speech length; the timing keeps `source: estimated`, `match_percent`, `threshold` and a `note`.
+
+What was built:
+
+- **`services/graphics_lab.py`.** `create_run(session, line_text, orientation, voice_id=None)` (an unknown voice is 422; a line whose estimated speech is over 15 s is refused before any speech is made). `on_voice_finished(speech_run_id)` queues the timing job for each run with that speech and no timing. `speech_for_timing`, `voice_timing(alignment, threshold, duration_s)`, `store_timing` (no commit; false when the run already has a timing). `RunRow` gains `speech`, `voice`, `speech_job` and `timing_job`, `voice_status` (`speaking`, `timing`, `ready` or `failed`, with the error) and the run states `making_voice` and `voice_failed`. `voice_audio_of(session, run)` returns the speech's stored path, or None.
+- **Job `time_lab_graphic_words`** (`jobs/time_lab_graphic_words.py`): a subclass of `TimeSpeechWordsHandler`, `gpu` provider on the Parakeet pool, deduped by `run_id`. It aligns the line with what was heard and writes the run's `timing` in the transaction that finishes the job. `jobs/lab_voice.py` queues it after storing the speech (best effort, like the Audio video lab).
+- **Timing shape** (`lab_graphic_run.timing`): `{source, duration_s, match_percent, threshold, heard_text, words, note?}`, one word for each `line.split()` word, as GFX-003 asked. `duration_s` is the measured length of the speech file, so a speech over 15 s is stored but the brief is refused (422).
+- **API:** `POST /api/lab/graphics/runs` takes `voice_id`; a run has `voice` (`voice_name`, `speech_url`, `speech_job`, `timing_job`, `state`, `error`, `timing_source`, `match_percent`, `threshold`, `note`), null without a voice; `ask-again` can answer 409.
+- **Deleting:** a Graphics run is a user of its speech (`lab_deletion._voice_run_uses`, the carried-over item), so deleting a speech a run uses is refused with "Graphics run N"; deleting a run also removes its speech once nothing else uses it, and is refused while the speech's job or the timing job is running.
+- **Frontend:** a voice select on the form (clearable, searchable), `GraphicsVoicePanel` on the run page (voice name, stage, timing source with the match percent, the note, the error, a player for the speech alone), no brief buttons while the voice is made or failed, and polling of the list and the page while a voice is made. `schema.d.ts` regenerated.
+
+**Checked.** `ruff check`, `ruff format --check`, `npm run lint`, `typecheck` and `build` pass. On a throwaway `DATA_DIR` (the GPU server URL pointed at an unresolvable host, so nothing real was called; the speech and timing steps were simulated by writing the speech file path and calling the handler's `_match_and_store` with made-up Parakeet words): an unknown voice and a long line were refused and left no speech; a run with a voice was `making_voice`, and `Write the brief`, `Make all` and `Ask again` got 409; the speech stored queued one timing job (a second call queued none); a matching transcript gave `parakeet`, 100 percent and 27 words, and `resolve` then put beat `b2` on the frame of its spoken word (53, against 63 estimated) and gave 215 frames (255 estimated); a made-up wrong transcript gave `estimated`, 0 percent, a note, and the last word ending at the speech's end; a 16 s speech was stored and the brief refused (422); a failed speech job gave `voice_failed` with its message; the brief job's input carried the Parakeet timing; Ask again shared the speech and copied the timing; deleting the speech was listed as used by two Graphics runs; deleting one run kept the speech and deleting the last removed it; a run without a voice behaved as in GFX-003. Through the API on a temporary backend: create with and without a voice, 422 for an unknown id and for `voice_id` 0, 409 for the three clicks, the list state, and the delete preview blocked while the speech runs. In headless Chrome the form showed the voice field and the run page the voice panel ("The line is being spoken", the brief waiting). No paid call was made, the real GPU server was not reached, and the real database was not touched.
+
+**Still to do for this phase.** The live check: pick a saved voice, make a run with excerpt 1, wait for "Voice ready", play the speech, then press Write the brief and compare each beat's time with the spoken words (about 0.1 s). That is one GPU speech, one Parakeet call and one paid model call. Update the status when it is done. The owner has to rebuild the Docker backend (`docker compose up -d --build backend`) for the new code; there is no migration.
+
+**For the later phases.**
+
+- GFX-005 reads `graphics_lab.voice_audio_of(session, run)` for the speech and adds it to every engine's video. The speech file can be longer than the graphic (the graphic ends 0.5 s after the last word), so the render must cut the audio to the video's frame count (`resolved.frames`).
+- Each render should record `resolved.timing_source` (`estimated` or `parakeet`) in its metrics. With a voice, the run's `timing.note` explains an estimated fallback.
+- A run with a voice always has its timing stored before its brief, so `resolved.timing_source` is `parakeet` or `estimated` (the fallback), and the beat frames already follow it. No later phase has to work the frames out again.
 
 ### GFX-005 — Motion service and the render job
 
@@ -1096,3 +1121,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-02 | GFX-001 | In Progress | The owner confirmed the Remotion licence (GQ-1 closed) and that any Voice lab voice may be used. The excerpts are still to be approved. |
 | 2026-11-02 | GFX-002 | Done | Migration `0079` (two tables, six job types), service, engine registry, API, Graphics tab with form, run list and run page, shared delete with the `graphic_run` kind, Inter Medium as the text font (G-11). Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-003 | In Progress | Director call built: brief writer and checks, resolver (timing, frames, number text, theme, zones), job `write_lab_graphic_brief`, the three clicks (brief, Make all, Ask again), brief panel on the run page, setting `graphics_words_per_minute`. Checked against a stand-in model server; the live check on excerpts 1 and 8 is open. Notes for the later phases are in the completion notes. |
+| 2026-11-03 | GFX-004 | In Progress | Voice built: optional saved voice on the form, speech made when the run is made, job `time_lab_graphic_words` (Parakeet), the brief waits for the timing, estimated fallback with a note, `voice_audio_of`, Graphics runs counted as users of a speech, voice panel on the run page. Checked on a throwaway database; the live check with a real voice is open. Notes for the later phases are in the completion notes. |

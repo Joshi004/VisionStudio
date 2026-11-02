@@ -1,7 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
-import { Button, Group, SegmentedControl, Stack, Text, Textarea } from "@mantine/core";
+import { Button, Group, SegmentedControl, Select, Stack, Text, Textarea } from "@mantine/core";
 
 import type { GraphicOrientation } from "../../api/graphicsLab";
+import { useVoices } from "../../api/voiceLab";
 import {
   LINE_MAX_CHARS,
   ORIENTATION_LABELS,
@@ -17,13 +18,14 @@ type GraphicsLabFormProps = {
 };
 
 /**
- * The form of the Graphics lab: one line of an explainer script and the orientation. Nothing
- * else is needed (the voice comes in a later phase). Making a run costs nothing: no model is
- * called until the brief is asked for.
+ * The form of the Graphics lab: one line of an explainer script, the orientation and, optionally,
+ * a saved voice. No model is called until the brief is asked for. A voice starts a speech job
+ * when the run is made.
  */
 export function GraphicsLabForm({ state, onChange, onMake, making }: GraphicsLabFormProps) {
   const problem = formProblem(state);
   const length = state.line.trim().length;
+  const voices = useVoices().data ?? [];
 
   return (
     <Stack gap="sm">
@@ -46,6 +48,18 @@ export function GraphicsLabForm({ state, onChange, onMake, making }: GraphicsLab
       <Text size="xs" c={length > LINE_MAX_CHARS ? "red" : "dimmed"}>
         {length} of {LINE_MAX_CHARS} characters
       </Text>
+
+      <Select
+        label="Voice (optional)"
+        description="A saved voice of the Voice lab reads the line when the run is made (a remote server job of a minute or two), and each beat then lands on the spoken words. Without a voice, the times are estimated."
+        placeholder={voices.length === 0 ? "No saved voices yet" : "No voice"}
+        data={voices.map((voice) => ({ value: String(voice.id), label: voice.name }))}
+        value={state.voiceId}
+        onChange={(voiceId) => onChange((current) => ({ ...current, voiceId }))}
+        clearable
+        searchable
+        nothingFoundMessage="No such voice"
+      />
 
       <Group justify="space-between" align="flex-end">
         <Stack gap={4}>

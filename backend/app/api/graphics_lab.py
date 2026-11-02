@@ -1,9 +1,11 @@
 """`/api/lab/graphics`: the Graphics lab. One line of an explainer script, made into the same
 graphic by four engines and compared (GFX-002).
 
-`POST .../runs` makes a run from a line and an orientation. Nothing is started: the run has no
-brief yet, and its four engines say they are not built yet. The brief, the voice and the engines
-are added by the later phases of `Graphics_lab_implementation_phases.md`.
+`POST .../runs` makes a run from a line, an orientation and, optionally, a saved voice. No model
+is called: the run has no brief yet, and its four engines say they are not built yet. With a
+voice, the speech of the line starts at once and its words are timed when it is stored (GFX-004);
+the brief cannot be written until that timing is stored. The engines are added by the later
+phases of `Graphics_lab_implementation_phases.md`.
 
 `GET .../runs` lists the runs, newest first. `GET .../runs/{id}` reads one with its brief job and,
 for each engine, every render made for it (newest first).
@@ -27,7 +29,7 @@ from datetime import datetime
 from typing import Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobSummary, job_summary
@@ -53,7 +55,10 @@ _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No run or render has
 _CONFLICT = {409: {"model": ErrorResponse, "description": "The run's state does not allow it."}}
 
 Orientation = Literal["landscape", "portrait"]
-RunStateOut = Literal["new", "writing_brief", "brief_ready", "brief_failed"]
+RunStateOut = Literal[
+    "new", "making_voice", "voice_failed", "writing_brief", "brief_ready", "brief_failed"
+]
+VoiceStageOut = Literal["speaking", "timing", "ready", "failed"]
 Verdict = Literal["good", "usable", "bad"]
 BriefKind = Literal["kpi", "comparison", "trend", "process", "list", "statement", "concept"]
 DerivedOp = Literal["pct_change", "difference", "ratio", "sum"]
@@ -173,6 +178,9 @@ class GraphicRunCreate(BaseModel):
     # answers with a message the page can show.
     line_text: StrictStr = Field(max_length=_REQUEST_LINE_MAX)
     orientation: StrictStr = Field(max_length=20)
+    # A saved voice of the Voice lab that speaks the line. Left out: no voice, and the times of
+    # the words are estimated.
+    voice_id: StrictInt | None = Field(default=None, ge=1, le=_MAX_ID)
 
 
 class GraphicRenderUpdate(BaseModel):
@@ -225,6 +233,28 @@ class GraphicRunSummaryOut(BaseModel):
     state: RunStateOut
 
 
+class GraphicVoiceOut(BaseModel):
+    """The voice of a run (GFX-004): the speech and where the timing of its words stands."""
+
+    # The saved voice, by id and name (the name is None when the voice was deleted).
+    voice_id: int | None
+    voice_name: str | None
+    speech_run_id: int
+    # The speech alone, from /media. None until it is stored.
+    speech_url: str | None
+    speech_job: JobSummary | None
+    timing_job: JobSummary | None
+    state: VoiceStageOut
+    # Why the voice failed. None otherwise.
+    error: str | None
+    # `parakeet`, or `estimated` when too few words matched. None until the timing is stored.
+    timing_source: str | None
+    match_percent: float | None
+    threshold: int | None
+    # A sentence about the timing, set when it was estimated.
+    note: str | None
+
+
 class GraphicRunOut(GraphicRunSummaryOut):
     # The size and frame rate of every video of the run.
     width: int
@@ -233,6 +263,7 @@ class GraphicRunOut(GraphicRunSummaryOut):
     # The saved voice and the speech made with it (GFX-004). None for a run without a voice.
     voice_id: int | None
     speech_run_id: int | None
+    voice: GraphicVoiceOut | None
     # The words of the line with their times (GFX-004).
     timing: Any | None
     # What the director decided (GFX-003), what code worked out from it, and the job that wrote it.
@@ -286,6 +317,31 @@ def run_summary_out(row: graphics_lab.RunRow) -> GraphicRunSummaryOut:
     )
 
 
+def voice_out(row: graphics_lab.RunRow) -> GraphicVoiceOut | None:
+    """The run's voice, or None for a run without one."""
+    status = row.voice_status
+    run = row.run
+    if status is None or run.speech_run_id is None:
+        return None
+    timing = run.timing if isinstance(run.timing, dict) else {}
+    match_percent = timing.get("match_percent")
+    threshold = timing.get("threshold")
+    return GraphicVoiceOut(
+        voice_id=run.voice_id,
+        voice_name=row.voice.name if row.voice is not None else None,
+        speech_run_id=run.speech_run_id,
+        speech_url=media_url(row.speech.path) if row.speech and row.speech.path else None,
+        speech_job=_job_out(row.speech_job),
+        timing_job=_job_out(row.timing_job),
+        state=status.stage,
+        error=status.error,
+        timing_source=timing.get("source"),
+        match_percent=float(match_percent) if isinstance(match_percent, int | float) else None,
+        threshold=int(threshold) if isinstance(threshold, int) else None,
+        note=timing.get("note"),
+    )
+
+
 def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
     run = row.run
     width, height = graphics_lab.size_of(run)
@@ -299,6 +355,7 @@ def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
         fps=graphics_lab.FPS,
         voice_id=run.voice_id,
         speech_run_id=run.speech_run_id,
+        voice=voice_out(row),
         timing=run.timing,
         brief=run.brief,
         resolved=run.resolved,
@@ -323,9 +380,13 @@ def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
     responses=_INVALID,
 )
 async def create_run(body: GraphicRunCreate, session: SessionDep) -> GraphicRunOut:
-    """Makes a run from a line (1 to 300 characters) and an orientation. Nothing is started."""
+    """Makes a run from a line (1 to 300 characters), an orientation and, optionally, a saved
+    voice. No model is called. With a voice, its speech starts now (a GPU job).
+    """
     try:
-        row = await graphics_lab.create_run(session, body.line_text, body.orientation)
+        row = await graphics_lab.create_run(
+            session, body.line_text, body.orientation, body.voice_id
+        )
     except graphics_lab.GraphicsLabInputError as exc:
         raise _unprocessable(str(exc)) from exc
     return run_out(row)
@@ -419,7 +480,7 @@ async def make_all(run_id: int, session: SessionDep) -> GraphicRunOut:
     "/lab/graphics/runs/{run_id}/ask-again",
     response_model=GraphicRunOut,
     status_code=status.HTTP_201_CREATED,
-    responses={**_NOT_FOUND, **_INVALID},
+    responses={**_NOT_FOUND, **_CONFLICT, **_INVALID},
 )
 async def ask_again(run_id: int, session: SessionDep) -> GraphicRunOut:
     """Makes a new run with the same line and orientation, and starts its brief. The run this

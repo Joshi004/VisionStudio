@@ -39,9 +39,10 @@ export function GraphicsLabPanel({ form, onFormChange }: GraphicsLabPanelProps) 
       <Text size="sm" c="dimmed">
         Type one line of an explainer script and make a run. A run is where the graphic for that line
         is made by four engines (Remotion templates, Python templates, Remotion building blocks and a
-        generated component) and compared. The engines are built one by one. Making a run costs nothing;
-        writing its brief is a paid model call that starts only when you press the button. A run
-        belongs to no project.
+        generated component) and compared. The engines are built one by one. Making a run with no
+        voice costs nothing; with a saved voice it starts a speech job on the remote server. Writing
+        the brief is a paid model call that starts only when you press the button. A run belongs to
+        no project.
       </Text>
 
       <Paper withBorder p="md" radius="md">

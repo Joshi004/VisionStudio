@@ -186,6 +186,7 @@ _OWNERS: Final[dict[Any, tuple[str, Any]]] = {
     CharacterTake: ("take", CharacterTake.id),
     AvLabTest: ("av_test", AvLabTest.id),
     AvLabSegment: ("av_test", AvLabSegment.test_id),
+    LabGraphicRun: ("graphic_run", LabGraphicRun.id),
     LibraryEnvironmentVersion: ("environment", LibraryEnvironmentVersion.environment_id),
     EnvironmentReferenceCandidate: (
         "environment",
@@ -292,6 +293,8 @@ async def _name(session: AsyncSession, kind: str, owner_id: int) -> str:
         take = await session.get(CharacterTake, owner_id)
         owner = await session.get(LibraryCharacter, take.character_id) if take else None
         return f"A take of character '{owner.name}'" if owner else f"Character take {owner_id}"
+    if kind == "graphic_run":
+        return f"Graphics run {owner_id}"
     return f"Audio-video test {owner_id}"
 
 
@@ -459,6 +462,9 @@ async def _voice_run_uses(session: AsyncSession, run_id: int) -> list[str]:
     owners |= await _owners_of(
         session, AvLabSegment.slice_run_id, AvLabSegment.slice_run_id == run_id
     )
+    owners |= await _owners_of(
+        session, LabGraphicRun.speech_run_id, LabGraphicRun.speech_run_id == run_id
+    )
     owners |= await _owners_of_json(session, CharacterTake.audio_input, "voice_runs", {run_id})
     owners |= await _owners_of(session, LabVoiceRun.project_id, LabVoiceRun.id == run_id)
     used_by = await _names(session, owners)
@@ -581,6 +587,8 @@ async def _inspect_graphic_run(session: AsyncSession, run_id: int) -> _Inspectio
     job_ids = {run.brief_job_id, run.timing_job_id}
     for render in renders.scalars():
         job_ids |= {render.input_job_id, render.render_job_id}
+    if run.speech_run_id is not None:
+        job_ids |= await _ids(session, LabVoiceRun.job_id, LabVoiceRun.id == run.speech_run_id)
     job_ids.discard(None)
     return _Inspection(
         label=f"Graphics run {run.id}: {_snippet(run.line_text)}",
@@ -659,10 +667,13 @@ async def _remove_music_run(session: AsyncSession, run_id: int) -> list[str]:
 
 
 async def _remove_graphic_run(session: AsyncSession, run_id: int) -> list[str]:
-    """Deletes the run and its renders, and returns the videos they stored."""
+    """Deletes the run and its renders, and returns the videos they stored. The speech of the
+    run's voice goes with it once nothing else uses it (a copy made by Ask again shares it).
+    """
     run = await session.get(LabGraphicRun, run_id)
     if run is None:
         return []
+    speech_id = run.speech_run_id
     renders = await session.execute(
         select(LabGraphicRender).where(LabGraphicRender.run_id == run_id)
     )
@@ -673,6 +684,14 @@ async def _remove_graphic_run(session: AsyncSession, run_id: int) -> list[str]:
         await session.delete(render)
     await session.flush()
     await session.delete(run)
+    await session.flush()
+    if speech_id is not None:
+        used = await _voice_run_uses(session, speech_id)
+        made_by_takes = await _ids(
+            session, CharacterTake.id, CharacterTake.voice_run_id == speech_id
+        )
+        if not used and not made_by_takes:
+            paths += await _remove_voice_run(session, speech_id)
     return paths
 
 

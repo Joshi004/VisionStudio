@@ -2,7 +2,7 @@
 and the four videos compared (GFX-002).
 
 The lab belongs to no project and changes none. A **run** (`lab_graphic_run`) is one line, one
-orientation and, from GFX-004, an optional saved voice. Its brief and its timing belong to it, so
+orientation and, since GFX-004, an optional saved voice. Its brief and its timing belong to it, so
 asking the director again makes a new run and a brief never changes under the renders made from
 it. A **render** (`lab_graphic_render`) is one engine's attempt for a run: the input that engine
 draws from, the jobs that wrote and rendered it, the video, the metrics and the owner's verdict.
@@ -13,29 +13,49 @@ What a run is doing is worked out on every read from its jobs and its stored fie
 This module holds the form checks, the rows, the engine registry
 (`services/graphics_engines.py`), the verdict, and (GFX-003) the clicks that start the paid
 director call: **Write the brief** (`start_brief`), **Make all** (`make_all`) and **Ask again**
-(`ask_again`). The brief itself is written by the job `write_lab_graphic_brief`. The voice
-(GFX-004) and the engines (GFX-005 to GFX-010) fill in the rest, and read the names this module
-gives (`voice_audio_of`, `size_of`, `FONTS`, the font constants).
+(`ask_again`). The brief itself is written by the job `write_lab_graphic_brief`.
+
+**The voice (GFX-004).** A run made with a saved voice makes its speech at once, as a Voice lab
+run in `direction` mode (`create_run`). When the speech is stored, `on_voice_finished` queues the
+job `time_lab_graphic_words`, which times the words with Parakeet and stores the timing on the
+run (`store_timing`). The brief waits for that timing (`start_brief` refuses until it is stored),
+so the beat frames and the length of the graphic follow the real voice. A run's voice is never
+changed: a different voice is a new run.
+
+The engines (GFX-005 to GFX-010) fill in the rest, and read the names this module gives
+(`voice_audio_of`, `size_of`, `FONTS`, the font constants).
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final, Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Job, LabGraphicRender, LabGraphicRun
+from app.db.models import Job, LabGraphicRender, LabGraphicRun, LabVoiceRun, Voice
+from app.db.session import SessionLocal
 from app.jobs import store
-from app.services import graphics_engines, graphics_resolve, projects
+from app.services import (
+    explainer,
+    graphics_engines,
+    graphics_resolve,
+    projects,
+    voice_lab,
+)
 
 _logger = logging.getLogger(__name__)
 
 BRIEF_JOB_TYPE: Final = "write_lab_graphic_brief"
+TIMING_JOB_TYPE: Final = "time_lab_graphic_words"
+# Two presses on one run make one timing job.
+TIMING_DEDUPE_KEY: Final = "run_id"
+# How the saved voice reads the line: the same delivery as the explainer pipeline.
+SPEECH_DELIVERY: Final = explainer.DEFAULT_PRESENTER_DELIVERY
 
 LINE_MAX_CHARS: Final = 300
 NOTE_MAX_CHARS: Final = 1000
@@ -54,7 +74,12 @@ TEXT_FONT_FILE: Final = "Inter-Medium.ttf"
 # The fonts as the resolved brief names them (§4.4).
 FONTS: Final = {"display": DISPLAY_FONT_NAME, "text": TEXT_FONT_NAME}
 
-RunState = Literal["new", "writing_brief", "brief_ready", "brief_failed"]
+RunState = Literal[
+    "new", "making_voice", "voice_failed", "writing_brief", "brief_ready", "brief_failed"
+]
+# `speaking`: the speech is being made. `timing`: Parakeet is timing its words. `ready`: the
+# timing is stored. `failed`: a step of the voice ended without a result.
+VoiceStage = Literal["speaking", "timing", "ready", "failed"]
 
 
 class GraphicsLabInputError(ValueError):
@@ -75,16 +100,37 @@ class RenderRow:
 
 
 @dataclass(frozen=True)
+class VoiceStatus:
+    """Where the voice of a run stands, and why it failed when it did."""
+
+    stage: VoiceStage
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class RunRow:
-    """A run with its brief job and its renders, newest first. `renders` is empty in a list."""
+    """A run with its brief job and its renders, newest first. `renders` is empty in a list.
+
+    A run with a voice also has its speech, the saved voice and the jobs of the speech and of the
+    timing (each None when it does not exist).
+    """
 
     run: LabGraphicRun
     brief_job: Job | None
     renders: list[RenderRow]
+    speech: LabVoiceRun | None = None
+    voice: Voice | None = None
+    speech_job: Job | None = None
+    timing_job: Job | None = None
+
+    @property
+    def voice_status(self) -> VoiceStatus | None:
+        """None for a run without a voice."""
+        return voice_status(self.run, self.speech, self.speech_job, self.timing_job)
 
     @property
     def state(self) -> RunState:
-        return run_state(self.run, self.brief_job)
+        return run_state(self.run, self.brief_job, self.voice_status)
 
 
 # --- The form -------------------------------------------------------------------------------
@@ -118,45 +164,182 @@ def size_of(run: LabGraphicRun) -> tuple[int, int]:
 # --- State ----------------------------------------------------------------------------------
 
 
-def run_state(run: LabGraphicRun, brief_job: Job | None) -> RunState:
-    """What the run is doing, worked out from its brief and the job that writes it.
+_ENDED_BADLY = ("failed", "cancelled")
 
-    `new`: no brief was asked for. `writing_brief`: the director job is waiting or running.
-    `brief_ready`: the brief is stored. `brief_failed`: the job ended without one.
+
+def _job_error(job: Job | None, fallback: str) -> str:
+    """Why a job ended without a result: its own message, or `fallback`."""
+    if job is not None and job.status in _ENDED_BADLY and job.error:
+        return job.error
+    return fallback
+
+
+def voice_status(
+    run: LabGraphicRun,
+    speech: LabVoiceRun | None,
+    speech_job: Job | None,
+    timing_job: Job | None,
+) -> VoiceStatus | None:
+    """Where the run's voice stands, or None when the run has none. The run's timing is the
+    result: once it is stored the voice is `ready`, whatever happened to the jobs after that.
+    """
+    if run.speech_run_id is None:
+        return None
+    if run.timing is not None:
+        return VoiceStatus("ready")
+    if speech is None:
+        return VoiceStatus("failed", "The speech of this run is gone.")
+    if speech.path is None:
+        if speech_job is not None and speech_job.status in store.ACTIVE_STATUSES:
+            return VoiceStatus("speaking")
+        return VoiceStatus("failed", _job_error(speech_job, "The speech was not made."))
+    if timing_job is not None and timing_job.status in store.ACTIVE_STATUSES:
+        return VoiceStatus("timing")
+    return VoiceStatus("failed", _job_error(timing_job, "The words of the speech were not timed."))
+
+
+def run_state(
+    run: LabGraphicRun, brief_job: Job | None, voice: VoiceStatus | None = None
+) -> RunState:
+    """What the run is doing, worked out from its brief, the job that writes it and its voice.
+
+    `new`: no brief was asked for. `making_voice`: the speech is being made or its words timed.
+    `voice_failed`: that ended without a timing. `writing_brief`: the director job is waiting or
+    running. `brief_ready`: the brief is stored. `brief_failed`: the job ended without one.
     """
     if run.brief is not None:
         return "brief_ready"
-    if brief_job is None:
-        return "new"
-    if brief_job.status in store.ACTIVE_STATUSES:
-        return "writing_brief"
-    return "brief_failed"
+    if brief_job is not None:
+        if brief_job.status in store.ACTIVE_STATUSES:
+            return "writing_brief"
+        return "brief_failed"
+    if voice is not None and voice.stage != "ready":
+        return "voice_failed" if voice.stage == "failed" else "making_voice"
+    return "new"
 
 
 async def voice_audio_of(session: AsyncSession, run: LabGraphicRun) -> str | None:
     """The stored path of the speech that goes into the run's videos, or None when the run has
-    no voice. GFX-004 fills this in: until then no run has a voice, so it is always None. The
-    render job (GFX-005) reads it to add the voice to every engine's video.
+    no voice (or its speech has no file). The render job (GFX-005) reads it to add the voice to
+    every engine's video. The file can be longer than the graphic: the render cuts it to the
+    graphic's length.
     """
-    return None
+    if run.speech_run_id is None:
+        return None
+    speech = await session.get(LabVoiceRun, run.speech_run_id)
+    return speech.path if speech is not None else None
 
 
 # --- Runs -----------------------------------------------------------------------------------
 
 
-async def create_run(session: AsyncSession, line_text: object, orientation: object) -> RunRow:
-    """Checks the form and adds one run. Commits. Raises GraphicsLabInputError. Nothing is
-    started: the director call is its own click (GFX-003).
+def check_voice_id(value: object) -> int | None:
+    """The saved voice's id, or None for a run without a voice. Raises GraphicsLabInputError."""
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise GraphicsLabInputError("The voice must be a saved voice.")
+    return value
+
+
+async def create_run(
+    session: AsyncSession,
+    line_text: object,
+    orientation: object,
+    voice_id: object = None,
+) -> RunRow:
+    """Checks the form and adds one run. Commits. Raises GraphicsLabInputError. No model is
+    called: the director call is its own click (GFX-003).
+
+    With a saved voice the speech of the line is started now, as a Voice lab run in `direction`
+    mode with the explainer's presenter delivery, and its words are timed when it is stored
+    (`on_voice_finished`). A line whose estimated speech is longer than one graphic can be is
+    refused before any speech is made.
     """
-    run = LabGraphicRun(line_text=clean_line(line_text), orientation=check_orientation(orientation))
+    text = clean_line(line_text)
+    checked_orientation = check_orientation(orientation)
+    saved_voice_id = check_voice_id(voice_id)
+    speech_run_id: int | None = None
+    if saved_voice_id is not None:
+        await _estimated_timing(session, text)
+        form = voice_lab.VoiceLabForm(
+            mode="direction",
+            text=text,
+            instruction=SPEECH_DELIVERY,
+            voice_id=saved_voice_id,
+            seed=None,
+            cfg_scale=None,
+        )
+        try:
+            speech = await voice_lab.create_run(session, form, commit=False)
+        except voice_lab.VoiceLabInputError as exc:
+            await session.rollback()
+            raise GraphicsLabInputError(str(exc)) from exc
+        speech_run_id = speech.run.id
+    run = LabGraphicRun(
+        line_text=text,
+        orientation=checked_orientation,
+        voice_id=saved_voice_id,
+        speech_run_id=speech_run_id,
+    )
     session.add(run)
     await session.commit()
-    _logger.info("lab graphic run %d created: %s", run.id, run.orientation)
-    return RunRow(run=run, brief_job=None, renders=[])
+    _logger.info(
+        "lab graphic run %d created: %s, voice=%s", run.id, run.orientation, saved_voice_id
+    )
+    created = await get_run(session, run.id)
+    assert created is not None
+    return created
 
 
 def _select() -> Any:
     return select(LabGraphicRun, Job).outerjoin(Job, Job.id == LabGraphicRun.brief_job_id)
+
+
+async def _with_voices(session: AsyncSession, rows: list[RunRow]) -> list[RunRow]:
+    """The rows with the speech, saved voice and jobs of each run that has a voice, loaded
+    together.
+    """
+    speech_ids = {row.run.speech_run_id for row in rows if row.run.speech_run_id is not None}
+    if not speech_ids:
+        return rows
+    voice_ids = {row.run.voice_id for row in rows if row.run.voice_id is not None}
+    speeches = {
+        speech.id: speech
+        for speech in (
+            await session.execute(
+                select(LabVoiceRun)
+                .where(LabVoiceRun.id.in_(speech_ids))
+                .execution_options(populate_existing=True)
+            )
+        ).scalars()
+    }
+    voices: dict[int, Voice] = {}
+    if voice_ids:
+        found = await session.execute(
+            select(Voice).where(Voice.id.in_(voice_ids)).execution_options(populate_existing=True)
+        )
+        voices = {voice.id: voice for voice in found.scalars()}
+    job_ids = {row.run.timing_job_id for row in rows if row.run.timing_job_id is not None}
+    job_ids |= {speech.job_id for speech in speeches.values() if speech.job_id is not None}
+    jobs = await _jobs(session, job_ids)
+    attached: list[RunRow] = []
+    for row in rows:
+        speech = speeches.get(row.run.speech_run_id) if row.run.speech_run_id is not None else None
+        attached.append(
+            replace(
+                row,
+                speech=speech,
+                voice=voices.get(row.run.voice_id) if row.run.voice_id is not None else None,
+                speech_job=jobs.get(speech.job_id)
+                if speech is not None and speech.job_id is not None
+                else None,
+                timing_job=jobs.get(row.run.timing_job_id)
+                if row.run.timing_job_id is not None
+                else None,
+            )
+        )
+    return attached
 
 
 async def list_runs(session: AsyncSession, before_id: int | None, limit: int) -> list[RunRow]:
@@ -165,11 +348,14 @@ async def list_runs(session: AsyncSession, before_id: int | None, limit: int) ->
     if before_id is not None:
         statement = statement.where(LabGraphicRun.id < before_id)
     result = await session.execute(statement.execution_options(populate_existing=True))
-    return [RunRow(run=run, brief_job=job, renders=[]) for run, job in result.all()]
+    rows = [RunRow(run=run, brief_job=job, renders=[]) for run, job in result.all()]
+    return await _with_voices(session, rows)
 
 
 async def get_run(session: AsyncSession, run_id: int) -> RunRow | None:
-    """The run with its brief job and its renders, newest first. None when it does not exist."""
+    """The run with its brief job, its voice and its renders, newest first. None when it does
+    not exist.
+    """
     statement = (
         _select().where(LabGraphicRun.id == run_id).execution_options(populate_existing=True)
     )
@@ -183,9 +369,94 @@ async def get_run(session: AsyncSession, run_id: int) -> RunRow | None:
         .order_by(LabGraphicRender.id.desc())
         .execution_options(populate_existing=True)
     )
-    return RunRow(
+    row = RunRow(
         run=run, brief_job=brief_job, renders=await _render_rows(session, renders.scalars())
     )
+    return (await _with_voices(session, [row]))[0]
+
+
+# --- The voice (GFX-004) ----------------------------------------------------------------------
+
+
+async def on_voice_finished(speech_run_id: int) -> bool:
+    """Called (best effort) once a Voice lab speech has been stored. Queues the timing of the
+    words of every run made with this speech that has no timing and no timing job yet. Returns
+    True when a job was queued.
+    """
+    # A session of its own: this is called from the speech job, after it was saved.
+    async with SessionLocal() as session:
+        statement = select(LabGraphicRun).where(
+            LabGraphicRun.speech_run_id == speech_run_id,
+            LabGraphicRun.timing.is_(None),
+            LabGraphicRun.timing_job_id.is_(None),
+        )
+        runs = list((await session.execute(statement)).scalars())
+        queued = False
+        for run in runs:
+            job, created = await store.create_job(
+                session,
+                project_id=None,
+                type=TIMING_JOB_TYPE,
+                provider="gpu",
+                input={"requested": TIMING_JOB_TYPE, TIMING_DEDUPE_KEY: run.id},
+                commit=False,
+                dedupe_key=TIMING_DEDUPE_KEY,
+            )
+            run.timing_job_id = job.id
+            queued = queued or created
+        await session.commit()
+    return queued
+
+
+async def speech_for_timing(
+    session: AsyncSession, run_id: int
+) -> tuple[str, str, float | None] | None:
+    """What the timing job needs: the stored path of the run's speech, the run's line and the
+    speech's measured length. None when the run or its speech (or its file) is gone.
+    """
+    statement = select(LabGraphicRun).where(LabGraphicRun.id == run_id)
+    run = (await session.execute(statement.execution_options(populate_existing=True))).scalar()
+    if run is None or run.speech_run_id is None:
+        return None
+    speech = await session.get(LabVoiceRun, run.speech_run_id)
+    if speech is None or speech.path is None:
+        return None
+    return speech.path, run.line_text, speech.duration_s
+
+
+def voice_timing(alignment: Any, threshold: int, duration_s: float) -> dict[str, Any]:
+    """The timing of a run with a voice, from `word_timings.Alignment`. It has the shape the
+    brief and `graphics_resolve.resolve` read: one entry for each word of the line, and
+    `duration_s` the length of the speech. Below the threshold the times are estimated over the
+    real speech, and `note` says so.
+    """
+    timing: dict[str, Any] = {
+        "source": alignment.source,
+        "duration_s": round(duration_s, 3),
+        "match_percent": alignment.match_percent,
+        "threshold": threshold,
+        "heard_text": alignment.heard_text,
+        "words": alignment.words,
+    }
+    if alignment.source == graphics_resolve.SOURCE_ESTIMATED:
+        timing["note"] = (
+            f"Parakeet's words matched {alignment.match_percent:g}% of the line, and "
+            f"{threshold}% is needed, so the word times are estimated over the speech."
+        )
+    return timing
+
+
+async def store_timing(session: AsyncSession, run_id: int, timing: dict[str, Any]) -> bool:
+    """Saves the timing on the run. No commit. False when the run is gone or already has a
+    timing (a brief may have been written from it, so it stands).
+    """
+    statement = select(LabGraphicRun).where(LabGraphicRun.id == run_id)
+    run = (await session.execute(statement.execution_options(populate_existing=True))).scalar()
+    if run is None or run.timing is not None:
+        return False
+    run.timing = timing
+    run.last_error = None
+    return True
 
 
 async def _render_rows(session: AsyncSession, renders: Any) -> list[RenderRow]:
@@ -264,6 +535,21 @@ def _ensure_fits(timing: dict[str, Any]) -> None:
         raise GraphicsLabInputError(str(exc)) from exc
 
 
+def _require_voice_timed(row: RunRow) -> None:
+    """Raises GraphicsLabConflictError unless the run has no voice or its voice is timed: the
+    brief is resolved from the real times, so it waits for them.
+    """
+    status = row.voice_status
+    if status is None or status.stage == "ready":
+        return
+    if status.stage == "failed":
+        reason = (status.error or "").rstrip(". ")
+        raise GraphicsLabConflictError(f"The voice failed: {reason}. Make a new run to try again.")
+    raise GraphicsLabConflictError(
+        "The voice is still being made and timed. Write the brief when it is ready."
+    )
+
+
 async def start_brief(
     session: AsyncSession, run_id: int, *, then_start_engines: bool = False
 ) -> RunRow | None:
@@ -284,6 +570,7 @@ async def start_brief(
         )
     if row.state == "writing_brief":
         raise GraphicsLabConflictError("The brief is already being written.")
+    _require_voice_timed(row)
     if run.timing is None:
         run.timing = await _estimated_timing(session, run.line_text)
     else:
@@ -380,12 +667,32 @@ async def make_all(session: AsyncSession, run_id: int) -> RunRow | None:
 async def ask_again(session: AsyncSession, run_id: int) -> RunRow | None:
     """**Ask again**: a new run with the same line and orientation, and its brief started. The
     old run is not changed. None when the run does not exist. Commits. Raises
-    GraphicsLabInputError when the line is too long.
+    GraphicsLabInputError when the line is too long, and GraphicsLabConflictError when the run's
+    voice is not timed.
+
+    A run with a voice keeps it: the new run shares the same speech and copies its timing, so
+    nothing is spoken or timed again and the brief can start at once.
     """
-    source = await session.get(LabGraphicRun, run_id)
-    if source is None:
+    row = await get_run(session, run_id)
+    if row is None:
         return None
+    source = row.run
     # Checked before the new run is made, so a refused click leaves nothing behind.
-    await _estimated_timing(session, source.line_text)
-    created = await create_run(session, source.line_text, source.orientation)
-    return await start_brief(session, created.run.id)
+    if source.speech_run_id is None:
+        await _estimated_timing(session, source.line_text)
+        created = await create_run(session, source.line_text, source.orientation)
+        return await start_brief(session, created.run.id)
+    _require_voice_timed(row)
+    assert source.timing is not None
+    _ensure_fits(source.timing)
+    copy = LabGraphicRun(
+        line_text=source.line_text,
+        orientation=source.orientation,
+        voice_id=source.voice_id,
+        speech_run_id=source.speech_run_id,
+        timing=source.timing,
+    )
+    session.add(copy)
+    await session.commit()
+    _logger.info("lab graphic run %d created as a copy of run %d, with its voice", copy.id, run_id)
+    return await start_brief(session, copy.id)

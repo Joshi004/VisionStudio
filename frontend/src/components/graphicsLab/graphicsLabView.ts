@@ -3,6 +3,7 @@ import type {
   GraphicOrientation,
   GraphicRunCreate,
   GraphicRunState,
+  GraphicVoiceStage,
 } from "../../api/graphicsLab";
 
 /** The longest line the lab takes. The server stays the judge; the form only says so early. */
@@ -11,11 +12,14 @@ export const LINE_MAX_CHARS = 300;
 export type GraphicsLabFormState = {
   line: string;
   orientation: GraphicOrientation;
+  /** The id of a saved voice as the select holds it (a string), or null for no voice. */
+  voiceId: string | null;
 };
 
 export const DEFAULT_FORM: GraphicsLabFormState = {
   line: "",
   orientation: "landscape",
+  voiceId: null,
 };
 
 export const ORIENTATION_LABELS: Record<GraphicOrientation, string> = {
@@ -25,6 +29,8 @@ export const ORIENTATION_LABELS: Record<GraphicOrientation, string> = {
 
 const STATE_TEXT: Record<GraphicRunState, string> = {
   new: "No brief yet",
+  making_voice: "Making the voice",
+  voice_failed: "The voice failed",
   writing_brief: "Writing the brief",
   brief_ready: "Brief ready",
   brief_failed: "The brief failed",
@@ -48,7 +54,23 @@ export function formProblem(form: GraphicsLabFormState): string | null {
 }
 
 export function toRequest(form: GraphicsLabFormState): GraphicRunCreate {
-  return { line_text: form.line.trim(), orientation: form.orientation };
+  return {
+    line_text: form.line.trim(),
+    orientation: form.orientation,
+    voice_id: form.voiceId === null ? null : Number(form.voiceId),
+  };
+}
+
+const VOICE_STAGE_TEXT: Record<GraphicVoiceStage, string> = {
+  speaking: "The line is being spoken",
+  timing: "The words are being timed",
+  ready: "Voice ready",
+  failed: "The voice failed",
+};
+
+/** Where a run's voice stands, in words. */
+export function voiceStageText(stage: GraphicVoiceStage): string {
+  return VOICE_STAGE_TEXT[stage];
 }
 
 /** The line on one row of a list, cut at a whole word where it is long. */

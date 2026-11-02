@@ -38,6 +38,8 @@ export function GraphicsBriefPanel({ run, onOpenRun }: GraphicsBriefPanelProps) 
 
   const busy = writeBrief.isPending || makeAll.isPending || askAgain.isPending;
   const writing = run.state === "writing_brief";
+  // The brief is resolved from the real word times, so it waits for the voice (GFX-004).
+  const waitingForVoice = run.state === "making_voice" || run.state === "voice_failed";
   const noEngineBuilt = run.engines.every((engine) => !engine.built);
   const failure = [writeBrief, makeAll, askAgain].find((click) => click.isError)?.error;
   // A brief job that ended without saying why on the run (cancelled, or failed by a restart).
@@ -52,7 +54,7 @@ export function GraphicsBriefPanel({ run, onOpenRun }: GraphicsBriefPanelProps) 
               Brief
             </Text>
             <Group gap="xs">
-              {writing && <Loader size="xs" />}
+              {(writing || run.state === "making_voice") && <Loader size="xs" />}
               <Text size="sm" c="dimmed">
                 {stateText(run.state)}.
               </Text>
@@ -60,7 +62,7 @@ export function GraphicsBriefPanel({ run, onOpenRun }: GraphicsBriefPanelProps) 
           </Stack>
 
           <Group gap="xs">
-            {(run.state === "new" || run.state === "brief_failed") && (
+            {!waitingForVoice && (run.state === "new" || run.state === "brief_failed") && (
               <Button
                 size="compact-sm"
                 variant="default"
@@ -71,7 +73,7 @@ export function GraphicsBriefPanel({ run, onOpenRun }: GraphicsBriefPanelProps) 
                 {run.state === "new" ? "Write the brief" : "Try again"}
               </Button>
             )}
-            {run.state !== "writing_brief" && (
+            {!waitingForVoice && run.state !== "writing_brief" && (
               <Button
                 size="compact-sm"
                 loading={makeAll.isPending}
@@ -95,7 +97,14 @@ export function GraphicsBriefPanel({ run, onOpenRun }: GraphicsBriefPanelProps) 
           </Group>
         </Group>
 
-        {run.state !== "brief_ready" && run.state !== "writing_brief" && (
+        {waitingForVoice && (
+          <Text size="xs" c="dimmed">
+            {run.state === "making_voice"
+              ? "The brief can be written once the voice is timed."
+              : "The voice failed. Make a new run to try again."}
+          </Text>
+        )}
+        {!waitingForVoice && run.state !== "brief_ready" && run.state !== "writing_brief" && (
           <Text size="xs" c="dimmed">
             Writing the brief is one paid model call (two at most, if the first answer cannot be
             used). Make all writes the brief and then starts every engine that is built.

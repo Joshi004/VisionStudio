@@ -2067,7 +2067,8 @@ export interface paths {
         put?: never;
         /**
          * Create Run
-         * @description Makes a run from a line (1 to 300 characters) and an orientation. Nothing is started.
+         * @description Makes a run from a line (1 to 300 characters), an orientation and, optionally, a saved
+         *     voice. No model is called. With a voice, its speech starts now (a GPU job).
          */
         post: operations["create_run_api_lab_graphics_runs_post"];
         delete?: never;
@@ -7292,6 +7293,8 @@ export interface components {
             line_text: string;
             /** Orientation */
             orientation: string;
+            /** Voice Id */
+            voice_id?: number | null;
         };
         /** GraphicRunOut */
         GraphicRunOut: {
@@ -7313,7 +7316,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "new" | "writing_brief" | "brief_ready" | "brief_failed";
+            state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
             /** Width */
             width: number;
             /** Height */
@@ -7324,6 +7327,7 @@ export interface components {
             voice_id: number | null;
             /** Speech Run Id */
             speech_run_id: number | null;
+            voice: components["schemas"]["GraphicVoiceOut"] | null;
             /** Timing */
             timing: unknown | null;
             brief: components["schemas"]["GraphicBriefOut"] | null;
@@ -7354,7 +7358,38 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "new" | "writing_brief" | "brief_ready" | "brief_failed";
+            state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
+        };
+        /**
+         * GraphicVoiceOut
+         * @description The voice of a run (GFX-004): the speech and where the timing of its words stands.
+         */
+        GraphicVoiceOut: {
+            /** Voice Id */
+            voice_id: number | null;
+            /** Voice Name */
+            voice_name: string | null;
+            /** Speech Run Id */
+            speech_run_id: number;
+            /** Speech Url */
+            speech_url: string | null;
+            speech_job: components["schemas"]["JobSummary"] | null;
+            timing_job: components["schemas"]["JobSummary"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "speaking" | "timing" | "ready" | "failed";
+            /** Error */
+            error: string | null;
+            /** Timing Source */
+            timing_source: string | null;
+            /** Match Percent */
+            match_percent: number | null;
+            /** Threshold */
+            threshold: number | null;
+            /** Note */
+            note: string | null;
         };
         /** GraphicZoneOut */
         GraphicZoneOut: {
@@ -19957,6 +19992,15 @@ export interface operations {
             };
             /** @description No run or render has this id. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

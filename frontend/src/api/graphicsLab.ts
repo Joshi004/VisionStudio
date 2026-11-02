@@ -11,6 +11,8 @@ export type GraphicRunCreate = components["schemas"]["GraphicRunCreate"];
 export type GraphicEngine = components["schemas"]["GraphicEngineOut"];
 export type GraphicRender = components["schemas"]["GraphicRenderOut"];
 export type GraphicRunState = GraphicRunSummary["state"];
+export type GraphicVoice = components["schemas"]["GraphicVoiceOut"];
+export type GraphicVoiceStage = GraphicVoice["state"];
 export type GraphicBrief = components["schemas"]["GraphicBriefOut"];
 export type GraphicResolved = components["schemas"]["GraphicResolvedOut"];
 export type GraphicOrientation = GraphicRunSummary["orientation"];
@@ -37,7 +39,8 @@ async function fetchRuns(beforeId: number | undefined) {
 
 /**
  * The runs, newest first, a page at a time. They are loaded again every few seconds while the
- * brief of any of them is being written, so its state changes by itself.
+ * brief of any of them is being written or its voice is being made, so its state changes by
+ * itself.
  */
 export function useGraphicsRuns() {
   return useInfiniteQuery({
@@ -46,7 +49,9 @@ export function useGraphicsRuns() {
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (last) => (last.length === PAGE_SIZE ? last[last.length - 1].id : undefined),
     refetchInterval: (query) =>
-      query.state.data?.pages.some((page) => page.some((run) => run.state === "writing_brief"))
+      query.state.data?.pages.some((page) =>
+        page.some((run) => run.state === "writing_brief" || run.state === "making_voice"),
+      )
         ? ACTIVE_POLL_MS
         : false,
   });
@@ -65,13 +70,18 @@ async function fetchRun(runId: number) {
   return data;
 }
 
-/** True while a job behind the run (its brief, or any input or render) is waiting or running. */
+/**
+ * True while a job behind the run (its speech, the timing of its words, its brief, or any input
+ * or render) is waiting or running.
+ */
 function hasActiveJob(run: GraphicRun | undefined): boolean {
   if (run === undefined) {
     return false;
   }
   return (
     isJobActive(run.brief_job) ||
+    isJobActive(run.voice?.speech_job) ||
+    isJobActive(run.voice?.timing_job) ||
     run.engines.some((engine) =>
       engine.renders.some((render) => isJobActive(render.input_job) || isJobActive(render.render_job)),
     )

@@ -5,6 +5,7 @@ import { useGraphicsRun } from "../../api/graphicsLab";
 import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
 import { GraphicsBriefPanel } from "./GraphicsBriefPanel";
 import { GraphicsEngineCard } from "./GraphicsEngineCard";
+import { GraphicsVoicePanel } from "./GraphicsVoicePanel";
 import { ORIENTATION_LABELS } from "./graphicsLabView";
 
 type GraphicsRunPageProps = {
@@ -58,6 +59,8 @@ export function GraphicsRunPage({ runId, onBack, onOpenRun }: GraphicsRunPagePro
               </Text>
             </Stack>
           </Paper>
+
+          {data.voice !== null && <GraphicsVoicePanel voice={data.voice} />}
 
           <GraphicsBriefPanel run={data} onOpenRun={onOpenRun} />
 
