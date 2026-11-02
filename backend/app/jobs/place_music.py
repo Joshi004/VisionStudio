@@ -12,8 +12,8 @@ owner, and the placement is saved without the model's help.
 
 The model is the **story role** (`llm_target.STORY_MODEL_KEY`). A paid job, so the rules in
 `jobs/llm_call.py` hold: at most 2 attempts (the second told what was wrong with the first
-answer), a refusal never retried, every answer saved the moment it arrives, and a restart never
-re-runs it (`never_rerun`). With nothing to ask, no call is made. The placement row is saved in
+answer), a refusal never retried, every answer saved the moment it arrives, and a restart queues
+it again (`never_rerun`). With nothing to ask, no call is made. The placement row is saved in
 the same transaction that marks the job succeeded. Logs hold the job id and counts, never the
 story or the answers.
 """

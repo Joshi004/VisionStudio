@@ -358,6 +358,11 @@ def asking_model(attempt: int, attempts: int) -> str:
     return f"asking the language model (attempt {attempt} of {attempts})"
 
 
+def queued_again(reason: str, attempt: int, attempts: int) -> str:
+    """Shown on a paid job the dispatcher put back in the queue by itself."""
+    return f"{reason}: queued again (attempt {attempt} of {attempts})"
+
+
 # --- The stage a job shows: worked out from its status and phase ------------------------------
 # Only five statuses are stored, but a remote GPU job goes through many more steps. The stage
 # names the step for people, and nothing is stored: `stage_of` reads `status` and `phase`.

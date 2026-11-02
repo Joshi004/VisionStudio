@@ -10,7 +10,7 @@ fails, the attempt is marked failed
 
 It is a paid call to the language model, so the rules in `jobs/llm_call.py` hold: at most 2
 attempts, a refusal never retried, every answer saved the moment it arrives, and a restart
-never re-runs it (`never_rerun`). A click writes the prompt again even when one exists
+queues it again (`never_rerun`). A click writes the prompt again even when one exists
 already: the job is created with `dedupe=False`, so two clicks make two jobs.
 
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt

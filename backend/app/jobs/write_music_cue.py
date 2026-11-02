@@ -27,7 +27,7 @@ the job succeeded.
 The model is the **story role** (`llm_target.STORY_MODEL_KEY`). A paid job, so the rules in
 `jobs/llm_call.py` hold for every call: at most 2 attempts (the second told what was wrong with
 the first answer), a refusal never retried, every answer saved the moment it arrives, and a
-restart never re-runs it (`never_rerun`). The answers already paid for stay on the job's output.
+restart queues it again (`never_rerun`). The answers already paid for stay on the job's output.
 
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt
 did and its token counts, never the story or the answers.

@@ -1320,6 +1320,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Diagnostics
+         * @description Timings of the dispatcher, the pipeline run and the database pool, and the time jobs
+         *     wait before they start. Read-only, and costs no database read.
+         */
+        get: operations["get_diagnostics_api_jobs_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/capacity": {
         parameters: {
             query?: never;
@@ -4888,6 +4909,8 @@ export interface components {
             stale: number;
             /** Failed */
             failed: number;
+            /** Not Started */
+            not_started: number;
             /** Blocked By */
             blocked_by: string[];
             /** Blocked Reason */
@@ -7109,6 +7132,23 @@ export interface components {
              * @enum {string}
              */
             readonly stage: "waiting" | "paused" | "resubmitting" | "starting" | "waiting_to_upload" | "uploading" | "waiting_for_gpu" | "running_on_server" | "fetching_result" | "server_unreachable" | "not_found" | "running" | "completed" | "failed" | "cancelled";
+        };
+        /**
+         * JobDiagnostics
+         * @description How the scheduler is doing, from the last `window_s` seconds (`app/core/metrics.py`).
+         *     Kept in memory, so it starts empty after a restart.
+         */
+        JobDiagnostics: {
+            /** Window S */
+            window_s: number;
+            /** Series */
+            series: {
+                [key: string]: components["schemas"]["SeriesStats"];
+            };
+            /** Counters */
+            counters: {
+                [key: string]: number;
+            };
         };
         /**
          * JobPromptOut
@@ -11424,6 +11464,21 @@ export interface components {
              * Format: date-time
              */
             selected_at: string;
+        };
+        /**
+         * SeriesStats
+         * @description The recent samples of one measurement: how many, the median, the 90th percentile and the
+         *     largest. Seconds for names ending in `_s`, plain numbers otherwise.
+         */
+        SeriesStats: {
+            /** Count */
+            count: number;
+            /** P50 */
+            p50: number;
+            /** P90 */
+            p90: number;
+            /** Max */
+            max: number;
         };
         /** ServerStatusOut */
         ServerStatusOut: {
@@ -17597,6 +17652,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_diagnostics_api_jobs_diagnostics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDiagnostics"];
                 };
             };
         };

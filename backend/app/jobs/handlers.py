@@ -18,8 +18,11 @@ backend stopped (ANALYSIS.md Section 3.3, "On backend start"):
 - `resume`: a remote job. With a provider job id it keeps being polled. Without one the
   submit never completed, so it is queued again.
 - `start_again`: a local job. It is queued again.
-- `never_rerun`: a paid LLM job. It is failed, because a paid call never repeats by itself
-  (ANALYSIS.md Section 6.2, rule 1).
+- `never_rerun`: a paid LLM job. It is not resumed: a paid call is not continued from where it
+  stopped (ANALYSIS.md Section 6.2, rule 1). The dispatcher queues it again from the start, at
+  most `MAX_AUTOMATIC_RERUNS` times (the handler can opt out with `rerun_automatically`), and
+  after that it is failed. The same applies when a passing database error (a pool timeout,
+  "database is locked") ended its task.
 
 `start` and `finish` open their own database session (`SessionLocal()`), keep transactions
 short, and never hold one across a network call. `poll` is given the job and a `PollContext`
@@ -31,7 +34,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +45,10 @@ if TYPE_CHECKING:
 
 RestartRule = Literal["resume", "start_again", "never_rerun"]
 Provider = Literal["gpu", "llm", "image", "local"]
+
+# How many times a `never_rerun` job is queued again by itself (after a restart or a passing
+# database error) before it is failed. With the first run, a job has this many plus one attempts.
+MAX_AUTOMATIC_RERUNS: Final = 2
 
 
 @dataclass(frozen=True)
@@ -79,6 +86,13 @@ class JobHandler(ABC):
     # provider setting says, before a job starts, whether the job's calls go to the paid API or
     # to Qwen3.8 on the GPU server, and so which pool the job waits in.
     model_key: ClassVar[str | None] = None
+    # A slow local poll (the story pipeline run) runs in a task of its own, so the tick does not
+    # wait for it before starting queued jobs.
+    poll_in_background: ClassVar[bool] = False
+    # A `never_rerun` job that a restart or a passing database error cut short is queued again
+    # by itself, up to `MAX_AUTOMATIC_RERUNS` times. False for a job that would repeat something
+    # already saved if it ran again from the start.
+    rerun_automatically: ClassVar[bool] = True
 
     async def concurrency_limit(self, session: AsyncSession) -> int:
         """How many jobs of this type may be running at once. Only a `local` handler is asked:

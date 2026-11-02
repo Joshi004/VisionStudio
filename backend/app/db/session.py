@@ -11,17 +11,26 @@ Alembic (which only needs the ORM metadata) never creates this async engine.
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncGenerator
-from typing import Annotated
+from typing import Annotated, Any, Final
 
 from fastapi import Depends, Request
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core import metrics
 from app.core.config import get_config
 from app.db import activity, state_memo  # noqa: F401  (activity: registers its session listeners)
 
-engine = create_async_engine(get_config().async_database_url)
+# SQLite allows one writer at a time, but most sessions only hold a connection for a few
+# milliseconds. 64 paid calls, the GPU jobs, the pipeline pass and the API share the pool.
+POOL_SIZE: Final = 20
+POOL_MAX_OVERFLOW: Final = 20
+
+engine = create_async_engine(
+    get_config().async_database_url, pool_size=POOL_SIZE, max_overflow=POOL_MAX_OVERFLOW
+)
 
 
 @event.listens_for(engine.sync_engine, "connect")
@@ -38,6 +47,23 @@ def _set_sqlite_pragmas(dbapi_connection: object, _record: object) -> None:
     cursor.execute("PRAGMA busy_timeout=5000")
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.close()
+
+
+@event.listens_for(engine.sync_engine, "checkout")
+def _note_checkout(_dbapi_connection: object, record: Any, _proxy: object) -> None:
+    """For the scheduler diagnostics (`app/core/metrics.py`): when a connection was taken, and
+    how many are held now. It changes nothing about the pool.
+    """
+    record.info["checked_out_at"] = time.monotonic()
+    metrics.record("pool_in_use", engine.sync_engine.pool.checkedout())  # type: ignore[attr-defined]
+
+
+@event.listens_for(engine.sync_engine, "checkin")
+def _note_checkin(_dbapi_connection: object, record: Any) -> None:
+    """How long the connection that is being given back was held."""
+    taken = record.info.pop("checked_out_at", None) if record is not None else None
+    if taken is not None:
+        metrics.record("pool_hold_s", time.monotonic() - taken)
 
 
 # `expire_on_commit=False`: with async SQLAlchemy, lazy loading (which a post-commit

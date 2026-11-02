@@ -10,8 +10,8 @@ The request is built and the answer checked in `services/music_cue_writer.py`.
 
 The model is the **story role** (`llm_target.STORY_MODEL_KEY`). A paid job, so the rules in
 `jobs/llm_call.py` hold: at most 2 attempts (the second told what was wrong with the first
-answer), a refusal never retried, every answer saved the moment it arrives, and a restart never
-re-runs it (`never_rerun`): the owner rejects the take again with a fresh job. The new take (a
+answer), a refusal never retried, every answer saved the moment it arrives, and a restart queues
+it again (`never_rerun`): the owner rejects the take again with a fresh job. The new take (a
 `lab_music` run) is queued in the same transaction that marks this job succeeded. It is a
 local-style job: everything happens in `start`. Logs hold the job id and token counts, never the
 story, the note or the answers.

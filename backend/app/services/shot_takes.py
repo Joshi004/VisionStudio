@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -957,6 +958,40 @@ async def start_shot(session: AsyncSession, project: Project, scene_id: str, sho
     )
     await session.commit()
     return job
+
+
+async def start_shots(
+    session: AsyncSession, project: Project, keys: list[tuple[str, str]]
+) -> AsyncGenerator[tuple[tuple[str, str], Job | str]]:
+    """Queues the job that generates one more take of each of these `(scene id, shot id)`
+    shots, exactly as `start_shot` does for one (no chaining: a shot that continues another
+    waits for it in the pipeline), but works out the state once for all of them. Each take and
+    job is committed as it is made, so a long batch never holds the database's one writer.
+
+    Gives `(key, outcome)` for each shot as it is done: the job (the one already generating the
+    shot when it has one) or, when that shot cannot be generated, the reason as a sentence for
+    the user. The caller may stop reading at any point; what was given is done. Anything else
+    that goes wrong is raised, after the shots already given.
+    """
+    current = await state(session, project)
+    for scene_id, shot_id in keys:
+        outcome: Job | str
+        try:
+            scene, shot = _find_shot(current, scene_id, shot_id)
+            if shot.blocked_reason is not None and not _already_generating(shot):
+                raise ShotTakesError(shot.blocked_reason)
+            prompt = await _newest_prompt(session, project.id, scene_id, shot_id)
+            if prompt is None:
+                raise ShotTakesError(
+                    "Compile this shot's prompt first: the clip is generated from it."
+                )
+            outcome, _created = await _queue(
+                session, project, scene_id, shot, prompt, predecessor=_predecessor(scene, shot)
+            )
+            await session.commit()
+        except ShotTakesError as exc:
+            outcome = str(exc)
+        yield (scene_id, shot_id), outcome
 
 
 def _already_generating(shot: ShotEntry) -> bool:

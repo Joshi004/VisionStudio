@@ -15,7 +15,7 @@ with `dedupe_key`). The model is the **story role** (`llm_target.STORY_MODEL_KEY
 story stage (D-12).
 
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved on the job the moment it arrives, and a restart never re-runs it
+retried, every answer saved on the job the moment it arrives, and a restart queues it again
 (`never_rerun`): the user asks again by pressing Stage again.
 
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt

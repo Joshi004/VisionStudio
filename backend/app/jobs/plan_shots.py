@@ -20,7 +20,7 @@ the number of the version it was about, and that plan's shots): the request gets
 blocks, and the plan the job saves records the note in its `inputs`.
 
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved on the job the moment it arrives, and a restart never re-runs it
+retried, every answer saved on the job the moment it arrives, and a restart queues it again
 (`never_rerun`): the user asks again by pressing Plan again. An answer that leaves an event
 unshown or a unit uncarried is unusable, so it is asked for once more; after that the job fails
 with the reason and nothing is stored.

@@ -10,7 +10,7 @@ marks the job succeeded.
 
 The model is the **story role** (`llm_target.STORY_MODEL_KEY`), like every story stage (D-12).
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved the moment it arrives, and a restart never re-runs it
+retried, every answer saved the moment it arrives, and a restart queues it again
 (`never_rerun`): the user asks again with the Find relations button.
 
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt

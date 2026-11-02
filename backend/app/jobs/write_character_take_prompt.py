@@ -10,7 +10,7 @@ assembles them, so `output.video_prompt` is the finished text. A take of H3 may 
 `last_frame_prompt`, the instruction that edits its first frame into its last.
 
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved the moment it arrives, and a restart never re-runs it
+retried, every answer saved the moment it arrives, and a restart queues it again
 (`never_rerun`): the take's own "continue" step asks again by starting a fresh job, never by
 resuming this one.
 

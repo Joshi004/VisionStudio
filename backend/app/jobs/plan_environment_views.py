@@ -16,7 +16,7 @@ One job per environment, so environments are planned side by side (`store.create
 stage (D-12).
 
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved on the job the moment it arrives, and a restart never re-runs it
+retried, every answer saved on the job the moment it arrives, and a restart queues it again
 (`never_rerun`). It is a local-style job: everything happens in `start`. Logs hold the job id,
 what each attempt did and its token counts, never the answer.
 """

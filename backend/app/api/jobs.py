@@ -15,6 +15,7 @@ from pydantic import BaseModel, computed_field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
+from app.core import metrics
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionDep
@@ -293,6 +294,36 @@ class PoolCapacity(BaseModel):
 
 class JobCapacity(BaseModel):
     pools: list[PoolCapacity]
+
+
+class SeriesStats(BaseModel):
+    """The recent samples of one measurement: how many, the median, the 90th percentile and the
+    largest. Seconds for names ending in `_s`, plain numbers otherwise.
+    """
+
+    count: int
+    p50: float
+    p90: float
+    max: float
+
+
+class JobDiagnostics(BaseModel):
+    """How the scheduler is doing, from the last `window_s` seconds (`app/core/metrics.py`).
+    Kept in memory, so it starts empty after a restart.
+    """
+
+    window_s: int
+    series: dict[str, SeriesStats]
+    counters: dict[str, int]
+
+
+# Registered before `/jobs/{job_id}`, which would take "diagnostics" for a job id.
+@router.get("/jobs/diagnostics", response_model=JobDiagnostics)
+async def get_diagnostics() -> JobDiagnostics:
+    """Timings of the dispatcher, the pipeline run and the database pool, and the time jobs
+    wait before they start. Read-only, and costs no database read.
+    """
+    return JobDiagnostics.model_validate(metrics.summary())
 
 
 # Registered before `/jobs/{job_id}`, which would take "capacity" for a job id.

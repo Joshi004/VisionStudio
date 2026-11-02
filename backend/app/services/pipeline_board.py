@@ -135,6 +135,9 @@ class StepCounts:
     failed: int = 0
     # Targets that are not done, have nothing going on, and cannot go on.
     blocked: int = 0
+    # Targets that could be started now and have no job yet: not done, nothing going on, not
+    # blocked, not failed, not waiting for another target, and nothing needs allowing first.
+    not_started: int = 0
     # Why the first such target failed or cannot go on.
     reason: str | None = None
 
@@ -184,7 +187,7 @@ def _short(text: str) -> str:
 
 def count_targets(targets: list[Target]) -> StepCounts:
     """Counts a step's targets. Pure."""
-    active = stale = failed = blocked = done = 0
+    active = stale = failed = blocked = done = not_started = 0
     reason: str | None = None
     for target in targets:
         done += target.done
@@ -199,6 +202,8 @@ def count_targets(targets: list[Target]) -> StepCounts:
         elif target.last_error is not None:
             failed += 1
             reason = reason or _short(target.last_error)
+        elif not target.waits_for and target.consent is None:
+            not_started += 1
     return StepCounts(
         total=len(targets),
         done=done,
@@ -206,6 +211,7 @@ def count_targets(targets: list[Target]) -> StepCounts:
         stale=stale,
         failed=failed,
         blocked=blocked,
+        not_started=not_started,
         reason=reason,
     )
 

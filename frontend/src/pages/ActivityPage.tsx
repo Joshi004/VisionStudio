@@ -22,6 +22,7 @@ import { JobActions } from "../components/jobs/JobActions";
 import { JobDetailDrawer } from "../components/jobs/JobDetailDrawer";
 import { JobStatusBadge } from "../components/jobs/JobStatusBadge";
 import { PoolCapacityPanel } from "../components/jobs/PoolCapacityPanel";
+import { SchedulerHealthPanel } from "../components/jobs/SchedulerHealthPanel";
 import { elapsedText, jobTypeLabel, labPathFor } from "../components/jobs/jobFormat";
 import { formatDateTime } from "../format";
 import { useNow } from "../hooks/useNow";
@@ -76,6 +77,7 @@ export function ActivityPage() {
       </Group>
 
       <PoolCapacityPanel />
+      <SchedulerHealthPanel />
 
       {isLoading && <Loader size="sm" />}
 

@@ -17,7 +17,7 @@ library character (ANALYSIS.md Phase 25), told apart by `job.input["requested"]`
 
 Both are a paid call to the language model, so the rules in `jobs/llm_call.py` hold here:
 at most 2 attempts, a refusal never retried, every answer
-saved the moment it arrives, and a restart never re-runs it (`never_rerun`). A click writes the
+saved the moment it arrives, and a restart queues it again (`never_rerun`). A click writes the
 prompt or the line again even when one exists already (that is what "write again" is for): the
 job type passes `dedupe=False` (`character_library.PROMPT_JOB`'s callers), so two clicks make
 two jobs.

@@ -29,6 +29,10 @@ function detailParts(step: BoardStep, labelOf: (key: string) => string): string[
   if (step.active > 0) {
     parts.push(`${step.active} running`);
   }
+  if (step.not_started > 0 && (step.status === "running" || step.status === "ready")) {
+    // Ready to go, but no job exists yet: work the pipeline has not queued.
+    parts.push(`${step.not_started} not queued yet`);
+  }
   if (step.stale > 0) {
     parts.push(`${step.stale} out of date`);
   }

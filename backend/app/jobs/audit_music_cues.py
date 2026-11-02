@@ -18,8 +18,8 @@ The result is saved with its fixes applied as new rows of the cues they touch
 
 The model is the **story role** (`llm_target.STORY_MODEL_KEY`). A paid job, so the rules in
 `jobs/llm_call.py` hold: at most 2 attempts (the second told what was wrong with the first answer),
-a refusal never retried, every answer saved the moment it arrives, and a restart never re-runs
-it (`never_rerun`).
+a refusal never retried, every answer saved the moment it arrives, and a restart queues it
+again (`never_rerun`).
 
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt
 did and its token counts, never the story or the answers.

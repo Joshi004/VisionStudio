@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
@@ -235,6 +235,57 @@ async def _start_each(
             _logger.exception("pipeline: starting '%s' failed unexpectedly", target.key)
             await session.rollback()
             results.append(Started(target, error=f"Unexpected error: {exc}"))
+    return results
+
+
+# How long a batch start goes on after its first shot is done. What the whole batch reads once
+# (the project's stages) is not counted, so only the shots themselves use this time. The rest is
+# started by the next poll.
+BATCH_SECONDS: Final = 5.0
+
+# Starts a stage's shots together: given the `(scene id, shot id)` of each, it gives each shot's
+# job, or the reason it cannot be started, as the shot is done (`shot_definitions.start_shots`).
+StartShots = Callable[[list[tuple[str, str]]], AsyncGenerator[tuple[tuple[str, str], Job | str]]]
+
+
+async def _start_batch(
+    session: AsyncSession, targets: list[Target], deadline: float, start: StartShots
+) -> list[Started]:
+    """Starts the shot targets of a step in one pass, where `_start_each` starts one at a time.
+
+    The stage reads the project once for all of them (`start`), instead of once for each. A shot
+    the stage refuses is reported on its target and the others go on. It stops when the time is
+    up (`deadline`, but never before `BATCH_SECONDS` after the first shot), and the targets not
+    reached are left for the next poll: they are not in the result.
+
+    An unexpected error is put on the target that was being started (the first one not done),
+    because a transient problem must not use up a try for every shot of the batch. The targets
+    after it are left for the next poll too.
+    """
+    pending = {(target.ref[0], target.ref[1]): target for target in targets}
+    results: list[Started] = []
+    stream = start(list(pending))
+    cutoff: float | None = None
+    try:
+        async for key, outcome in stream:
+            target = pending.pop(key)
+            if isinstance(outcome, Job):
+                results.append(Started(target, job_ids=(outcome.id,)))
+            else:
+                results.append(Started(target, error=outcome))
+            if cutoff is None:
+                cutoff = max(deadline, time.monotonic() + BATCH_SECONDS)
+            if time.monotonic() > cutoff:
+                break
+    except Exception as exc:
+        _logger.exception(
+            "pipeline: starting a batch of %d shots failed unexpectedly", len(targets)
+        )
+        await session.rollback()
+        if pending:
+            results.append(Started(next(iter(pending.values())), error=f"Unexpected error: {exc}"))
+    finally:
+        await stream.aclose()
     return results
 
 
@@ -1772,18 +1823,12 @@ async def _start_shot_definitions(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    return await _start_each(
+    return await _start_batch(
         session,
         targets,
         deadline,
-        lambda target: _ids_of(
-            shot_definitions.start_shot(
-                session,
-                project,
-                target.ref[0],
-                target.ref[1],
-                confirm_replace_manual=options.confirm_overwrite,
-            )
+        lambda keys: shot_definitions.start_shots(
+            session, project, keys, confirm_replace_manual=options.confirm_overwrite
         ),
     )
 
@@ -2040,18 +2085,12 @@ async def _start_prompts(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    return await _start_each(
+    return await _start_batch(
         session,
         targets,
         deadline,
-        lambda target: _ids_of(
-            shot_prompts.start_shot(
-                session,
-                project,
-                target.ref[0],
-                target.ref[1],
-                confirm_replace_manual=options.confirm_overwrite,
-            )
+        lambda keys: shot_prompts.start_shots(
+            session, project, keys, confirm_replace_manual=options.confirm_overwrite
         ),
     )
 
@@ -2181,13 +2220,11 @@ async def _start_shot_generation(
         )
     to_generate = [target for target in targets if target.ref[-1] == _GENERATE]
     results.extend(
-        await _start_each(
+        await _start_batch(
             session,
             to_generate,
             deadline,
-            lambda target: _ids_of(
-                shot_takes.start_shot(session, project, target.ref[0], target.ref[1])
-            ),
+            lambda keys: shot_takes.start_shots(session, project, keys),
         )
     )
     return results

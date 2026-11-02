@@ -11,7 +11,7 @@ the GPU server when the Story provider setting says so. Which of the two shared 
 waits in follows that setting (`jobs/pools.py`).
 
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved the moment it arrives, and a restart never re-runs it
+retried, every answer saved the moment it arrives, and a restart queues it again
 (`never_rerun`): the user asks again by starting a fresh job with the Re-run button.
 
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt

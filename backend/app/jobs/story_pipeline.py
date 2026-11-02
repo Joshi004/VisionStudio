@@ -30,8 +30,9 @@ goes uncounted. If the run was cancelled meanwhile, the jobs it has just made ar
 
 **Paid calls are retried here, on purpose.** Every other paid job runs only from a click and is
 never retried. A run is one click, and a failed target is tried up to `MAX_TRIES` times, so the
-page says so before it starts. A paid job that a restart interrupted still fails, as always
-(`never_rerun` is its handler's), and the run then counts it as a try.
+page says so before it starts. A paid job that a restart or a passing database error (a pool
+timeout) interrupted is queued again by the dispatcher, up to `MAX_AUTOMATIC_RERUNS` times
+(`never_rerun` is its handler's rule). Only when it fails after that does the run count a try.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from typing import Any, Final, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
 from app.db import state_memo
 from app.db.models import Job, Project
 from app.db.session import SessionLocal
@@ -100,6 +102,9 @@ class _Outcome:
     stopped: bool = False
     # An inline step did its work: the steps after it may be ready now.
     again: bool = False
+    # For the diagnostics: jobs this poll made, and targets it left for the next poll.
+    made: int = 0
+    deferred: int = 0
 
 
 def _needs_are_ready(
@@ -191,6 +196,8 @@ class StoryPipelineHandler(JobHandler):
     # With its marker the dispatcher keeps polling the run after a restart. Without one the run
     # never got going, and starts again.
     restart_rule = "resume"
+    # A pass takes many seconds on a big project: the dispatcher must not wait for it.
+    poll_in_background = True
 
     def __init__(self) -> None:
         # Polls of a run that raised in a row. Only to stop a run that cannot be read.
@@ -247,6 +254,7 @@ class StoryPipelineHandler(JobHandler):
         try:
             finished = await self._poll(job_id)
         except Exception as exc:
+            metrics.note_exception(exc)
             failures = self._poll_failures.get(job_id, 0) + 1
             self._poll_failures[job_id] = failures
             _logger.exception("job %d: the pipeline run could not be checked", job_id)
@@ -290,9 +298,34 @@ class StoryPipelineHandler(JobHandler):
             return _Outcome(stopped=True)
         # Evaluating writes nothing, so each stage's state is worked out once. Starting jobs
         # (`_apply`) writes, and reads fresh data.
+        began = time.monotonic()
         async with state_memo.reading(session):
             result = await self._evaluate(session, run, project)
-        return await self._apply(session, run, project, result)
+        evaluated = time.monotonic()
+        outcome = await self._apply(session, run, project, result)
+        applied = time.monotonic()
+        self._note_pass(run.id, evaluated - began, applied - evaluated, outcome)
+        return outcome
+
+    @staticmethod
+    def _note_pass(job_id: int, evaluate_s: float, apply_s: float, outcome: _Outcome) -> None:
+        """Records how long one pass took and what it made (`app/core/metrics.py`), and logs a
+        line when it made jobs or left targets for the next poll.
+        """
+        metrics.record("pipeline_evaluate_s", evaluate_s)
+        metrics.record("pipeline_apply_s", apply_s)
+        metrics.record("pipeline_made", outcome.made)
+        metrics.record("pipeline_deferred", outcome.deferred)
+        if outcome.made or outcome.deferred:
+            _logger.info(
+                "job %d: pipeline pass %.1f s: evaluate %.1f, apply %.1f; made %d, deferred %d",
+                job_id,
+                evaluate_s + apply_s,
+                evaluate_s,
+                apply_s,
+                outcome.made,
+                outcome.deferred,
+            )
 
     @staticmethod
     async def _evaluate(session: AsyncSession, run: Job, project: Project) -> _Evaluation:
@@ -411,6 +444,8 @@ class StoryPipelineHandler(JobHandler):
             outcome.finished = False  # even a ticked last step waits for Continue
         elif not result.finished:
             deadline = time.monotonic() + START_SECONDS
+            wanted = sum(len(item.plan.creates) for item in result.going)
+            started_count = 0
             for item in result.going:
                 problems.extend(item.plan.problems)
                 in_progress += item.plan.waiting + len(item.plan.creates)
@@ -423,6 +458,7 @@ class StoryPipelineHandler(JobHandler):
                     session, project, item.plan.creates, options, deadline
                 )
                 started_any = True
+                started_count += len(started)
                 deferred = deferred or len(started) < len(item.plan.creates)
                 for entry in started:
                     pipeline.record_try(output, item.step.key, entry.target.key, entry)
@@ -431,6 +467,8 @@ class StoryPipelineHandler(JobHandler):
                         queued_any = True
                         outcome.again = outcome.again or item.step.inline
 
+            outcome.made = len(made)
+            outcome.deferred = wanted - started_count
             output["problems"] = [problem.as_json() for problem in problems]
             # Other targets (and other steps) go on first: the run stops only when nothing is
             # left that could still succeed.

@@ -18,7 +18,7 @@ One job per scene, so scenes are checked side by side when the pools allow
 (`llm_target.STORY_MODEL_KEY`), like every story stage (D-12).
 
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved on the job the moment it arrives, and a restart never re-runs it
+retried, every answer saved on the job the moment it arrives, and a restart queues it again
 (`never_rerun`): the user asks again by pressing Check continuity. An unusable answer is asked
 for once more; after that the job fails with the reason and nothing is stored.
 

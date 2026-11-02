@@ -19,7 +19,8 @@ the loop:
    If it does not answer, GPU jobs wait, and the loop backs off (the wait doubles up to
    120 s, or the poll interval if that is longer).
 3. Ask each running remote job's handler to `poll`. A handler that says "ready" gets its
-   `finish` started as a task.
+   `finish` started as a task. The story pipeline run, whose poll takes many seconds, is polled
+   in a task of its own, so the tick does not wait for it.
 4. Start queued jobs while their pool has free slots: the jobs others wait for first
    (`input.priority`, the clips of shots that other shots continue), then oldest first. Before the
    first GPU job is started, the GPU API is read and recorded (ANALYSIS.md Section 6.5).
@@ -39,14 +40,17 @@ import time
 from collections.abc import Coroutine
 from typing import Any, Final
 
+from sqlalchemy import exc as sa_exc
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import metrics
 from app.core import settings as settings_service
 from app.db.models import Job
 from app.db.session import SessionLocal
+from app.db.types import utcnow
 from app.jobs import handlers, live_status, phase_writer, phases, pools, register_handlers, store
-from app.jobs.handlers import JobHandler
+from app.jobs.handlers import MAX_AUTOMATIC_RERUNS, JobHandler
 from app.providers import contract_guard, gpu_server
 from app.services import gpu_status
 
@@ -64,7 +68,7 @@ FALLBACK_WAIT_S: Final = 15.0
 # A job that a handler put back in the queue is left alone for at least this long.
 MIN_RETRY_DELAY_S: Final = 5.0
 INTERRUPTED_MESSAGE: Final = (
-    "Interrupted by a restart. Paid calls never re-run by themselves; start it again."
+    f"Interrupted by a restart, and already tried {MAX_AUTOMATIC_RERUNS + 1} times. Start it again."
 )
 UNEXPECTED_ERROR_MAX_CHARS: Final = 500
 # What a queued job shows while its pool is full.
@@ -74,6 +78,26 @@ _SLOT_PHASES: Final = {
 }
 
 _logger = logging.getLogger(__name__)
+
+
+def _may_rerun(job: Job, handler: JobHandler) -> bool:
+    """Whether a paid job that was cut short is queued again, rather than failed: its handler
+    allows it and it has not been run `MAX_AUTOMATIC_RERUNS` times again already.
+    """
+    return (
+        handler.restart_rule == "never_rerun"
+        and handler.rerun_automatically
+        and job.attempt <= MAX_AUTOMATIC_RERUNS
+    )
+
+
+def _is_transient_db_error(exc: BaseException) -> bool:
+    """A database error that passes: no connection was free in time (pool timeout), or the file
+    stayed locked by another writer longer than `busy_timeout`.
+    """
+    if isinstance(exc, sa_exc.TimeoutError):
+        return True
+    return isinstance(exc, sa_exc.OperationalError) and "database is locked" in str(exc).lower()
 
 
 class _Dispatcher:
@@ -86,6 +110,9 @@ class _Dispatcher:
         self._interval_s = FALLBACK_WAIT_S
         # Job id -> monotonic time before which a queued job is not started again.
         self._retry_after: dict[int, float] = {}
+        # Job id -> monotonic time before which a poll that runs in the background (the pipeline
+        # run) is not started again. Without it, every nudge would start the next pass at once.
+        self._poll_after: dict[int, float] = {}
         self._warned_types: set[str] = set()
 
     # --- Lifecycle --------------------------------------------------------------
@@ -100,6 +127,7 @@ class _Dispatcher:
             # The tick also puts orphaned jobs right, so the app can still start.
             _logger.exception("dispatcher: recovery after the restart failed")
         phase_writer.start()
+        metrics.start_loop_watch()
         self._loop_task = asyncio.create_task(self._run(), name="dispatcher")
         _logger.info("dispatcher started")
 
@@ -109,8 +137,10 @@ class _Dispatcher:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await phase_writer.stop()
+        await metrics.stop_loop_watch()
         self._loop_task = None
         self._tasks.clear()
+        self._poll_after.clear()
         _logger.info("dispatcher stopped")
 
     def nudge(self) -> None:
@@ -139,9 +169,21 @@ class _Dispatcher:
         """
         async with SessionLocal() as session:
             if handler.restart_rule == "never_rerun":
-                await store.fail_job(session, job.id, INTERRUPTED_MESSAGE)
+                if _may_rerun(job, handler):
+                    await self._requeue_paid(session, job, "interrupted by a restart")
+                else:
+                    await store.fail_job(session, job.id, INTERRUPTED_MESSAGE)
             elif handler.restart_rule == "start_again" or job.provider_job_id is None:
                 await store.requeue(session, job.id, phases.RESTARTED)
+
+    @staticmethod
+    async def _requeue_paid(session: AsyncSession, job: Job, reason: str) -> None:
+        """Puts a paid job that was cut short back in the queue as its next attempt. It runs
+        again from the start, and it is a paid call again.
+        """
+        phase = phases.queued_again(reason, job.attempt + 1, MAX_AUTOMATIC_RERUNS + 1)
+        if await store.requeue(session, job.id, phase, next_attempt=True):
+            metrics.incr("auto_reruns")
 
     # --- The loop ---------------------------------------------------------------
 
@@ -151,7 +193,8 @@ class _Dispatcher:
                 wait_s = await self._tick()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                metrics.note_exception(exc)
                 _logger.exception("dispatcher tick failed")
                 wait_s = self._interval_s
             await self._sleep(wait_s)
@@ -177,6 +220,7 @@ class _Dispatcher:
         # Taken before the database is read: a job with no live task at this moment cannot
         # get one later in this tick, so what the database says about it is final.
         live = set(self._tasks)
+        tick_began = time.monotonic()
 
         async with SessionLocal() as session:
             interval = await settings_service.get_int(session, POLL_INTERVAL_KEY)
@@ -211,6 +255,12 @@ class _Dispatcher:
                 # Running, but nothing is working on it and it never reached the server.
                 await self._apply_restart_rule(job, handler)
                 continue
+            if handler.poll_in_background:
+                # A task of its own: this tick does not wait for the poll. A task still alive
+                # is skipped above (`live`), so two polls of one job never overlap.
+                if self._poll_after.get(job.id, 0.0) <= time.monotonic():
+                    self._spawn(job.id, self._poll_in_task(job, handler, poll_context))
+                continue
             pollable.append((job, handler))
 
         now = time.monotonic()
@@ -225,6 +275,7 @@ class _Dispatcher:
         # The jobs that others wait for (a shot that another shot continues) start first.
         waiting.sort(key=lambda pair: (-store.priority_of(pair[0]), pair[0].id))
 
+        read_done = time.monotonic()
         gpu_blocked = False
         needs_gpu = any(h.provider == "gpu" for _job, h in pollable) or any(
             h.provider == "gpu" for _job, h in waiting
@@ -232,13 +283,51 @@ class _Dispatcher:
         if needs_gpu:
             gpu_blocked = not await self._server_answers(interval)
 
-        await self._poll_running(
+        polls_began = time.monotonic()
+        slowest_poll = await self._poll_running(
             [(job, h) for job, h in pollable if not (gpu_blocked and h.provider == "gpu")],
             poll_context,
         )
-        await self._start_queued(waiting, running, limits, qwen38_keys, gpu_blocked)
+        start_began = time.monotonic()
+        started = await self._start_queued(waiting, running, limits, qwen38_keys, gpu_blocked)
+        self._record_tick(
+            tick_began, read_done, polls_began, start_began, started, len(waiting), slowest_poll
+        )
 
         return self._backoff_s if self._backoff_s > 0 else float(interval)
+
+    @staticmethod
+    def _record_tick(
+        began: float,
+        read_done: float,
+        polls_began: float,
+        start_began: float,
+        started: int,
+        waiting: int,
+        slowest_poll: tuple[str, float] | None,
+    ) -> None:
+        """Notes how long the parts of one tick took (`app/core/metrics.py`) and logs one line."""
+        end = time.monotonic()
+        read_s, health_s = read_done - began, polls_began - read_done
+        polls_s, start_s, total_s = start_began - polls_began, end - start_began, end - began
+        metrics.record("tick_s", total_s)
+        metrics.record("tick_read_s", read_s)
+        metrics.record("tick_polls_s", polls_s)
+        metrics.record("tick_start_s", start_s)
+        metrics.record("tick_started", started)
+        slowest = f" (slowest {slowest_poll[0]} {slowest_poll[1]:.1f})" if slowest_poll else ""
+        _logger.info(
+            "dispatcher tick %.1f s: read %.1f, health %.1f, polls %.1f%s, start %.1f; "
+            "started %d of %d waiting",
+            total_s,
+            read_s,
+            health_s,
+            polls_s,
+            slowest,
+            start_s,
+            started,
+            waiting,
+        )
 
     # --- Step 2: the server ------------------------------------------------------
 
@@ -269,17 +358,21 @@ class _Dispatcher:
 
     async def _poll_running(
         self, pollable: list[tuple[Job, JobHandler]], context: handlers.PollContext
-    ) -> None:
+    ) -> tuple[str, float] | None:
         """Polls every running job (at most `MAX_PARALLEL_POLLS` at once), then writes what the
         polls found in one session, and only then starts the `finish` of the jobs that are ready:
         a finishing phase (the job can no longer be cancelled) and the server's last answer
         are saved before `finish` reads the job.
+
+        Returns the job type of the slowest poll and its seconds (for the tick's log line), or
+        None when nothing was polled.
         """
         if not pollable:
-            return
+            return None
         gate = asyncio.Semaphore(MAX_PARALLEL_POLLS)
+        timings: dict[str, float] = {}
         ready = await asyncio.gather(
-            *(self._poll_one(job, h, context, gate) for job, h in pollable)
+            *(self._poll_one(job, h, context, gate, timings) for job, h in pollable)
         )
         if context.records:
             try:
@@ -291,20 +384,59 @@ class _Dispatcher:
         for (job, handler), is_ready in zip(pollable, ready, strict=True):
             if is_ready:
                 self._spawn(job.id, handler.finish(job.id))
+        if not timings:
+            return None
+        slowest = max(timings, key=lambda job_type: timings[job_type])
+        return slowest, timings[slowest]
 
     @staticmethod
     async def _poll_one(
-        job: Job, handler: JobHandler, context: handlers.PollContext, gate: asyncio.Semaphore
+        job: Job,
+        handler: JobHandler,
+        context: handlers.PollContext,
+        gate: asyncio.Semaphore,
+        timings: dict[str, float],
     ) -> bool:
+        """One poll. Its seconds go to the diagnostics by job type, and into `timings` (the
+        longest per type) for the tick's log line.
+        """
         async with gate:
+            began = time.monotonic()
             try:
                 return await handler.poll(job, context)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 # Not fatal for the job: it is checked again at the next tick.
+                metrics.note_exception(exc)
                 _logger.exception("job %d: checking the server failed unexpectedly", job.id)
                 return False
+            finally:
+                seconds = time.monotonic() - began
+                metrics.record(f"poll_s:{job.type}", seconds)
+                timings[job.type] = max(timings.get(job.type, 0.0), seconds)
+
+    async def _poll_in_task(
+        self, job: Job, handler: JobHandler, context: handlers.PollContext
+    ) -> None:
+        """One poll of a job whose handler is slow (`poll_in_background`), in a task of its own.
+        An error is not fatal for the job: it is polled again later. When the job is ready,
+        `finish` runs here, in the same task.
+        """
+        began = time.monotonic()
+        ready = False
+        try:
+            ready = await handler.poll(job, context)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            metrics.note_exception(exc)
+            _logger.exception("job %d: checking the job failed unexpectedly", job.id)
+        finally:
+            metrics.record(f"poll_s:{job.type}", time.monotonic() - began)
+            self._poll_after[job.id] = time.monotonic() + MIN_RETRY_DELAY_S
+        if ready:
+            await handler.finish(job.id)
 
     # --- Step 4: queued jobs -------------------------------------------------------
 
@@ -315,7 +447,9 @@ class _Dispatcher:
         limits: dict[str, int],
         qwen38_keys: frozenset[str],
         gpu_blocked: bool,
-    ) -> None:
+    ) -> int:
+        """Starts what the pools have room for and returns how many jobs it started."""
+        started = 0
         # The limits count slots: a job takes one, except a MiniMax H3 clip (the GPUs the server
         # gave it, 4 until it says), and the Qwen3.8 calls, which share one.
         running_with_handlers = [(job, handlers.get_handler(job.type)) for job in running]
@@ -372,11 +506,15 @@ class _Dispatcher:
             free[pool] -= cost
             qwen38_held = qwen38_held or is_qwen38
             self._retry_after.pop(job.id, None)
+            started += 1
+            # From creation, so a job put back in the queue shows its whole wait.
+            metrics.record(f"queue_wait_s:{pool}", (utcnow() - job.created_at).total_seconds())
             self._spawn(job.id, handler.start(job.id))
 
         if queued_phases:
             async with SessionLocal() as session:
                 await store.set_phases(session, queued_phases, status="queued")
+        return started
 
     # --- Tasks ---------------------------------------------------------------------
 
@@ -395,15 +533,25 @@ class _Dispatcher:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            metrics.note_exception(exc)
             _logger.exception("job %d: unexpected error", job_id)
             await self._fail_unexpected(job_id, exc)
         await self._after_task(job_id)
 
-    @staticmethod
-    async def _fail_unexpected(job_id: int, exc: Exception) -> None:
+    async def _fail_unexpected(self, job_id: int, exc: Exception) -> None:
+        """Ends a job whose task raised. A paid job that a passing database error cut short is
+        queued again instead (`_may_rerun`); `requeue` only changes a job that is still running.
+        """
         message = f"Unexpected error: {type(exc).__name__}: {exc}"
         try:
             async with SessionLocal() as session:
+                if _is_transient_db_error(exc):
+                    job = await store.get_job(session, job_id)
+                    await session.commit()
+                    handler = handlers.get_handler(job.type) if job is not None else None
+                    if job is not None and handler is not None and _may_rerun(job, handler):
+                        await self._requeue_paid(session, job, "database busy")
+                        return
                 await store.fail_job(session, job_id, message[:UNEXPECTED_ERROR_MAX_CHARS])
         except Exception:
             _logger.exception("job %d: could not record the failure", job_id)
@@ -435,6 +583,7 @@ class _Dispatcher:
             self._retry_after[job_id] = time.monotonic() + max(self._interval_s, MIN_RETRY_DELAY_S)
             return
         self._retry_after.pop(job_id, None)
+        self._poll_after.pop(job_id, None)
         self.nudge()
 
     def _warn_missing_handler(self, job_type: str) -> None:

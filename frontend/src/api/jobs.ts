@@ -11,6 +11,10 @@ export type JobSummary = components["schemas"]["JobSummary"];
 export type JobDetail = components["schemas"]["JobDetail"];
 export type JobCapacity = components["schemas"]["JobCapacity"];
 export type PoolCapacity = components["schemas"]["PoolCapacity"];
+export type JobDiagnostics = components["schemas"]["JobDiagnostics"];
+export type SeriesStats = components["schemas"]["SeriesStats"];
+
+const DIAGNOSTICS_POLL_MS = 15_000;
 
 /** Every job query starts with this key, so one call refreshes them all. */
 export const JOBS_KEY = ["jobs"] as const;
@@ -101,6 +105,26 @@ export function useJobCapacity() {
       query.state.data?.pools.some((pool) => pool.running + pool.queued > 0)
         ? ACTIVE_POLL_MS
         : STATUS_POLL_MS,
+  });
+}
+
+async function fetchDiagnostics() {
+  const { data, response } = await api.GET("/api/jobs/diagnostics");
+  if (!data) {
+    throw new ApiError(
+      `Could not load the scheduler health (HTTP ${response.status}).`,
+      response.status,
+    );
+  }
+  return data;
+}
+
+/** How long the scheduler's steps take and how long jobs wait, over the last few minutes. */
+export function useJobDiagnostics() {
+  return useQuery({
+    queryKey: [...JOBS_KEY, "diagnostics"],
+    queryFn: fetchDiagnostics,
+    refetchInterval: DIAGNOSTICS_POLL_MS,
   });
 }
 

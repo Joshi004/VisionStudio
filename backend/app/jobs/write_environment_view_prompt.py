@@ -11,8 +11,8 @@ why (its status is read from this job). Reuses `image_prompt_writer.py`'s reader
 
 It is a paid call to the language model on the **image-prompt role**
 (`llm_target.IMAGE_PROMPT_MODEL_KEY`), so the rules in `jobs/llm_call.py` hold: at most 2
-attempts, a refusal never retried, every answer saved the moment it arrives, and a restart never
-re-runs it (`never_rerun`). It is a local-style job: everything happens in `start`. Logs hold the
+attempts, a refusal never retried, every answer saved the moment it arrives, and a restart queues
+it again (`never_rerun`). It is a local-style job: everything happens in `start`. Logs hold the
 job id, what each attempt did and its token counts, never the prompt or the answer.
 """
 

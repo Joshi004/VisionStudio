@@ -11,7 +11,8 @@ into the lab form, where the author edits it before running anything. It is a pa
   is checked, so a crash after the paid call still leaves the answer behind.
 - At most 2 attempts, the second only for a rate limit, a server error, no answer, or an
   answer that cannot be used. A refusal (HTTP 400, 401, 403, 404, 422) is never retried.
-- A restart never re-runs it (`never_rerun`): the dispatcher fails it with a message.
+- A restart queues it again, at most twice (`never_rerun`), and after that the dispatcher fails it
+  with a message.
 
 There is no cache: each click is a new paid try on purpose (the lab is for trying ideas), and
 there is no rule-based fallback, so two failed attempts fail the job.

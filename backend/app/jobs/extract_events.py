@@ -15,7 +15,7 @@ One job per scene, so scenes are extracted side by side when the pools allow
 (`llm_target.STORY_MODEL_KEY`), like every story stage (D-12).
 
 A paid call, so the rules in `jobs/llm_call.py` hold here: at most 2 attempts, a refusal never
-retried, every answer saved on the job the moment it arrives, and a restart never re-runs it
+retried, every answer saved on the job the moment it arrives, and a restart queues it again
 (`never_rerun`): the user asks again by pressing Extract again. An answer whose speech cannot
 be found in the scene is unusable, so it is asked for once more; after that the job fails with
 the reason and nothing is stored.

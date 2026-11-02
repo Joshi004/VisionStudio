@@ -29,6 +29,7 @@ generation request: which `<Picture n>` shows which subject and which `<Audio n>
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -423,6 +424,46 @@ async def start_shot(
     if note is not None and not created:
         raise ShotPromptsError("The prompt of this shot is already being compiled.")
     return job
+
+
+async def start_shots(
+    session: AsyncSession,
+    project: Project,
+    keys: list[tuple[str, str]],
+    *,
+    confirm_replace_manual: bool = False,
+) -> AsyncGenerator[tuple[tuple[str, str], Job | str]]:
+    """Queues the job that compiles the prompt of each of these `(scene id, shot id)` shots, as
+    `start_shot` does for one, but works out the state and what the shots are defined from once
+    for all of them. Each job is committed as it is made.
+
+    Gives `(key, outcome)` for each shot as it is done: the job (the one already waiting or
+    running when the shot has one) or, when that shot cannot be compiled, the reason as a
+    sentence for the user. The caller may stop reading at any point; what was given is done.
+    Anything else that goes wrong is raised, after the shots already given.
+    """
+    current = await state(session, project)
+    refused: dict[tuple[str, str], str] = {}
+    shots: dict[tuple[str, str], ShotEntry] = {}
+    for scene_id, shot_id in keys:
+        try:
+            _scene, shot = _find_shot(current, scene_id, shot_id)
+            if shot.needs_confirmation and not confirm_replace_manual:
+                raise ShotPromptsError(MANUAL_REPLACE_MESSAGE)
+        except ShotPromptsError as exc:
+            refused[(scene_id, shot_id)] = str(exc)
+        else:
+            shots[(scene_id, shot_id)] = shot
+    contexts = await shot_definitions.shot_contexts(session, project, list(shots))
+    for key, reason in refused.items():
+        yield key, reason
+    for key, shot in shots.items():
+        outcome: Job | str
+        try:
+            outcome, _created = await _queue(session, project, key[0], shot, contexts[key])
+        except ShotPromptsError as exc:
+            outcome = str(exc)
+        yield key, outcome
 
 
 def _feedback_on(text: str, newest: ShotPrompt | None) -> user_feedback.Feedback:

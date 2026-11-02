@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -814,11 +815,15 @@ async def _queue(
     scene_id: str,
     shot_id: str,
     feedback: user_feedback.Feedback | None = None,
+    locked: set[str] | None = None,
 ) -> tuple[Job, bool]:
     """Queues the job for this shot and returns `(job, created)`. `created` is False when the
     shot already has a job waiting or running, which is returned instead. Raises
     ShotDefinitionsError when this shot cannot be defined, among other reasons because a cut
     repair is working on it.
+
+    `locked` is the `scene/shot` keys a cut repair is working on, when the caller read them
+    once for many shots (`start_shots`). Without it they are read here.
 
     `feedback` is the user's note on the newest specification (PHASE-038). The job is given the
     note and the specification it is about; the version it saves records the note and the
@@ -827,7 +832,9 @@ async def _queue(
     refusal = _scene_refusal(loaded, scene_id)
     if refusal is not None:
         raise ShotDefinitionsError(refusal)
-    if _shot_key(scene_id, shot_id) in await _repair_locked(session, project.id):
+    if locked is None:
+        locked = await _repair_locked(session, project.id)
+    if _shot_key(scene_id, shot_id) in locked:
         raise ShotDefinitionsError(REPAIRING_REASON)
     fields = _shot_fields(loaded, project.id, scene_id, shot_id)
     if feedback is not None:
@@ -972,6 +979,40 @@ async def start_shot(
     if note is not None and not created:
         raise ShotDefinitionsError("This shot is already being defined.")
     return job
+
+
+async def start_shots(
+    session: AsyncSession,
+    project: Project,
+    keys: list[tuple[str, str]],
+    *,
+    confirm_replace_manual: bool = False,
+) -> AsyncGenerator[tuple[tuple[str, str], Job | str]]:
+    """Queues the job that defines each of these `(scene id, shot id)` shots, as `start_shot`
+    does for one, but loads what the shots are defined from once for all of them. Each job is
+    committed as it is made, so a long batch never holds the database's one writer.
+
+    Gives `(key, outcome)` for each shot as it is done: the job (the one already waiting or
+    running when the shot has one) or, when that shot cannot be defined, the reason as a
+    sentence for the user. The caller may stop reading at any point; what was given is done.
+    Anything else that goes wrong is raised, after the shots already given.
+    """
+    loaded = await _load(session, project)
+    newest = await _newest_rows(session, project.id)
+    locked = await _repair_locked(session, project.id)
+    for scene_id, shot_id in keys:
+        outcome: Job | str
+        try:
+            _find_scene(loaded, scene_id)
+            row = newest.get(_shot_key(scene_id, shot_id))
+            if row is not None and row.source == SOURCE_MANUAL and not confirm_replace_manual:
+                raise ShotDefinitionsError(MANUAL_REPLACE_MESSAGE)
+            outcome, _created = await _queue(
+                session, project, loaded, scene_id, shot_id, locked=locked
+            )
+        except ShotDefinitionsError as exc:
+            outcome = str(exc)
+        yield (scene_id, shot_id), outcome
 
 
 def _feedback_on(text: str, newest: ShotDefinition | None) -> user_feedback.Feedback:

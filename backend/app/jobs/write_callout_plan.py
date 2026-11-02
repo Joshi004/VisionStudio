@@ -14,7 +14,7 @@ next version, in the same transaction that marks the job succeeded.
 
 The model is the **story role** (`llm_target.STORY_MODEL_KEY`). A paid job, so the rules in
 `jobs/llm_call.py` hold: at most 2 attempts, a refusal never retried, every answer saved the
-moment it arrives, and a restart never re-runs it (`never_rerun`): the owner asks again with a
+moment it arrives, and a restart queues it again (`never_rerun`): the owner asks again with a
 fresh job.
 
 It is a local-style job: everything happens in `start`. Logs hold the job id, what each attempt

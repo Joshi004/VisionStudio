@@ -59,6 +59,8 @@ class BoardStepOut(BaseModel):
     active: int
     stale: int
     failed: int
+    # Targets that are ready to be started and have no job yet.
+    not_started: int
     # The steps it needs that are not done yet.
     blocked_by: list[str]
     # Why a target failed or cannot go on, when there is one. None otherwise.
@@ -145,6 +147,7 @@ async def get_pipeline_board(project_id: int, session: SessionDep) -> PipelineBo
                 active=step.counts.active,
                 stale=step.counts.stale,
                 failed=step.counts.failed,
+                not_started=step.counts.not_started,
                 blocked_by=list(step.blocked_by),
                 blocked_reason=step.counts.reason,
             )

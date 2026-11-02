@@ -16,7 +16,7 @@ and the seeds). `input.requested` says what to do:
 Each call builds its request in `services/music_theme_writer.py`, asks the model and checks the
 answer there. The model is the **story role** (`llm_target.STORY_MODEL_KEY`). A paid job, so the
 rules in `jobs/llm_call.py` hold: at most 2 attempts, a refusal never retried, every answer saved
-the moment it arrives, and a restart never re-runs it (`never_rerun`): the owner asks again with a
+the moment it arrives, and a restart queues it again (`never_rerun`): the owner asks again with a
 fresh job. It is a local-style job: everything happens in `start`. Logs hold the job id, what each
 attempt did and its token counts, never the story or the answers.
 """
