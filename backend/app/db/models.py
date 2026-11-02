@@ -1318,7 +1318,8 @@ class LabRun(Base):
     on the GPU server's Qwen-Image-2.1 takes minutes, so it is a `lab_image` job (`job_id`) and
     the row is `running` until the job ends. Either way the row keeps the exact request and
     the raw response (image data replaced by sizes), so results can be compared later. Deleted
-    only with the character or environment it was made for (PHASE-055).
+    with the character or environment it was made for (PHASE-055), or by itself when nothing
+    uses it (`services/lab_deletion.py`).
     """
 
     __tablename__ = "lab_run"

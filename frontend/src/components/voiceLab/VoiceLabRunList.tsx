@@ -9,6 +9,7 @@ import { formatDateTime } from "../../format";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
 import { SaveVoiceModal } from "./SaveVoiceModal";
 import { paramsLine } from "./voiceLabView";
 
@@ -45,6 +46,7 @@ function RunCard({
             >
               Load into the form
             </Button>
+            <DeleteLabSampleButton kind="voice_run" sampleId={run.id} />
           </Group>
         </Group>
         <Text size="sm" style={{ whiteSpace: "pre-wrap" }} lineClamp={6}>
@@ -100,7 +102,7 @@ type VoiceLabRunListProps = {
   onLoad: (run: VoiceLabRun) => void;
 };
 
-/** Every run, newest first. They stay: nothing is deleted. */
+/** Every run, newest first. A run stays until it is deleted, and one that is still used is kept. */
 export function VoiceLabRunList({ onLoad }: VoiceLabRunListProps) {
   const runs = useVoiceLabRuns();
   const all = runs.data?.pages.flat() ?? [];
@@ -120,7 +122,7 @@ export function VoiceLabRunList({ onLoad }: VoiceLabRunListProps) {
       )}
       {runs.data && all.length === 0 && (
         <Text size="sm" c="dimmed">
-          No runs yet. The runs you start appear here, and stay: they are never deleted.
+          No runs yet. The runs you start appear here, and stay until you delete them.
         </Text>
       )}
       {all.map((run) => (

@@ -7,6 +7,7 @@ import { useNow } from "../../hooks/useNow";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobActions } from "../jobs/JobActions";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
 import { LicenseBadge } from "./MusicLicense";
 import { Measurements, OutsideWindowLine, Verdict } from "./MusicRunRating";
 import { sourceLine } from "./musicEditView";
@@ -115,6 +116,7 @@ function RunCard({ run, now, catalog, onLoad, onEdit }: RunCardProps) {
               Edit this run
             </Button>
           )}
+          <DeleteLabSampleButton kind="music_run" sampleId={run.id} />
         </Group>
       </Stack>
     </Paper>
@@ -123,7 +125,8 @@ function RunCard({ run, now, catalog, onLoad, onEdit }: RunCardProps) {
 
 /**
  * The runs, newest first, grouped by the click that made them so the models can be heard one
- * after the other on the same brief. Nothing here is ever deleted.
+ * after the other on the same brief. A run stays until it is deleted, and one that is still used
+ * (by a take, a theme or an edit of it) is kept.
  */
 export function MusicLabRunList({
   onLoad,
@@ -152,7 +155,7 @@ export function MusicLabRunList({
       )}
       {runs.data && groups.length === 0 && (
         <Text size="sm" c="dimmed">
-          No runs yet. The runs you start appear here, and stay: they are never deleted.
+          No runs yet. The runs you start appear here, and stay until you delete them.
         </Text>
       )}
 

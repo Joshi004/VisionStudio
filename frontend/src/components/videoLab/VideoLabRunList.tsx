@@ -10,6 +10,7 @@ import { JobActions } from "../jobs/JobActions";
 import { elapsedText, serverEstimateText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { Thumb } from "../imageLab/ReferenceTray";
+import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
 import {
   isLipSyncRun,
   isReferenceRun,
@@ -93,7 +94,10 @@ function RunCard({ run, now }: { run: LabVideoRun; now: number }) {
             )}
             {job !== null && <JobStatusBadge job={job} />}
           </Group>
-          {job !== null && <JobActions job={job} />}
+          <Group gap="xs" wrap="nowrap">
+            {job !== null && <JobActions job={job} />}
+            <DeleteLabSampleButton kind="video_run" sampleId={run.id} />
+          </Group>
         </Group>
         {job !== null && (
           <Text size="xs" c="dimmed">
@@ -172,7 +176,7 @@ export function VideoLabRunList({ onLoad }: VideoLabRunListProps) {
       )}
       {runs.data && groups.length === 0 && (
         <Text size="sm" c="dimmed">
-          No runs yet. The runs you start appear here, and stay: they are never deleted.
+          No runs yet. The runs you start appear here, and stay until you delete them.
         </Text>
       )}
 

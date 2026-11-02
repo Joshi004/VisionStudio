@@ -7,6 +7,7 @@ import { formatDateTime } from "../../format";
 import { JobActions } from "../jobs/JobActions";
 import { elapsedText } from "../jobs/jobFormat";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
 import { AvMarkedText } from "./AvMarkedText";
 import {
   AV_MARKER_LABELS,
@@ -185,17 +186,20 @@ export function AvTestCard({ test, now }: { test: AvTest; now: number }) {
               {test.copied_from_id !== null ? ` · copied from test ${test.copied_from_id}` : ""}
             </Text>
           </Stack>
-          {canCopy && (
-            <Button
-              size="compact-sm"
-              variant="default"
-              loading={copy.isPending}
-              title="Makes a new test on the same speech, word times, parts and first frame, with the other way of using the speech. Each clip is a paid video run."
-              onClick={() => copy.mutate({ testId: test.id, audioMarker: other })}
-            >
-              Copy with {AV_MARKER_LABELS[other].toLowerCase()}
-            </Button>
-          )}
+          <Group gap="xs" wrap="nowrap">
+            {canCopy && (
+              <Button
+                size="compact-sm"
+                variant="default"
+                loading={copy.isPending}
+                title="Makes a new test on the same speech, word times, parts and first frame, with the other way of using the speech. Each clip is a paid video run."
+                onClick={() => copy.mutate({ testId: test.id, audioMarker: other })}
+              >
+                Copy with {AV_MARKER_LABELS[other].toLowerCase()}
+              </Button>
+            )}
+            <DeleteLabSampleButton kind="av_test" sampleId={test.id} />
+          </Group>
         </Group>
         {copy.isError && (
           <Alert color="red" p="xs" title="The test was not copied">

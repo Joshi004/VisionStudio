@@ -322,7 +322,7 @@ async def create_run(body: LabRunRequest, session: SessionDep) -> LabRunOut:
         raise _unprocessable(str(exc)) from exc
 
     run = await image_lab.get_run(session, run_id)
-    if run is None:  # cannot happen: runs are never deleted
+    if run is None:  # cannot happen: the run was saved a moment ago
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "The run was not saved.")
     return (await _runs_out(session, [run], with_payloads=True))[0]
 

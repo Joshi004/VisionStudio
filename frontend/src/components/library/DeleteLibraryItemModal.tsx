@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Alert, Button, Group, List, Loader, Modal, Stack, Text } from "@mantine/core";
 
 import {
@@ -7,6 +8,7 @@ import {
   useEnvironmentDeletionPreview,
 } from "../../api/deletion";
 import { describeError } from "../../api/errors";
+import { ServerCleanupCheckbox } from "./ServerCleanupCheckbox";
 
 type DeleteLibraryItemModalProps = {
   kind: "character" | "environment";
@@ -44,19 +46,27 @@ export function DeleteLibraryItemModal({
   const remove = kind === "character" ? removeCharacter : removeEnvironment;
   const data = preview.data;
   const blocked = data?.blocked_reason ?? null;
+  // Never ticked at first: the GPU server is only cleaned up when the user asks for it.
+  const [purgeServer, setPurgeServer] = useState(false);
 
   function close() {
     remove.reset();
+    setPurgeServer(false);
     onClose();
   }
 
   function confirm() {
-    remove.mutate(libraryId, {
+    const options = {
       onSuccess: () => {
         close();
         onDeleted();
       },
-    });
+    };
+    if (kind === "character") {
+      removeCharacter.mutate({ characterId: libraryId, purgeServer }, options);
+    } else {
+      removeEnvironment.mutate({ environmentId: libraryId, purgeServer }, options);
+    }
   }
 
   return (
@@ -103,6 +113,12 @@ export function DeleteLibraryItemModal({
                 No project uses it.
               </Text>
             )}
+
+            <ServerCleanupCheckbox
+              checked={purgeServer}
+              onChange={setPurgeServer}
+              disabled={remove.isPending}
+            />
           </>
         )}
 

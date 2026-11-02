@@ -16,6 +16,7 @@ import { Link } from "react-router";
 
 import type { LabImage, LabRun } from "../../api/imageLab";
 import { formatBytes, formatDateTime } from "../../format";
+import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
 import { costLine, engineText, paramsLine, runStatusColor } from "./labView";
 
 type LabRunViewProps = {
@@ -24,6 +25,8 @@ type LabRunViewProps = {
   onUseAsReference?: (image: LabImage) => void;
   /** Fills the form with this run's settings. */
   onLoad?: (run: LabRun) => void;
+  /** Called after the run was deleted, so the view that shows it can let it go. */
+  onDeleted?: () => void;
 };
 
 function Json({ label, value }: { label: string; value: unknown }) {
@@ -48,7 +51,7 @@ function Json({ label, value }: { label: string; value: unknown }) {
 }
 
 /** One run: what was asked, what came back, and the exact request and answer. */
-export function LabRunView({ run, onUseAsReference, onLoad }: LabRunViewProps) {
+export function LabRunView({ run, onUseAsReference, onLoad, onDeleted }: LabRunViewProps) {
   const [added, setAdded] = useState<number | null>(null);
   const cost = costLine(run);
 
@@ -69,6 +72,7 @@ export function LabRunView({ run, onUseAsReference, onLoad }: LabRunViewProps) {
             Load into form
           </Button>
         )}
+        <DeleteLabSampleButton kind="image_run" sampleId={run.id} onDeleted={onDeleted} />
       </Group>
 
       <Text size="sm" c="dimmed">

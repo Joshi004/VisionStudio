@@ -8,9 +8,9 @@ changes one class. The rules:
 - every path is checked to stay inside the media folder;
 - the database keeps only the relative path, and the URL is `/media/` plus
   that path (nginx serves it read-only from the same volume);
-- stored files are deleted only when the user deletes a project or a library item
-  (PHASE-055: `delete_media`, `delete_project_dir`). Temporary working files in `tmp_dir`
-  are cleared freely.
+- stored files are deleted only when the user deletes a project, a library item or a lab
+  sample (PHASE-055: `delete_media`, `delete_project_dir`). Temporary working files in
+  `tmp_dir` are cleared freely.
 
 An upload is received into `tmp_dir` first, checked by the caller, and then
 moved into place with `save`. Temp files are created with `open(..., "xb")`

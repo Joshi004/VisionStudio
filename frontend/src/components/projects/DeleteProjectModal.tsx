@@ -7,6 +7,7 @@ import {
   type DeletionItem,
 } from "../../api/deletion";
 import { describeError } from "../../api/errors";
+import { ServerCleanupCheckbox } from "../library/ServerCleanupCheckbox";
 
 type DeleteProjectModalProps = {
   /** The project to delete, or null while the dialog is closed. */
@@ -131,17 +132,20 @@ export function DeleteProjectModal({ project, onClose, onDeleted }: DeleteProjec
   // to be set when the list is loaded.
   const [untickedCharacters, setUntickedCharacters] = useState<Set<number>>(new Set());
   const [untickedEnvironments, setUntickedEnvironments] = useState<Set<number>>(new Set());
+  // Never ticked at first: the GPU server is only cleaned up when the user asks for it.
+  const [purgeServer, setPurgeServer] = useState(false);
 
   function close() {
     remove.reset();
     setUntickedCharacters(new Set());
     setUntickedEnvironments(new Set());
+    setPurgeServer(false);
     onClose();
   }
 
   function confirm() {
     remove.mutate(
-      { characterIds: [...characters], environmentIds: [...environments] },
+      { characterIds: [...characters], environmentIds: [...environments], purgeServer },
       {
         onSuccess: () => {
           close();
@@ -230,6 +234,12 @@ export function DeleteProjectModal({ project, onClose, onDeleted }: DeleteProjec
                 The project used no characters or environments from the library.
               </Text>
             )}
+
+            <ServerCleanupCheckbox
+              checked={purgeServer}
+              onChange={setPurgeServer}
+              disabled={remove.isPending}
+            />
           </>
         )}
 

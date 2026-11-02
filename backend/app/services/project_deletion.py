@@ -36,8 +36,9 @@ from app.db.models import (
     StoryRender,
 )
 from app.jobs import store
-from app.services import library_deletion
+from app.services import library_deletion, server_cleanup
 from app.services.library_deletion import Kind
+from app.services.server_cleanup import PurgePlan
 from app.services.storage import Storage, StorageError
 
 _logger = logging.getLogger(__name__)
@@ -214,18 +215,42 @@ def _without_reason(item: ItemPreview) -> ItemPreview:
     )
 
 
+async def _server_job_ids(
+    session: AsyncSession, project_id: int, voice_run_ids: set[int]
+) -> set[int]:
+    """The project's jobs, and the jobs of the speech samples made for it, for the optional
+    cleanup of the GPU server. The jobs of the project go with its row, so they are read first.
+    """
+    project_jobs = await session.execute(select(Job.id).where(Job.project_id == project_id))
+    job_ids = set(project_jobs.scalars())
+    if voice_run_ids:
+        voice_jobs = await session.execute(
+            select(LabVoiceRun.job_id).where(
+                LabVoiceRun.id.in_(voice_run_ids), LabVoiceRun.job_id.is_not(None)
+            )
+        )
+        job_ids |= set(voice_jobs.scalars())
+    return job_ids
+
+
 async def delete_project(
     session: AsyncSession,
     storage: Storage,
     project: Project,
     character_ids: list[int],
     environment_ids: list[int],
-) -> None:
+    *,
+    purge_server: bool = False,
+) -> PurgePlan | None:
     """Deletes the project, the chosen characters and environments, and the files, and commits.
 
     Raises ProjectBusyError while the project has work running, InvalidSelectionError for an
     item that the project does not use, and LibraryItemBusyError for an item that cannot be
     deleted now. Nothing is deleted when any of these is raised.
+
+    With `purge_server` it returns what to purge on the GPU server afterwards
+    (`server_cleanup.purge`): the jobs of the project and of the items deleted with it, read
+    before the rows are gone. Otherwise None.
     """
     if await _is_busy(session, project.id):
         raise ProjectBusyError("Stop the pipeline and any running work of this project first.")
@@ -259,13 +284,21 @@ async def delete_project(
     )
     voice_run_ids = set(voice_runs.scalars())
 
+    plan: PurgePlan | None = None
+    if purge_server:
+        job_ids = await _server_job_ids(session, project_id, voice_run_ids)
+        plan = await server_cleanup.make_plan(session, job_ids)
+
     await session.delete(project)
     await session.commit()
     _logger.info("project %d deleted; %d library item(s) chosen", project_id, len(chosen))
 
     for kind, library_id in chosen:
         try:
-            await library_deletion.delete_item(session, storage, kind, library_id)
+            item_plan = await library_deletion.delete_item(
+                session, storage, kind, library_id, purge_server=purge_server
+            )
+            plan = server_cleanup.merge(plan, item_plan)
         except library_deletion.LibraryDeletionError:
             # Something started on it since the check. The project is already gone, so the
             # item stays in the library and the user can delete it there.
@@ -277,3 +310,4 @@ async def delete_project(
         await storage.delete_project_dir(project_id)
     except (StorageError, OSError):
         _logger.exception("could not remove the media folder of project %d", project_id)
+    return plan

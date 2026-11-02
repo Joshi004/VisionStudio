@@ -2110,7 +2110,8 @@ export interface paths {
         post?: never;
         /**
          * Delete Character
-         * @description Deletes the character for good. Projects that used it are flagged, not changed.
+         * @description Deletes the character for good. Projects that used it are flagged, not changed. With
+         *     `purge_server` the GPU server is cleaned up too, after this answer.
          */
         delete: operations["delete_character_api_lab_characters__character_id__delete"];
         options?: never;
@@ -2623,7 +2624,8 @@ export interface paths {
         post?: never;
         /**
          * Delete Environment
-         * @description Deletes the environment for good. Projects that used it are flagged, not changed.
+         * @description Deletes the environment for good. Projects that used it are flagged, not changed. With
+         *     `purge_server` the GPU server is cleaned up too, after this answer.
          */
         delete: operations["delete_environment_api_lab_environments__environment_id__delete"];
         options?: never;
@@ -4587,7 +4589,8 @@ export interface paths {
         put?: never;
         /**
          * Delete Project
-         * @description Deletes the project, its files, and the chosen characters and environments.
+         * @description Deletes the project, its files, and the chosen characters and environments. With
+         *     `purge_server` the GPU server is cleaned up too, after this answer.
          */
         post: operations["delete_project_api_projects__project_id__delete_post"];
         delete?: never;
@@ -4625,6 +4628,47 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/samples/{kind}/{sample_id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lab Sample Deletion Preview
+         * @description Where a lab sample is still used, and why it cannot be deleted now, if so.
+         */
+        get: operations["get_lab_sample_deletion_preview_api_lab_samples__kind___sample_id__deletion_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/samples/{kind}/{sample_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Lab Sample
+         * @description Deletes one lab sample and its file for good, unless something still uses it. With
+         *     `purge_server` the GPU server is cleaned up too, after this answer.
+         */
+        delete: operations["delete_lab_sample_api_lab_samples__kind___sample_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -7536,6 +7580,25 @@ export interface components {
             /** Next Before Id */
             next_before_id: number | null;
         };
+        /**
+         * LabSampleDeletionPreviewOut
+         * @description What the delete dialog of a lab sample shows.
+         */
+        LabSampleDeletionPreviewOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test";
+            /** Sample Id */
+            sample_id: number;
+            /** Label */
+            label: string;
+            /** Used By */
+            used_by: string[];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
         /** LabVideoRunCreate */
         LabVideoRunCreate: {
             /** Prompt */
@@ -9913,12 +9976,18 @@ export interface components {
         /**
          * ProjectDeleteIn
          * @description The library items to delete with the project. Anything left out stays in the library.
+         *     `purge_server` also asks the GPU server to delete what it still holds for them.
          */
         ProjectDeleteIn: {
             /** Character Ids */
             character_ids?: number[];
             /** Environment Ids */
             environment_ids?: number[];
+            /**
+             * Purge Server
+             * @default false
+             */
+            purge_server: boolean;
         };
         /** ProjectDeletionPreviewOut */
         ProjectDeletionPreviewOut: {
@@ -19310,7 +19379,9 @@ export interface operations {
     };
     delete_character_api_lab_characters__character_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                purge_server?: boolean;
+            };
             header?: never;
             path: {
                 character_id: number;
@@ -20531,7 +20602,9 @@ export interface operations {
     };
     delete_environment_api_lab_environments__environment_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                purge_server?: boolean;
+            };
             header?: never;
             path: {
                 environment_id: number;
@@ -24892,6 +24965,97 @@ export interface operations {
             };
             /** @description No such project or library item. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_lab_sample_deletion_preview_api_lab_samples__kind___sample_id__deletion_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test";
+                sample_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LabSampleDeletionPreviewOut"];
+                };
+            };
+            /** @description No such lab sample. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_lab_sample_api_lab_samples__kind___sample_id__delete: {
+        parameters: {
+            query?: {
+                purge_server?: boolean;
+            };
+            header?: never;
+            path: {
+                kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test";
+                sample_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such lab sample. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The sample is still being made, or something still uses it. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

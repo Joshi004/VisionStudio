@@ -1,8 +1,9 @@
-import { Alert, Badge, Button, Loader, Stack, Table, Text, Title } from "@mantine/core";
+import { Alert, Badge, Button, Group, Loader, Stack, Table, Text, Title } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import { useLabRuns } from "../../api/imageLab";
 import { formatDateTime } from "../../format";
+import { DeleteLabSampleButton } from "../lab/DeleteLabSampleButton";
 import { engineText, runStatusColor, sizeText } from "./labView";
 
 /**
@@ -98,9 +99,12 @@ export function LabHistory({ onOpen }: { onOpen: (runId: number) => void }) {
                     )}
                   </Table.Td>
                   <Table.Td>
-                    <Button size="compact-xs" variant="default" onClick={() => onOpen(run.id)}>
-                      Open
-                    </Button>
+                    <Group gap="xs" wrap="nowrap">
+                      <Button size="compact-xs" variant="default" onClick={() => onOpen(run.id)}>
+                        Open
+                      </Button>
+                      <DeleteLabSampleButton kind="image_run" sampleId={run.id} />
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               );

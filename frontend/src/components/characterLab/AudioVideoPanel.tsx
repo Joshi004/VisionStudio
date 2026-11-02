@@ -18,7 +18,7 @@ type AudioVideoPanelProps = {
 
 /**
  * The Audio video lab of one character: a form to make a test, and the tests made, newest first.
- * A test is never deleted. While one is moving along, the page asks again by itself.
+ * A test stays until it is deleted. While one is moving along, the page asks again by itself.
  */
 export function AudioVideoPanel({ character, form, onChange }: AudioVideoPanelProps) {
   const tests = useAvTests(character.id);
@@ -40,7 +40,7 @@ export function AudioVideoPanel({ character, form, onChange }: AudioVideoPanelPr
         {tests.data && list.length === 0 && (
           <Text size="sm" c="dimmed">
             No test yet. Write a text above, mark the parts to show as video and press Make the
-            test: it appears here, and stays.
+            test: it appears here, and stays until you delete it.
           </Text>
         )}
         {list.map((test) => (

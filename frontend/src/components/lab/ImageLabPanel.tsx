@@ -66,6 +66,14 @@ export function ImageLabPanel({ form, onFormChange: setForm }: ImageLabPanelProp
     }));
   }
 
+  // The run the Result panel shows was deleted: nothing is left to show.
+  function clearResult() {
+    run.reset();
+    qwen.reset();
+    setQwenRunId(null);
+    setShown(null);
+  }
+
   function loadIntoForm(source: LabRun) {
     setForm(stateFromRun(source));
     setOpenRunId(null);
@@ -104,7 +112,12 @@ export function ImageLabPanel({ form, onFormChange: setForm }: ImageLabPanelProp
         <Paper withBorder p="md" radius="md">
           <Stack gap="sm">
             <Title order={4}>Result</Title>
-            <LabRunView run={result} onUseAsReference={addAsReference} onLoad={loadIntoForm} />
+            <LabRunView
+              run={result}
+              onUseAsReference={addAsReference}
+              onLoad={loadIntoForm}
+              onDeleted={clearResult}
+            />
           </Stack>
         </Paper>
       )}
@@ -131,7 +144,12 @@ export function ImageLabPanel({ form, onFormChange: setForm }: ImageLabPanelProp
           </Alert>
         )}
         {opened.data && (
-          <LabRunView run={opened.data} onUseAsReference={addAsReference} onLoad={loadIntoForm} />
+          <LabRunView
+            run={opened.data}
+            onUseAsReference={addAsReference}
+            onLoad={loadIntoForm}
+            onDeleted={() => setOpenRunId(null)}
+          />
         )}
       </Drawer>
     </Stack>

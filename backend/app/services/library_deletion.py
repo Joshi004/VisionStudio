@@ -30,6 +30,7 @@ from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    AvLabTest,
     CharacterLook,
     CharacterLookCandidate,
     CharacterReference,
@@ -43,6 +44,7 @@ from app.db.models import (
     Job,
     LabImage,
     LabMusicRun,
+    LabMusicSource,
     LabRun,
     LabVideoRun,
     LabVoiceRun,
@@ -60,6 +62,8 @@ from app.db.models import (
     Voice,
 )
 from app.jobs import store
+from app.services import server_cleanup
+from app.services.server_cleanup import PurgePlan
 from app.services.storage import Storage, StorageError
 
 _logger = logging.getLogger(__name__)
@@ -117,7 +121,7 @@ class _Owned:
 
 
 @dataclass
-class _Found:
+class References:
     """What the rows that stay still point at."""
 
     lab_images: set[int] = field(default_factory=set)
@@ -137,7 +141,7 @@ def _is_id(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _scan(value: Any, found: _Found) -> None:
+def scan_references(value: Any, found: References) -> None:
     """Collects every picture id, voice-run id and cut-out path named anywhere in a JSON value.
     It reads more than it needs on purpose: a number that merely looks like a reference only
     makes a file stay.
@@ -156,10 +160,10 @@ def _scan(value: Any, found: _Found) -> None:
                     found.lab_images.update(entry for entry in item if _is_id(entry))
                 elif key == "cutout_path" and isinstance(item, str):
                     found.cutouts.add(item)
-            _scan(item, found)
+            scan_references(item, found)
     elif isinstance(value, list):
         for item in value:
-            _scan(item, found)
+            scan_references(item, found)
 
 
 # --- Loading ---------------------------------------------------------------------------------
@@ -460,10 +464,44 @@ async def _write_missing_records(
     await session.flush()
 
 
-async def delete_item(session: AsyncSession, storage: Storage, kind: str, library_id: int) -> None:
+async def _server_job_ids(
+    session: AsyncSession, kind: Kind, library_id: int, owned: _Owned
+) -> set[int]:
+    """The jobs behind the item's pictures, speech and clips, for the optional cleanup of the GPU
+    server. Read before the item is deleted.
+    """
+    job_ids = set(owned.job_ids)
+    if owned.image_run_ids:
+        job_ids |= await _ids(session, LabRun.job_id, LabRun.id.in_(owned.image_run_ids))
+    if owned.voice_run_ids:
+        job_ids |= await _ids(session, LabVoiceRun.job_id, LabVoiceRun.id.in_(owned.voice_run_ids))
+    if owned.video_run_ids:
+        job_ids |= await _ids(session, LabVideoRun.job_id, LabVideoRun.id.in_(owned.video_run_ids))
+    if kind == "character":
+        # The Audio video tests of the character go with it (their rows cascade).
+        tests = await session.execute(
+            select(AvLabTest.timing_job_id, AvLabTest.render_job_id, LabVoiceRun.job_id)
+            .outerjoin(LabVoiceRun, LabVoiceRun.id == AvLabTest.voice_run_id)
+            .where(AvLabTest.character_id == library_id)
+        )
+        for row in tests.all():
+            job_ids |= {job_id for job_id in row if job_id is not None}
+    return job_ids
+
+
+async def delete_item(
+    session: AsyncSession,
+    storage: Storage,
+    kind: str,
+    library_id: int,
+    *,
+    purge_server: bool = False,
+) -> PurgePlan | None:
     """Deletes the library item and the files only it used, and commits.
 
-    Raises LibraryItemNotFoundError, or LibraryItemBusyError while work on it is running.
+    Raises LibraryItemNotFoundError, or LibraryItemBusyError while work on it is running. With
+    `purge_server` it returns what to purge on the GPU server afterwards
+    (`server_cleanup.purge`), read before the rows are gone; otherwise None.
     """
     checked = _check_kind(kind)
     item = await _load(session, checked, library_id)
@@ -475,6 +513,11 @@ async def delete_item(session: AsyncSession, storage: Storage, kind: str, librar
     reason = await _busy_reason(session, checked, library_id, owned, uses)
     if reason is not None:
         raise LibraryItemBusyError(f"'{item.name}' cannot be deleted: {reason}")
+
+    plan: PurgePlan | None = None
+    if purge_server:
+        job_ids = await _server_job_ids(session, checked, library_id, owned)
+        plan = await server_cleanup.make_plan(session, job_ids)
 
     name = item.name
     await _write_missing_records(session, checked, library_id, name, uses)
@@ -488,12 +531,13 @@ async def delete_item(session: AsyncSession, storage: Storage, kind: str, librar
         # The database is already consistent: only some files stay behind.
         await session.rollback()
         _logger.exception("could not remove every file of %s %d", checked, library_id)
+    return plan
 
 
 # --- Files -----------------------------------------------------------------------------------
 
-# Where a picture is named inside another row's JSON.
-_IMAGE_JSON_COLUMNS: Final[tuple[Any, ...]] = (
+# Where a picture is named inside another row's JSON. `services/lab_deletion.py` reads these too.
+IMAGE_JSON_COLUMNS: Final[tuple[Any, ...]] = (
     LibraryCharacterVersion.look_references,
     LibraryCharacterVersion.named_looks,
     LibraryEnvironmentVersion.states,
@@ -506,10 +550,11 @@ _IMAGE_JSON_COLUMNS: Final[tuple[Any, ...]] = (
     EnvironmentState.inputs,
     EnvironmentView.inputs,
     EnvironmentViewState.inputs,
+    AvLabTest.first_frame,
 )
 
 # Where a picture is named by a plain column.
-_IMAGE_ID_COLUMNS: Final[tuple[Any, ...]] = (
+IMAGE_ID_COLUMNS: Final[tuple[Any, ...]] = (
     CharacterLook.reference_image_id,
     CharacterReference.lab_image_id,
     LibraryEnvironmentVersion.reference_image_id,
@@ -519,21 +564,21 @@ _IMAGE_ID_COLUMNS: Final[tuple[Any, ...]] = (
 )
 
 
-async def _still_referenced(session: AsyncSession, owned: _Owned) -> _Found:
+async def _still_referenced(session: AsyncSession, owned: _Owned) -> References:
     """What the rows that stay still point at. Runs of the item itself do not count: they go
     with it.
     """
-    found = _Found()
-    for column in _IMAGE_JSON_COLUMNS:
+    found = References()
+    for column in IMAGE_JSON_COLUMNS:
         for value in (await session.execute(select(column))).scalars():
-            _scan(value, found)
-    for id_column in _IMAGE_ID_COLUMNS:
+            scan_references(value, found)
+    for id_column in IMAGE_ID_COLUMNS:
         rows = await session.execute(select(id_column).where(id_column.is_not(None)))
         found.lab_images.update(rows.scalars())
 
     other_runs = select(LabRun.reference_images).where(LabRun.id.not_in(owned.image_run_ids))
     for value in (await session.execute(other_runs)).scalars():
-        _scan(value, found)
+        scan_references(value, found)
     other_videos = select(
         LabVideoRun.first_frame,
         LabVideoRun.last_frame,
@@ -543,19 +588,22 @@ async def _still_referenced(session: AsyncSession, owned: _Owned) -> _Found:
     ).where(LabVideoRun.id.not_in(owned.video_run_ids))
     for row in (await session.execute(other_videos)).all():
         for value in row:
-            _scan(value, found)
+            scan_references(value, found)
     return found
 
 
-async def _path_in_use(session: AsyncSession, path: str) -> bool:
-    """Whether any remaining row stores this file."""
+async def path_in_use(session: AsyncSession, path: str) -> bool:
+    """Whether any remaining row stores this file. `services/lab_deletion.py` uses it too."""
     for column in (
         LabImage.path,
         Voice.path,
         LabVoiceRun.path,
         LabVideoRun.path,
         LabMusicRun.path,
+        LabMusicSource.path,
         CharacterReference.cutout_path,
+        AvLabTest.mixed_path,
+        AvLabTest.tts_path,
     ):
         found = await session.execute(select(exists().where(column == path)))
         if found.scalar():
@@ -612,7 +660,7 @@ async def _remove_owned_files(session: AsyncSession, storage: Storage, owned: _O
     await session.commit()
 
     for path in dict.fromkeys(paths):
-        if await _path_in_use(session, path):
+        if await path_in_use(session, path):
             continue
         try:
             await storage.delete_media(path)
