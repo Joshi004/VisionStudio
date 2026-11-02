@@ -1,12 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { invalidateAfterJobAction } from "./jobs";
-import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { ACTIVE_POLL_MS } from "./polling";
 import { PROJECTS_KEY, isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
+import { anySceneActive, sceneQuery } from "./sceneQuery";
+import type { OpenScene } from "./sceneQuery";
 
 export type ShotDefinitions = components["schemas"]["ShotDefinitionsOut"];
 export type SceneShotDefinitions =
@@ -29,10 +36,20 @@ export function shotDefinitionsKey(projectId: number) {
   return [...PROJECTS_KEY, projectId, "shot-definitions"] as const;
 }
 
-async function fetchShotDefinitions(projectId: number) {
+/** The shot-definition lists themselves, one for each open scene (and one for none). */
+export function shotDefinitionsSceneKey(projectId: number) {
+  return [...shotDefinitionsKey(projectId), "scene"] as const;
+}
+
+async function fetchShotDefinitions(projectId: number, sceneId: OpenScene) {
   const { data, error, response } = await api.GET(
     "/api/projects/{project_id}/shot-definitions",
-    { params: { path: { project_id: projectId } } },
+    {
+      params: {
+        path: { project_id: projectId },
+        query: sceneQuery(sceneId),
+      },
+    },
   );
   if (!data) {
     throw new ApiError(
@@ -51,18 +68,18 @@ async function fetchShotDefinitions(projectId: number) {
  * few seconds while any definition job is waiting or running. (The continuity check queues
  * cut repairs that write definitions of their own, PHASE-023: `useShotContinuity` loads this
  * again while it is busy.)
+ *
+ * Every scene is listed with a summary of its shots; the shots themselves are loaded for the
+ * open scene only (`sceneId`), or for none (null).
  */
-export function useShotDefinitions(projectId: number) {
+export function useShotDefinitions(projectId: number, sceneId: OpenScene) {
   return useQuery({
-    queryKey: shotDefinitionsKey(projectId),
-    queryFn: () => fetchShotDefinitions(projectId),
+    queryKey: [...shotDefinitionsSceneKey(projectId), sceneId],
+    queryFn: () => fetchShotDefinitions(projectId, sceneId),
     enabled: isValidProjectId(projectId),
+    placeholderData: keepPreviousData,
     refetchInterval: (current) =>
-      current.state.data?.entries.some((scene) =>
-        scene.shots.some((shot) => isJobActive(shot.job)),
-      )
-        ? ACTIVE_POLL_MS
-        : false,
+      anySceneActive(current.state.data?.entries) ? ACTIVE_POLL_MS : false,
   });
 }
 

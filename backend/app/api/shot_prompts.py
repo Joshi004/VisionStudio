@@ -36,6 +36,14 @@ from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.api.scene_filter import (
+    SceneIdQuery,
+    SceneShotsSummaryOut,
+    ShotsQuery,
+    includes_shots,
+    is_active,
+    summarize,
+)
 from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
@@ -167,7 +175,9 @@ class SceneShotPromptsOut(BaseModel):
     index: int
     title: str
     description: str
+    # Empty when the list was asked for without this scene's shots; `summary` still counts them.
     shots: list[ShotPromptEntryOut]
+    summary: SceneShotsSummaryOut
 
 
 class ShotPromptsOut(BaseModel):
@@ -260,13 +270,19 @@ def _shot_out(entry: ShotEntry) -> ShotPromptEntryOut:
     )
 
 
-def _scene_out(entry: SceneEntry) -> SceneShotPromptsOut:
+def _scene_out(entry: SceneEntry, with_shots: bool) -> SceneShotPromptsOut:
     return SceneShotPromptsOut(
         id=entry.item["id"],
         index=entry.item["index"],
         title=entry.item["title"],
         description=entry.item["description"],
-        shots=[_shot_out(shot) for shot in entry.shots],
+        shots=[_shot_out(shot) for shot in entry.shots] if with_shots else [],
+        summary=summarize(
+            entry.shots,
+            status=lambda shot: shot.status,
+            active=lambda shot: is_active(shot.job),
+            todo=lambda shot: shot.can_run and shot.status != "compiled",
+        ),
     )
 
 
@@ -294,16 +310,29 @@ def _refused(exc: shot_prompts.ShotPromptsError) -> HTTPException:
     response_model=ShotPromptsOut,
     responses=_NOT_FOUND,
 )
-async def get_shot_prompts(project_id: int, session: SessionDep) -> ShotPromptsOut:
+async def get_shot_prompts(
+    project_id: int,
+    session: SessionDep,
+    scene_id: SceneIdQuery = None,
+    shots: ShotsQuery = True,
+) -> ShotPromptsOut:
     project = await load_project(session, project_id)
-    return await _state_out(session, project)
+    return await _state_out(session, project, scene_id, shots)
 
 
-async def _state_out(session: AsyncSession, project: Project) -> ShotPromptsOut:
+async def _state_out(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str | None = None,
+    shots: bool = True,
+) -> ShotPromptsOut:
     result = await shot_prompts.state(session, project)
     return ShotPromptsOut(
         scenes_version=result.scenes_version,
-        entries=[_scene_out(entry) for entry in result.entries],
+        entries=[
+            _scene_out(entry, includes_shots(entry.item["id"], scene_id, shots))
+            for entry in result.entries
+        ],
         blocked_reason=result.blocked_reason,
     )
 

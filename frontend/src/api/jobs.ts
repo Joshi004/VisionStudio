@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
@@ -42,6 +42,38 @@ export function useJobs(projectId?: number) {
     queryKey: [...JOBS_KEY, "list", projectId ?? "all"],
     queryFn: () => fetchJobs(projectId),
     refetchInterval: (query) => (query.state.data?.some(isJobActive) ? ACTIVE_POLL_MS : false),
+  });
+}
+
+/** One page of the jobs, and how many jobs there are in all (of the project, when one is given). */
+export type JobsPage = { jobs: JobSummary[]; total: number };
+
+async function fetchJobsPage(
+  projectId: number | undefined,
+  page: number,
+  pageSize: number,
+): Promise<JobsPage> {
+  const { data, response } = await api.GET("/api/jobs", {
+    params: { query: { project_id: projectId, limit: pageSize, offset: (page - 1) * pageSize } },
+  });
+  if (!data) {
+    throw new ApiError(`Could not load the jobs (HTTP ${response.status}).`, response.status);
+  }
+  const total = Number(response.headers.get("X-Total-Count"));
+  return { jobs: data, total: Number.isFinite(total) ? total : data.length };
+}
+
+/**
+ * The newest jobs, `pageSize` at a time (pages start at 1), all of them or those of one
+ * project. The page is loaded again every few seconds while any job on it is waiting or running.
+ */
+export function useJobsPage(projectId: number | undefined, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: [...JOBS_KEY, "page", projectId ?? "all", pageSize, page],
+    queryFn: () => fetchJobsPage(projectId, page, pageSize),
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) =>
+      query.state.data?.jobs.some(isJobActive) ? ACTIVE_POLL_MS : false,
   });
 }
 

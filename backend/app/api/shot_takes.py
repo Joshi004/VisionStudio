@@ -31,6 +31,7 @@ other shot changes. The answers never return ORM objects.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal, cast
 
@@ -45,6 +46,14 @@ from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.api.scene_filter import (
+    SceneIdQuery,
+    SceneShotsSummaryOut,
+    ShotsQuery,
+    includes_shots,
+    is_active,
+    summarize,
+)
 from app.db.models import Asset, Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
@@ -213,7 +222,9 @@ class SceneShotTakesOut(BaseModel):
     index: int
     title: str
     description: str
+    # Empty when the list was asked for without this scene's shots; `summary` still counts them.
     shots: list[ShotTakesEntryOut]
+    summary: SceneShotsSummaryOut
 
 
 class ShotTakesOut(BaseModel):
@@ -388,20 +399,34 @@ def _shot_out(entry: ShotEntry, frame_urls: dict[int, str]) -> ShotTakesEntryOut
     )
 
 
-def _scene_out(entry: SceneEntry, frame_urls: dict[int, str]) -> SceneShotTakesOut:
+def _is_working(shot: ShotEntry) -> bool:
+    """True when the shot's newest take is being made, or a take's speech is being checked."""
+    return is_active(shot.job) or any(is_active(take.dialogue_job) for take in shot.takes)
+
+
+def _scene_out(
+    entry: SceneEntry, frame_urls: dict[int, str], with_shots: bool
+) -> SceneShotTakesOut:
     return SceneShotTakesOut(
         id=entry.item["id"],
         index=entry.item["index"],
         title=entry.item["title"],
         description=entry.item["description"],
-        shots=[_shot_out(shot, frame_urls) for shot in entry.shots],
+        shots=[_shot_out(shot, frame_urls) for shot in entry.shots] if with_shots else [],
+        summary=summarize(
+            entry.shots,
+            status=lambda shot: shot.status,
+            active=_is_working,
+            # What "Generate scene" starts: no good clip, and not waiting for a check.
+            todo=lambda shot: shot.can_run and shot.status not in ("generated", "unchecked"),
+        ),
     )
 
 
-async def _frame_urls(result: shot_takes.ShotTakesState, session: AsyncSession) -> dict[int, str]:
-    """The address of every anchor frame the takes name, by asset id (PHASE-032)."""
+async def _frame_urls(scenes: Sequence[SceneEntry], session: AsyncSession) -> dict[int, str]:
+    """The address of every anchor frame the takes of these scenes name, by asset id (PHASE-032)."""
     ids: set[int] = set()
-    for scene in result.entries:
+    for scene in scenes:
         for shot in scene.shots:
             for take in shot.takes:
                 asset_id = take.anchor.get("asset_id") if take.anchor is not None else None
@@ -437,13 +462,24 @@ def _refused(exc: shot_takes.ShotTakesError) -> HTTPException:
     response_model=ShotTakesOut,
     responses=_NOT_FOUND,
 )
-async def get_shot_takes(project_id: int, session: SessionDep) -> ShotTakesOut:
+async def get_shot_takes(
+    project_id: int,
+    session: SessionDep,
+    scene_id: SceneIdQuery = None,
+    shots: ShotsQuery = True,
+) -> ShotTakesOut:
     project = await load_project(session, project_id)
     result = await shot_takes.state(session, project)
-    frame_urls = await _frame_urls(result, session)
+    sent = {
+        entry.item["id"]: includes_shots(entry.item["id"], scene_id, shots)
+        for entry in result.entries
+    }
+    frame_urls = await _frame_urls(
+        [entry for entry in result.entries if sent[entry.item["id"]]], session
+    )
     return ShotTakesOut(
         scenes_version=result.scenes_version,
-        entries=[_scene_out(entry, frame_urls) for entry in result.entries],
+        entries=[_scene_out(entry, frame_urls, sent[entry.item["id"]]) for entry in result.entries],
         blocked_reason=result.blocked_reason,
         unchecked_count=result.unchecked_count,
         check_job=_job_out(result.check_job),

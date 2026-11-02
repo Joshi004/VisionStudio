@@ -16,6 +16,7 @@ import {
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
+import { shotsNotLoaded } from "../../api/sceneQuery";
 import {
   useCompileAllPrompts,
   useCompileOnePrompt,
@@ -31,6 +32,7 @@ import { FeedbackModal } from "./FeedbackModal";
 import { PromptHoverCard } from "./PromptHoverCard";
 import { PromptLegend } from "./PromptLegend";
 import { ReplaceManualModal } from "./ReplaceManualModal";
+import { SceneSection } from "./SceneSection";
 import { ShotPromptEditor } from "./ShotPromptEditor";
 
 type ShotPromptsPanelProps = {
@@ -242,6 +244,8 @@ function ShotRow({
 
 type SceneRowProps = {
   scene: SceneShotPrompts;
+  opened: boolean;
+  onToggle: () => void;
   busy: boolean;
   onCompileScene: () => void;
   onCompileShot: (shot: ShotPromptEntry) => void;
@@ -256,9 +260,14 @@ type SceneRowProps = {
   ) => void;
 };
 
-/** One scene: how many of its shots have a prompt, and its shots. */
+/**
+ * One scene: how many of its shots have a prompt, and its shots. The counts come from the
+ * scene's summary, so they show while the scene is closed and its shots are not loaded.
+ */
 function SceneRow({
   scene,
+  opened,
+  onToggle,
   busy,
   onCompileScene,
   onCompileShot,
@@ -268,69 +277,59 @@ function SceneRow({
   onStartEdit,
   onSave,
 }: SceneRowProps) {
-  const compiled = scene.shots.filter(
-    (shot) => shot.status === "compiled",
-  ).length;
-  const outOfDate = scene.shots.filter(
-    (shot) => shot.status === "out_of_date",
-  ).length;
-  // What "Compile scene" would do for this scene.
-  const todo = scene.shots.filter(
-    (shot) => shot.can_run && shot.status !== "compiled",
-  ).length;
+  const { total, by_status: byStatus, active, todo } = scene.summary;
+  const compiled = byStatus.compiled ?? 0;
+  const outOfDate = byStatus.out_of_date ?? 0;
 
   return (
-    <Stack gap={6}>
-      <Group align="flex-start" wrap="nowrap" gap="sm">
-        <Badge
-          variant="outline"
-          color="gray"
-          miw={40}
-          style={{ flexShrink: 0, textTransform: "none" }}
-        >
-          {scene.index}
-        </Badge>
-        <Group gap="xs" style={{ flexGrow: 1 }}>
-          <Text size="sm" fw={500}>
-            {scene.title}
-          </Text>
+    <SceneSection
+      index={scene.index}
+      title={scene.title}
+      opened={opened}
+      onToggle={onToggle}
+      loading={shotsNotLoaded(scene)}
+      badges={
+        <>
           <Badge variant="light" color="gray">
-            {compiled} of {scene.shots.length} compiled
+            {compiled} of {total} compiled
           </Badge>
+          {active > 0 && (
+            <Badge variant="light" color="blue">
+              {active} running
+            </Badge>
+          )}
           {outOfDate > 0 && (
             <Badge variant="light" color="yellow">
               {outOfDate} out of date
             </Badge>
           )}
-        </Group>
+        </>
+      }
+      actions={
         <Button
           size="compact-sm"
           variant="default"
           disabled={busy || todo === 0}
           onClick={onCompileScene}
-          style={{ flexShrink: 0 }}
         >
           Compile scene
         </Button>
-      </Group>
-      {scene.shots.length > 0 && (
-        <Stack gap="sm" ml={48}>
-          {scene.shots.map((entry) => (
-            <ShotRow
-              key={entry.shot.id}
-              entry={entry}
-              busy={busy}
-              onCompile={() => onCompileShot(entry)}
-              onFeedback={() => onFeedbackShot(entry)}
-              saving={saving}
-              saveError={saveError}
-              onStartEdit={onStartEdit}
-              onSave={(pieces, done) => onSave(entry.shot.id, pieces, done)}
-            />
-          ))}
-        </Stack>
-      )}
-    </Stack>
+      }
+    >
+      {scene.shots.map((entry) => (
+        <ShotRow
+          key={entry.shot.id}
+          entry={entry}
+          busy={busy}
+          onCompile={() => onCompileShot(entry)}
+          onFeedback={() => onFeedbackShot(entry)}
+          saving={saving}
+          saveError={saveError}
+          onStartEdit={onStartEdit}
+          onSave={(pieces, done) => onSave(entry.shot.id, pieces, done)}
+        />
+      ))}
+    </SceneSection>
   );
 }
 
@@ -342,7 +341,12 @@ function SceneRow({
  * A shot's prompt is compiled by itself when its request is planned, and can be edited by hand.
  */
 export function ShotPromptsPanel({ projectId }: ShotPromptsPanelProps) {
-  const { data, isLoading, isError, error } = useShotPrompts(projectId);
+  // Only the shots of one scene are loaded and shown at a time; every scene is listed closed.
+  const [openSceneId, setOpenSceneId] = useState<string | null>(null);
+  const { data, isLoading, isError, error } = useShotPrompts(
+    projectId,
+    openSceneId,
+  );
   const compileAll = useCompileAllPrompts(projectId);
   const compileScene = useCompileScenePrompts(projectId);
   const compileOne = useCompileOnePrompt(projectId);
@@ -363,13 +367,7 @@ export function ShotPromptsPanel({ projectId }: ShotPromptsPanelProps) {
     compileAll.isPending || compileScene.isPending || compileOne.isPending;
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
   // What "Compile all" would do: the shots that may be compiled and have no current prompt.
-  const allCount = entries.reduce(
-    (sum, scene) =>
-      sum +
-      scene.shots.filter((shot) => shot.can_run && shot.status !== "compiled")
-        .length,
-    0,
-  );
+  const allCount = entries.reduce((sum, scene) => sum + scene.summary.todo, 0);
   // The shots the last press could not do, with why.
   const skipped = [
     ...(compileAll.data?.skipped ?? []),
@@ -445,6 +443,12 @@ export function ShotPromptsPanel({ projectId }: ShotPromptsPanelProps) {
           <SceneRow
             key={scene.id}
             scene={scene}
+            opened={scene.id === openSceneId}
+            onToggle={() =>
+              setOpenSceneId((current) =>
+                current === scene.id ? null : scene.id,
+              )
+            }
             busy={busy}
             onCompileScene={() => compileScene.mutate(scene.id)}
             onCompileShot={(shot) =>

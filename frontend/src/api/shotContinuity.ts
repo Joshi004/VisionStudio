@@ -8,7 +8,7 @@ import { invalidateAfterJobAction } from "./jobs";
 import { ACTIVE_POLL_MS, isJobActive } from "./polling";
 import { isValidProjectId } from "./projects";
 import type { components } from "./schema";
-import { shotDefinitionsKey } from "./shotDefinitions";
+import { shotDefinitionsKey, shotDefinitionsSceneKey } from "./shotDefinitions";
 
 export type ShotContinuity = components["schemas"]["ShotContinuityOut"];
 export type SceneContinuity = components["schemas"]["SceneContinuityOut"];
@@ -77,11 +77,11 @@ export function useShotContinuity(
     queryFn: async () => {
       const data = await fetchShotContinuity(projectId);
       if (data.entries.some(isContinuityBusy)) {
-        // A cut repair writes new shot definitions: the shots' own list must follow it. Only
-        // that list (`exact`), or the two would refresh each other without end.
+        // A cut repair writes new shot definitions: the shots' own lists must follow it. Only
+        // those (not the continuity under the same key), or the two would refresh each other
+        // without end.
         void queryClient.invalidateQueries({
-          queryKey: shotDefinitionsKey(projectId),
-          exact: true,
+          queryKey: shotDefinitionsSceneKey(projectId),
         });
       }
       return data;

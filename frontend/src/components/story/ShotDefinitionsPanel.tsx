@@ -17,6 +17,7 @@ import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import { useSceneDefinitions } from "../../api/sceneDefinitions";
 import { useSceneEvents } from "../../api/sceneEvents";
+import { anySceneActive, shotsNotLoaded } from "../../api/sceneQuery";
 import {
   useCheckAllContinuity,
   useCheckSceneContinuity,
@@ -42,6 +43,7 @@ import { FeedbackBadge } from "./FeedbackBadge";
 import { FeedbackModal } from "./FeedbackModal";
 import { PromptHoverCard } from "./PromptHoverCard";
 import { ReplaceManualModal } from "./ReplaceManualModal";
+import { SceneSection } from "./SceneSection";
 import { ShotDefinitionEditor } from "./ShotDefinitionEditor";
 import { ShotDefinitionView } from "./ShotDefinitionView";
 
@@ -269,6 +271,8 @@ function ShotRow({
 
 type SceneRowProps = {
   scene: SceneShotDefinitions;
+  opened: boolean;
+  onToggle: () => void;
   /** The scene's continuity; undefined until the continuity state has loaded. */
   continuity: SceneContinuity | undefined;
   characterNames: Record<string, string>;
@@ -401,6 +405,8 @@ function CutRow({ mismatch, busy, onRepair }: CutRowProps) {
 /** One scene: how many of its shots are defined, why they cannot be, and its shots. */
 function SceneRow({
   scene,
+  opened,
+  onToggle,
   continuity,
   characterNames,
   projectBlocked,
@@ -416,18 +422,10 @@ function SceneRow({
   onStartEdit,
   onSave,
 }: SceneRowProps) {
-  const defined = scene.shots.filter(
-    (shot) => shot.status === "defined",
-  ).length;
-  const outOfDate = scene.shots.filter(
-    (shot) => shot.status === "out_of_date",
-  ).length;
-  const active = scene.shots.some((shot) => isJobActive(shot.job));
+  const { total, by_status: byStatus, active, todo } = scene.summary;
+  const defined = byStatus.defined ?? 0;
+  const outOfDate = byStatus.out_of_date ?? 0;
   const reason = projectBlocked ? null : scene.blocked_reason;
-  // What "Define shots" would start for this scene.
-  const todo = scene.shots.filter(
-    (shot) => shot.can_run && shot.status !== "defined",
-  ).length;
   // The cuts that do not line up, each shown at its place: the start of the scene before the
   // first shot, every other cut after the shot it follows (the scene's end after the last).
   const mismatches = continuity?.mismatches ?? [];
@@ -441,97 +439,92 @@ function SceneRow({
   );
 
   return (
-    <Stack gap={6}>
-      <Group align="flex-start" wrap="nowrap" gap="sm">
-        <Badge
-          variant="outline"
-          color="gray"
-          miw={40}
-          style={{ flexShrink: 0, textTransform: "none" }}
-        >
-          {scene.index}
-        </Badge>
-        <Stack gap={4} style={{ flexGrow: 1 }}>
-          <Group gap="xs">
-            <Text size="sm" fw={500}>
-              {scene.title}
-            </Text>
-            {scene.plan_version !== null ? (
-              <Badge
-                variant="light"
-                color="gray"
-                title="The version of the scene's shot plan the shots are read from"
-              >
-                {defined} of {scene.shots.length} defined
-              </Badge>
-            ) : (
-              <Badge variant="light" color="gray">
-                Shots not planned
-              </Badge>
-            )}
-            {outOfDate > 0 && (
-              <Badge variant="light" color="yellow">
-                {outOfDate} out of date
-              </Badge>
-            )}
-          </Group>
+    <SceneSection
+      index={scene.index}
+      title={scene.title}
+      opened={opened}
+      onToggle={onToggle}
+      loading={shotsNotLoaded(scene)}
+      badges={
+        <>
+          {scene.plan_version !== null ? (
+            <Badge
+              variant="light"
+              color="gray"
+              title="The version of the scene's shot plan the shots are read from"
+            >
+              {defined} of {total} defined
+            </Badge>
+          ) : (
+            <Badge variant="light" color="gray">
+              Shots not planned
+            </Badge>
+          )}
+          {active > 0 && (
+            <Badge variant="light" color="blue">
+              {active} running
+            </Badge>
+          )}
+          {outOfDate > 0 && (
+            <Badge variant="light" color="yellow">
+              {outOfDate} out of date
+            </Badge>
+          )}
+        </>
+      }
+      note={
+        <>
           {reason !== null && (
             <Text size="xs" c="dimmed">
               {reason}
             </Text>
           )}
-          {continuity !== undefined && scene.shots.length > 0 && (
+          {continuity !== undefined && total > 0 && (
             <ContinuityLine
               continuity={continuity}
               busy={busy}
               onCheck={onCheckContinuity}
             />
           )}
-        </Stack>
+        </>
+      }
+      actions={
         <Button
           size="compact-sm"
           variant="default"
-          loading={active}
+          loading={active > 0}
           disabled={!scene.can_run || busy || todo === 0}
           onClick={onDefineScene}
-          style={{ flexShrink: 0 }}
         >
           Define shots
         </Button>
-      </Group>
-      {scene.shots.length > 0 && (
-        <Stack gap="sm" ml={48}>
-          {mismatches
-            .filter((item) => item.before === "scene_start")
-            .map(cutRow)}
-          {scene.shots.map((entry) => (
-            <Stack key={entry.shot.id} gap="sm">
-              <ShotRow
-                entry={entry}
-                continuity={continuity?.shots.find(
-                  (flag) => flag.shot_id === entry.shot.id,
-                )}
-                characterNames={characterNames}
-                sceneBlocked={scene.blocked_reason !== null}
-                busy={busy}
-                onDefine={() => onDefineShot(entry.shot.id)}
-                onFeedback={() => onFeedbackShot(entry)}
-                sceneCharacterIds={sceneCharacterIds}
-                saving={saving}
-                saveError={saveError}
-                onStartEdit={onStartEdit}
-                onSave={(definition, done) =>
-                  onSave(entry.shot.id, definition, done)
-                }
-              />
-              {mismatches
-                .filter((item) => item.before === entry.shot.id)
-                .map(cutRow)}
-            </Stack>
-          ))}
+      }
+    >
+      {mismatches.filter((item) => item.before === "scene_start").map(cutRow)}
+      {scene.shots.map((entry) => (
+        <Stack key={entry.shot.id} gap="sm">
+          <ShotRow
+            entry={entry}
+            continuity={continuity?.shots.find(
+              (flag) => flag.shot_id === entry.shot.id,
+            )}
+            characterNames={characterNames}
+            sceneBlocked={scene.blocked_reason !== null}
+            busy={busy}
+            onDefine={() => onDefineShot(entry.shot.id)}
+            onFeedback={() => onFeedbackShot(entry)}
+            sceneCharacterIds={sceneCharacterIds}
+            saving={saving}
+            saveError={saveError}
+            onStartEdit={onStartEdit}
+            onSave={(definition, done) =>
+              onSave(entry.shot.id, definition, done)
+            }
+          />
+          {mismatches.filter((item) => item.before === entry.shot.id).map(cutRow)}
         </Stack>
-      )}
-    </Stack>
+      ))}
+    </SceneSection>
   );
 }
 
@@ -542,7 +535,12 @@ function SceneRow({
  * whose definition is missing or out of date.
  */
 export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
-  const { data, isLoading, isError, error } = useShotDefinitions(projectId);
+  // Only the shots of one scene are loaded and shown at a time; every scene is listed closed.
+  const [openSceneId, setOpenSceneId] = useState<string | null>(null);
+  const { data, isLoading, isError, error } = useShotDefinitions(
+    projectId,
+    openSceneId,
+  );
   const defineAll = useDefineAllShots(projectId);
   const defineScene = useDefineSceneShots(projectId);
   const defineOne = useDefineOneShot(projectId);
@@ -565,9 +563,7 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
   const entries = data?.entries ?? [];
   // A check follows the last shot of a scene to be defined, so the continuity is asked again
   // while any shot is being defined.
-  const definitionsActive = entries.some((scene) =>
-    scene.shots.some((shot) => isJobActive(shot.job)),
-  );
+  const definitionsActive = anySceneActive(entries);
   const continuity = useShotContinuity(projectId, definitionsActive).data;
   const continuityByScene = new Map(
     (continuity?.entries ?? []).map((scene) => [scene.id, scene]),
@@ -592,20 +588,12 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
     ]),
   );
   // What "Define all" would start: the shots of scenes that may run and are not defined and current.
-  const allCount = entries.reduce(
-    (sum, scene) =>
-      sum +
-      scene.shots.filter((shot) => shot.can_run && shot.status !== "defined")
-        .length,
-    0,
-  );
+  const allCount = entries.reduce((sum, scene) => sum + scene.summary.todo, 0);
   // A scene that was skipped, and a shot the user wrote (it is only redefined by its own
   // button). The other shot-level skips ("already defined") are not worth showing.
   const manualShots = new Set(
     entries.flatMap((scene) =>
-      scene.shots
-        .filter((shot) => shot.needs_confirmation)
-        .map((shot) => `${scene.id}/${shot.shot.id}`),
+      scene.summary.manual_shot_ids.map((shotId) => `${scene.id}/${shotId}`),
     ),
   );
   const skipped = [
@@ -728,6 +716,12 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
           <SceneRow
             key={scene.id}
             scene={scene}
+            opened={scene.id === openSceneId}
+            onToggle={() =>
+              setOpenSceneId((current) =>
+                current === scene.id ? null : scene.id,
+              )
+            }
             continuity={continuityByScene.get(scene.id)}
             characterNames={characterNames}
             projectBlocked={projectBlocked}

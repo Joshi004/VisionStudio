@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Project
@@ -310,10 +310,19 @@ async def get_project(session: AsyncSession, project_id: int) -> Project | None:
     return await session.get(Project, project_id)
 
 
-async def list_projects(session: AsyncSession) -> list[Project]:
-    """All projects, newest first."""
+async def list_projects(
+    session: AsyncSession, *, limit: int | None = None, offset: int = 0
+) -> list[Project]:
+    """Projects, newest first: all of them, or one page of them."""
     statement = select(Project).order_by(Project.created_at.desc(), Project.id.desc())
+    if limit is not None:
+        statement = statement.limit(limit).offset(offset)
     return list((await session.execute(statement)).scalars())
+
+
+async def count_projects(session: AsyncSession) -> int:
+    """How many projects there are."""
+    return (await session.execute(select(func.count()).select_from(Project))).scalar_one()
 
 
 async def update_project(

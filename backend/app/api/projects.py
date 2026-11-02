@@ -12,9 +12,9 @@ file as the raw request body).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -206,8 +206,17 @@ async def load_project(session: AsyncSession, project_id: int) -> Project:
 
 
 @router.get("/projects", response_model=list[ProjectSummary])
-async def list_projects(session: SessionDep) -> list[ProjectSummary]:
-    projects = await projects_service.list_projects(session)
+async def list_projects(
+    session: SessionDep,
+    response: Response,
+    limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[ProjectSummary]:
+    """Projects, newest first: all of them, or one page (`limit`, `offset`). The header
+    `X-Total-Count` is how many projects there are in all.
+    """
+    response.headers["X-Total-Count"] = str(await projects_service.count_projects(session))
+    projects = await projects_service.list_projects(session, limit=limit, offset=offset)
     return [
         ProjectSummary(
             id=project.id,

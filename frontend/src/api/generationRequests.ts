@@ -1,12 +1,19 @@
 import { useRef } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
-import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { ACTIVE_POLL_MS } from "./polling";
 import { isValidProjectId } from "./projects";
 import type { components } from "./schema";
+import { anySceneActive, sceneQuery } from "./sceneQuery";
+import type { OpenScene } from "./sceneQuery";
 import { useShotDefinitions } from "./shotDefinitions";
 import { shotReferencesKey } from "./shotReferences";
 
@@ -36,10 +43,20 @@ export function generationRequestsKey(projectId: number) {
   return [...shotReferencesKey(projectId), "requests"] as const;
 }
 
-async function fetchGenerationRequests(projectId: number) {
+/** The request lists themselves, one for each open scene (and one for none). */
+export function generationRequestsSceneKey(projectId: number) {
+  return [...generationRequestsKey(projectId), "scene"] as const;
+}
+
+async function fetchGenerationRequests(projectId: number, sceneId: OpenScene) {
   const { data, error, response } = await api.GET(
     "/api/projects/{project_id}/generation-requests",
-    { params: { path: { project_id: projectId } } },
+    {
+      params: {
+        path: { project_id: projectId },
+        query: sceneQuery(sceneId),
+      },
+    },
   );
   if (!data) {
     throw new ApiError(
@@ -57,17 +74,20 @@ async function fetchGenerationRequests(projectId: number) {
  * Where each shot's generation request stands. A request is planned by the server right after
  * a shot's references are chosen, so it is loaded again every few seconds while any definition
  * job is waiting or running, and for a short while after.
+ *
+ * Every scene is listed with a summary of its shots; the shots themselves are loaded for the
+ * open scene only (`sceneId`), or for none (null).
  */
-export function useGenerationRequests(projectId: number) {
+export function useGenerationRequests(projectId: number, sceneId: OpenScene) {
   const lastActive = useRef(0);
-  const definitionsActive =
-    useShotDefinitions(projectId).data?.entries.some((scene) =>
-      scene.shots.some((shot) => isJobActive(shot.job)),
-    ) ?? false;
+  const definitionsActive = anySceneActive(
+    useShotDefinitions(projectId, null).data?.entries,
+  );
   return useQuery({
-    queryKey: generationRequestsKey(projectId),
-    queryFn: () => fetchGenerationRequests(projectId),
+    queryKey: [...generationRequestsSceneKey(projectId), sceneId],
+    queryFn: () => fetchGenerationRequests(projectId, sceneId),
     enabled: isValidProjectId(projectId),
+    placeholderData: keepPreviousData,
     refetchInterval: () => {
       if (definitionsActive) {
         lastActive.current = Date.now();

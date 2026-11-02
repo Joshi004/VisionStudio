@@ -28,9 +28,10 @@ from typing import Any, Final
 from app.providers import llm
 from app.services.text_limits import fit_text, keep_first, length_rule
 
-# Hidden reasoning is billed as output, so this leaves room to think before the answer.
+# Hidden reasoning is billed as output, so this leaves room to think before the answer. It is a
+# ceiling, not a target. The music plan of a long story used all of 12,000 on reasoning alone.
 # Qwen3.8 ignores it and uses its own limit (`providers/qwen38.py`).
-MAX_TOKENS: Final = 12000
+MAX_TOKENS: Final = 48000
 REASONING_EFFORT: Final = "high"
 
 DIRECTION_COUNT: Final = 4

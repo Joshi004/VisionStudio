@@ -3,7 +3,6 @@ import {
   Alert,
   Badge,
   Button,
-  Collapse,
   Divider,
   Group,
   Loader,
@@ -80,6 +79,9 @@ const STATUS: Record<
 
 type EntryRowProps = {
   entry: ShotPlanEntry;
+  /** True while this scene's shots are shown: one scene at a time. */
+  opened: boolean;
+  onToggle: () => void;
   events: SceneEventsContent | null;
   units: SpeechUnitsContent | null;
   audio: SpeechUnitAudio[];
@@ -103,6 +105,8 @@ type EntryRowProps = {
  */
 function EntryRow({
   entry,
+  opened,
+  onToggle,
   events,
   units,
   audio,
@@ -117,7 +121,6 @@ function EntryRow({
   onStartEdit,
   onSave,
 }: EntryRowProps) {
-  const [open, setOpen] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const job = entry.job;
@@ -224,12 +227,8 @@ function EntryRow({
             </Button>
           )}
           {entry.shots !== null && (
-            <Button
-              size="compact-xs"
-              variant="default"
-              onClick={() => setOpen((value) => !value)}
-            >
-              {open ? "Hide the shots" : "Show the shots"}
+            <Button size="compact-xs" variant="default" onClick={onToggle}>
+              {opened ? "Hide the shots" : "Show the shots"}
             </Button>
           )}
           {entry.shots !== null && (
@@ -239,7 +238,9 @@ function EntryRow({
               disabled={editing || active || busy}
               onClick={() => {
                 onStartEdit();
-                setOpen(false);
+                if (opened) {
+                  onToggle();
+                }
                 setEditing(true);
               }}
             >
@@ -282,32 +283,28 @@ function EntryRow({
           />
         </Paper>
       )}
-      {entry.timeline !== null && (
-        <Collapse expanded={timelineOpen}>
-          <SceneTimelineView
-            timeline={entry.timeline}
-            storyStartSeconds={entry.story_start_seconds}
-          />
-        </Collapse>
+      {entry.timeline !== null && timelineOpen && (
+        <SceneTimelineView
+          timeline={entry.timeline}
+          storyStartSeconds={entry.story_start_seconds}
+        />
       )}
-      {entry.shots !== null && entry.version !== null && !editing && (
-        <Collapse expanded={open}>
-          <ArtifactViewer
-            title="Shots"
-            version={entry.version.version}
-            source={entry.version.source}
-            jobId={entry.version.job_id}
-            createdAt={entry.version.created_at}
-          >
-            <ShotPlanView
-              plan={entry.shots}
-              events={events}
-              units={units}
-              audio={audio}
-              characterNames={characterNames}
-            />
-          </ArtifactViewer>
-        </Collapse>
+      {entry.shots !== null && entry.version !== null && !editing && opened && (
+        <ArtifactViewer
+          title="Shots"
+          version={entry.version.version}
+          source={entry.version.source}
+          jobId={entry.version.job_id}
+          createdAt={entry.version.created_at}
+        >
+          <ShotPlanView
+            plan={entry.shots}
+            events={events}
+            units={units}
+            audio={audio}
+            characterNames={characterNames}
+          />
+        </ArtifactViewer>
       )}
     </Stack>
   );
@@ -328,6 +325,8 @@ export function ShotPlansPanel({ projectId }: ShotPlansPanelProps) {
   const [confirming, setConfirming] = useState<ShotPlanEntry | null>(null);
   // The scene the user is writing a note about.
   const [feedbackFor, setFeedbackFor] = useState<ShotPlanEntry | null>(null);
+  // The scene whose shots are shown: one at a time, so the others render no shots at all.
+  const [openSceneId, setOpenSceneId] = useState<string | null>(null);
   // What a shot names (events, units and their measured length) comes from the earlier
   // stages. They are already loaded for their own panels, so this shares their queries.
   const sceneEvents = useSceneEvents(projectId).data;
@@ -414,6 +413,12 @@ export function ShotPlansPanel({ projectId }: ShotPlansPanelProps) {
           <EntryRow
             key={entry.id}
             entry={entry}
+            opened={entry.id === openSceneId}
+            onToggle={() =>
+              setOpenSceneId((current) =>
+                current === entry.id ? null : entry.id,
+              )
+            }
             events={
               sceneEvents?.entries.find((item) => item.id === entry.id)
                 ?.events ?? null

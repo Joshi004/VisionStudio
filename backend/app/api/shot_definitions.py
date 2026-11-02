@@ -23,6 +23,7 @@ written to the Character Lab. The answers never return ORM objects.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 from typing import Any, Literal, cast
 
@@ -35,6 +36,13 @@ from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
+from app.api.scene_filter import (
+    DefinitionsSummaryOut,
+    SceneIdQuery,
+    ShotsQuery,
+    includes_shots,
+    is_active,
+)
 from app.db.models import Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher
@@ -212,7 +220,9 @@ class SceneShotDefinitionsOut(BaseModel):
     # Where the scene's shot plan stands, and which version its shots were read from.
     plan_status: PlanStatus
     plan_version: int | None
+    # Empty when the list was asked for without this scene's shots; `summary` still counts them.
     shots: list[ShotDefinitionEntryOut]
+    summary: DefinitionsSummaryOut
     # Why this scene's shots cannot be defined, or None.
     blocked_reason: str | None
     can_run: bool
@@ -382,7 +392,19 @@ def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
     )
 
 
-def _scene_out(entry: SceneEntry) -> SceneShotDefinitionsOut:
+def _summary_out(entry: SceneEntry) -> DefinitionsSummaryOut:
+    shots = entry.shots
+    by_status = Counter(shot.status for shot in shots)
+    return DefinitionsSummaryOut(
+        total=len(shots),
+        by_status=dict(by_status),
+        active=sum(1 for shot in shots if is_active(shot.job)),
+        todo=sum(1 for shot in shots if shot.can_run and shot.status != "defined"),
+        manual_shot_ids=[shot.shot["id"] for shot in shots if shot.needs_confirmation],
+    )
+
+
+def _scene_out(entry: SceneEntry, with_shots: bool) -> SceneShotDefinitionsOut:
     return SceneShotDefinitionsOut(
         id=entry.item["id"],
         index=entry.item["index"],
@@ -390,7 +412,8 @@ def _scene_out(entry: SceneEntry) -> SceneShotDefinitionsOut:
         description=entry.item["description"],
         plan_status=entry.plan_status,
         plan_version=entry.plan.version if entry.plan is not None else None,
-        shots=[_shot_out(shot) for shot in entry.shots],
+        shots=[_shot_out(shot) for shot in entry.shots] if with_shots else [],
+        summary=_summary_out(entry),
         blocked_reason=entry.blocked_reason,
         can_run=entry.can_run,
     )
@@ -420,16 +443,29 @@ def _refused(exc: shot_definitions.ShotDefinitionsError) -> HTTPException:
     response_model=ShotDefinitionsOut,
     responses=_NOT_FOUND,
 )
-async def get_shot_definitions(project_id: int, session: SessionDep) -> ShotDefinitionsOut:
+async def get_shot_definitions(
+    project_id: int,
+    session: SessionDep,
+    scene_id: SceneIdQuery = None,
+    shots: ShotsQuery = True,
+) -> ShotDefinitionsOut:
     project = await load_project(session, project_id)
-    return await _state_out(session, project)
+    return await _state_out(session, project, scene_id, shots)
 
 
-async def _state_out(session: AsyncSession, project: Project) -> ShotDefinitionsOut:
+async def _state_out(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str | None = None,
+    shots: bool = True,
+) -> ShotDefinitionsOut:
     result = await shot_definitions.state(session, project)
     return ShotDefinitionsOut(
         scenes_version=result.scenes_version,
-        entries=[_scene_out(entry) for entry in result.entries],
+        entries=[
+            _scene_out(entry, includes_shots(entry.item["id"], scene_id, shots))
+            for entry in result.entries
+        ],
         blocked_reason=result.blocked_reason,
     )
 

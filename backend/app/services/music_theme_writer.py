@@ -32,7 +32,7 @@ from app.services.music_prompt_profiles import ACE_STEP
 MODEL: Final = "ace-step-1.5"
 
 # Hidden reasoning is billed as output, so this leaves room to think before the answer.
-MAX_TOKENS: Final = 8000
+MAX_TOKENS: Final = 48000
 REASONING_EFFORT: Final = "high"
 
 # The most ACE-Step takes. A model counts characters badly, so it is told a size in words that

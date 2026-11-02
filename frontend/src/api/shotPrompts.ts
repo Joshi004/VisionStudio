@@ -1,14 +1,21 @@
 import { useRef } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
 import { generationRequestsKey } from "./generationRequests";
 import { invalidateAfterJobAction } from "./jobs";
-import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { ACTIVE_POLL_MS } from "./polling";
 import { isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
+import { anySceneActive, sceneQuery } from "./sceneQuery";
+import type { OpenScene } from "./sceneQuery";
 import { useShotDefinitions } from "./shotDefinitions";
 
 export type ShotPrompts = components["schemas"]["ShotPromptsOut"];
@@ -36,10 +43,20 @@ export function shotPromptsKey(projectId: number) {
   return [...generationRequestsKey(projectId), "prompts"] as const;
 }
 
-async function fetchShotPrompts(projectId: number) {
+/** The prompt lists themselves, one for each open scene (and one for none). */
+export function shotPromptsSceneKey(projectId: number) {
+  return [...shotPromptsKey(projectId), "scene"] as const;
+}
+
+async function fetchShotPrompts(projectId: number, sceneId: OpenScene) {
   const { data, error, response } = await api.GET(
     "/api/projects/{project_id}/shot-prompts",
-    { params: { path: { project_id: projectId } } },
+    {
+      params: {
+        path: { project_id: projectId },
+        query: sceneQuery(sceneId),
+      },
+    },
   );
   if (!data) {
     throw new ApiError(
@@ -57,22 +74,22 @@ async function fetchShotPrompts(projectId: number) {
  * Where each shot's compiled prompt stands. A compile job is queued by the server right after a
  * shot's request is planned, so it is loaded again every few seconds while a compile job (or a
  * definition job) is waiting or running, and for a short while after.
+ *
+ * Every scene is listed with a summary of its shots; the shots themselves are loaded for the
+ * open scene only (`sceneId`), or for none (null).
  */
-export function useShotPrompts(projectId: number) {
+export function useShotPrompts(projectId: number, sceneId: OpenScene) {
   const lastActive = useRef(0);
-  const definitionsActive =
-    useShotDefinitions(projectId).data?.entries.some((scene) =>
-      scene.shots.some((shot) => isJobActive(shot.job)),
-    ) ?? false;
+  const definitionsActive = anySceneActive(
+    useShotDefinitions(projectId, null).data?.entries,
+  );
   return useQuery({
-    queryKey: shotPromptsKey(projectId),
-    queryFn: () => fetchShotPrompts(projectId),
+    queryKey: [...shotPromptsSceneKey(projectId), sceneId],
+    queryFn: () => fetchShotPrompts(projectId, sceneId),
     enabled: isValidProjectId(projectId),
+    placeholderData: keepPreviousData,
     refetchInterval: (current) => {
-      const promptsActive =
-        current.state.data?.entries.some((scene) =>
-          scene.shots.some((shot) => isJobActive(shot.job)),
-        ) ?? false;
+      const promptsActive = anySceneActive(current.state.data?.entries);
       if (promptsActive || definitionsActive) {
         lastActive.current = Date.now();
         return ACTIVE_POLL_MS;

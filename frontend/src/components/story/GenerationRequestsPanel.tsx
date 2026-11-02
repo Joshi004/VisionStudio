@@ -24,7 +24,9 @@ import {
   type RequestPicture,
   type SceneGenerationRequests,
 } from "../../api/generationRequests";
+import { shotsNotLoaded } from "../../api/sceneQuery";
 import { PromptHoverCard } from "./PromptHoverCard";
+import { SceneSection } from "./SceneSection";
 
 type GenerationRequestsPanelProps = {
   projectId: number;
@@ -285,69 +287,68 @@ function ShotRow({ entry, busy, onPlan }: ShotRowProps) {
 
 type SceneRowProps = {
   scene: SceneGenerationRequests;
+  opened: boolean;
+  onToggle: () => void;
   busy: boolean;
   onPlanScene: () => void;
   onPlanShot: (shotId: string) => void;
 };
 
-/** One scene: how many of its shots have a request, and its shots. */
-function SceneRow({ scene, busy, onPlanScene, onPlanShot }: SceneRowProps) {
-  const planned = scene.shots.filter((shot) => shot.status === "planned").length;
-  const outOfDate = scene.shots.filter(
-    (shot) => shot.status === "out_of_date",
-  ).length;
-  // What "Plan scene" would do for this scene.
-  const todo = scene.shots.filter(
-    (shot) => shot.can_run && shot.status !== "planned",
-  ).length;
+/**
+ * One scene: how many of its shots have a request, and its shots. The counts come from the
+ * scene's summary, so they show while the scene is closed and its shots are not loaded.
+ */
+function SceneRow({
+  scene,
+  opened,
+  onToggle,
+  busy,
+  onPlanScene,
+  onPlanShot,
+}: SceneRowProps) {
+  const { total, by_status: byStatus, todo } = scene.summary;
+  const planned = byStatus.planned ?? 0;
+  const outOfDate = byStatus.out_of_date ?? 0;
 
   return (
-    <Stack gap={6}>
-      <Group align="flex-start" wrap="nowrap" gap="sm">
-        <Badge
-          variant="outline"
-          color="gray"
-          miw={40}
-          style={{ flexShrink: 0, textTransform: "none" }}
-        >
-          {scene.index}
-        </Badge>
-        <Group gap="xs" style={{ flexGrow: 1 }}>
-          <Text size="sm" fw={500}>
-            {scene.title}
-          </Text>
+    <SceneSection
+      index={scene.index}
+      title={scene.title}
+      opened={opened}
+      onToggle={onToggle}
+      loading={shotsNotLoaded(scene)}
+      badges={
+        <>
           <Badge variant="light" color="gray">
-            {planned} of {scene.shots.length} planned
+            {planned} of {total} planned
           </Badge>
           {outOfDate > 0 && (
             <Badge variant="light" color="yellow">
               {outOfDate} out of date
             </Badge>
           )}
-        </Group>
+        </>
+      }
+      actions={
         <Button
           size="compact-sm"
           variant="default"
           disabled={busy || todo === 0}
           onClick={onPlanScene}
-          style={{ flexShrink: 0 }}
         >
           Plan scene
         </Button>
-      </Group>
-      {scene.shots.length > 0 && (
-        <Stack gap="sm" ml={48}>
-          {scene.shots.map((entry) => (
-            <ShotRow
-              key={entry.shot.id}
-              entry={entry}
-              busy={busy}
-              onPlan={() => onPlanShot(entry.shot.id)}
-            />
-          ))}
-        </Stack>
-      )}
-    </Stack>
+      }
+    >
+      {scene.shots.map((entry) => (
+        <ShotRow
+          key={entry.shot.id}
+          entry={entry}
+          busy={busy}
+          onPlan={() => onPlanShot(entry.shot.id)}
+        />
+      ))}
+    </SceneSection>
   );
 }
 
@@ -361,7 +362,12 @@ function SceneRow({ scene, busy, onPlanScene, onPlanShot }: SceneRowProps) {
 export function GenerationRequestsPanel({
   projectId,
 }: GenerationRequestsPanelProps) {
-  const { data, isLoading, isError, error } = useGenerationRequests(projectId);
+  // Only the shots of one scene are loaded and shown at a time; every scene is listed closed.
+  const [openSceneId, setOpenSceneId] = useState<string | null>(null);
+  const { data, isLoading, isError, error } = useGenerationRequests(
+    projectId,
+    openSceneId,
+  );
   const planAll = usePlanAllRequests(projectId);
   const planScene = usePlanSceneRequests(projectId);
   const planOne = usePlanOneShotRequest(projectId);
@@ -370,13 +376,7 @@ export function GenerationRequestsPanel({
   const busy = planAll.isPending || planScene.isPending || planOne.isPending;
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
   // What "Plan all" would do: the shots that may be planned and have no current request.
-  const allCount = entries.reduce(
-    (sum, scene) =>
-      sum +
-      scene.shots.filter((shot) => shot.can_run && shot.status !== "planned")
-        .length,
-    0,
-  );
+  const allCount = entries.reduce((sum, scene) => sum + scene.summary.todo, 0);
   // The shots the last press could not do, with why.
   const skipped = [
     ...(planAll.data?.skipped ?? []),
@@ -452,6 +452,12 @@ export function GenerationRequestsPanel({
           <SceneRow
             key={scene.id}
             scene={scene}
+            opened={scene.id === openSceneId}
+            onToggle={() =>
+              setOpenSceneId((current) =>
+                current === scene.id ? null : scene.id,
+              )
+            }
             busy={busy}
             onPlanScene={() => planScene.mutate(scene.id)}
             onPlanShot={(shotId) =>

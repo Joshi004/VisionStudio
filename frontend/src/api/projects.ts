@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
@@ -26,6 +26,29 @@ async function fetchProjects() {
 
 export function useProjects() {
   return useQuery({ queryKey: PROJECTS_KEY, queryFn: fetchProjects });
+}
+
+/** One page of the projects, and how many projects there are in all. */
+export type ProjectsPage = { projects: ProjectSummary[]; total: number };
+
+async function fetchProjectsPage(page: number, pageSize: number): Promise<ProjectsPage> {
+  const { data, response } = await api.GET("/api/projects", {
+    params: { query: { limit: pageSize, offset: (page - 1) * pageSize } },
+  });
+  if (!data) {
+    throw new ApiError(`Could not load the projects (HTTP ${response.status}).`, response.status);
+  }
+  const total = Number(response.headers.get("X-Total-Count"));
+  return { projects: data, total: Number.isFinite(total) ? total : data.length };
+}
+
+/** The projects, newest first, `pageSize` at a time. Pages start at 1. */
+export function useProjectsPage(page: number, pageSize: number) {
+  return useQuery({
+    queryKey: [...PROJECTS_KEY, "page", pageSize, page],
+    queryFn: () => fetchProjectsPage(page, pageSize),
+    placeholderData: keepPreviousData,
+  });
 }
 
 async function fetchProject(projectId: number) {

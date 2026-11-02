@@ -1,16 +1,37 @@
-import { Alert, Anchor, Badge, Button, Group, Loader, Stack, Table, Text, Title } from "@mantine/core";
+import {
+  Alert,
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  Loader,
+  Pagination,
+  Stack,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useState } from "react";
 import { Link } from "react-router";
 
 import { describeError } from "../api/errors";
-import { useProjects } from "../api/projects";
+import { useProjectsPage } from "../api/projects";
 import { CreateProjectModal } from "../components/projects/CreateProjectModal";
 import { DeleteProjectModal } from "../components/projects/DeleteProjectModal";
 import { capitalise } from "../format";
 
+const PAGE_SIZE = 20;
+
 export function ProjectsPage() {
-  const { data, isLoading, isError, error } = useProjects();
+  const [page, setPage] = useState(1);
+  const { data, isLoading, isError, error } = useProjectsPage(page, PAGE_SIZE);
+  const projects = data?.projects;
+  const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+  // After the last project of the last page is deleted, that page is gone: go to the new last one.
+  if (data && page > pageCount) {
+    setPage(pageCount);
+  }
   const [modalOpened, modal] = useDisclosure(false);
   const [toDelete, setToDelete] = useState<{ id: number; name: string } | null>(null);
 
@@ -29,9 +50,9 @@ export function ProjectsPage() {
         </Alert>
       )}
 
-      {data && data.length === 0 && <Text c="dimmed">No projects yet.</Text>}
+      {projects && projects.length === 0 && page === 1 && <Text c="dimmed">No projects yet.</Text>}
 
-      {data && data.length > 0 && (
+      {projects && projects.length > 0 && (
         <Table verticalSpacing="sm" highlightOnHover>
           <Table.Thead>
             <Table.Tr>
@@ -43,7 +64,7 @@ export function ProjectsPage() {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {data.map((project) => (
+            {projects.map((project) => (
               <Table.Tr key={project.id}>
                 <Table.Td>
                   <Anchor component={Link} to={`/projects/${project.id}`}>
@@ -69,6 +90,12 @@ export function ProjectsPage() {
             ))}
           </Table.Tbody>
         </Table>
+      )}
+
+      {pageCount > 1 && (
+        <Group justify="center">
+          <Pagination total={pageCount} value={page} onChange={setPage} />
+        </Group>
       )}
 
       <CreateProjectModal opened={modalOpened} onClose={modal.close} />

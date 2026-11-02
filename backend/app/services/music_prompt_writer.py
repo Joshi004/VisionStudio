@@ -39,7 +39,7 @@ from app.services.music_prompt_profiles import (
 
 # Hidden reasoning is billed as output (ANALYSIS.md Section 6.2, rule 4). The fields are a few
 # hundred tokens (a song's lyrics are the longest), so this leaves room to think.
-MAX_TOKENS: Final = 8000
+MAX_TOKENS: Final = 48000
 REASONING_EFFORT: Final = "high"
 
 # What each kind is, in a phrase for the request.

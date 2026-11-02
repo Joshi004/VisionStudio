@@ -552,13 +552,23 @@ def _rows_statement() -> Any:
     )
 
 
-async def list_jobs(session: AsyncSession, *, project_id: int | None, limit: int) -> list[JobRow]:
+async def list_jobs(
+    session: AsyncSession, *, project_id: int | None, limit: int, offset: int = 0
+) -> list[JobRow]:
     """Jobs with their project names, newest first."""
-    statement = _rows_statement().order_by(Job.id.desc()).limit(limit)
+    statement = _rows_statement().order_by(Job.id.desc()).limit(limit).offset(offset)
     if project_id is not None:
         statement = statement.where(Job.project_id == project_id)
     result = await session.execute(statement)
     return [JobRow(job=job, project_name=owner_name(job, name)) for job, name in result.all()]
+
+
+async def count_jobs(session: AsyncSession, *, project_id: int | None) -> int:
+    """How many jobs there are: all of them, or those of one project."""
+    statement = select(func.count()).select_from(Job)
+    if project_id is not None:
+        statement = statement.where(Job.project_id == project_id)
+    return (await session.execute(statement)).scalar_one()
 
 
 async def get_job_row(session: AsyncSession, job_id: int) -> JobRow | None:

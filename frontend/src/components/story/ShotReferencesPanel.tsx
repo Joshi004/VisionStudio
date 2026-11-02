@@ -15,6 +15,7 @@ import {
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
+import { shotsNotLoaded } from "../../api/sceneQuery";
 import {
   useSaveShotReferences,
   useSelectAllReferences,
@@ -28,6 +29,7 @@ import {
 import { PromptHoverCard } from "./PromptHoverCard";
 import { pictureLabel } from "./referencePictureFormat";
 import { ReplaceManualModal } from "./ReplaceManualModal";
+import { SceneSection } from "./SceneSection";
 import { ShotReferencesEditor } from "./ShotReferencesEditor";
 
 type ShotReferencesPanelProps = {
@@ -289,6 +291,8 @@ function ShotRow({
 
 type SceneRowProps = {
   scene: SceneShotReferences;
+  opened: boolean;
+  onToggle: () => void;
   busy: boolean;
   onSelectScene: () => void;
   onSelectShot: (shot: ShotReferenceEntry) => void;
@@ -298,9 +302,14 @@ type SceneRowProps = {
   onSave: (shotId: string, labImageIds: number[], done: () => void) => void;
 };
 
-/** One scene: how many of its shots have their references, and its shots. */
+/**
+ * One scene: how many of its shots have their references, and its shots. The counts come from
+ * the scene's summary, so they show while the scene is closed and its shots are not loaded.
+ */
 function SceneRow({
   scene,
+  opened,
+  onToggle,
   busy,
   onSelectScene,
   onSelectShot,
@@ -309,66 +318,58 @@ function SceneRow({
   onStartEdit,
   onSave,
 }: SceneRowProps) {
-  const chosen = scene.shots.filter((shot) => shot.status === "selected").length;
-  const outOfDate = scene.shots.filter(
-    (shot) => shot.status === "out_of_date",
-  ).length;
-  // What "Select references" would do for this scene.
-  const todo = scene.shots.filter(
-    (shot) => shot.can_run && shot.status !== "selected",
-  ).length;
+  const { total, by_status: byStatus, active, todo } = scene.summary;
+  const chosen = byStatus.selected ?? 0;
+  const outOfDate = byStatus.out_of_date ?? 0;
 
   return (
-    <Stack gap={6}>
-      <Group align="flex-start" wrap="nowrap" gap="sm">
-        <Badge
-          variant="outline"
-          color="gray"
-          miw={40}
-          style={{ flexShrink: 0, textTransform: "none" }}
-        >
-          {scene.index}
-        </Badge>
-        <Group gap="xs" style={{ flexGrow: 1 }}>
-          <Text size="sm" fw={500}>
-            {scene.title}
-          </Text>
+    <SceneSection
+      index={scene.index}
+      title={scene.title}
+      opened={opened}
+      onToggle={onToggle}
+      loading={shotsNotLoaded(scene)}
+      badges={
+        <>
           <Badge variant="light" color="gray">
-            {chosen} of {scene.shots.length} chosen
+            {chosen} of {total} chosen
           </Badge>
+          {active > 0 && (
+            <Badge variant="light" color="blue">
+              {active} running
+            </Badge>
+          )}
           {outOfDate > 0 && (
             <Badge variant="light" color="yellow">
               {outOfDate} out of date
             </Badge>
           )}
-        </Group>
+        </>
+      }
+      actions={
         <Button
           size="compact-sm"
           variant="default"
           disabled={busy || todo === 0}
           onClick={onSelectScene}
-          style={{ flexShrink: 0 }}
         >
           Select references
         </Button>
-      </Group>
-      {scene.shots.length > 0 && (
-        <Stack gap="sm" ml={48}>
-          {scene.shots.map((entry) => (
-            <ShotRow
-              key={entry.shot.id}
-              entry={entry}
-              busy={busy}
-              onSelect={() => onSelectShot(entry)}
-              saving={saving}
-              saveError={saveError}
-              onStartEdit={onStartEdit}
-              onSave={(ids, done) => onSave(entry.shot.id, ids, done)}
-            />
-          ))}
-        </Stack>
-      )}
-    </Stack>
+      }
+    >
+      {scene.shots.map((entry) => (
+        <ShotRow
+          key={entry.shot.id}
+          entry={entry}
+          busy={busy}
+          onSelect={() => onSelectShot(entry)}
+          saving={saving}
+          saveError={saveError}
+          onStartEdit={onStartEdit}
+          onSave={(ids, done) => onSave(entry.shot.id, ids, done)}
+        />
+      ))}
+    </SceneSection>
   );
 }
 
@@ -381,7 +382,12 @@ function SceneRow({
  * by themselves when it is defined.
  */
 export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
-  const { data, isLoading, isError, error } = useShotReferences(projectId);
+  // Only the shots of one scene are loaded and shown at a time; every scene is listed closed.
+  const [openSceneId, setOpenSceneId] = useState<string | null>(null);
+  const { data, isLoading, isError, error } = useShotReferences(
+    projectId,
+    openSceneId,
+  );
   const selectAll = useSelectAllReferences(projectId);
   const selectScene = useSelectSceneReferences(projectId);
   const selectOne = useSelectOneShotReferences(projectId);
@@ -397,13 +403,7 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
     selectAll.isPending || selectScene.isPending || selectOne.isPending;
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
   // What "Select all" would do: the shots that may be chosen and have no current manifest.
-  const allCount = entries.reduce(
-    (sum, scene) =>
-      sum +
-      scene.shots.filter((shot) => shot.can_run && shot.status !== "selected")
-        .length,
-    0,
-  );
+  const allCount = entries.reduce((sum, scene) => sum + scene.summary.todo, 0);
   // The shots the last press could not do, with why (for example a missing picture).
   const skipped = [
     ...(selectAll.data?.skipped ?? []),
@@ -416,7 +416,7 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
     (selectScene.data?.queued.length ?? 0) +
     (selectOne.data?.queued.length ?? 0);
   const choosingCount = entries.reduce(
-    (sum, scene) => sum + scene.shots.filter((shot) => isJobActive(shot.job)).length,
+    (sum, scene) => sum + scene.summary.active,
     0,
   );
 
@@ -499,6 +499,12 @@ export function ShotReferencesPanel({ projectId }: ShotReferencesPanelProps) {
           <SceneRow
             key={scene.id}
             scene={scene}
+            opened={scene.id === openSceneId}
+            onToggle={() =>
+              setOpenSceneId((current) =>
+                current === scene.id ? null : scene.id,
+              )
+            }
             busy={busy}
             onSelectScene={() => selectScene.mutate(scene.id)}
             onSelectShot={(shot) =>

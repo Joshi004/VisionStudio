@@ -1,12 +1,19 @@
 import { useRef } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { api } from "./client";
 import { ApiError, detailMessage } from "./errors";
-import { ACTIVE_POLL_MS, isJobActive } from "./polling";
+import { ACTIVE_POLL_MS } from "./polling";
 import { isValidProjectId, refreshProject } from "./projects";
 import type { components } from "./schema";
+import { anySceneActive, sceneQuery } from "./sceneQuery";
+import type { OpenScene } from "./sceneQuery";
 import { shotDefinitionsKey, useShotDefinitions } from "./shotDefinitions";
 
 export type ShotReferences = components["schemas"]["ShotReferencesOut"];
@@ -35,10 +42,20 @@ export function shotReferencesKey(projectId: number) {
   return [...shotDefinitionsKey(projectId), "references"] as const;
 }
 
-async function fetchShotReferences(projectId: number) {
+/** The reference lists themselves, one for each open scene (and one for none). */
+export function shotReferencesSceneKey(projectId: number) {
+  return [...shotReferencesKey(projectId), "scene"] as const;
+}
+
+async function fetchShotReferences(projectId: number, sceneId: OpenScene) {
   const { data, error, response } = await api.GET(
     "/api/projects/{project_id}/shot-references",
-    { params: { path: { project_id: projectId } } },
+    {
+      params: {
+        path: { project_id: projectId },
+        query: sceneQuery(sceneId),
+      },
+    },
   );
   if (!data) {
     throw new ApiError(
@@ -57,22 +74,22 @@ async function fetchShotReferences(projectId: number) {
  * shot is defined (by rule at once, or by a job of the language model), so it is loaded again
  * every few seconds while any definition job or any selection job is waiting or running, and
  * for a short while after.
+ *
+ * Every scene is listed with a summary of its shots; the shots themselves are loaded for the
+ * open scene only (`sceneId`), or for none (null).
  */
-export function useShotReferences(projectId: number) {
+export function useShotReferences(projectId: number, sceneId: OpenScene) {
   const lastActive = useRef(0);
-  const definitionsActive =
-    useShotDefinitions(projectId).data?.entries.some((scene) =>
-      scene.shots.some((shot) => isJobActive(shot.job)),
-    ) ?? false;
+  const definitionsActive = anySceneActive(
+    useShotDefinitions(projectId, null).data?.entries,
+  );
   return useQuery({
-    queryKey: shotReferencesKey(projectId),
-    queryFn: () => fetchShotReferences(projectId),
+    queryKey: [...shotReferencesSceneKey(projectId), sceneId],
+    queryFn: () => fetchShotReferences(projectId, sceneId),
     enabled: isValidProjectId(projectId),
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
-      const selecting =
-        query.state.data?.entries.some((scene) =>
-          scene.shots.some((shot) => isJobActive(shot.job)),
-        ) ?? false;
+      const selecting = anySceneActive(query.state.data?.entries);
       if (definitionsActive || selecting) {
         lastActive.current = Date.now();
         return ACTIVE_POLL_MS;

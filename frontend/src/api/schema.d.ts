@@ -28,7 +28,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Projects */
+        /**
+         * List Projects
+         * @description Projects, newest first: all of them, or one page (`limit`, `offset`). The header
+         *     `X-Total-Count` is how many projects there are in all.
+         */
         get: operations["list_projects_api_projects_get"];
         put?: never;
         /** Create Project */
@@ -1304,7 +1308,8 @@ export interface paths {
         };
         /**
          * List Jobs
-         * @description Jobs, newest first: all of them, or those of one project.
+         * @description Jobs, newest first: all of them, or those of one project; `limit` jobs from `offset`.
+         *     The header `X-Total-Count` is how many jobs there are in all (of that project).
          */
         get: operations["list_jobs_api_jobs_get"];
         put?: never;
@@ -5823,6 +5828,24 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * DefinitionsSummaryOut
+         * @description The summary of the shot definitions, which also names the shots the user wrote.
+         */
+        DefinitionsSummaryOut: {
+            /** Total */
+            total: number;
+            /** By Status */
+            by_status: {
+                [key: string]: number;
+            };
+            /** Active */
+            active: number;
+            /** Todo */
+            todo: number;
+            /** Manual Shot Ids */
+            manual_shot_ids: string[];
         };
         /**
          * DeletionItemOut
@@ -11091,6 +11114,7 @@ export interface components {
             description: string;
             /** Shots */
             shots: components["schemas"]["GenerationRequestEntryOut"][];
+            summary: components["schemas"]["SceneShotsSummaryOut"];
         };
         /**
          * SceneIn
@@ -11189,6 +11213,7 @@ export interface components {
             plan_version: number | null;
             /** Shots */
             shots: components["schemas"]["ShotDefinitionEntryOut"][];
+            summary: components["schemas"]["DefinitionsSummaryOut"];
             /** Blocked Reason */
             blocked_reason: string | null;
             /** Can Run */
@@ -11209,6 +11234,7 @@ export interface components {
             description: string;
             /** Shots */
             shots: components["schemas"]["ShotPromptEntryOut"][];
+            summary: components["schemas"]["SceneShotsSummaryOut"];
         };
         /**
          * SceneShotReferencesOut
@@ -11225,6 +11251,7 @@ export interface components {
             description: string;
             /** Shots */
             shots: components["schemas"]["ShotReferenceEntryOut"][];
+            summary: components["schemas"]["SceneShotsSummaryOut"];
         };
         /**
          * SceneShotTakesOut
@@ -11241,6 +11268,23 @@ export interface components {
             description: string;
             /** Shots */
             shots: components["schemas"]["ShotTakesEntryOut"][];
+            summary: components["schemas"]["SceneShotsSummaryOut"];
+        };
+        /**
+         * SceneShotsSummaryOut
+         * @description How the shots of one scene stand. It counts every shot, whether or not they are sent.
+         */
+        SceneShotsSummaryOut: {
+            /** Total */
+            total: number;
+            /** By Status */
+            by_status: {
+                [key: string]: number;
+            };
+            /** Active */
+            active: number;
+            /** Todo */
+            todo: number;
         };
         /** SceneSpanOut */
         SceneSpanOut: {
@@ -14415,7 +14459,10 @@ export interface operations {
     };
     list_projects_api_projects_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number | null;
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14429,6 +14476,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -17517,6 +17573,7 @@ export interface operations {
             query?: {
                 project_id?: number | null;
                 limit?: number;
+                offset?: number;
             };
             header?: never;
             path?: never;
@@ -22791,7 +22848,12 @@ export interface operations {
     };
     get_shot_definitions_api_projects__project_id__shot_definitions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Send the shots of this scene only. The other scenes are listed without shots. */
+                scene_id?: string | null;
+                /** @description False: list the scenes without any shots (their summaries only). */
+                shots?: boolean;
+            };
             header?: never;
             path: {
                 project_id: number;
@@ -23171,7 +23233,12 @@ export interface operations {
     };
     get_shot_references_api_projects__project_id__shot_references_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Send the shots of this scene only. The other scenes are listed without shots. */
+                scene_id?: string | null;
+                /** @description False: list the scenes without any shots (their summaries only). */
+                shots?: boolean;
+            };
             header?: never;
             path: {
                 project_id: number;
@@ -23384,7 +23451,12 @@ export interface operations {
     };
     get_generation_requests_api_projects__project_id__generation_requests_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Send the shots of this scene only. The other scenes are listed without shots. */
+                scene_id?: string | null;
+                /** @description False: list the scenes without any shots (their summaries only). */
+                shots?: boolean;
+            };
             header?: never;
             path: {
                 project_id: number;
@@ -23547,7 +23619,12 @@ export interface operations {
     };
     get_shot_prompts_api_projects__project_id__shot_prompts_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Send the shots of this scene only. The other scenes are listed without shots. */
+                scene_id?: string | null;
+                /** @description False: list the scenes without any shots (their summaries only). */
+                shots?: boolean;
+            };
             header?: never;
             path: {
                 project_id: number;
@@ -23760,7 +23837,12 @@ export interface operations {
     };
     get_shot_takes_api_projects__project_id__shot_takes_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Send the shots of this scene only. The other scenes are listed without shots. */
+                scene_id?: string | null;
+                /** @description False: list the scenes without any shots (their summaries only). */
+                shots?: boolean;
+            };
             header?: never;
             path: {
                 project_id: number;

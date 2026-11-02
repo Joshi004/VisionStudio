@@ -20,6 +20,7 @@ ORM objects.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, cast
@@ -31,6 +32,13 @@ from sqlalchemy import select
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.projects import load_project
+from app.api.scene_filter import (
+    SceneIdQuery,
+    SceneShotsSummaryOut,
+    ShotsQuery,
+    includes_shots,
+    summarize,
+)
 from app.db.models import LabImage, SpeechUnitAudio
 from app.db.session import SessionDep
 from app.services import generation_requests, shot_prompts, storage
@@ -200,7 +208,9 @@ class SceneGenerationRequestsOut(BaseModel):
     index: int
     title: str
     description: str
+    # Empty when the list was asked for without this scene's shots; `summary` still counts them.
     shots: list[GenerationRequestEntryOut]
+    summary: SceneShotsSummaryOut
 
 
 class GenerationRequestsOut(BaseModel):
@@ -235,11 +245,11 @@ class _Urls:
     audios: dict[int, str]
 
 
-async def _urls(state: generation_requests.GenerationRequestsState, session: SessionDep) -> _Urls:
-    """The address of every picture and audio the newest requests name, by id."""
+async def _urls(scenes: Sequence[SceneEntry], session: SessionDep) -> _Urls:
+    """The address of every picture and audio the newest requests of these scenes name, by id."""
     picture_ids: set[int] = set()
     audio_ids: set[int] = set()
-    for scene in state.entries:
+    for scene in scenes:
         for shot in scene.shots:
             if shot.row is not None:
                 picture_ids.update(
@@ -334,13 +344,20 @@ def _shot_out(entry: ShotEntry, urls: _Urls) -> GenerationRequestEntryOut:
     )
 
 
-def _scene_out(entry: SceneEntry, urls: _Urls) -> SceneGenerationRequestsOut:
+def _scene_out(entry: SceneEntry, urls: _Urls, with_shots: bool) -> SceneGenerationRequestsOut:
     return SceneGenerationRequestsOut(
         id=entry.item["id"],
         index=entry.item["index"],
         title=entry.item["title"],
         description=entry.item["description"],
-        shots=[_shot_out(shot, urls) for shot in entry.shots],
+        shots=[_shot_out(shot, urls) for shot in entry.shots] if with_shots else [],
+        summary=summarize(
+            entry.shots,
+            status=lambda shot: shot.status,
+            # Planning a request is done by code in the request, so no shot has a job.
+            active=lambda shot: False,
+            todo=lambda shot: shot.can_run and shot.status != "planned",
+        ),
     )
 
 
@@ -376,13 +393,22 @@ async def _compile_prompts(project_id: int, result: generation_requests.PlanResu
     response_model=GenerationRequestsOut,
     responses=_NOT_FOUND,
 )
-async def get_generation_requests(project_id: int, session: SessionDep) -> GenerationRequestsOut:
+async def get_generation_requests(
+    project_id: int,
+    session: SessionDep,
+    scene_id: SceneIdQuery = None,
+    shots: ShotsQuery = True,
+) -> GenerationRequestsOut:
     project = await load_project(session, project_id)
     result = await generation_requests.state(session, project)
-    urls = await _urls(result, session)
+    sent = {
+        entry.item["id"]: includes_shots(entry.item["id"], scene_id, shots)
+        for entry in result.entries
+    }
+    urls = await _urls([entry for entry in result.entries if sent[entry.item["id"]]], session)
     return GenerationRequestsOut(
         scenes_version=result.scenes_version,
-        entries=[_scene_out(entry, urls) for entry in result.entries],
+        entries=[_scene_out(entry, urls, sent[entry.item["id"]]) for entry in result.entries],
         blocked_reason=result.blocked_reason,
     )
 

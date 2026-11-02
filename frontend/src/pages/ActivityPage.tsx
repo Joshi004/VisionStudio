@@ -1,9 +1,21 @@
 import { useState } from "react";
-import { Alert, Anchor, Button, Group, Loader, Select, Stack, Table, Text, Title } from "@mantine/core";
+import {
+  Alert,
+  Anchor,
+  Button,
+  Group,
+  Loader,
+  Pagination,
+  Select,
+  Stack,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
 import { Link } from "react-router";
 
 import { describeError } from "../api/errors";
-import { useJobs } from "../api/jobs";
+import { useJobsPage } from "../api/jobs";
 import { isJobActive } from "../api/polling";
 import { useProjects } from "../api/projects";
 import { JobActions } from "../components/jobs/JobActions";
@@ -21,13 +33,22 @@ function firstLine(text: string | null): string {
   return text.split("\n", 1)[0];
 }
 
+const PAGE_SIZE = 50;
+
 export function ActivityPage() {
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [openJobId, setOpenJobId] = useState<number | null>(null);
 
   const projects = useProjects();
   const projectId = projectFilter === null ? undefined : Number(projectFilter);
-  const { data: jobs, isLoading, isError, error, dataUpdatedAt } = useJobs(projectId);
+  const { data, isLoading, isError, error, dataUpdatedAt } = useJobsPage(projectId, page, PAGE_SIZE);
+  const jobs = data?.jobs;
+  const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+  // If the jobs of the page are gone (a smaller list after a change), go to the last page.
+  if (data && page > pageCount) {
+    setPage(pageCount);
+  }
   // Elapsed times are worked out from the stored times and the clock, which ticks once a
   // second while any job in the list is waiting or running.
   const now = useNow(jobs?.some(isJobActive) ?? false, dataUpdatedAt);
@@ -45,7 +66,11 @@ export function ActivityPage() {
             label: project.name,
           }))}
           value={projectFilter}
-          onChange={setProjectFilter}
+          onChange={(value) => {
+            setProjectFilter(value);
+            // Another project's jobs start at the first page.
+            setPage(1);
+          }}
           w={260}
         />
       </Group>
@@ -60,7 +85,7 @@ export function ActivityPage() {
         </Alert>
       )}
 
-      {jobs && jobs.length === 0 && <Text c="dimmed">No jobs yet.</Text>}
+      {jobs && jobs.length === 0 && page === 1 && <Text c="dimmed">No jobs yet.</Text>}
 
       {jobs && jobs.length > 0 && (
         <Table.ScrollContainer minWidth={900}>
@@ -136,6 +161,12 @@ export function ActivityPage() {
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
+      )}
+
+      {pageCount > 1 && (
+        <Group justify="center">
+          <Pagination total={pageCount} value={page} onChange={setPage} />
+        </Group>
       )}
 
       <JobDetailDrawer jobId={openJobId} onClose={() => setOpenJobId(null)} />

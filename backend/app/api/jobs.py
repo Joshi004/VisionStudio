@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, computed_field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -253,11 +253,16 @@ async def _load_row(session: AsyncSession, job_id: int) -> JobRow:
 @router.get("/jobs", response_model=list[JobSummary])
 async def list_jobs(
     session: SessionDep,
+    response: Response,
     project_id: Annotated[int | None, Query(ge=1, le=_MAX_JOB_ID)] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[JobSummary]:
-    """Jobs, newest first: all of them, or those of one project."""
-    rows = await store.list_jobs(session, project_id=project_id, limit=limit)
+    """Jobs, newest first: all of them, or those of one project; `limit` jobs from `offset`.
+    The header `X-Total-Count` is how many jobs there are in all (of that project).
+    """
+    response.headers["X-Total-Count"] = str(await store.count_jobs(session, project_id=project_id))
+    rows = await store.list_jobs(session, project_id=project_id, limit=limit, offset=offset)
     return [job_summary(row) for row in rows]
 
 
