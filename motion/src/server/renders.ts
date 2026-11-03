@@ -113,7 +113,7 @@ async function run(record: RenderRecord): Promise<void> {
     code: request.code ?? null,
   };
 
-  try {
+  const draw = async (): Promise<void> => {
     const composition = await selectComposition({
       serveUrl: BUNDLE_DIR,
       id: COMPOSITION_OF[request.engine],
@@ -151,6 +151,22 @@ async function run(record: RenderRecord): Promise<void> {
         record.progress = Math.round(progress * 1000) / 1000;
       },
     });
+  };
+
+  try {
+    try {
+      await draw();
+    } catch (error) {
+      // Remotion starts a small file server for each render. When one render follows another
+      // very closely, the browser sometimes finds the earlier server still closing and its
+      // connection is reset (seen twice in about 60 renders in GFX-007). Nothing was wrong with
+      // the input, so the render is tried once more; any other error is final.
+      if (timedOut || record.removed || !errorText(error).includes("ERR_CONNECTION_RESET")) {
+        throw error;
+      }
+      record.progress = 0;
+      await draw();
+    }
     record.progress = 1;
     record.state = "done";
   } catch (error) {

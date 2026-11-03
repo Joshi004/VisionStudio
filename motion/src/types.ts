@@ -17,11 +17,17 @@ export type Theme = {
 export type Box = { left: number; top: number; right: number; bottom: number };
 export type Zone = { top: number; bottom: number };
 
+// A fact or a derived value of the resolved brief: its full value and the text code wrote for it.
+export type Measure = { label: string; value: number; unit: string; display: string };
+
 export type Resolved = {
   width: number;
   height: number;
   fps: number;
   frames: number;
+  facts: Record<string, Measure>;
+  derived: Record<string, Measure>;
+  beats: Record<string, { frame: number; shows: string }>;
   theme: Theme;
   fonts: { display: string; text: string };
   safe_area: Box;

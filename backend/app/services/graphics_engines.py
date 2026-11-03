@@ -68,6 +68,7 @@ ENGINES: Final[dict[EngineKey, Engine]] = {
         key="remotion_templates",
         label="Remotion templates",
         start=graphics_template_engine.start,
+        renderer_built=True,
     ),
     "python_templates": Engine(
         key="python_templates",

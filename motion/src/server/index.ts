@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import { counts, enqueue, fileOf, MAX_PARALLEL, prepareRenderDir, remove, statusOf, sweep } from "./renders.ts";
 import { idParamsSchema, renderRequestSchema } from "./schema.ts";
 import type { RenderRequest } from "./schema.ts";
+import { CATALOGUE_VERSION } from "../templates/spec.ts";
 import { readVersions } from "./versions.ts";
 
 const PORT = Number(process.env["PORT"] ?? 8090);
@@ -18,14 +19,13 @@ const app = Fastify({
   bodyLimit: BODY_LIMIT_BYTES,
 });
 
-// What the service is made of. The template catalogue and the block library have no version
-// until GFX-006 and GFX-009.
+// What the service is made of. The block library has no version until GFX-009.
 app.get("/health", async () => ({
   ok: true,
   remotion: versions.remotion,
   chrome: versions.chrome,
   node: process.version,
-  templates: null,
+  templates: CATALOGUE_VERSION,
   blocks: null,
   max_parallel: MAX_PARALLEL,
   ...counts(),

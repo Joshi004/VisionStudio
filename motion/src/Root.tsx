@@ -4,6 +4,7 @@ import type { CalculateMetadataFunction } from "remotion";
 import "./fonts";
 import { NotBuiltYet } from "./NotBuiltYet";
 import { TestCard } from "./TestCard";
+import { Templates } from "./templates/Templates";
 import type { GraphicInput, Resolved } from "./types";
 
 // The size, frame rate and length of every video come from the input, so the frame count is
@@ -20,6 +21,9 @@ const placeholder: Resolved = {
   height: 1080,
   fps: 24,
   frames: 72,
+  facts: {},
+  derived: {},
+  beats: {},
   theme: {
     background: "#0B0F17",
     surface: "#161C28",
@@ -48,8 +52,8 @@ const defaults = (engine: string): GraphicInput => ({
   code: null,
 });
 
-// The four compositions of §4.6. Only the test card is drawn in GFX-005; the other three show
-// "not built yet" and are filled in by GFX-007, GFX-009 and GFX-010.
+// The four compositions of §4.6. The test card (GFX-005) and the templates (GFX-007) are drawn;
+// the other two show "not built yet" until GFX-009 and GFX-010.
 export function Root() {
   return (
     <>
@@ -65,7 +69,7 @@ export function Root() {
       />
       <Composition
         id="Templates"
-        component={NotBuiltYet}
+        component={Templates}
         width={1920}
         height={1080}
         fps={24}
