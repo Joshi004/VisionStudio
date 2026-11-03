@@ -356,6 +356,11 @@ function VersionCard({
   const badge = ENGINE_BADGE[engine.status];
   const busy = engine.status === "writing" || engine.status === "rendering";
   const { resolved } = shot;
+  // The attempt a repair was made from (a component whose render failed), when it is shown.
+  const repairedAttempt =
+    attempt?.repair_of != null
+      ? engine.attempts.find((item) => item.id === attempt.repair_of)
+      : undefined;
 
   return (
     <Paper withBorder p="sm" radius="md" data-engine={engine.key}>
@@ -374,7 +379,8 @@ function VersionCard({
 
         {engine.failed_outright && (
           <Alert color="red" p="xs" title="The generated component failed">
-            Nothing more will be tried for it. Ask again to try a new one.
+            Its repairs are used up and nothing more will be tried for it. Ask again to try a new
+            one.
           </Alert>
         )}
 
@@ -402,6 +408,7 @@ function VersionCard({
               Attempt {attempt.attempt}
               {engine.attempts.length > 1 ? ` of ${engine.attempts.length}` : ""}
               {attempt.url !== null && !attempt.current ? ", drawn for an earlier look" : ""}
+              {repairedAttempt !== undefined ? `, a repair of attempt ${repairedAttempt.attempt}` : ""}
             </Text>
             {engine.key === "remotion_blocks" && <GraphicsBlockScene render={attempt} />}
             {engine.key === "generated_component" && <GraphicsComponentCode render={attempt} />}

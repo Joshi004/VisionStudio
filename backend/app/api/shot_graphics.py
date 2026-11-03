@@ -84,6 +84,8 @@ class ShotGraphicAttemptOut(BaseModel):
     failed_outright: bool
     # The attempt whose input this one draws again for a new theme, or None.
     rerender_of: int | None
+    # The attempt of a component whose render failed, which this one repairs, or None.
+    repair_of: int | None
 
 
 class ShotGraphicEngineOut(BaseModel):
@@ -200,6 +202,7 @@ def _attempt_out(entry: shot_graphics.AttemptEntry, project: Project) -> ShotGra
         last_error=entry.error,
         failed_outright=row.failed_outright,
         rerender_of=rerender if isinstance(rerender, int) else None,
+        repair_of=row.repair_of,
     )
 
 

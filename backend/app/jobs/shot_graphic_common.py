@@ -30,6 +30,14 @@ _logger = logging.getLogger(__name__)
 
 TOO_LONG: Final = "The model's answer was cut off because it reached the token limit."
 
+# How long a motion's entrance lasts, in frames (`motion/src/templates/motion.ts`): the frame where
+# a beat's part has arrived is the beat's frame plus this.
+ENTRANCE_FRAMES: Final = {"snappy": 12, "smooth": 18, "calm": 24}
+# The most frames one browser check draws (`MAX_CHECK_FRAMES` of the motion service).
+MAX_CHECK_FRAMES: Final = 16
+# The longest error text sent to the model in a repair, each error on its own.
+REPAIR_ERROR_MAX_CHARS: Final = 2_000
+
 
 @dataclass(frozen=True)
 class Checked:
@@ -69,6 +77,38 @@ def errors_of(answer: dict[str, Any]) -> list[str]:
     return sentences or ["The component could not be drawn."]
 
 
+def repair_errors(errors: list[str]) -> list[str]:
+    """The errors of a failed check or render as they are sent to the model: each at most
+    `REPAIR_ERROR_MAX_CHARS` long.
+    """
+    return [error[:REPAIR_ERROR_MAX_CHARS] for error in errors]
+
+
+def outright_message(repairs: int, errors: list[str]) -> str:
+    """What the card says of a component that has failed outright (§3.7)."""
+    noun = "repair" if repairs == 1 else "repairs"
+    return f"The generated component failed after {repairs} {noun}: " + " ".join(errors)
+
+
+def check_frames(resolved: dict[str, Any]) -> list[int]:
+    """The frames the browser check draws (§3.7), in ascending order: the first, the middle and
+    the last frame, every beat's frame, and the frame where each beat's entrance ends. Frames
+    past the end are moved to the last frame, repeats are dropped, and at most
+    `MAX_CHECK_FRAMES` are kept, the first three and the beats before the ends of the entrances.
+    """
+    frames = int(resolved["frames"])
+    last = frames - 1
+    beats = [int(beat["frame"]) for beat in (resolved.get("beats") or {}).values()]
+    entrance = ENTRANCE_FRAMES.get(str((resolved.get("theme") or {}).get("motion")), 0)
+    wanted = [0, frames // 2, last, *beats, *(min(frame + entrance, last) for frame in beats)]
+    kept: list[int] = []
+    for frame in wanted:
+        frame = max(0, min(frame, last))
+        if frame not in kept:
+            kept.append(frame)
+    return sorted(kept[:MAX_CHECK_FRAMES])
+
+
 async def _motion_url() -> str:
     async with SessionLocal() as session:
         return await settings_service.get_str(session, settings_service.MOTION_URL_KEY)
@@ -86,6 +126,7 @@ async def check_component(job_id: int, resolved: dict[str, Any], code: str) -> C
         "frames": int(resolved["frames"]),
         "resolved": resolved,
         "code": code,
+        "at_frames": check_frames(resolved),
     }
     try:
         answer = await motion_renderer.checks(await _motion_url(), body)
@@ -117,8 +158,12 @@ async def measure_layout(job_id: int, resolved: dict[str, Any], scene: dict[str,
     return Measured(graphics_blocks.layout_problems(report, resolved))
 
 
-def checks_record(checked: Checked, asked_again: bool) -> dict[str, Any]:
-    """What is stored of the browser check: `checked` is false when it could not be made."""
+def checks_record(checked: Checked, repairs: int, repair_limit: int) -> dict[str, Any]:
+    """What is stored of the browser check: `checked` is false when it could not be made.
+    `repairs` is how many repair asks the job that wrote this input made (EXG-006), and
+    `repair_limit` the setting it ran under. `asked_again` (read by the lab's card views) is true
+    when there was at least one.
+    """
     answer = checked.answer
     record: dict[str, Any] = {
         "checked": answer is not None,
@@ -126,7 +171,9 @@ def checks_record(checked: Checked, asked_again: bool) -> dict[str, Any]:
         "stage": None if answer is None else answer.get("stage"),
         "errors": [] if answer is None or answer.get("ok") else errors_of(answer),
         "check_s": None if answer is None else answer.get("check_s"),
-        "asked_again": asked_again,
+        "asked_again": repairs > 0,
+        "repairs": repairs,
+        "repair_limit": repair_limit,
     }
     if answer is None:
         record["reason"] = checked.reason

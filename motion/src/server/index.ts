@@ -59,7 +59,8 @@ app.post<{ Body: LayoutRequest }>(
   },
 );
 
-// Transpiles a generated component and draws three still frames of it (GFX-010). A component that
+// Transpiles a generated component and draws still frames of it: three, or the up to 16 the request
+// names (GFX-010, EXG-006). A component that
 // does not compile or does not draw is a 200 with `ok: false` and the errors; only a service that
 // cannot run the check at all answers 422.
 app.post<{ Body: ChecksRequest }>(

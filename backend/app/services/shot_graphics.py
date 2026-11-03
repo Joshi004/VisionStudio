@@ -27,6 +27,15 @@ nothing while a job of it is waiting or running, nothing when its video is curre
 a component failed outright; a new attempt with the input it already has when its video is out of
 date; the render again when its input has no video; otherwise a new model call.
 
+**Repairs of a component** (EXG-006, §3.7). A **chain** starts at an attempt that is not a repair
+(`repair_of` empty), made by one press of Make, one **Ask again** or one new theme, and a chain
+may spend at most the setting `graphics_component_repairs` repair asks to the model. The asks a
+job made are in its attempt's `input.checks.repairs`; `repairs_used` adds them up along
+`repair_of`. A failed check is repaired inside the job that wrote the component. A failed render
+is repaired by a **new attempt** (`queue_repair`): a row with `repair_of` set and a write job in
+repair mode that is given the code and the render error. A shot that has moved on (a new brief,
+theme or size) is not repaired: the next Make starts from what is current.
+
 **The video of a shot** is, for now (EXG-007 adds the owner's choice), the newest component
 attempt with a current video, or the newest block attempt with a current video when the component
 failed outright. A shot is **done** when it has one.
@@ -42,6 +51,7 @@ from typing import Any, Final
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import settings as settings_service
 from app.db.models import Job, Project, ShotGraphic, ShotGraphicBrief
 from app.db.state_memo import memoized_state
 from app.jobs import store
@@ -49,6 +59,7 @@ from app.services import (
     cut_planning_writer,
     graphic_theme,
     graphics_lab,
+    graphics_render,
     graphics_resolve,
     scene_timeline,
     shot_graphic_briefs,
@@ -636,6 +647,7 @@ async def _new_row(
     *,
     input: Any = None,
     rerender_of: int | None = None,
+    repair_of: int | None = None,
 ) -> ShotGraphic:
     assert shot.brief is not None
     row = ShotGraphic(
@@ -645,6 +657,7 @@ async def _new_row(
         brief_id=shot.brief.id,
         engine=engine,
         attempt=await _next_attempt(session, shot.brief.id, engine),
+        repair_of=repair_of,
         input=input,
         inputs=_attempt_inputs(shot, rerender_of),
     )
@@ -654,30 +667,41 @@ async def _new_row(
 
 
 async def _write(
-    session: AsyncSession, project: Project, scene_id: str, shot: ShotEntry, engine: str
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    shot: ShotEntry,
+    engine: str,
+    *,
+    repair_of: int | None = None,
+    repair: dict[str, Any] | None = None,
 ) -> Job | None:
     """A new attempt that asks the model for the code or the scene. None when a job of this kind
-    is already waiting or running for the shot.
+    is already waiting or running for the shot. `repair_of` and `repair` make it the repair of a
+    component whose render failed (see `queue_repair`).
     """
     assert shot.material is not None and shot.brief is not None and shot.resolved is not None
-    row = await _new_row(session, project, scene_id, shot, engine)
+    row = await _new_row(session, project, scene_id, shot, engine, repair_of=repair_of)
+    job_input: dict[str, Any] = {
+        WRITE_DEDUPE_KEY: graphic_key(scene_id, shot.shot["id"]),
+        RENDER_DEDUPE_KEY: row.id,
+        "scene_id": scene_id,
+        "shot_id": shot.shot["id"],
+        "line": shot.material["line"],
+        "context": shot.material["context"],
+        "mood": shot.material["mood"],
+        "orientation": project.orientation,
+        "brief": shot.brief.content,
+        "resolved": shot.resolved,
+    }
+    if repair is not None:
+        job_input["repair"] = repair
     job, created = await store.create_job(
         session,
         project_id=project.id,
         type=WRITE_JOB_TYPES[engine],
         provider="llm",
-        input={
-            WRITE_DEDUPE_KEY: graphic_key(scene_id, shot.shot["id"]),
-            RENDER_DEDUPE_KEY: row.id,
-            "scene_id": scene_id,
-            "shot_id": shot.shot["id"],
-            "line": shot.material["line"],
-            "context": shot.material["context"],
-            "mood": shot.material["mood"],
-            "orientation": project.orientation,
-            "brief": shot.brief.content,
-            "resolved": shot.resolved,
-        },
+        input=job_input,
         commit=False,
         dedupe_key=WRITE_DEDUPE_KEY,
     )
@@ -704,6 +728,79 @@ async def _again_from(
         session, project, scene_id, shot, engine, input=source.input, rerender_of=source.id
     )
     return await queue_render(session, row)
+
+
+async def repair_limit(session: AsyncSession) -> int:
+    """How many repair asks one chain of attempts may spend (the setting, 0 to 3)."""
+    return await settings_service.get_int(session, settings_service.GRAPHICS_COMPONENT_REPAIRS_KEY)
+
+
+async def repairs_used(session: AsyncSession, row: ShotGraphic) -> int:
+    """The repair asks spent by the chain `row` belongs to, up to and including `row`: the asks
+    recorded on each attempt (`input.checks.repairs`) along `repair_of`. An attempt that no model
+    call wrote (the new-theme attempts, which copy an earlier input) has spent none, whatever
+    input it holds.
+    """
+    used = 0
+    seen: set[int] = set()
+    current: ShotGraphic | None = row
+    while current is not None and current.id not in seen:
+        seen.add(current.id)
+        if current.input_job_id is not None and isinstance(current.input, dict):
+            checks = current.input.get("checks")
+            count = checks.get("repairs") if isinstance(checks, dict) else None
+            if isinstance(count, int) and not isinstance(count, bool):
+                used += count
+        current = (
+            await session.get(ShotGraphic, current.repair_of)
+            if current.repair_of is not None
+            else None
+        )
+    return used
+
+
+async def queue_repair(
+    session: AsyncSession,
+    project: Project,
+    row: ShotGraphic,
+    errors: list[str],
+    repairs_before: int,
+) -> Job | None:
+    """The repair of a component whose render failed: a new attempt of the component, with
+    `repair_of` set to `row`, and a write job that is given the code and the errors. No commit:
+    the caller commits it with the failure it records.
+
+    None when nothing can be repaired now: the attempt has no code, or the shot has moved on (it
+    has a refusal, or its brief, theme or size are no longer the ones `row` was drawn from, so
+    the next Make starts from what is current), or a write job of the shot is already waiting.
+    The caller has checked the budget.
+    """
+    code = graphics_render.code_of(row.input)
+    if code is None or row.engine != COMPONENT:
+        return None
+    try:
+        shot = _find(await _build(session, project), row.scene_id, row.shot_id)
+    except ShotGraphicsError:
+        return None
+    recorded = row.inputs.get("resolved_sha256") if isinstance(row.inputs, dict) else None
+    if (
+        shot.refusal is not None
+        or shot.brief is None
+        or shot.brief.id != row.brief_id
+        or recorded is None
+        or shot.resolved_sha256 != recorded
+    ):
+        return None
+    repair = {
+        "of": row.id,
+        "code": code,
+        "errors": errors,
+        "stage": "render",
+        "repairs_before": repairs_before,
+    }
+    return await _write(
+        session, project, row.scene_id, shot, COMPONENT, repair_of=row.id, repair=repair
+    )
 
 
 async def _start_engine(

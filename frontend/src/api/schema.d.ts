@@ -13332,6 +13332,8 @@ export interface components {
             failed_outright: boolean;
             /** Rerender Of */
             rerender_of: number | null;
+            /** Repair Of */
+            repair_of: number | null;
         };
         /** ShotGraphicEngineOut */
         ShotGraphicEngineOut: {

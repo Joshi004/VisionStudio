@@ -37,8 +37,9 @@ STATUS_TIMEOUT_S: Final = 10.0
 DELETE_TIMEOUT_S: Final = 10.0
 # The service starts a browser for each layout and gives up after 60 s.
 LAYOUT_TIMEOUT_S: Final = 90.0
-# The same for a component check (a browser, three stills, a limit of 60 s).
-CHECKS_TIMEOUT_S: Final = 90.0
+# The same for a component check (a browser and up to 16 stills; the service's own limit is 60 s
+# plus 1 s for each frame above three, so 73 s at most).
+CHECKS_TIMEOUT_S: Final = 105.0
 DOWNLOAD_TIMEOUT_S: Final = 300.0
 # A graphic is at most 15 s long; a file this large means something is wrong.
 DOWNLOAD_MAX_BYTES: Final = 500 * 1024 * 1024
@@ -138,7 +139,8 @@ async def layout(base_url: str, body: dict[str, Any]) -> dict[str, Any]:
 
 async def checks(base_url: str, body: dict[str, Any]) -> dict[str, Any]:
     """The check of a generated component: `{ok, stage, errors: [{frame, message}], texts:
-    [{frame, text}], check_s}`. The body is `{width, height, fps, frames, resolved, code}`. A
+    [{frame, text}], check_s}`. The body is `{width, height, fps, frames, resolved, code}` and
+    optionally `at_frames`, the frames to draw (at most 16; without it, three). A
     component that does not compile or draw is an answer with `ok` false, not an error.
     """
     try:

@@ -173,15 +173,19 @@ def parse_code(content: str) -> str:
     return blocks[0]
 
 
-def repair_request(body: dict[str, Any], code: str, errors: list[str]) -> dict[str, Any]:
+def repair_request(
+    body: dict[str, Any], code: str, errors: list[str], *, rendered: bool = False
+) -> dict[str, Any]:
     """`body` with a note added to its last user message: the code the model wrote, which passed
-    the static checks, and the errors found when it was compiled and drawn in the browser.
-    `body` is not changed.
+    the static checks, and the errors found when it was compiled and drawn in the browser, or,
+    with `rendered`, when it was drawn frame by frame into the video (EXG-006). `body` is not
+    changed.
     """
     listed = "\n".join(f"- {error}" for error in errors)
+    where = "drawn into the video" if rendered else "compiled and drawn in the browser"
     note = (
         "\n\nNOTE: An earlier answer to this request passed the static checks, but when it was "
-        f"compiled and drawn in the browser it failed:\n{listed}\n\nThe earlier code was:\n"
+        f"{where} it failed:\n{listed}\n\nThe earlier code was:\n"
         f"```tsx\n{code}\n```\n\nWrite the whole component again with these errors fixed and "
         "everything else kept as it was, in one ```tsx code block."
     )

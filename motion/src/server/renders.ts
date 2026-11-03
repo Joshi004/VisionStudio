@@ -194,7 +194,7 @@ async function run(record: RenderRecord): Promise<void> {
       ? `The render ran past its time limit of ${request.time_limit_s} s and was stopped.`
       : record.removed
         ? "The render was cancelled."
-        : errorText(error);
+        : failureText(error);
   } finally {
     clearTimeout(timer);
     record.cancel = null;
@@ -205,6 +205,14 @@ async function run(record: RenderRecord): Promise<void> {
 function errorText(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.slice(0, 2000);
+}
+
+// Remotion's error for a frame that threw carries the frame's number (`frame`). It is put in front
+// of the message so that the repair of a component can say where it broke (EXG-006).
+function failureText(error: unknown): string {
+  const frame = (error as { frame?: unknown } | null)?.frame;
+  const text = errorText(error);
+  return typeof frame === "number" && Number.isInteger(frame) ? `At frame ${frame}: ${text}`.slice(0, 2000) : text;
 }
 
 export type RenderStatus = {

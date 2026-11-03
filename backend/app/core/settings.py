@@ -200,6 +200,11 @@ GRAPHICS_WPM_KEY = "graphics_words_per_minute"
 MOTION_URL_KEY = "motion_service_url"
 GRAPHICS_MAX_RENDERS_KEY = "graphics_max_parallel_renders"
 
+# How many times the model is asked to repair one generated component of an explainer graphic when
+# its browser check or its render fails, counted over a chain of attempts (EXG-006). A count, not a
+# length, so it is not part of the order below.
+GRAPHICS_COMPONENT_REPAIRS_KEY = "graphics_component_repairs"
+
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
 SHOT_CONTINUITY_MAX_ROUNDS_KEY = "shot_continuity_max_rounds"
@@ -986,6 +991,24 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=1,
         min_value=1,
         max_value=4,
+    ),
+    SettingSpec(
+        key=GRAPHICS_COMPONENT_REPAIRS_KEY,
+        group=GROUP_GRAPHICS,
+        label="Explainer graphics: repairs of a generated component",
+        help=(
+            "How many times the language model is asked to repair a generated component of an "
+            "explainer's graphic shot when its check in the browser or its render fails. Each "
+            "repair is a paid call that sends the code and the error. The repairs are counted over "
+            "one chain of attempts, started by one press of Make the graphics or Ask again. When "
+            "they are used up, the component has failed outright and the video uses the building "
+            "blocks instead. 0 means no repair. A motion service that cannot be reached spends no "
+            "repair. It applies to the next job that starts; running jobs are not changed."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=3,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

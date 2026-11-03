@@ -19,8 +19,12 @@ the block scene) and the resolved brief it is drawn from (`inputs.resolved`).
 4. The video is stored, and the attempt gets its path, its frame count, its metrics and its
    warnings.
 
-A render the motion service says it could not draw, or does not finish in time, is a failure
-outright for a component. A service that cannot be reached is not (`MotionServiceError`): it says
+A render the motion service says it could not draw, or does not finish in time, is repaired for a
+component (EXG-006, §3.7): the job fails, and in the same transaction a new attempt of the
+component and its write job in repair mode are queued, with the code and the error, while the
+chain's repairs (`graphics_component_repairs`) last. The same holds for a component that fails the
+free check of step 1. With the repairs used up the component has failed outright. A service that
+cannot be reached is neither repaired nor a failure outright (`MotionServiceError`): it says
 nothing about the graphic, and the render is started again later. A frame count, size or frame
 rate that is wrong is not either.
 
@@ -39,7 +43,7 @@ from typing import Any, Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import ShotGraphic, ShotGraphicBrief
+from app.db.models import Project, ShotGraphic, ShotGraphicBrief
 from app.db.session import SessionLocal
 from app.jobs import motion_draw, phase_writer, phases, shot_graphic_common, store
 from app.jobs.handlers import JobHandler
@@ -54,7 +58,13 @@ JOB_TYPE: Final = shot_graphics.RENDER_JOB_TYPE
 
 
 class ComponentFailed(RenderFailed):
-    """A component that cannot be drawn (it failed its check again). A failure outright."""
+    """A component that cannot be drawn (it failed its check again). It is repaired, or fails
+    outright when the repairs are used up. `errors` are the sentences the model is given.
+    """
+
+    def __init__(self, message: str, errors: list[str]) -> None:
+        super().__init__(message)
+        self.errors = errors
 
 
 class VideoMismatch(RenderFailed):
@@ -109,8 +119,10 @@ class RenderShotGraphicHandler(JobHandler):
             if row_id is None:
                 raise RenderFailed("The job names no graphic.")
             await self._render(job_id, row_id, storage, temp_paths)
-        except (motion_draw.MotionRenderFailed, ComponentFailed) as exc:
-            await _fail(job_id, row_id, str(exc), outright=True)
+        except ComponentFailed as exc:
+            await _fail_drawing(job_id, row_id, str(exc), exc.errors)
+        except motion_draw.MotionRenderFailed as exc:
+            await _fail_drawing(job_id, row_id, str(exc), [str(exc)])
         except VideoMismatch as exc:
             await _fail(job_id, row_id, str(exc), metrics=exc.metrics)
         except (RenderFailed, motion_renderer.MotionServiceError) as exc:
@@ -205,13 +217,15 @@ class RenderShotGraphicHandler(JobHandler):
             checked = await shot_graphic_common.check_component(job_id, plan.resolved, code)
             if checked.failed:
                 assert checked.answer is not None
+                errors = shot_graphic_common.errors_of(checked.answer)
                 raise ComponentFailed(
-                    "The component does not work with the new look: "
-                    + " ".join(shot_graphic_common.errors_of(checked.answer))
+                    "The component does not work with the new look: " + " ".join(errors), errors
                 )
+            async with SessionLocal() as session:
+                limit = await shot_graphics.repair_limit(session)
             plan.input = {
                 "code": code,
-                "checks": shot_graphic_common.checks_record(checked, False),
+                "checks": shot_graphic_common.checks_record(checked, 0, limit),
                 "warnings": shot_graphic_common.component_warnings(
                     code, checked, plan.brief, plan.context, plan.resolved
                 ),
@@ -299,6 +313,53 @@ async def _save(
             return
         await session.commit()
     _logger.info("job %d: shot graphic rendered (%d frames, %s)", job_id, plan.frames, plan.engine)
+
+
+async def _fail_drawing(job_id: int, row_id: int | None, message: str, errors: list[str]) -> None:
+    """Fails the job of a render the motion service could not draw, or of a component that no
+    longer works with a new look (§3.7). For a component the model is asked to repair it, while
+    its chain has repairs left: a new attempt (`repair_of`) and its write job are queued in the
+    same transaction that fails this job. With none left, the component has failed outright and
+    the attempt says after how many repairs. A shot that has moved on is not repaired and not
+    marked: the next Make starts from what is current. Block scenes have no repairs.
+    """
+    if row_id is None:
+        await _fail(job_id, row_id, message)
+        return
+    async with SessionLocal() as session:
+        job = await store.get_job(session, job_id)
+        row = await session.get(ShotGraphic, row_id)
+        project = await session.get(Project, row.project_id) if row is not None else None
+        if (
+            job is None
+            or job.status != "running"
+            or row is None
+            or project is None
+            or row.engine != shot_graphics.COMPONENT
+        ):
+            await session.rollback()
+            await _fail(job_id, row_id, message)
+            return
+        used = await shot_graphics.repairs_used(session, row)
+        allowed = await shot_graphics.repair_limit(session)
+        repair_job_id: int | None = None
+        if used < allowed:
+            repair = await shot_graphics.queue_repair(
+                session, project, row, shot_graphic_common.repair_errors(errors), used
+            )
+            repair_job_id = repair.id if repair is not None else None
+        if used < allowed:
+            # Either repaired, or nothing to repair now: not a failure outright.
+            row.last_error = message[: store.ERROR_MAX_CHARS]
+            row.failed_outright = False
+        else:
+            row.last_error = shot_graphic_common.outright_message(used, errors)[
+                : store.ERROR_MAX_CHARS
+            ]
+            row.failed_outright = True
+        await store.fail_job(session, job_id, message)
+    if repair_job_id is not None:
+        _logger.info("job %d: the component is repaired by job %d", job_id, repair_job_id)
 
 
 async def _fail(
