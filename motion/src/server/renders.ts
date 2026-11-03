@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { makeCancelSignal, renderMedia, selectComposition } from "@remotion/renderer";
 import type { Engine, RenderRequest } from "./schema.ts";
+import { transpile } from "./transpile.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 export const BUNDLE_DIR = process.env["MOTION_BUNDLE"] ?? resolve(root, "build/bundle");
@@ -102,6 +103,22 @@ async function run(record: RenderRecord): Promise<void> {
     cancel();
   }, request.time_limit_s * 1000);
 
+  // A generated component is transpiled here, once, and the composition evaluates the result
+  // (GFX-010). Code that does not compile fails the render before any browser starts.
+  let compiled: string | null = null;
+  if (request.engine === "generated_component") {
+    const transpiled = await transpile(request.code ?? "");
+    if (transpiled.error !== undefined) {
+      clearTimeout(timer);
+      record.cancel = null;
+      record.state = "failed";
+      record.error = `The component does not compile: ${transpiled.error}`;
+      record.finishedAt = Date.now();
+      return;
+    }
+    compiled = transpiled.js;
+  }
+
   const inputProps = {
     engine: request.engine,
     width: request.width,
@@ -111,6 +128,7 @@ async function run(record: RenderRecord): Promise<void> {
     resolved: request.resolved,
     input: request.input ?? null,
     code: request.code ?? null,
+    compiled,
   };
 
   const draw = async (): Promise<void> => {

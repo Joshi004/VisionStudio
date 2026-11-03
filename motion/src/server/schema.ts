@@ -120,3 +120,30 @@ export const idParamsSchema = {
     },
   },
 } as const;
+
+// The body of POST /checks (GFX-010): the size, length and resolved brief of a render, and the
+// component's code. The backend's static checks hold the same limit of characters.
+export const MAX_CODE_CHARS = 40_000;
+
+export type ChecksRequest = {
+  width: number;
+  height: number;
+  fps: number;
+  frames: number;
+  resolved: Record<string, unknown>;
+  code: string;
+};
+
+export const checksRequestSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["width", "height", "fps", "frames", "resolved", "code"],
+  properties: {
+    width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
+    height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
+    fps: { type: "integer", minimum: 1, maximum: 60 },
+    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
+    resolved: { type: "object" },
+    code: { type: "string", minLength: 1, maxLength: MAX_CODE_CHARS },
+  },
+} as const;

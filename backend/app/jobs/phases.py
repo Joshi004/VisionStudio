@@ -176,6 +176,10 @@ SAVING_TEMPLATE_SPEC: Final = "saving the template spec"
 # above (the scene, then at most one more call with the layout problems).
 CHECKING_BLOCK_LAYOUT: Final = "measuring the layout in the browser"
 SAVING_BLOCK_SCENE: Final = "saving the block scene"
+# `write_lab_graphic_component` (GFX-010) also uses PREPARING_PROMPT and `asking_model` from above
+# (the component, then at most one more call with the errors of the browser check).
+CHECKING_COMPONENT: Final = "compiling the component in the browser"
+SAVING_COMPONENT: Final = "saving the component"
 
 # --- Running: the music cues (MUSIC-009) -------------------------------------------------
 # `write_music_cue` and `audit_music_cues` also use PREPARING_PROMPT and `asking_model` from above

@@ -158,6 +158,26 @@ def input_warnings(input: Any) -> list[str]:
     return [str(problem) for problem in problems] if isinstance(problems, list) else []
 
 
+def component_warnings(input: Any) -> list[str]:
+    """The warnings a generated component's saved input carries into its render (GFX-010): that
+    it was not checked in the browser, and the numbers that are not traced to a fact (a fact's
+    value typed in the code, a number on screen that the line does not say). Other engines'
+    inputs have none.
+    """
+    checks = input.get("checks") if isinstance(input, dict) else None
+    if not isinstance(checks, dict):
+        return []
+    warnings: list[str] = []
+    if checks.get("checked") is False:
+        warnings.append(
+            f"The component was not checked: {checks.get('reason') or 'no reason given'}"
+        )
+    listed = input.get("warnings")
+    if isinstance(listed, list):
+        warnings.extend(str(warning) for warning in listed)
+    return warnings
+
+
 def check_probe(
     probe: VideoProbe, *, width: int, height: int, fps: int, frames: int
 ) -> tuple[dict[str, bool], list[str]]:

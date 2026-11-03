@@ -46,4 +46,8 @@ export type GraphicInput = {
   resolved: Resolved;
   input: unknown;
   code: string | null;
+  // The component's code transpiled by the server (GFX-010); only `Generated` reads it.
+  compiled?: string | null;
+  // Check mode of `POST /checks`: the composition writes the text on screen to the console.
+  report_text?: boolean;
 };

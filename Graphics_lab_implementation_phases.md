@@ -337,14 +337,14 @@ The instructions tell the model:
 
 **Static checks** run in the backend before anything renders. A failure goes back to the model once, with the reasons.
 
-- Imports come only from an allowed list (**Planning decides**: at least `react` and `remotion`, perhaps `@remotion/shapes` and `@remotion/paths`).
+- Imports come only from an allowed list (**decided in GFX-010**): `react`, `remotion`, `@remotion/shapes` and `@remotion/paths`. `import` and `export ... from` of any other module, and a bare `import "x"`, are refused. The browser side is a second guard: the component is evaluated with a `require` that knows only these four (and `react/jsx-runtime`, which the JSX transform needs).
 - There is exactly one default export.
 - None of these appear: `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `eval`, `Function(`, `import(`, `require(`, `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`, `window.open`, `navigator`, `<iframe`, `<script`, or any `http:`, `https:` or `//` address.
 - At most 40,000 characters.
 
-**The compile check** follows: the motion service transpiles the code and renders still frames at the first, middle and last frame (`POST /checks`). An error goes back to the model once, with the error text.
+**The compile check** follows: the motion service transpiles the code and renders still frames at the first, middle and last frame (`POST /checks`, §4.6). An error goes back to the model once, with the code and the error text, and the new code is checked the same way. If it still fails, the job fails and the card shows the code and the errors; no render is made.
 
-**Warnings, not refusals:** a number literal in the code equal to a fact's value, and, when GFX-009's layout report exists, any text on screen containing a number that is not a fact's `display`.
+**Warnings, not refusals (decided in GFX-010):** a number literal in the code equal to a fact's or a derived value's value (the full value, the value as the line says it, or a number of its `display`; a whole number under 10 is not reported, because it is too common as a size or an opacity), and any number in the text on screen at the three checked frames that the line does not say and no fact's `display` shows. The text is what the browser reports (`/checks` `texts`). They are stored in `input.warnings`, are the first warnings of the render, and `metrics.untraced_numbers` counts them.
 
 The static checks are not the security boundary. The container is (G-8, GFX-005, GFX-010).
 
@@ -360,7 +360,7 @@ A new folder `motion/` holds a Node project with Remotion. It builds into a thir
 | `GET /renders/{id}/file` | 005 | The finished MP4 |
 | `DELETE /renders/{id}` | 005 | Removes the file from the service |
 | `POST /layout` | 009 | The boxes of the texts of a block scene at the given frames: `{width, height, fps, frames, resolved, input, at_frames}` (at most 32 frames). Answers `200 {frames: [{frame, texts: [{element, part, text, font, size, box}]}], issues}`, or `422 {error}` for a scene that cannot be drawn. It uses `selectComposition` on the `BlocksLayout` composition, which measures in the browser; one at a time, 0.2 to 0.7 s, 60 s limit |
-| `POST /checks` | 010 | Transpiles a component and renders still frames, answering the errors |
+| `POST /checks` | 010 | `{width, height, fps, frames, resolved, code}` (code at most 40,000 characters). Transpiles the component with esbuild and renders PNG stills at the first, middle and last frame in a browser of its own (one check at a time, 60 s limit; closing that browser ends a page stuck in a loop). Answers `200 {ok, stage, errors: [{frame, message}], texts: [{frame, text}], check_s}`: `stage` is `transpile` or `render` for the first error. A component that does not compile or draw is `ok: false`, not an HTTP error; `422 {error}` only when no browser can be started |
 
 - **Compositions:** `TestCard` (GFX-005), `Templates` (GFX-007), `Blocks` (GFX-009), `Generated` (GFX-010). GFX-005 registers all four, with the last three showing a "not built yet" card, so each engine phase only fills in its own folder.
 - **Isolation:** the container is only on an `internal: true` Docker network that the backend also joins. It has a read-only root filesystem, a `tmpfs` for its work, a non-root user, CPU, memory and time limits, and no environment secrets. The browser is downloaded when the image is built, because the container has no internet when it runs.
@@ -440,7 +440,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-007 | Remotion templates | Code | 005, 006 | In Progress (built and checked on the host motion service and a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-008 | Python templates | Code | 005, 006 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-009 | Building blocks | Code | 003, 005 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
-| GFX-010 | Generated components | Code | 003, 005 | Not Started |
+| GFX-010 | Generated components | Code | 003, 005 | In Progress (built and checked on the host motion service and a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-011 | Comparison view | Code | 003, 005 | Not Started |
 | GFX-012 | Trial batch and summary | Code | 007, 008, 009, 010, 011 | Not Started |
 | GFX-013 | Owner judges the trial and decides | Manual | 001, 012 | Not Started |
@@ -1088,7 +1088,7 @@ What was built: `motion/src/blocks/` (`scene.ts` types and `readScene`, `ctx.ts`
 
 ### GFX-010 — Generated components
 
-**Status:** Not Started
+**Status:** In Progress (built and checked on 2026-11-03 on the host motion service and on a throwaway backend; the owner's rebuild of the Docker stack and the live check with the real model are open)
 
 **Objective.** GLM-5.3 writes a whole Remotion component for each graphic (§4.5.3). It passes static checks and a compile check, gets one chance to be repaired, and is rendered in the isolated motion service.
 
@@ -1130,11 +1130,55 @@ What was built: `motion/src/blocks/` (`scene.ts` types and `readScene`, `ctx.ts`
 
 **Completion checklist.**
 
-- [ ] Writer, static checks, `/checks`, host composition
-- [ ] Job with repair, registry, card
-- [ ] Hardening review, docs, standard checks
+- [x] Writer, static checks, `/checks`, host composition
+- [x] Job with repair, registry, card
+- [x] Hardening review, docs, standard checks (`ruff check` and `ruff format --check`, `tsc --noEmit` in `motion/`, and ESLint, `tsc` and the production build of the frontend pass; no API shape change, so no `gen:api`)
+- [ ] Live check: Make all on excerpts 1, 5 and 8 with the real model, then play the generated-component card (paid calls, owner's click)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration (the job type was added in GFX-002), no new setting, no API change. Three new direct npm packages in `motion/package.json` (`@remotion/shapes` 4.0.540, `@remotion/paths` 4.0.540, `esbuild` 0.28.1; the last two were already in the tree through the bundler and are now pinned). The "Planning decides" items:
+
+- **How the code reaches the browser: one host bundle.** The server transpiles the TSX with `esbuild.transform` (loader `tsx`, CommonJS, automatic JSX) and passes the result as the `compiled` prop. The `Generated` composition evaluates it with `new Function("require", "module", "exports", js)` and a `require` that knows only the allowed modules, then draws the default export. Measured on the host (warm cache): transpiling a 1.6 KB component took 28 ms; a `@remotion/bundler` bundle of the whole project took 0.5 to 0.8 s and would also write its output on every render, which the read-only container root does not allow without more `tmpfs`. A bundle per render was not built.
+- **Allowed imports:** `react`, `remotion`, `@remotion/shapes`, `@remotion/paths` (recorded in §4.5.3).
+- **`max_tokens`:** 48,000 (under Qwen3.8's 49,152) and `reasoning_effort` high; tokens are paid as used. The answer is one fenced `tsx` block (the first block with a default export; the whole answer when there is no fence). An answer cut off at the limit is refused.
+- **The second ask:** the static checks run inside the reader of `ask_model`, so they use its 2 attempts (the second is told the reason). The browser check's error gets one more ask of its own (`max_attempts=1`) with the code and the errors, so a component costs up to 3 paid attempts, as a scene does in GFX-009.
+
+What was built:
+
+- **`motion/`:** `src/generated/` (`modules.ts`, the allowed `require`; `props.ts`, `GraphicProps` of §4.5.3 with derived values merged into `facts` and the font families added to the theme; `Generated.tsx`, the composition; `marker.ts` and `version.ts`, plain files the server can import), `src/server/transpile.ts`, `src/server/checks.ts` and `POST /checks` (§4.6; `/health` reports `generated: 1`), and `renders.ts`, which transpiles a generated component before the browser starts ("The component does not compile: ..."). The composition paints the theme's background under the component, so a component that paints nothing is still on the lab's background. In check mode (`report_text`) it writes the visible text (`innerText` and the text of SVG labels) to the browser's console for each still, and the server reads it with `onBrowserLog`. The unused `NotBuiltYet.tsx` was removed.
+- **Backend:** `services/graphics_code_checks.py` (pure: `check_code`, `code_warnings`, `text_warnings`), `services/graphics_component_writer.py` (pure: the instructions, `build_request`, `parse_code`, `repair_request`), `services/graphics_component_engine.py` (`start`: one component job and one `generated_component` render row), `jobs/write_lab_graphic_component.py` (`llm`, `never_rerun`, story model, deduped by `run_id`; the component and the render are saved in one transaction with `finish_job`, then `queue_render`), `providers/motion_renderer.checks`, the phases `CHECKING_COMPONENT` and `SAVING_COMPONENT`, `graphics_render.component_warnings`, and `metrics.untraced_numbers` on the render. Stored input: `{code, checks: {checked, passed, stage, errors, check_s, asked_again, reason?}, warnings}`. A component that fails its checks twice is saved on the row with its errors and `last_error`, and no render is queued.
+- **Frontend:** `GraphicsComponentCode` (the check result, the warnings and the code, folded) with `readComponentInput`.
+
+**Deviations and details.**
+
+- **The static checks read the code with its comments removed** (`strip_comments`: strings and template literals are kept, and a quote not closed on its line is taken as an apostrophe in JSX text), so a comment that says "no fetch" does not refuse a component. The `//` rule means any `//` left outside a comment. Banned names are matched as whole words.
+- **`ERR_CONNECTION_RESET`** gets the same one repeat as a render and a layout check.
+- **A change to the service's process (`server/index.ts`):** closing the check's browser while Remotion was still closing one of its pages (after a component that threw) made Remotion reject a promise nobody awaits, and Node stopped the whole service (seen on the third request). Only that rejection (a "Target closed" error) is now logged and ignored; any other still stops the process. If it is ever seen to hide something, take it out and the check closes its browser later.
+- Numbers under 10 are not reported as a typed fact (see §4.5.3). A visible number word such as "one" counts as a number in the on-screen text, as it does for block texts.
+
+**Hardening review** (host motion service, `linux/arm64` image not re-run):
+
+- **An endless loop in a render:** `while (true) {}` with a 10 s limit failed with "The render ran past its time limit of 10 s and was stopped." after 10.1 s; the next render of a good component worked, `/health` answered, and no browser process was left behind. Remotion's cancel signal does end a page whose main thread is stuck, so no browser of the render's own was needed.
+- **An endless loop in a check:** stopped by Remotion's own frame wait after 28 s with "waiting for the page to render the React component failed: timeout 23000ms exceeded" and a note that the component probably never finishes drawing. The check's own 60 s limit and the closing of its browser are the backstop. No browser process was left behind.
+- **A component that crashes:** a thrown error, an import of `fs` and a syntax error each came back as an error with its message (the thrown error with the frame), and the service stayed healthy after repeated crashes.
+- **The browser's strictest setting:** Chrome's own sandbox cannot be on (GFX-005); the container is the boundary. Nothing stricter was found that Remotion's options allow. A component runs in the same origin as the composition, with no network (the container has none), no volume and no secrets.
+
+**Checked.** Throwaway scripts (not kept) on the host motion service (`npm run fonts && npm run bundle`, then `node src/server/index.ts`) and on a throwaway backend (`DATA_DIR` in `/tmp`, a stand-in model server answering the brief and the component, the real database and Docker stack untouched; no paid call):
+
+- **Refused before any render** (`check_code` and `/checks`): a `fetch` call, an import of `fs`, an `https://` address, a `//` address, a missing default export, two default exports, a re-export from another module, a file over 40,000 characters and an empty answer (each message names the rule); a syntax error (`line 1, column 45: ...`, from the transpiler).
+- **The repair, through the job:** `fetch` then good (the second attempt of the first call, with the reason in the request); a syntax error then good (the repair ask carried the code and the compile error; `asked_again` true); an import of `fs` twice (the job failed with the reason on the card, `checks` null); a component that throws twice (the job failed, the code and "Drawing frame 0 failed: boom in component" saved on the row, no render queued); an endless loop then good (repaired).
+- **Warnings:** a typed `31` gave "The code has the number 31, the value of f3"; a text "up 42 times" in an SVG label gave "The text on screen at 0.0 s shows the number 42". Both are in `input.warnings` and the render's warnings, and `metrics.untraced_numbers` was 2.
+- **Renders:** a landscape and a portrait run went end to end through the backend: 201 frames, the right size, 24 fps, H.264 and `yuv420p` (all five checks true), about 5 s each. (The excerpts' own briefs were not used: the stand-in answered the brief of excerpt 1's line for every run.)
+- **Render again:** the same component rendered twice by the service gave identical `framemd5` (120 frames).
+- **Motion service down:** the code was saved as "not checked" with the service's message, and the render failed with that message on the card.
+
+**Still to do for this phase.** The owner has to rebuild (`docker compose up -d --build motion backend`; `motion` gets new npm packages, so `npm ci` runs again; there is no migration), then press **Make all** on excerpts 1, 5 and 8 with the real model (one brief call and one component call, up to three attempts, each) and play the generated-component card. A run made before this phase has no component job: make a new run with **Ask again**, because **Render again** comes in GFX-011. The first live run shows how well GLM-5.3 writes Remotion code (GQ-5); a long component may need a longer `REQUEST_TIMEOUT_S` (900 s now). Update the status when it is done.
+
+**For the later phases.**
+
+- GFX-011's **Render again** on the generated card is `graphics_lab.queue_render` on the row and `ffmpeg -f framemd5` on the two files, as for the other engines. **Ask again** makes a new run, so a new component.
+- GFX-012 counts "every number traced" for this engine as `metrics.untraced_numbers == 0`, and the failures that were saved with no render (`last_error`, `input.checks.passed == false`) as an engine that made no video.
+- The motion bundle must be rebuilt (`npm run bundle`, or the image) after any change in `motion/src`.
+
 
 ### GFX-011 — Comparison view
 

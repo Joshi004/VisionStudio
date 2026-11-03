@@ -177,7 +177,12 @@ class RenderLabGraphicHandler(JobHandler):
         # shows, the probe's warnings explain what the file is.
         problems = graphics_render.input_warnings(plan.input)
         metrics["layout_problems"] = len(problems)
-        await _save(job_id, plan, stored.relative_path, metrics, problems + warnings)
+        # A generated component's warnings (GFX-010) are about numbers, not layout: they are
+        # counted on their own.
+        untraced = graphics_render.component_warnings(plan.input)
+        if plan.engine == "generated_component":
+            metrics["untraced_numbers"] = len(untraced)
+        await _save(job_id, plan, stored.relative_path, metrics, problems + untraced + warnings)
 
     async def _draw_in_motion(
         self, job_id: int, base_url: str, body: dict[str, Any], dest: Path

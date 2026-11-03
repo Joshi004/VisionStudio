@@ -38,7 +38,11 @@ from typing import Final, Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, LabGraphicRun
-from app.services import graphics_block_engine, graphics_template_engine
+from app.services import (
+    graphics_block_engine,
+    graphics_component_engine,
+    graphics_template_engine,
+)
 
 EngineKey = Literal[
     "remotion_templates", "python_templates", "remotion_blocks", "generated_component"
@@ -82,5 +86,10 @@ ENGINES: Final[dict[EngineKey, Engine]] = {
         start=graphics_block_engine.start,
         renderer_built=True,
     ),
-    "generated_component": Engine(key="generated_component", label="Generated component"),
+    "generated_component": Engine(
+        key="generated_component",
+        label="Generated component",
+        start=graphics_component_engine.start,
+        renderer_built=True,
+    ),
 }

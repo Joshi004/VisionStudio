@@ -2,10 +2,12 @@ import { createReadStream } from "node:fs";
 import Fastify from "fastify";
 
 import { counts, enqueue, fileOf, MAX_PARALLEL, prepareRenderDir, remove, statusOf, sweep } from "./renders.ts";
+import { checkComponent, ServiceError } from "./checks.ts";
 import { measureLayout } from "./layout.ts";
-import { idParamsSchema, layoutRequestSchema, renderRequestSchema } from "./schema.ts";
-import type { LayoutRequest, RenderRequest } from "./schema.ts";
+import { checksRequestSchema, idParamsSchema, layoutRequestSchema, renderRequestSchema } from "./schema.ts";
+import type { ChecksRequest, LayoutRequest, RenderRequest } from "./schema.ts";
 import { BLOCKS_VERSION } from "../blocks/scene.ts";
+import { GENERATED_VERSION } from "../generated/version.ts";
 import { CATALOGUE_VERSION } from "../templates/spec.ts";
 import { readVersions } from "./versions.ts";
 
@@ -29,6 +31,7 @@ app.get("/health", async () => ({
   node: process.version,
   templates: CATALOGUE_VERSION,
   blocks: BLOCKS_VERSION,
+  generated: GENERATED_VERSION,
   max_parallel: MAX_PARALLEL,
   ...counts(),
 }));
@@ -52,6 +55,22 @@ app.post<{ Body: LayoutRequest }>(
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       return reply.code(422).send({ error: text.slice(0, 2000) });
+    }
+  },
+);
+
+// Transpiles a generated component and draws three still frames of it (GFX-010). A component that
+// does not compile or does not draw is a 200 with `ok: false` and the errors; only a service that
+// cannot run the check at all answers 422.
+app.post<{ Body: ChecksRequest }>(
+  "/checks",
+  { schema: { body: checksRequestSchema } },
+  async (request, reply) => {
+    try {
+      return await checkComponent(request.body);
+    } catch (error) {
+      if (!(error instanceof ServiceError)) throw error;
+      return reply.code(422).send({ error: error.message });
     }
   },
 );
@@ -88,6 +107,18 @@ app.delete<{ Params: { id: string } }>(
 );
 
 setInterval(() => sweep(), 60_000).unref();
+
+// Closing a browser while Remotion is still closing one of its pages (a component that threw or hung,
+// GFX-010) makes Remotion reject a promise nobody awaits, and Node would stop the whole service for
+// it. Only that one error is let through; anything else still stops the process.
+process.on("unhandledRejection", (reason) => {
+  const text = reason instanceof Error ? reason.message : String(reason);
+  if (text.includes("Target closed")) {
+    app.log.warn("a closing browser page was cut short (ignored)");
+    return;
+  }
+  throw reason;
+});
 
 const shutdown = () => {
   void app.close().finally(() => process.exit(0));

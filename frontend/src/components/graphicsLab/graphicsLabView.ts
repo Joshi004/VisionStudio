@@ -194,3 +194,47 @@ export function readBlockInput(input: unknown): BlockInput | null {
     askedAgain: asked_again === true,
   };
 }
+
+/**
+ * What the generated-component engine holds as its input (GFX-010): the code the model wrote, what
+ * the browser check found, and the warnings about numbers that are not traced to a fact.
+ * `checked` is false when the motion service could not be reached; `passed` is null then.
+ */
+export type ComponentInput = {
+  code: string;
+  checked: boolean;
+  passed: boolean | null;
+  /** Why the check was not made, when it was not. */
+  reason: string | null;
+  errors: string[];
+  warnings: string[];
+  askedAgain: boolean;
+};
+
+function texts(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+export function readComponentInput(input: unknown): ComponentInput | null {
+  if (typeof input !== "object" || input === null) {
+    return null;
+  }
+  const { code, checks, warnings } = input as Record<string, unknown>;
+  if (typeof code !== "string") {
+    return null;
+  }
+  const { checked, passed, reason, errors, asked_again } = (
+    typeof checks === "object" && checks !== null ? checks : {}
+  ) as Record<string, unknown>;
+  return {
+    code,
+    checked: checked !== false,
+    passed: typeof passed === "boolean" ? passed : null,
+    reason: typeof reason === "string" ? reason : null,
+    errors: texts(errors),
+    warnings: texts(warnings),
+    askedAgain: asked_again === true,
+  };
+}

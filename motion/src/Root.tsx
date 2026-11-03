@@ -6,7 +6,7 @@ import { layoutReport } from "./blocks/report";
 import type { LayoutReport } from "./blocks/report";
 import { readScene } from "./blocks/scene";
 import { fontsLoaded } from "./fonts";
-import { NotBuiltYet } from "./NotBuiltYet";
+import { Generated } from "./generated/Generated";
 import { TestCard } from "./TestCard";
 import { Templates } from "./templates/Templates";
 import type { GraphicInput, Resolved } from "./types";
@@ -77,9 +77,9 @@ const defaults = (engine: string): GraphicInput => ({
   code: null,
 });
 
-// The compositions of §4.6. The test card (GFX-005), the templates (GFX-007) and the blocks
-// (GFX-009) are drawn; `Generated` shows "not built yet" until GFX-010. `BlocksLayout` draws
-// nothing: it only measures a block scene for `POST /layout`.
+// The compositions of §4.6. The test card (GFX-005), the templates (GFX-007), the blocks
+// (GFX-009) and the generated component (GFX-010) are drawn. `BlocksLayout` draws nothing: it
+// only measures a block scene for `POST /layout`.
 export function Root() {
   return (
     <>
@@ -125,7 +125,7 @@ export function Root() {
       />
       <Composition
         id="Generated"
-        component={NotBuiltYet}
+        component={Generated}
         width={1920}
         height={1080}
         fps={24}
