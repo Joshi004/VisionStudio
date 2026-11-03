@@ -8,8 +8,10 @@ differ.
 
 The result is the run's `timing` column (`graphics_lab.voice_timing`: one entry for each word of
 the line, with `source` `parakeet`, or `estimated` and a note when too few words matched),
-written in the same transaction that finishes the job. Nothing starts after it: the brief is the
-owner's click, and it waits for this timing.
+written in the same transaction that finishes the job. Nothing starts after it for an ordinary
+run: the brief is the owner's click, and it waits for this timing. A run made by the trial batch
+(GFX-012, `services/graphics_trial.py`) is the exception: the trial's click already asked for the
+brief and the engines, so they start now (best effort, after the timing is saved).
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from app.db.session import SessionLocal
 from app.jobs import store
 from app.jobs.time_speech_words import TimeSpeechWordsHandler, processing_time
 from app.providers import transcriber
-from app.services import graphics_lab, word_timings
+from app.services import graphics_lab, graphics_trial, word_timings
 
 _logger = logging.getLogger(__name__)
 
@@ -98,4 +100,16 @@ class TimeLabGraphicWordsHandler(TimeSpeechWordsHandler):
             alignment.match_percent,
             threshold,
         )
+        if saved:
+            await self._start_trial_run(job.id, run_id)
         return True
+
+    @staticmethod
+    async def _start_trial_run(job_id: int, run_id: int) -> None:
+        """A run of a trial batch (GFX-012) has its brief and engines started now that its
+        timing is stored. Best effort: a failure is kept on the run, and the job stays done.
+        """
+        try:
+            await graphics_trial.start_after_timing(run_id)
+        except Exception:
+            _logger.exception("job %d: the trial could not start run %d", job_id, run_id)

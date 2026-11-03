@@ -2266,6 +2266,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/graphics/trials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trials
+         * @description The excerpts of Appendix A, what a trial costs (with and without a voice) and the trial
+         *     sets made so far, newest first. Nothing is started.
+         */
+        get: operations["get_trials_api_lab_graphics_trials_get"];
+        put?: never;
+        /**
+         * Start Trial
+         * @description A paid action: makes one run for each of the ten excerpts and starts **Make all** on each
+         *     (with a voice, as soon as each voice is timed). The call counts are shown by `GET .../trials`
+         *     and confirmed on the page first. 409 while the newest set is still being made.
+         */
+        post: operations["start_trial_api_lab_graphics_trials_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/trials/{set_no}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trial Summary
+         * @description The summary of one trial set: the counts and medians of each engine, and each run's
+         *     outcome on each engine.
+         */
+        get: operations["get_trial_summary_api_lab_graphics_trials__set_no__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters": {
         parameters: {
             query?: never;
@@ -7507,6 +7555,191 @@ export interface components {
             metrics: unknown;
             /** Warnings */
             warnings: string[];
+        };
+        /**
+         * GraphicTrialCostOut
+         * @description What a trial will do, shown and confirmed before it starts.
+         */
+        GraphicTrialCostOut: {
+            /** Runs */
+            runs: number;
+            /** Paid Calls */
+            paid_calls: number;
+            /** Most Paid Calls */
+            most_paid_calls: number;
+            /** Speeches */
+            speeches: number;
+        };
+        /** GraphicTrialCreate */
+        GraphicTrialCreate: {
+            /** Voice Id */
+            voice_id?: number | null;
+            /**
+             * Orientation
+             * @default own
+             * @enum {string}
+             */
+            orientation: "own" | "landscape" | "portrait";
+        };
+        /**
+         * GraphicTrialEngineOut
+         * @description The counts of one engine over the set (§4.9). The three `of videos` counts are out of
+         *     `videos`; the repeat counts are over every Render again of the set.
+         */
+        GraphicTrialEngineOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "remotion_templates" | "python_templates" | "remotion_blocks" | "generated_component";
+            /** Label */
+            label: string;
+            /** Runs */
+            runs: number;
+            /** Videos */
+            videos: number;
+            /** No Fit */
+            no_fit: number;
+            /** Failed */
+            failed: number;
+            /** Working */
+            working: number;
+            /** Not Started */
+            not_started: number;
+            /** Checks Passed */
+            checks_passed: number;
+            /** No Layout Warning */
+            no_layout_warning: number;
+            /** Numbers Traced */
+            numbers_traced: number;
+            /** Median Render S */
+            median_render_s: number | null;
+            /** Median Tokens */
+            median_tokens: number | null;
+            /** Repeats Identical */
+            repeats_identical: number;
+            /** Repeats Differing */
+            repeats_differing: number;
+            /** Repeats Not Compared */
+            repeats_not_compared: number;
+            /** Verdict Good */
+            verdict_good: number;
+            /** Verdict Usable */
+            verdict_usable: number;
+            /** Verdict Bad */
+            verdict_bad: number;
+            /** Verdict None */
+            verdict_none: number;
+        };
+        /**
+         * GraphicTrialExcerptOut
+         * @description One line of Appendix A, with the orientation it runs in when the trial uses each excerpt's
+         *     own.
+         */
+        GraphicTrialExcerptOut: {
+            /** Key */
+            key: string;
+            /** Domain */
+            domain: string;
+            /** Text */
+            text: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Tests */
+            tests: string;
+        };
+        /**
+         * GraphicTrialOutcomeOut
+         * @description What became of one engine on one run: its newest render that is not a Render again.
+         */
+        GraphicTrialOutcomeOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "no_fit" | "failed" | "working" | "not_started";
+            /** Render Id */
+            render_id: number | null;
+            /** Attempt */
+            attempt: number | null;
+            /** Verdict */
+            verdict: ("good" | "usable" | "bad") | null;
+        };
+        /** GraphicTrialOverviewOut */
+        GraphicTrialOverviewOut: {
+            /** Excerpts */
+            excerpts: components["schemas"]["GraphicTrialExcerptOut"][];
+            cost: components["schemas"]["GraphicTrialCostOut"];
+            cost_with_voice: components["schemas"]["GraphicTrialCostOut"];
+            /** Sets */
+            sets: components["schemas"]["GraphicTrialSetOut"][];
+        };
+        /** GraphicTrialRunOut */
+        GraphicTrialRunOut: {
+            /** Run Id */
+            run_id: number;
+            /** Case */
+            case: string;
+            /** Domain */
+            domain: string;
+            /** Line Text */
+            line_text: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
+            /** Last Error */
+            last_error: string | null;
+            /** Outcomes */
+            outcomes: {
+                [key: string]: components["schemas"]["GraphicTrialOutcomeOut"];
+            };
+        };
+        /** GraphicTrialSetOut */
+        GraphicTrialSetOut: {
+            /** Set No */
+            set_no: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Runs */
+            runs: number;
+        };
+        /** GraphicTrialStartedOut */
+        GraphicTrialStartedOut: {
+            /** Set No */
+            set_no: number;
+            /** Run Ids */
+            run_ids: number[];
+        };
+        /** GraphicTrialSummaryOut */
+        GraphicTrialSummaryOut: {
+            /** Set No */
+            set_no: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** With Voice */
+            with_voice: boolean;
+            /** Active */
+            active: boolean;
+            /** Engines */
+            engines: components["schemas"]["GraphicTrialEngineOut"][];
+            /** Runs */
+            runs: components["schemas"]["GraphicTrialRunOut"][];
         };
         /**
          * GraphicVoiceOut
@@ -20324,6 +20557,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GraphicTestCardOut"];
+                };
+            };
+        };
+    };
+    get_trials_api_lab_graphics_trials_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTrialOverviewOut"];
+                };
+            };
+        };
+    };
+    start_trial_api_lab_graphics_trials_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicTrialCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTrialStartedOut"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_trial_summary_api_lab_graphics_trials__set_no__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                set_no: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTrialSummaryOut"];
+                };
+            };
+            /** @description No trial set has this number. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

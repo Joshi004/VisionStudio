@@ -442,7 +442,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-009 | Building blocks | Code | 003, 005 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-010 | Generated components | Code | 003, 005 | In Progress (built and checked on the host motion service and a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-011 | Comparison view | Code | 003, 005 | In Progress (built and checked on the host, a throwaway backend and headless Chrome; the owner's rebuild and a look at a live run are open) |
-| GFX-012 | Trial batch and summary | Code | 007, 008, 009, 010, 011 | Not Started |
+| GFX-012 | Trial batch and summary | Code | 007, 008, 009, 010, 011 | In Progress (built and checked on a throwaway backend with a stand-in model and headless Chrome; the owner's rebuild and the first real trial are open) |
 | GFX-013 | Owner judges the trial and decides | Manual | 001, 012 | Not Started |
 
 ### 5.1 Dependency graph
@@ -1255,7 +1255,7 @@ What was built:
 
 ### GFX-012 — Trial batch and summary
 
-**Status:** Not Started
+**Status:** In Progress (built and checked on 2026-11-03 on a throwaway backend with a stand-in model server and headless Chrome; the owner's rebuild of the Docker stack and the first real trial are open)
 
 **Objective.** One click runs the Appendix A excerpts through every engine. A summary page counts the results per engine (§4.9) and copies them as Markdown for Appendix B.
 
@@ -1291,11 +1291,41 @@ What was built:
 
 **Completion checklist.**
 
-- [ ] Excerpt list, Run the trial, cost shown
-- [ ] Summary page, Copy as Markdown
-- [ ] Docs, standard checks
+- [x] Excerpt list, Run the trial, cost shown
+- [x] Summary page, Copy as Markdown
+- [x] Docs, standard checks (`ruff check` and `ruff format --check`, ESLint, `tsc -b`, the production build and `gen:api` pass; no change to `motion/`)
+- [ ] A real trial on the owner's Docker stack after the rebuild (`docker compose up -d --build backend frontend`; there is no migration): about 40 to 100 paid calls, owner's click
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration, no new setting, no new job type, no new package, and no change to any engine or to the motion service. The "Planning decides" items:
+
+- **How a set is grouped: a set number inside `trial_case_key`.** The column holds `"<set>:<case>"` (`3:T05`). The next set is one more than the highest number found, so a set can be found with `LIKE '3:%'` and the existing index serves it. `DATABASE_STRUCTURE.md` says so.
+- **Where the excerpts live: in code** (`services/graphics_trial.EXCERPTS`, a tuple), not in a JSON file. The text is Appendix A as it stands: GFX-001 has not approved the list yet, and if it changes only that tuple changes.
+- **The orientation of each excerpt** (Appendix A has a new column, the owner's decision): T03, T06, T07 and T09 run in portrait and the other six in landscape, so a line chart, a vertical flow, benchmark bars and a list are each tried in portrait. The form can also make all ten landscape or all ten portrait.
+- **Which attempt counts: the newest render of an engine that is not a Render again** (the owner's decision), which is what the card shows and what is judged. Renders made by Render again feed only the repeat counts.
+
+What was built:
+
+- **`services/graphics_trial.py`.** `EXCERPTS`, `case_key` and `parse_case_key`, `trial_cost` (10 runs, 40 paid calls, at most 100, and 10 speeches with a voice), `start_trial`, `start_after_timing`, `list_sets` and `summarize` (`summarize_rows` is pure). `graphics_lab.create_run` has a new `trial_case_key` argument, and `graphics_lab.trial_runs` and `check_line_fits` are new.
+- **Starting.** `start_trial(session, voice_id, orientation)` checks the voice and that every excerpt's estimated speech fits one graphic, before anything is made; refuses (409) while the newest set still has a run whose voice is being made or timed or whose brief is being written (a second click would pay for a second set); makes the ten runs; and, without a voice, presses **Make all** on each. A failure on one run is kept in that run's `last_error` and never stops the others. **With a voice** the speech is made at once for each run and the brief waits for its timing (GFX-004), so `jobs/time_lab_graphic_words.py` calls `graphics_trial.start_after_timing(run_id)` after it has saved the timing: for a run that has a trial key and no brief job it starts the brief and then the engines. Any other run is left alone, so the owner's click is still what starts the brief of an ordinary run. The click on **Run the trial** is the click G-13 asks for.
+- **The summary** (`GET .../trials/{set}`), per engine over the set's runs: the runs, the videos, "no template fits" (the input has `template` null), failed, and not finished (working or not started); out of the videos, how many passed the frame, size and frame rate checks (`metrics.checks`), had no layout warning (`metrics.layout_problems == 0`) and had every number traced; the median render time (`metrics.render_s`); the median tokens (prompt plus completion tokens of the input job's calls, over every counted render that has a call); the Render again results (identical, differing, not compared, from `metrics.repeat` of every repeat in the set); and the verdict counts, with "not judged". **Every number traced** is `metrics.untraced_numbers == 0` for the generated component (as GFX-010 asked). The other engines refuse an untraced number before they draw (G-7), so each of their videos counts, and the page and the Markdown say so. A render counts as *failed* when it has `last_error`, a failed or cancelled job, or a component whose checks did not pass. Each run's outcome on each engine is returned too, with its verdict and attempt.
+- **API** (`api/graphics_lab.py`): `GET /api/lab/graphics/trials` (the excerpts, the cost with and without a voice, and the sets), `POST /api/lab/graphics/trials` (`{voice_id, orientation: own | landscape | portrait}`; 201 `{set_no, run_ids}`, 409 while the newest set is being made, 422 for an unknown voice or a line that is too long) and `GET /api/lab/graphics/trials/{set_no}` (404 for an unknown set). `schema.d.ts` regenerated.
+- **Frontend** (`components/graphicsLab/`): `GraphicsTrialPanel` (a "Trial batch" box on the Graphics tab: the excerpts folded, the voice and orientation, the cost line, **Run the trial** with a confirmation that names the paid calls and the speeches, and the list of sets), `GraphicsTrialSummary` (a set switcher, one table with a row for each measure and a column for each engine, a table of the runs with each engine's outcome, verdict and **Open run**, **Copy as Markdown**, and polling while any part of the set is still going), `graphicsTrialView.ts` (`measureRows`, `trialMarkdown`), and `useOpenGraphicsTrial` (`?trial=<set>`). A run opened from a summary goes over it (`?trial=3&run=12`), and closing the run returns to the summary. The trial's engine counts are in one table with the engines as columns rather than one table for each engine, so that two engines can be read side by side.
+
+**Checked.** A throwaway backend (`DATA_DIR` in `/tmp`, the model URL pointed at a stand-in server that answered any line's brief as a concept with no numbers and the spec as "no template fits", and refused the scene and component calls; no paid call, and the real database and Docker stack were not touched) and headless Google Chrome on the built frontend:
+
+- One trial made ten runs with the keys `1:T01` to `1:T10`, each with its own orientation, a brief, and a render of every engine that is built (10 briefs and 10 specs were asked; the scene and component calls were refused). A second click at once got 409 with the reason; an unknown voice got 422 and a bad orientation 422; an unknown set got 404. With every run done, `active` was false.
+- **The counts, by hand.** Renders were added to the database by hand for three runs (a good block video with a Render again that was identical; a bad component video with a Render again that differed by 3 frames; a component video with no untraced numbers and a Render again that could not be compared). The summary counted, as worked out on paper: 1 video for the blocks (checks 1, layout 1, traced 1, median 6.0 s, 1 identical, 1 good) and 2 for the component (checks 1, layout 1, traced 1, median 15.0 s, 1 differing, 1 not compared, 1 bad, 1 not judged); the Render again attempts were not counted as videos, and the attempt shown for each run was the newest one that is not a repeat.
+- **A trial with a voice** was checked on the hook only (a real voice needs the GPU server): `start_after_timing` on a run with a trial key and a stored timing started the brief and then the engines; on an ordinary run it did nothing; a second call did nothing.
+- **A second trial** got set 10 (the highest number was 9, from a run made by hand), and the switcher moved between sets.
+- **In the browser:** the panel showed the cost line "10 runs, 40 paid model calls (up to 100 when answers are retried)", the confirmation said the same and Cancel started nothing, the summary opened at `?trial=10`, **Copy as Markdown** put the heading and the two tables on the clipboard, **Open run** went to `?trial=10&run=13`, and **All runs** went back to the summary and then to the list.
+
+**Still to do for this phase.** The owner has to rebuild (`docker compose up -d --build backend frontend`; there is no migration), then press **Run the trial** (with a voice or without), confirm the calls, and watch the summary fill in. The first real trial also answers GQ-5 (how well GLM-5.3 writes Remotion code) and GQ-8 (lines without numbers). Update the status when it is done.
+
+**For the later phases.**
+
+- GFX-013 copies the summary with **Copy as Markdown** into Appendix B, then judges each run: the verdict counts in the summary come from the verdicts set on the run pages.
+- A trial run is an ordinary run with a trial key: it can be opened, asked again, judged and deleted like any other, and deleting it removes it from its set's counts.
+- The summary reads the newest attempt that is not a Render again. Asking an engine again on a trial run therefore changes that engine's counts for the run.
 
 ### GFX-013 — Owner judges the trial and decides (manual)
 
@@ -1339,7 +1369,7 @@ The rules of `Implementation_phases.md` §6 apply. Update a phase's **Status** l
 | GQ-7 | **Estimated timing drifts** from a real voice by a few tenths of a second over a long line. With a voice, the beats follow the real words. | GFX-003, GFX-004 |
 | GQ-8 | **Lines without numbers** (AI concepts) may get "no template fits". That is a result of the trial, not a defect, and it shows where blocks or generated code are needed. | GFX-006, GFX-012 |
 | GQ-9 | **The number reader's known limits** (ordinals, "half", ranges, years said in two parts) can refuse a correct fact. A refusal names the fact, so the owner can reword the line. | GFX-003 |
-| GQ-10 | **Cost.** A run is four paid calls plus at most one retry each (up to 3 attempts for the block scene), so a trial is about 40 to 80 calls. GFX-012 shows the count before it starts. | GFX-012 |
+| GQ-10 | **Cost.** A run is four paid calls plus at most one retry each (up to 3 attempts for the block scene), so a trial is 40 calls when every answer is usable the first time and at most 100 (10 runs times 2 + 2 + 3 + 3 attempts). GFX-012 shows both counts, and asks for a confirmation, before it starts. | GFX-012 |
 
 **Out of scope for the whole lab:** data you upload and live market data (both planned for the pipeline, not needed to compare engines), captions or callouts burned into the lab videos, music, and a live Remotion preview in the browser.
 
@@ -1349,18 +1379,18 @@ The rules of `Implementation_phases.md` §6 apply. Update a phase's **Status** l
 
 The companies and numbers are made up. The owner approves or changes the list in GFX-001.
 
-| Key | Domain | Excerpt | What it tests |
-|-----|--------|---------|---------------|
-| T01 | Finance | "Acme's revenue has exploded. It made 12 billion dollars in 2023, 19 billion in 2024, and 31 billion in 2025. That's more than double in two years." | Bars, a derived percent change, a beat per year |
-| T02 | Finance | "Northwind's stock closed at 84 dollars on Friday, down 6.5 percent in a single day, its worst drop since March." | A KPI with a negative change |
-| T03 | Finance | "Over the last five quarters, Globex's operating margin went from 18 percent to 21, then 24, dipped to 22, and reached 27 percent this quarter." | A line through five points, an axis that does not start at zero |
-| T04 | Finance | "Initech trades at 45 times earnings, while its closest rival, Umbrella, trades at just 19 times. Investors pay more than twice as much for every dollar Initech earns." | A comparison of multiples, a derived ratio |
-| T05 | AI | "A large language model works in three steps. It splits your text into tokens, turns each token into a vector, and then predicts the next token, one at a time." | A three-step flow |
-| T06 | AI | "Retrieval augmented generation adds one step before the answer: your question searches your documents, the best matches are added to the prompt, and only then does the model write its reply." | A four-step flow with longer labels |
-| T07 | AI | "On the coding benchmark, the new model scored 71 percent, up from 48 percent for the previous version, and ahead of the 64 percent of its closest competitor." | Benchmark bars with an emphasis |
-| T08 | AI | "Attention lets every word look at every other word in the sentence, so 'it' can learn that it means 'the animal' and not 'the street'." | A concept with no numbers: no template should fit |
-| T09 | General | "There are three reasons this matters: it is cheaper, it is faster, and it works offline." | A list that builds item by item |
-| T10 | General | "Here is the part nobody talks about." | A very short line (the 3 s minimum), a statement card |
+| Key | Domain | Orientation | Excerpt | What it tests |
+|-----|--------|-------------|---------|---------------|
+| T01 | Finance | Landscape | "Acme's revenue has exploded. It made 12 billion dollars in 2023, 19 billion in 2024, and 31 billion in 2025. That's more than double in two years." | Bars, a derived percent change, a beat per year |
+| T02 | Finance | Landscape | "Northwind's stock closed at 84 dollars on Friday, down 6.5 percent in a single day, its worst drop since March." | A KPI with a negative change |
+| T03 | Finance | Portrait | "Over the last five quarters, Globex's operating margin went from 18 percent to 21, then 24, dipped to 22, and reached 27 percent this quarter." | A line through five points, an axis that does not start at zero |
+| T04 | Finance | Landscape | "Initech trades at 45 times earnings, while its closest rival, Umbrella, trades at just 19 times. Investors pay more than twice as much for every dollar Initech earns." | A comparison of multiples, a derived ratio |
+| T05 | AI | Landscape | "A large language model works in three steps. It splits your text into tokens, turns each token into a vector, and then predicts the next token, one at a time." | A three-step flow |
+| T06 | AI | Portrait | "Retrieval augmented generation adds one step before the answer: your question searches your documents, the best matches are added to the prompt, and only then does the model write its reply." | A four-step flow with longer labels |
+| T07 | AI | Portrait | "On the coding benchmark, the new model scored 71 percent, up from 48 percent for the previous version, and ahead of the 64 percent of its closest competitor." | Benchmark bars with an emphasis |
+| T08 | AI | Landscape | "Attention lets every word look at every other word in the sentence, so 'it' can learn that it means 'the animal' and not 'the street'." | A concept with no numbers: no template should fit |
+| T09 | General | Portrait | "There are three reasons this matters: it is cheaper, it is faster, and it works offline." | A list that builds item by item |
+| T10 | General | Landscape | "Here is the part nobody talks about." | A very short line (the 3 s minimum), a statement card |
 
 ---
 
@@ -1385,3 +1415,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-03 | GFX-008 | In Progress | Python templates built: `services/graphics_python/` draws the five templates, their variants, the four backgrounds and the beat motion with Pillow at 3x supersampling, in a child process that pipes raw frames into FFmpeg with Remotion's encoding and colour arguments; `python_templates` has `renderer_built`. Checked on 88 videos on the host (frames, beats, caption area, identical frames on render again), and through a throwaway backend with a stand-in model server (Python row 2.3 s against Remotion's 6.7 s; the API answered within 18 ms during the render). The owner's rebuild and the live check are open. Differences from Remotion are in the completion notes. |
 | 2026-11-03 | GFX-009 | In Progress | Building blocks built: ten blocks and their effects on a 12 x 12 grid (`motion/src/blocks/`), `POST /layout` that measures texts in the browser, the scene checks, the scene writer, job `write_lab_graphic_block_scene` with one layout ask (up to 3 attempts), `remotion_blocks` marked built, the block card. Checked on the host motion service and a throwaway backend with a stand-in model; the owner's rebuild and the live check with the real model are open. |
 | 2026-11-03 | GFX-011 | In Progress | Comparison view built: one playback bar plays, pauses, steps and seeks all four videos in sync (a leader video, the others follow), safe-area and caption-area overlays, cards with metrics, the model call's cost, warnings, input, verdict and the list of attempts, **Ask again** on one engine (a new attempt; both template cards for the template engines) and **Render again** (same input, no model call, frames compared with `framemd5` as a step of `render_lab_graphic`, `metrics.repeat`). Checked on the host, a throwaway backend with a stand-in model and headless Chrome; the owner's rebuild and a look at a live run are open. |
+| 2026-11-03 | GFX-012 | In Progress | Trial batch built: ten excerpts (each with its own orientation) through every engine as a numbered set (`trial_case_key` `<set>:<case>`), the paid calls shown and confirmed first, a voice trial starting each brief when its timing is stored, and a summary page with the counts and medians of §4.9 per engine, a table of the runs, and **Copy as Markdown**. Checked on a throwaway backend with a stand-in model and headless Chrome; the owner's rebuild and the first real trial are open. |

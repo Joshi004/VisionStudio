@@ -3420,7 +3420,7 @@ CREATE INDEX idx_shot_voice_source_project ON shot_voice_source (project_id);
 | `brief_job_id` | INTEGER, FK → `job.id` | NULL | — | The `write_lab_graphic_brief` job (GFX-003). `ON DELETE SET NULL` |
 | `brief` | JSON | NULL | — | What the director model wrote, checked by code (GFX-003; shape in Section 5). NULL until written |
 | `resolved` | JSON | NULL | — | The brief as code resolved it: frame count, beat frames, number texts, theme, safe area, caption zone (GFX-003; shape in Section 5). Every engine's input is checked against it |
-| `trial_case_key` | TEXT | NULL | — | The case of the trial batch the run belongs to (GFX-012) |
+| `trial_case_key` | TEXT | NULL | — | The trial batch the run belongs to, as `<set>:<case>` (for example `3:T05`: set 3, excerpt T05); NULL for a run made from the form (GFX-012). A set is found with `LIKE '<set>:%'` |
 | `last_error` | TEXT | NULL | — | A failure that no job holds |
 
 ```sql

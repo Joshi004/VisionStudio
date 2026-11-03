@@ -253,9 +253,11 @@ async def create_run(
     line_text: object,
     orientation: object,
     voice_id: object = None,
+    trial_case_key: str | None = None,
 ) -> RunRow:
     """Checks the form and adds one run. Commits. Raises GraphicsLabInputError. No model is
-    called: the director call is its own click (GFX-003).
+    called: the director call is its own click (GFX-003). `trial_case_key` marks a run made by
+    the trial batch (GFX-012, `services/graphics_trial.py`); the form never sets it.
 
     With a saved voice the speech of the line is started now, as a Voice lab run in `direction`
     mode with the explainer's presenter delivery, and its words are timed when it is stored
@@ -287,6 +289,7 @@ async def create_run(
         orientation=checked_orientation,
         voice_id=saved_voice_id,
         speech_run_id=speech_run_id,
+        trial_case_key=trial_case_key,
     )
     session.add(run)
     await session.commit()
@@ -379,6 +382,41 @@ async def get_run(session: AsyncSession, run_id: int) -> RunRow | None:
         run=run, brief_job=brief_job, renders=await _render_rows(session, renders.scalars())
     )
     return (await _with_voices(session, [row]))[0]
+
+
+async def trial_runs(session: AsyncSession, set_no: int) -> list[RunRow]:
+    """The runs of one trial set (GFX-012: `trial_case_key` is `"<set>:<case>"`), in the order
+    they were made, each with all its renders.
+    """
+    statement = (
+        _select()
+        .where(LabGraphicRun.trial_case_key.like(f"{set_no}:%"))
+        .order_by(LabGraphicRun.id)
+        .execution_options(populate_existing=True)
+    )
+    rows: list[RunRow] = []
+    for run, brief_job in (await session.execute(statement)).all():
+        renders = await session.execute(
+            select(LabGraphicRender)
+            .where(LabGraphicRender.run_id == run.id)
+            .order_by(LabGraphicRender.id.desc())
+            .execution_options(populate_existing=True)
+        )
+        rows.append(
+            RunRow(
+                run=run,
+                brief_job=brief_job,
+                renders=await _render_rows(session, renders.scalars()),
+            )
+        )
+    return await _with_voices(session, rows)
+
+
+async def check_line_fits(session: AsyncSession, line_text: str) -> None:
+    """Raises GraphicsLabInputError when the line's estimated speech is longer than one graphic
+    can be. Nothing is made or paid for.
+    """
+    await _estimated_timing(session, line_text)
 
 
 # --- The voice (GFX-004) ----------------------------------------------------------------------

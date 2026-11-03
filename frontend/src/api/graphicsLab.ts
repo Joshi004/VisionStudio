@@ -286,3 +286,83 @@ export function useRenderGraphicsTestCard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: testCardKey }),
   });
 }
+
+// --- The trial batch (GFX-012) ---------------------------------------------------------------
+
+export type GraphicTrialOverview = components["schemas"]["GraphicTrialOverviewOut"];
+export type GraphicTrialExcerpt = components["schemas"]["GraphicTrialExcerptOut"];
+export type GraphicTrialCost = components["schemas"]["GraphicTrialCostOut"];
+export type GraphicTrialSet = components["schemas"]["GraphicTrialSetOut"];
+export type GraphicTrialSummary = components["schemas"]["GraphicTrialSummaryOut"];
+export type GraphicTrialEngine = components["schemas"]["GraphicTrialEngineOut"];
+export type GraphicTrialRun = components["schemas"]["GraphicTrialRunOut"];
+export type GraphicTrialOutcome = components["schemas"]["GraphicTrialOutcomeOut"];
+export type GraphicTrialCreate = components["schemas"]["GraphicTrialCreate"];
+export type GraphicTrialOrientation = GraphicTrialCreate["orientation"];
+
+const trialsKey = [...GRAPHICS_LAB_KEY, "trials"] as const;
+
+/** The excerpts, what a trial costs, and the trial sets made so far. Nothing is started. */
+export function useGraphicsTrials() {
+  return useQuery({
+    queryKey: trialsKey,
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/lab/graphics/trials");
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not load the trials (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+  });
+}
+
+/**
+ * The summary of one trial set. Nothing is loaded while `setNo` is null. It is loaded again every
+ * few seconds while a voice, a brief or a render of the set is still going.
+ */
+export function useGraphicsTrial(setNo: number | null) {
+  return useQuery({
+    queryKey: [...trialsKey, "summary", setNo],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/lab/graphics/trials/{set_no}", {
+        params: { path: { set_no: setNo as number } },
+      });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not load the trial (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    enabled: setNo !== null,
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 1,
+    refetchInterval: (query) => (query.state.data?.active ? ACTIVE_POLL_MS : false),
+  });
+}
+
+/**
+ * Starts a trial: ten runs, each with Make all. It is a paid action, so a button calls it only
+ * from a click that was confirmed with the number of calls shown.
+ */
+export function useStartGraphicsTrial() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: GraphicTrialCreate) => {
+      const { data, error, response } = await api.POST("/api/lab/graphics/trials", { body });
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `The trial was not started (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    // Every Graphics query is read again: the runs list and the sets both changed.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: GRAPHICS_LAB_KEY }),
+  });
+}

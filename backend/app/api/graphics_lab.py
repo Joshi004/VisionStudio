@@ -29,6 +29,10 @@ renders a card of a chosen orientation and length, and `GET .../test-cards/newes
 newest one and the video of the newest that succeeded. It belongs to no run and costs nothing;
 only the newest video is kept.
 
+The trial batch (GFX-012) is three routes: `GET .../trials` (the excerpts, the cost and the sets),
+`POST .../trials` (a paid action: ten runs, each started with Make all) and `GET .../trials/{set}`
+(the summary of one set).
+
 A run is deleted through the shared lab-sample delete (`DELETE /api/lab/samples/graphic_run/{id}`,
 `api/deletion.py`), which refuses while any of its jobs is still running and removes the videos.
 """
@@ -47,7 +51,7 @@ from app.db.models import Job
 from app.db.session import SessionDep
 from app.jobs import store
 from app.jobs.store import JobRow
-from app.services import graphics_engines, graphics_lab
+from app.services import graphics_engines, graphics_lab, graphics_trial
 from app.services.graphics_engines import EngineKey
 from app.services.storage import media_url
 
@@ -663,3 +667,222 @@ async def get_newest_test_card(session: SessionDep) -> GraphicTestCardOut:
     """The newest test card job and the video of the newest one that succeeded."""
     newest, stored = await graphics_lab.newest_test_card(session)
     return test_card_out(newest, stored)
+
+
+# --- The trial batch (GFX-012) ----------------------------------------------------------------
+
+TrialOrientation = Literal["own", "landscape", "portrait"]
+OutcomeKindOut = Literal["video", "no_fit", "failed", "working", "not_started"]
+
+
+class GraphicTrialExcerptOut(BaseModel):
+    """One line of Appendix A, with the orientation it runs in when the trial uses each excerpt's
+    own.
+    """
+
+    key: str
+    domain: str
+    text: str
+    orientation: Orientation
+    tests: str
+
+
+class GraphicTrialCostOut(BaseModel):
+    """What a trial will do, shown and confirmed before it starts."""
+
+    runs: int
+    # The paid model calls when every one is answered at once, and the most there can be with
+    # every retry.
+    paid_calls: int
+    most_paid_calls: int
+    # Speeches made on the GPU server, each timed by Parakeet. Zero without a voice.
+    speeches: int
+
+
+class GraphicTrialSetOut(BaseModel):
+    set_no: int
+    created_at: datetime
+    runs: int
+
+
+class GraphicTrialOverviewOut(BaseModel):
+    excerpts: list[GraphicTrialExcerptOut]
+    cost: GraphicTrialCostOut
+    cost_with_voice: GraphicTrialCostOut
+    # The trial sets made so far, newest first.
+    sets: list[GraphicTrialSetOut]
+
+
+class GraphicTrialCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # A saved voice of the Voice lab for every excerpt, or none.
+    voice_id: StrictInt | None = Field(default=None, ge=1, le=_MAX_ID)
+    # `own`: each excerpt's own orientation. Otherwise one orientation for all ten.
+    orientation: TrialOrientation = "own"
+
+
+class GraphicTrialStartedOut(BaseModel):
+    set_no: int
+    run_ids: list[int]
+
+
+class GraphicTrialOutcomeOut(BaseModel):
+    """What became of one engine on one run: its newest render that is not a Render again."""
+
+    kind: OutcomeKindOut
+    render_id: int | None
+    attempt: int | None
+    verdict: Verdict | None
+
+
+class GraphicTrialEngineOut(BaseModel):
+    """The counts of one engine over the set (§4.9). The three `of videos` counts are out of
+    `videos`; the repeat counts are over every Render again of the set.
+    """
+
+    key: EngineKey
+    label: str
+    runs: int
+    videos: int
+    no_fit: int
+    failed: int
+    working: int
+    not_started: int
+    checks_passed: int
+    no_layout_warning: int
+    numbers_traced: int
+    median_render_s: float | None
+    median_tokens: int | None
+    repeats_identical: int
+    repeats_differing: int
+    repeats_not_compared: int
+    verdict_good: int
+    verdict_usable: int
+    verdict_bad: int
+    verdict_none: int
+
+
+class GraphicTrialRunOut(BaseModel):
+    run_id: int
+    case: str
+    domain: str
+    line_text: str
+    orientation: Orientation
+    state: RunStateOut
+    last_error: str | None
+    outcomes: dict[str, GraphicTrialOutcomeOut]
+
+
+class GraphicTrialSummaryOut(BaseModel):
+    set_no: int
+    created_at: datetime
+    with_voice: bool
+    # True while a voice, a brief or a render of the set is still going, so the page polls.
+    active: bool
+    engines: list[GraphicTrialEngineOut]
+    runs: list[GraphicTrialRunOut]
+
+
+def _trial_set_out(item: graphics_trial.TrialSet) -> GraphicTrialSetOut:
+    return GraphicTrialSetOut(set_no=item.set_no, created_at=item.created_at, runs=item.runs)
+
+
+def _trial_cost_out(cost: graphics_trial.TrialCost) -> GraphicTrialCostOut:
+    return GraphicTrialCostOut(
+        runs=cost.runs,
+        paid_calls=cost.paid_calls,
+        most_paid_calls=cost.most_paid_calls,
+        speeches=cost.speeches,
+    )
+
+
+def trial_summary_out(summary: graphics_trial.TrialSummary) -> GraphicTrialSummaryOut:
+    return GraphicTrialSummaryOut(
+        set_no=summary.set_no,
+        created_at=summary.created_at,
+        with_voice=summary.with_voice,
+        active=summary.active,
+        engines=[
+            GraphicTrialEngineOut(**vars(engine))  # the fields are the same, by name
+            for engine in summary.engines
+        ],
+        runs=[
+            GraphicTrialRunOut(
+                run_id=run.run_id,
+                case=run.case,
+                domain=run.domain,
+                line_text=run.line_text,
+                orientation=run.orientation,  # type: ignore[arg-type]  # the CHECK holds two
+                state=run.state,  # type: ignore[arg-type]  # `run_state` returns one of these
+                last_error=run.last_error,
+                outcomes={
+                    key: GraphicTrialOutcomeOut(
+                        kind=outcome.kind,
+                        render_id=outcome.render_id,
+                        attempt=outcome.attempt,
+                        verdict=outcome.verdict,  # type: ignore[arg-type]  # the CHECK holds three
+                    )
+                    for key, outcome in run.outcomes.items()
+                },
+            )
+            for run in summary.runs
+        ],
+    )
+
+
+@router.get("/lab/graphics/trials", response_model=GraphicTrialOverviewOut)
+async def get_trials(session: SessionDep) -> GraphicTrialOverviewOut:
+    """The excerpts of Appendix A, what a trial costs (with and without a voice) and the trial
+    sets made so far, newest first. Nothing is started.
+    """
+    return GraphicTrialOverviewOut(
+        excerpts=[
+            GraphicTrialExcerptOut(
+                key=excerpt.key,
+                domain=excerpt.domain,
+                text=excerpt.text,
+                orientation=excerpt.orientation,
+                tests=excerpt.tests,
+            )
+            for excerpt in graphics_trial.EXCERPTS
+        ],
+        cost=_trial_cost_out(graphics_trial.trial_cost(with_voice=False)),
+        cost_with_voice=_trial_cost_out(graphics_trial.trial_cost(with_voice=True)),
+        sets=[_trial_set_out(item) for item in await graphics_trial.list_sets(session)],
+    )
+
+
+@router.post(
+    "/lab/graphics/trials",
+    response_model=GraphicTrialStartedOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_CONFLICT, **_INVALID},
+)
+async def start_trial(body: GraphicTrialCreate, session: SessionDep) -> GraphicTrialStartedOut:
+    """A paid action: makes one run for each of the ten excerpts and starts **Make all** on each
+    (with a voice, as soon as each voice is timed). The call counts are shown by `GET .../trials`
+    and confirmed on the page first. 409 while the newest set is still being made.
+    """
+    try:
+        set_no, run_ids = await graphics_trial.start_trial(session, body.voice_id, body.orientation)
+    except graphics_trial.GraphicsTrialConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return GraphicTrialStartedOut(set_no=set_no, run_ids=run_ids)
+
+
+@router.get(
+    "/lab/graphics/trials/{set_no}",
+    response_model=GraphicTrialSummaryOut,
+    responses={404: {"model": ErrorResponse, "description": "No trial set has this number."}},
+)
+async def get_trial_summary(set_no: int, session: SessionDep) -> GraphicTrialSummaryOut:
+    """The summary of one trial set: the counts and medians of each engine, and each run's
+    outcome on each engine.
+    """
+    summary = await graphics_trial.summarize(session, set_no) if 1 <= set_no <= _MAX_ID else None
+    if summary is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trial set {set_no} does not exist.")
+    return trial_summary_out(summary)
