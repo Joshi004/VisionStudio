@@ -185,6 +185,8 @@ SAVING_BLOCK_SCENE: Final = "saving the block scene"
 # (the component, then at most one more call with the errors of the browser check).
 CHECKING_COMPONENT: Final = "compiling the component in the browser"
 SAVING_COMPONENT: Final = "saving the component"
+# `write_shot_graphic_component` and `write_shot_graphic_scene` (EXG-005) use the phases of the two
+# lab jobs above, and `render_shot_graphic` those of `render_lab_graphic` below (minus the voice).
 
 # --- Running: the music cues (MUSIC-009) -------------------------------------------------
 # `write_music_cue` and `audit_music_cues` also use PREPARING_PROMPT and `asking_model` from above

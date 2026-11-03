@@ -4012,6 +4012,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/graphics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shot Graphics */
+        get: operations["get_shot_graphics_api_projects__project_id__graphics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Shot Graphics
+         * @description Makes what is missing for one graphic shot. A version that has a current video, or that
+         *     failed outright, is left alone (a shot that has everything starts no job). A shot whose
+         *     graphics are being made is refused with 422.
+         */
+        post: operations["run_shot_graphics_api_projects__project_id__graphics__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/{engine}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Shot Graphic Again
+         * @description A paid model call: makes one version again as a new attempt, from the same brief.
+         */
+        post: operations["ask_shot_graphic_again_api_projects__project_id__graphics__scene_id___shot_id___engine__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-plans": {
         parameters: {
             query?: never;
@@ -13233,6 +13292,138 @@ export interface components {
             /** Description */
             description: string;
         };
+        /** ShotGraphicAskRun */
+        ShotGraphicAskRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /**
+         * ShotGraphicAttemptOut
+         * @description One attempt of one version: what it draws from, the jobs, the video and the checks.
+         */
+        ShotGraphicAttemptOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Attempt */
+            attempt: number;
+            /** Current */
+            current: boolean;
+            /** Stage */
+            stage: ("writing" | "rendering") | null;
+            /** Input */
+            input: unknown | null;
+            input_job: components["schemas"]["JobSummary"] | null;
+            input_call: components["schemas"]["GraphicCallOut"] | null;
+            render_job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+            /** Metrics */
+            metrics: unknown | null;
+            /** Warnings */
+            warnings: unknown | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Failed Outright */
+            failed_outright: boolean;
+            /** Rerender Of */
+            rerender_of: number | null;
+        };
+        /** ShotGraphicEngineOut */
+        ShotGraphicEngineOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "generated_component" | "remotion_blocks";
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "writing" | "rendering" | "ready" | "out_of_date" | "failed";
+            /** Failed Outright */
+            failed_outright: boolean;
+            /** Last Error */
+            last_error: string | null;
+            /** Attempts */
+            attempts: components["schemas"]["ShotGraphicAttemptOut"][];
+        };
+        /** ShotGraphicSceneOut */
+        ShotGraphicSceneOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Shots */
+            shots: components["schemas"]["ShotGraphicShotOut"][];
+        };
+        /** ShotGraphicShotOut */
+        ShotGraphicShotOut: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Spoken Text */
+            spoken_text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "working" | "ready" | "out_of_date" | "failed";
+            /** Reasons */
+            reasons: string[];
+            /** Last Error */
+            last_error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Brief Id */
+            brief_id: number | null;
+            /** Brief Version */
+            brief_version: number | null;
+            /**
+             * Brief Status
+             * @enum {string}
+             */
+            brief_status: "none" | "writing" | "ready" | "failed" | "out_of_date";
+            resolved: components["schemas"]["GraphicResolvedOut"] | null;
+            voice: components["schemas"]["ShotVoiceOut"] | null;
+            /** Engines */
+            engines: components["schemas"]["ShotGraphicEngineOut"][];
+        };
+        /** ShotGraphicsRun */
+        ShotGraphicsRun: {
+            /** Job Ids */
+            job_ids: number[];
+        };
+        /** ShotGraphicsStateOut */
+        ShotGraphicsStateOut: {
+            /** Scenes */
+            scenes: components["schemas"]["ShotGraphicSceneOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+            /** Theme Version */
+            theme_version: number | null;
+            /** Theme Current */
+            theme_current: boolean;
+        };
         /**
          * ShotOut
          * @description One shot skeleton. The events stay the source of truth: a shot only names them.
@@ -13892,6 +14083,16 @@ export interface components {
             description: string;
             /** Allowed For */
             allowed_for: string[];
+        };
+        /**
+         * ShotVoiceOut
+         * @description The scene's voice take, which the panel plays with the videos. The clips have no sound.
+         */
+        ShotVoiceOut: {
+            /** Url */
+            url: string;
+            /** Offset S */
+            offset_s: number;
         };
         /** SilenceOut */
         SilenceOut: {
@@ -24864,6 +25065,131 @@ export interface operations {
                 };
             };
             /** @description The scene or unit is not in the newest plan, the plan is out of date, or the unit has no voice to speak with yet. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_shot_graphics_api_projects__project_id__graphics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicsStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_shot_graphics_api_projects__project_id__graphics__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicsRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_shot_graphic_again_api_projects__project_id__graphics__scene_id___shot_id___engine__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+                engine: "generated_component" | "remotion_blocks";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicAskRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -67,8 +67,8 @@ WORD_TIMINGS_STEP: Final = "word_timings"
 CALLOUT_PLAN_STEP: Final = "callout_plan"
 
 # The steps that are switched off for every project but a continuous explainer with graphics on
-# (EXG-002, EXG-004).
-GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs")
+# (EXG-002, EXG-004, EXG-005).
+GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs", "graphics")
 
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
@@ -94,6 +94,7 @@ GROUPS: Final[dict[str, str]] = {
     "callout_plan": "speech",
     "graphic_theme": "graphics",
     "graphic_briefs": "graphics",
+    "graphics": "graphics",
     "music_bible": "music",
     "music_themes": "music",
     "music_plan": "music",

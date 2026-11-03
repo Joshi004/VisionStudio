@@ -142,11 +142,14 @@ def build_request(
     resolved: dict[str, Any],
     *,
     model: str,
+    mood: str | None = None,
 ) -> dict[str, Any]:
-    """The exact request body of the first call. It is stored on the job."""
+    """The exact request body of the first call. It is stored on the job. `mood` is the video's
+    mood for a graphic shot (EXG-005); the lab's brief carries its own.
+    """
     user = (
         f"LINE:\n{line}\n\nORIENTATION: {orientation}\n\nBRIEF:\n"
-        f"{json.dumps(brief_for_model(brief, resolved), ensure_ascii=False, indent=1)}"
+        f"{json.dumps(brief_for_model(brief, resolved, mood=mood), ensure_ascii=False, indent=1)}"
     )
     return {
         "model": model,

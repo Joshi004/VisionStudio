@@ -287,12 +287,19 @@ def resolve(
     height: int,
     fps: int,
     fonts: dict[str, str],
+    *,
+    frames: int | None = None,
+    theme: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The resolved brief (§4.4) of a checked brief and a timing. Raises ValueError when a beat's
     phrase is not found in the timing's words (it was checked against the line, so only a timing
     of other words can cause that).
+
+    A graphic shot of an explainer (EXG-005) gives the two keywords: `frames`, the exact length
+    of the shot's clip (the lab works it out from the timing), and `theme`, the video's theme
+    (the shot's brief has none). Without them this is the lab's resolve.
     """
-    frames = frames_of(timing, fps)
+    frames = frames if frames is not None else frames_of(timing, fps)
     words = timing["words"]
     tokens = line_tokens([str(word["text"]) for word in words])
     starts = phrase_starts(tokens, [(beat["id"], beat["phrase"]) for beat in brief["beats"]])
@@ -330,7 +337,7 @@ def resolve(
         }
         for beat, start in zip(brief["beats"], starts, strict=True)
     }
-    theme, notes = theme_for(brief["theme"])
+    colours, notes = theme_for(theme if theme is not None else brief["theme"])
     return {
         "width": width,
         "height": height,
@@ -340,7 +347,7 @@ def resolve(
         "facts": facts,
         "derived": derived,
         "beats": beats,
-        "theme": theme,
+        "theme": colours,
         "fonts": dict(fonts),
         "safe_area": safe_area(width, height),
         "caption_zone": caption_zone(width, height),

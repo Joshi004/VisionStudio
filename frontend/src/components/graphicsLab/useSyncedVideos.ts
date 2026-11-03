@@ -6,13 +6,25 @@ type UseSyncedVideosInput = {
   frames: number;
   /** The videos on the page, in the order of the cards. The first one is the leader. */
   keys: readonly string[];
+  /**
+   * The voice to play with the videos, when the videos have no sound of their own (a project's
+   * graphic clips). It is the take's time at the first frame of the clip, in seconds: negative
+   * when the clip starts inside the lead-in, so the voice starts when the clip reaches it. Leave
+   * it out (or null) for no voice.
+   */
+  audioOffsetS?: number | null;
 };
+
+/** How far the voice may be from the picture while playing before it is moved, in seconds. */
+const AUDIO_DRIFT_S = 0.1;
 
 export type SyncedVideos = {
   /** A ref callback for the video of one card. The same function every time for one key. */
   register: (key: string) => (element: HTMLVideoElement | null) => void;
   /** Call when a video has loaded (or has a new source), so it joins the others' position. */
   onLoaded: (key: string) => void;
+  /** A ref callback for the voice's audio element (see `audioOffsetS`). */
+  registerAudio: (element: HTMLAudioElement | null) => void;
   playing: boolean;
   /** The frame every video shows, counted from 0. */
   frame: number;
@@ -31,7 +43,12 @@ export type SyncedVideos = {
  * or a step pauses all of them and sets the same time on each, in the middle of the frame, so
  * every browser shows exactly that frame.
  */
-export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): SyncedVideos {
+export function useSyncedVideos({
+  fps,
+  frames,
+  keys,
+  audioOffsetS = null,
+}: UseSyncedVideosInput): SyncedVideos {
   const elements = useRef(new Map<string, HTMLVideoElement>());
   const callbacks = useRef(new Map<string, (element: HTMLVideoElement | null) => void>());
   const [playing, setPlaying] = useState(false);
@@ -39,9 +56,10 @@ export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): Sy
 
   const leaderKey = keys[0] ?? null;
   // The latest values, for the callbacks and the loop that must not be made again on every change.
-  const latest = useRef({ playing, frame, leaderKey });
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const latest = useRef({ playing, frame, leaderKey, audioOffsetS });
   useEffect(() => {
-    latest.current = { playing, frame, leaderKey };
+    latest.current = { playing, frame, leaderKey, audioOffsetS };
   });
 
   const timeOf = useCallback((at: number) => (at + 0.5) / fps, [fps]);
@@ -49,6 +67,37 @@ export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): Sy
     (seconds: number) => Math.min(Math.max(Math.floor(seconds * fps), 0), frames - 1),
     [fps, frames],
   );
+
+  // Puts the voice at the picture's time: paused (and parked) while it is not to play or the
+  // picture is still before the voice starts, else playing and moved when it drifts.
+  const syncAudio = useCallback((videoSeconds: number, shouldPlay: boolean) => {
+    const element = audio.current;
+    const offset = latest.current.audioOffsetS;
+    if (element === null || offset === null) {
+      return;
+    }
+    const target = offset + videoSeconds;
+    if (!shouldPlay || target < 0) {
+      if (!element.paused) {
+        element.pause();
+      }
+      const parked = Math.max(target, 0);
+      if (Math.abs(element.currentTime - parked) > 0.001) {
+        element.currentTime = parked;
+      }
+      return;
+    }
+    if (element.paused) {
+      element.currentTime = target;
+      void element.play().catch(() => undefined);
+    } else if (Math.abs(element.currentTime - target) > AUDIO_DRIFT_S) {
+      element.currentTime = target;
+    }
+  }, []);
+
+  const registerAudio = useCallback((element: HTMLAudioElement | null) => {
+    audio.current = element;
+  }, []);
 
   const applySound = useCallback(() => {
     for (const [key, element] of elements.current) {
@@ -82,6 +131,7 @@ export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): Sy
     for (const element of elements.current.values()) {
       element.pause();
     }
+    audio.current?.pause();
     setPlaying(false);
   }, []);
 
@@ -92,9 +142,10 @@ export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): Sy
       for (const element of elements.current.values()) {
         element.currentTime = timeOf(clamped);
       }
+      syncAudio(timeOf(clamped), false);
       setFrame(clamped);
     },
-    [frames, pauseAll, timeOf],
+    [frames, pauseAll, syncAudio, timeOf],
   );
 
   const play = useCallback(() => {
@@ -109,9 +160,10 @@ export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): Sy
       // sees the leader paused and stops.
       void element.play().catch(() => undefined);
     }
+    syncAudio(timeOf(from), true);
     setFrame(from);
     setPlaying(true);
-  }, [frames, timeOf]);
+  }, [frames, syncAudio, timeOf]);
 
   const pause = useCallback(() => {
     const leader =
@@ -154,6 +206,7 @@ export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): Sy
       }
       const seconds = leader.currentTime;
       setFrame(frameAt(seconds));
+      syncAudio(seconds, true);
       for (const [key, element] of elements.current) {
         if (key !== leaderKey && Math.abs(element.currentTime - seconds) > 1 / fps) {
           element.currentTime = seconds;
@@ -172,12 +225,13 @@ export function useSyncedVideos({ fps, frames, keys }: UseSyncedVideosInput): Sy
     };
     handle = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(handle);
-  }, [playing, leaderKey, fps, frames, frameAt, seekFrame]);
+  }, [playing, leaderKey, fps, frames, frameAt, seekFrame, syncAudio]);
 
   // With no leader (no card has a video) nothing is playing, whatever the state says.
   return {
     register,
     onLoaded,
+    registerAudio,
     playing: playing && leaderKey !== null,
     frame,
     play,

@@ -46,6 +46,7 @@ from app.api import (
     settings,
     shot_continuity,
     shot_definitions,
+    shot_graphics,
     shot_plans,
     shot_prompts,
     shot_references,
@@ -103,6 +104,7 @@ api_router.include_router(look_state_resolution.router, tags=["look-state-resolu
 api_router.include_router(look_state_images.router, tags=["look-state-images"])
 api_router.include_router(speech_units.router, tags=["speech-units"])
 api_router.include_router(speech_audio.router, tags=["speech-audio"])
+api_router.include_router(shot_graphics.router, tags=["shot-graphics"])
 api_router.include_router(shot_plans.router, tags=["shot-plans"])
 api_router.include_router(shot_definitions.router, tags=["shot-definitions"])
 api_router.include_router(shot_continuity.router, tags=["shot-continuity"])

@@ -45,6 +45,7 @@ from app.services import (
     scene_staging,
     shot_definitions,
     shot_graphic_briefs,
+    shot_graphics,
     shot_plans,
     shot_prompts,
     shot_references,
@@ -547,6 +548,8 @@ async def _collect_shots(session: AsyncSession, project: Project, found: _Collec
         add_shots(
             "graphic_briefs", (await shot_graphic_briefs.state(session, project)).entries, False
         )
+        # The graphics of those shots (EXG-005): a video drawn for another look is made again.
+        add_shots("graphics", (await shot_graphics.state(session, project)).entries, False)
     add_shots("references", (await shot_references.state(session, project)).entries, True)
     add_shots(
         "generation_requests",

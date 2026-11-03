@@ -24,7 +24,6 @@ start. Logs hold the job id, never the line.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -37,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings as settings_service
 from app.db.models import LabGraphicRender, LabGraphicRun
 from app.db.session import SessionLocal
-from app.jobs import phase_writer, phases, store
+from app.jobs import motion_draw, phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.jobs.render_story import RenderFailed, run_ffmpeg
 from app.providers import motion_renderer
@@ -52,9 +51,6 @@ _logger = logging.getLogger(__name__)
 graphics_render.python_renderer = graphics_python.render
 
 JOB_TYPE: Final = "render_lab_graphic"
-POLL_INTERVAL_S: Final = 1.0
-# The phase is rewritten every this many percent, not on every poll.
-PHASE_PERCENT_STEP: Final = 5
 MUX_TIMEOUT_S: Final = 300.0
 
 
@@ -125,7 +121,7 @@ class RenderLabGraphicHandler(JobHandler):
         if plan.engine == graphics_render.PYTHON_ENGINE:
             render_s = await self._draw_in_python(job_id, body, video)
         else:
-            render_s = await self._draw_in_motion(job_id, base_url, body, video)
+            render_s = await motion_draw.draw_in_motion(job_id, base_url, body, video)
 
         await phase_writer.note(job_id, phases.CHECKING_GRAPHIC)
         probe = await ffmpeg.probe_video(video)
@@ -229,23 +225,6 @@ class RenderLabGraphicHandler(JobHandler):
             "reason": reason,
         }, [message]
 
-    async def _draw_in_motion(
-        self, job_id: int, base_url: str, body: dict[str, Any], dest: Path
-    ) -> float | None:
-        """Has the motion service draw the video and downloads it to `dest`. Returns the
-        service's own render time in seconds.
-        """
-        await phase_writer.note(job_id, phases.SENDING_GRAPHIC)
-        service_id = await motion_renderer.start_render(base_url, body)
-        try:
-            status = await _wait_for_service(job_id, base_url, service_id)
-            await phase_writer.note(job_id, phases.DOWNLOADING_GRAPHIC)
-            await motion_renderer.download_render(base_url, service_id, dest)
-        finally:
-            await motion_renderer.delete_render(base_url, service_id)
-        seconds = status.get("render_s")
-        return float(seconds) if isinstance(seconds, int | float) else None
-
     async def _draw_in_python(self, job_id: int, body: dict[str, Any], dest: Path) -> float:
         """Has the Python renderer (GFX-008) draw the video into `dest`. Returns the seconds."""
         renderer = graphics_render.python_renderer
@@ -348,34 +327,6 @@ async def _plan(recorded: dict[str, Any]) -> _Plan:
         )
         await session.commit()
     return plan
-
-
-async def _wait_for_service(job_id: int, base_url: str, service_id: str) -> dict[str, Any]:
-    """Polls the motion service until the render is done, writing its progress as the job's
-    phase. Raises RenderFailed when the service says it failed or does not finish in time.
-    """
-    limit_s = graphics_render.RENDER_TIME_LIMIT_S + graphics_render.BACKEND_EXTRA_WAIT_S
-    deadline = time.monotonic() + limit_s
-    shown = -PHASE_PERCENT_STEP
-    while True:
-        status = await motion_renderer.render_status(base_url, service_id)
-        state = status.get("state")
-        if state == "done":
-            return status
-        if state == "failed":
-            reason = status.get("error")
-            raise RenderFailed(
-                f"The motion service could not render the graphic: "
-                f"{reason if isinstance(reason, str) and reason else 'no reason given'}"
-            )
-        if time.monotonic() > deadline:
-            raise RenderFailed(f"The motion service did not finish within {limit_s} s.")
-        progress = status.get("progress")
-        percent = int(float(progress) * 100) if isinstance(progress, int | float) else 0
-        if percent - shown >= PHASE_PERCENT_STEP:
-            shown = percent
-            await phase_writer.note(job_id, phases.rendering_graphic(percent))
-        await asyncio.sleep(POLL_INTERVAL_S)
 
 
 async def _check_voiced(path: Path, silent: VideoProbe, frames: int) -> None:

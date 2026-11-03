@@ -6,8 +6,8 @@ import { isJobActive } from "../../api/polling";
 import { BLOCK_LABELS, readBlockInput } from "./graphicsLabView";
 
 type GraphicsBlockSceneProps = {
-  /** The newest render of the building-blocks engine. */
-  render: GraphicRender;
+  /** The newest render of the building-blocks engine (or one attempt of a project's graphic). */
+  render: Pick<GraphicRender, "input" | "input_job">;
 };
 
 /**

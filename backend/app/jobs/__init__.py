@@ -75,6 +75,7 @@ def register_handlers() -> None:
     from app.jobs.preview_music_mix import PreviewMusicMixHandler
     from app.jobs.render_av_test import RenderAvTestHandler
     from app.jobs.render_lab_graphic import RenderLabGraphicHandler
+    from app.jobs.render_shot_graphic import RenderShotGraphicHandler
     from app.jobs.render_story import RenderStoryHandler
     from app.jobs.repair_shot_cut import RepairShotCutHandler
     from app.jobs.resolve_looks_states import ResolveLooksStatesHandler
@@ -103,6 +104,8 @@ def register_handlers() -> None:
     from app.jobs.write_music_plan import WriteMusicPlanHandler
     from app.jobs.write_music_theme_prompt import WriteMusicThemePromptHandler
     from app.jobs.write_shot_graphic_brief import WriteShotGraphicBriefHandler
+    from app.jobs.write_shot_graphic_component import WriteShotGraphicComponentHandler
+    from app.jobs.write_shot_graphic_scene import WriteShotGraphicSceneHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
 
     handlers.register(GenerateLabVideoHandler())
@@ -160,3 +163,6 @@ def register_handlers() -> None:
     handlers.register(RenderLabGraphicHandler())
     handlers.register(WriteGraphicThemeHandler())
     handlers.register(WriteShotGraphicBriefHandler())
+    handlers.register(WriteShotGraphicComponentHandler())
+    handlers.register(WriteShotGraphicSceneHandler())
+    handlers.register(RenderShotGraphicHandler())

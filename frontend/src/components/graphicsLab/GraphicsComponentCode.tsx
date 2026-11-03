@@ -6,8 +6,8 @@ import { isJobActive } from "../../api/polling";
 import { readComponentInput } from "./graphicsLabView";
 
 type GraphicsComponentCodeProps = {
-  /** The newest render of the generated-component engine. */
-  render: GraphicRender;
+  /** The newest render of the generated-component engine (or one attempt of a project's graphic). */
+  render: Pick<GraphicRender, "input" | "input_job">;
 };
 
 /**

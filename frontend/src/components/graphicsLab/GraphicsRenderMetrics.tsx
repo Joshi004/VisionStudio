@@ -11,7 +11,7 @@ import {
 } from "./graphicsLabView";
 
 /** The warnings of a render come from the backend as a list of strings. */
-function warningsOf(render: GraphicRender): string[] {
+function warningsOf(render: Pick<GraphicRender, "warnings">): string[] {
   return Array.isArray(render.warnings)
     ? render.warnings.filter((warning): warning is string => typeof warning === "string")
     : [];
@@ -22,10 +22,18 @@ function warningsOf(render: GraphicRender): string[] {
  * draw and how large it is, what the model call cost, whether a repeat matched, and the
  * warnings (the layout problems, the untraced numbers, the checks that failed).
  */
-export function GraphicsRenderMetrics({ render }: { render: GraphicRender }) {
+export function GraphicsRenderMetrics({
+  render,
+}: {
+  /** A render of the lab, or one attempt of a project's graphic (which has no `repeat_of` but may
+   * be another attempt's input drawn again). */
+  render: Pick<GraphicRender, "metrics" | "warnings" | "input_call"> & {
+    repeat_of?: number | null;
+  };
+}) {
   const metrics = readMetrics(render.metrics);
   const warnings = warningsOf(render);
-  const repeatedOf = render.repeat_of !== null;
+  const repeatedOf = (render.repeat_of ?? null) !== null;
 
   return (
     <Stack gap={4}>

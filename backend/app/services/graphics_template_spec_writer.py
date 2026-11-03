@@ -88,16 +88,21 @@ def _instructions(width: int, height: int) -> str:
     )
 
 
-def brief_for_model(brief: dict[str, Any], resolved: dict[str, Any]) -> dict[str, Any]:
+def brief_for_model(
+    brief: dict[str, Any], resolved: dict[str, Any], *, mood: str | None = None
+) -> dict[str, Any]:
     """What the model sees of the brief: the intent, the numbers with the text code shows for
-    each, and the beats with the second at which each starts.
+    each, and the beats with the second at which each starts. `mood` is the video's mood for a
+    graphic shot (EXG-005, whose brief has no theme); without it the brief's own theme is read,
+    as in the Graphics lab.
     """
     fps = int(resolved["fps"])
+    shown_mood = mood if mood is not None else brief["theme"]["mood"]
     return {
         "kind": brief["kind"],
         "intent": brief["intent"],
         "visual_brief": brief["visual_brief"],
-        "mood": brief["theme"]["mood"],
+        "mood": shown_mood,
         "facts": [
             {
                 "id": fact["id"],

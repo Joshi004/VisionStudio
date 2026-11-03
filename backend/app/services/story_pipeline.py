@@ -145,6 +145,11 @@ STEPS: Final[tuple[Step, ...]] = (
     # and the sentences around them. Skipped as complete for any project that is not a continuous
     # explainer with graphics on. A project with graphics on but no graphic shot has no targets.
     Step("graphic_briefs", "Write the graphic briefs", ("shot_plans",)),
+    # EXG-005: both versions of each graphic shot, a generated component and a block scene,
+    # drawn to an exact clip. It needs the briefs and the video's theme. Skipped as complete for
+    # any project that is not a continuous explainer with graphics on. Nothing after it waits for
+    # it yet; the render will (EXG-007).
+    Step("graphics", "Make the graphics", ("graphic_briefs", "graphic_theme")),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.
     Step("music_plan", "Plan the music", ("shot_plans", "music_bible")),
