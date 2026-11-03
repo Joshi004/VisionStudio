@@ -19,6 +19,10 @@ and its description. Code does the rest:
   limit of the audio a presenter clip takes), when an event is not shown, or when the events a
   shot lists do not match the words it covers.
 
+A project with graphics on may also plan `graphic` shots (EXG-003): a chart, diagram or text card
+drawn by code. They are cut on words like any other shot, last at least `SHORTEST_GRAPHIC_S`, and
+never go through H3. With graphics off the instructions and the request are unchanged.
+
 The `dialogue` / `narration` label of a speech unit is only a hint here. A shot's length is not
 moved onto one of H3's lengths (F-6): the clip is made later at the shortest H3 length that
 covers the shot, and the render trims it.
@@ -42,7 +46,7 @@ import json
 import math
 from typing import Any, Final
 
-from app.services import discovery_writer, shot_planning_writer, user_feedback
+from app.services import discovery_writer, scene_timeline, shot_planning_writer, user_feedback
 from app.services.frame_counts import H3_FPS, H3_MAX_FRAMES
 from app.services.text_limits import length_rule
 
@@ -56,6 +60,17 @@ DESCRIPTION_MAX_CHARS: Final = shot_planning_writer.DESCRIPTION_MAX_CHARS
 PRESENTER: Final = "presenter"
 BROLL_TYPES: Final = ("establishing", "action", "insert")
 CUT_TYPES: Final = (PRESENTER, *BROLL_TYPES)
+# A chart, diagram or text card drawn by code (EXG-003). Only a project with graphics on may have
+# one; its shot never goes through H3.
+GRAPHIC: Final = scene_timeline.GRAPHIC_SHOT_TYPE
+# The shortest a graphic shot may be: the Graphics lab's shortest graphic, 72 frames at 24 fps.
+SHORTEST_GRAPHIC_S: Final = 3.0
+
+
+def cut_types(graphics: bool) -> tuple[str, ...]:
+    """The shot types the planner may use: `GRAPHIC` is one only when the project has graphics."""
+    return (*CUT_TYPES, GRAPHIC) if graphics else CUT_TYPES
+
 
 # The take starts at the scene's start and uses its own leading silence; a tail follows its last
 # word. Both are stored on the plan (`cut_plan`), so later phases read them from there.
@@ -91,7 +106,65 @@ _ANSWER_FORM: Final = json.dumps(
     }
 )
 
-_BODY: Final = f"""You are the shot planner of a studio that makes explainer videos. One presenter \
+# The same form with a graphic shot, for a project with graphics on.
+_GRAPHICS_ANSWER_FORM: Final = json.dumps(
+    {
+        "shots": [
+            {
+                "start_word": 1,
+                "type": "presenter",
+                "source_event_ids": ["an id from EVENTS"],
+                "description": "The presenter speaks to the viewer, in the set.",
+            },
+            {
+                "start_word": 15,
+                "type": "insert",
+                "source_event_ids": ["an id from EVENTS"],
+                "description": "A hand counts banknotes on a wooden desk.",
+            },
+            {
+                "start_word": 30,
+                "type": "graphic",
+                "source_event_ids": ["an id from EVENTS"],
+                "description": "A bar chart compares the yearly revenue named in the sentence.",
+            },
+        ]
+    }
+)
+
+_GRAPHIC_TYPE_TEXT: Final = (
+    ', or "graphic" for a chart, diagram or text card drawn by code, timed to the words: for '
+    "numbers, comparisons, changes over time, the steps of a process, a short list, or one key "
+    "statement or definition"
+)
+_GRAPHIC_BROLL_TEXT: Final = " Use a graphic shot for those."
+_GRAPHIC_BROLL_USE: Final = (
+    "examples, places, objects and descriptions, a graphic shot for numbers, comparisons, the "
+    "steps of a process and short lists"
+)
+_GRAPHIC_RULES: Final = (
+    '- A "graphic" shot shows what its description says: one plain sentence, in English, of '
+    "what the graphic should show, with no colours and no times. Its numbers are those said in "
+    "the words around it.\n"
+    "- Start a graphic shot on or before the first number it shows, so its numbers fall inside "
+    "it.\n"
+)
+_GRAPHIC_LENGTH_TEXT: Final = ' A graphic shot lasts at least "shortest_graphic_seconds".'
+
+
+def _body(graphics: bool) -> str:
+    """The system message. With `graphics` False it is exactly what it was before graphic shots
+    existed; with it True the `graphic` type and its rules are added.
+    """
+    graphic_type = _GRAPHIC_TYPE_TEXT if graphics else ""
+    graphic_broll = _GRAPHIC_BROLL_TEXT if graphics else ""
+    broll_use = (
+        _GRAPHIC_BROLL_USE if graphics else "examples, numbers, places, objects and descriptions"
+    )
+    graphic_length = _GRAPHIC_LENGTH_TEXT if graphics else ""
+    graphic_rules = _GRAPHIC_RULES if graphics else ""
+    answer_form = _GRAPHICS_ANSWER_FORM if graphics else _ANSWER_FORM
+    return f"""You are the shot planner of a studio that makes explainer videos. One presenter \
 speaks the whole script. You read ONE scene whose events are known and whose speech has already \
 been recorded as ONE continuous take, with the time of every word. You decide how the audience \
 sees the scene: a list of shots, each starting on a word of the take. The picture is cut on top \
@@ -118,7 +191,7 @@ on word 1. Every later shot starts on a higher word than the shot before it. A s
 the next shot's start word, and the last shot lasts until the end of the take plus a short tail. \
 Code puts the cut in the middle of the pause before the start word, so you never give a time.
 - "type": "{PRESENTER}" when the presenter is seen on camera speaking to the viewer, or one of \
-{", ".join(BROLL_TYPES)} for B-roll.
+{", ".join(BROLL_TYPES)} for B-roll{graphic_type}.
 - "source_event_ids": the ids of the events this shot shows, copied from EVENTS. They must be \
 consecutive events, in story order, and at least one. List the event of every speech unit that \
 has a word inside the shot, and no other spoken event. A pause event has no words: list it in \
@@ -135,9 +208,9 @@ Its description says that the presenter is speaking to the viewer, in the set, a
 - B-roll shows what the words are about (an example, a place, an object, a person, a scene), never \
 the presenter or the set. Every B-roll shot is a picture that makes sense without the presenter \
 and needs no one's speech to be understood. Do not show on-screen text, charts or diagrams: only \
-what a camera could film or a video model could draw.
+what a camera could film or a video model could draw.{graphic_broll}
 - Make the video feel like an edited explainer. Open on the presenter and close on the presenter. \
-Use B-roll for examples, numbers, places, objects and descriptions, and go back to the presenter \
+Use B-roll for {broll_use}, and go back to the presenter \
 for the main points and the transitions. Do not leave the presenter off screen for a long \
 stretch, and do not cut more often than the words need.
 - Cut on a natural phrase boundary: after a comma, at a pause ("pause_before" is a good sign) or \
@@ -146,8 +219,8 @@ a number and its unit, a verb and its object). A cut in the middle of a sentence
 encouraged where it helps the viewer see what is being said.
 - Keep every shot between "shortest_shot_seconds" and "longest_shot_seconds" of the DURATION \
 POLICY, measured from the times in the TAKE. A presenter shot may not be longer either, because \
-the video model takes at most that much speech for one clip.
-- Do not invent events, characters or places the scene does not have.
+the video model takes at most that much speech for one clip.{graphic_length}
+{graphic_rules}- Do not invent events, characters or places the scene does not have.
 
 If the user message also holds STAGING, the scene was staged: plan shots that suit it, and never \
 plan a shot that shows a character listed under "off_screen".
@@ -157,12 +230,18 @@ plan a shot that shows a character listed under "off_screen".
 {user_feedback.INSTRUCTION}
 
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
-the type): {_ANSWER_FORM}"""
+the type): {answer_form}"""
 
 
-def instructions() -> str:
-    """The system message of a continuous explainer's cut planning."""
-    return _BODY
+_BODY: Final = _body(False)
+_GRAPHICS_BODY: Final = _body(True)
+
+
+def instructions(graphics: bool = False) -> str:
+    """The system message of a continuous explainer's cut planning. `graphics` is the project's
+    setting: with it on, the planner may also plan graphic shots (EXG-003).
+    """
+    return _GRAPHICS_BODY if graphics else _BODY
 
 
 # --- Times --------------------------------------------------------------------------------
@@ -279,20 +358,25 @@ def build_request(
     feedback: user_feedback.Feedback | None = None,
     staging: dict[str, Any] | None = None,
     longest_shot_seconds: float = MAX_SHOT_S,
+    graphics: bool = False,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
 
     The data blocks are those of `shot_planning_writer.build_request`, with the TAKE in place of
     the measured lengths, and the policy holds the shortest and longest shot, the lead-in and
-    the tail, as data (D-8).
+    the tail, as data (D-8). With `graphics` (the project's setting) the instructions allow
+    graphic shots and the policy adds their shortest length; with it off the request is exactly
+    what it was before graphic shots existed.
     """
-    policy = {
+    policy: dict[str, Any] = {
         "shortest_shot_seconds": target_min_seconds,
         "longest_shot_seconds": longest_shot_seconds,
         "lead_in_seconds": LEAD_IN_S,
         "tail_after_last_word_seconds": TAIL_S,
     }
+    if graphics:
+        policy["shortest_graphic_seconds"] = SHORTEST_GRAPHIC_S
     parts = [
         "STORY BIBLE (JSON):\n" + json.dumps(bible_content, ensure_ascii=False, indent=2),
         "SCENE (JSON):\n" + json.dumps(scene, ensure_ascii=False, indent=2),
@@ -312,7 +396,7 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": instructions()},
+            {"role": "system", "content": instructions(graphics)},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
@@ -359,6 +443,12 @@ def _check_length(
 ) -> None:
     length = round(end - start, _TIME_DECIMALS)
     if length < minimum - 1e-6:
+        if kind == GRAPHIC:
+            raise ValueError(
+                f"Shot {position} is a graphic shot of {length:g} s, which is shorter than the "
+                f"shortest graphic shot of {minimum:g} s. Start it on an earlier word, give it "
+                "more words, or make it another type."
+            )
         raise ValueError(
             f"Shot {position} lasts {length:g} s, which is shorter than the shortest shot of "
             f"{minimum:g} s. Start it on a later word or merge it with a neighbour."
@@ -407,11 +497,16 @@ def check_answer(
     target_min_seconds: float,
     warnings: list[str] | None = None,
     longest_shot_seconds: float = MAX_SHOT_S,
+    graphics: bool = False,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the content that is stored: `{scene_id, shots,
     cut_plan}`. Raises ValueError, with a message fit for the user, for the first problem found.
     With `warnings` (a model's answer), a description far over its size is cut instead and the
     cut is added to it.
+
+    `graphics` is the project's setting. Only with it on is `graphic` a known type; a graphic
+    shot lasts at least `SHORTEST_GRAPHIC_S`, and a scene needs at least one shot that is not a
+    graphic, because a graphic is drawn by code and the scene still needs a picture to define.
 
     `events` is the scene's stored events; `units` its speech units; `take` is `{seconds, words,
     spans}` as in `take_block`; `target_min_seconds` is the shortest a shot may be and
@@ -435,16 +530,18 @@ def check_answer(
     event_of_unit = {unit["id"]: unit["event_id"] for unit in units}
     spoken_events = set(event_of_unit.values())
 
+    allowed_types = cut_types(graphics)
+
     # The shape of each shot.
     parsed: list[dict[str, Any]] = []
     for position, entry in enumerate(entries, start=1):
         if not isinstance(entry, dict):
             raise ValueError(f"Shot {position} was not an object.")
         kind = entry.get("type")
-        if kind not in CUT_TYPES:
+        if kind not in allowed_types:
             raise ValueError(
                 f'Shot {position} had the type "{kind}", which is not one of: '
-                f"{', '.join(CUT_TYPES)}."
+                f"{', '.join(allowed_types)}."
             )
         parsed.append(
             {
@@ -455,6 +552,12 @@ def check_answer(
                 ),
                 "description": shot_planning_writer._description(entry, position, warnings),
             }
+        )
+
+    if all(shot["type"] == GRAPHIC for shot in parsed):
+        raise ValueError(
+            "Every shot of the scene was a graphic shot. Plan at least one presenter or B-roll "
+            "shot."
         )
 
     # The words: the shots start on word 1, then on higher words, so they cover the take.
@@ -475,7 +578,9 @@ def check_answer(
             shot["type"],
             start,
             end,
-            float(target_min_seconds),
+            max(float(target_min_seconds), SHORTEST_GRAPHIC_S)
+            if shot["type"] == GRAPHIC
+            else float(target_min_seconds),
             min(float(longest_shot_seconds), MAX_SHOT_S),
         )
 

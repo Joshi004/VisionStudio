@@ -478,7 +478,11 @@ async def _queue_check(
     current = await scene_definitions.current_definitions(session, project)
 
     shot_contents: list[dict[str, Any]] = [content for content in contents if content is not None]
-    boundary_list = shot_continuity_writer.boundaries(scene_definition.row.content, shot_contents)
+    # No cut is judged across a graphic shot (EXG-003): it has no definition and is no neighbour.
+    breaks = shot_continuity_writer.breaks_after(plan.content["shots"])
+    boundary_list = shot_continuity_writer.boundaries(
+        scene_definition.row.content, shot_contents, breaks
+    )
     characters = [
         {
             "id": character_id,

@@ -104,6 +104,9 @@ class _Input:
     take: dict[str, Any] | None = None
     # The longest a cut shot may be (FLOW-006); a job queued before it used H3's own limit.
     longest_shot_seconds: float = cut_planning_writer.MAX_SHOT_S
+    # The project has graphics on (EXG-003): the cut planner may plan graphic shots. Only a cut
+    # plan's job carries it; every other job reads False.
+    graphics: bool = False
 
 
 def _is_take(value: Any) -> bool:
@@ -171,6 +174,9 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     longest = job_input.get("longest_shot_seconds", cut_planning_writer.MAX_SHOT_S)
     if isinstance(longest, bool) or not isinstance(longest, int | float) or longest <= 0:
         return None
+    graphics = job_input.get("graphics", False)
+    if not isinstance(graphics, bool):
+        return None
     if not replan_ok or not feedback_ok or not (staging is None or isinstance(staging, dict)):
         return None
     if take is not None and not _is_take(take):
@@ -217,6 +223,7 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         staging=staging,
         take=take,
         longest_shot_seconds=float(longest),
+        graphics=graphics,
     )
 
 
@@ -257,12 +264,14 @@ class PlanShotsHandler(JobHandler):
         warnings: list[str],
         speech_mode: str,
         cut: tuple[dict[str, Any], int, float] | None = None,
+        graphics: bool = False,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
         What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
 
         `cut` is `(take, shortest shot, longest shot)` in seconds for a continuous explainer: its
         answer is checked by `cut_planning_writer`, the shots starting on words (FLOW-005).
+        `graphics` lets that check accept graphic shots (EXG-003).
         """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
@@ -271,7 +280,7 @@ class PlanShotsHandler(JobHandler):
             answer = shot_planning_writer.parse_answer(result.content)
             if cut is not None:
                 content = cut_planning_writer.check_answer(
-                    answer, scene_id, events, units, cut[0], cut[1], found, cut[2]
+                    answer, scene_id, events, units, cut[0], cut[1], found, cut[2], graphics
                 )
             else:
                 content = shot_planning_writer.check_answer(
@@ -334,6 +343,7 @@ class PlanShotsHandler(JobHandler):
                 feedback=read.feedback,
                 staging=read.staging,
                 longest_shot_seconds=read.longest_shot_seconds,
+                graphics=read.graphics,
             )
         else:
             body = shot_planning_writer.build_request(
@@ -386,6 +396,7 @@ class PlanShotsHandler(JobHandler):
                     if read.take is not None
                     else None
                 ),
+                read.graphics,
             ),
             timeout_s=REQUEST_TIMEOUT_S,
         )

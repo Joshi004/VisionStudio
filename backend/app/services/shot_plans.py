@@ -600,6 +600,9 @@ async def _queue(
                 {
                     "take": prepared.take,
                     "longest_shot_seconds": duration_policy.longest_cut_shot_s(policy),
+                    # EXG-003: only for a project with graphics on, so every other job is
+                    # exactly what it was.
+                    **({"graphics": True} if project.graphics else {}),
                 }
                 if prepared.take is not None
                 else {}

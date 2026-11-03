@@ -80,7 +80,14 @@ TakeState = Literal["generating", "checking_dialogue", "ready", "failed"]
 PromptStatus = Literal["not_compiled", "compiled", "out_of_date"]
 # `presenter` is the type of a shot of a continuous explainer that shows the presenter (FLOW-005).
 ShotType = Literal[
-    "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
+    "establishing",
+    "action",
+    "reaction",
+    "dialogue",
+    "insert",
+    "transition",
+    "presenter",
+    "graphic",
 ]
 ProblemKind = Literal["clip", "plan"]
 VoiceSource = Literal["take", "clip"]

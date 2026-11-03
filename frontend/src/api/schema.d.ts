@@ -11254,7 +11254,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -11700,7 +11700,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -13010,7 +13010,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Target Duration */
             target_duration: number;
             /**
@@ -13043,7 +13043,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Target Duration */
             target_duration: number;
             /**
@@ -13430,7 +13430,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -13506,7 +13506,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Source Event Ids */
@@ -14840,7 +14840,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */

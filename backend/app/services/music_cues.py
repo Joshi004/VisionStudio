@@ -47,6 +47,7 @@ from app.services import (
     shot_definitions,
     speech_units,
 )
+from app.services.scene_timeline import GRAPHIC_SHOT_TYPE
 
 JOB_TYPE: Final = "write_music_cue"
 AUDIT_JOB_TYPE: Final = "audit_music_cues"
@@ -94,6 +95,9 @@ def _shots_blocked_reason(
 ) -> str | None:
     titles = {scene["id"]: scene["title"] for scene in plan.timeline["scenes"]}
     for shot in plan.timeline["shots"]:
+        # A graphic shot (EXG-003) has no definition and nobody in it: it counts as defined.
+        if shot.get("type") == GRAPHIC_SHOT_TYPE:
+            continue
         if shot["ref"] not in defined:
             title = titles.get(shot["scene_id"], shot["scene_id"])
             return (

@@ -8,7 +8,8 @@ text keyed by character id, so a model judges them (Q-6): one call per scene.
 Code lists the **boundaries** of the scene, in order, and writes their ids:
 
 - `b0`: the scene's `continuity_start` and the first shot's `continuity_start`;
-- `b1` ... `b(n-1)`: shot k's `continuity_end` and shot k+1's `continuity_start`;
+- `b1` ... `b(n-1)`: shot k's `continuity_end` and shot k+1's `continuity_start`, except where a
+  graphic shot (EXG-003) stands between the two: that cut is left out (`breaks_after`);
 - `bn`: the last shot's `continuity_end` and the scene's `continuity_end`.
 
 The model says, for each boundary, whether the two states can follow each other at a cut, and
@@ -40,6 +41,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from app.services import discovery_writer
+from app.services.scene_timeline import GRAPHIC_SHOT_TYPE as GRAPHIC
 from app.services.text_limits import fit_text, length_rule
 
 parse_answer = discovery_writer.parse_answer
@@ -102,12 +104,31 @@ Answer with one JSON object only, in exactly this form (the values here are only
 the type): {_ANSWER_FORM}"""
 
 
+def breaks_after(plan_shots: Sequence[dict[str, Any]]) -> set[str]:
+    """The ids of the shots that a graphic shot follows directly (EXG-003). A graphic shot is
+    drawn by code and has no definition, so the cut from the shot before it to the shot after it
+    is not a cut between two neighbours: no boundary is made there. `plan_shots` is the scene's
+    plan, in order, graphic shots included.
+    """
+    return {
+        earlier["id"]
+        for earlier, later in zip(plan_shots, plan_shots[1:], strict=False)
+        if earlier.get("type") != GRAPHIC and later.get("type") == GRAPHIC
+    }
+
+
 def boundaries(
-    scene_definition: dict[str, Any], shot_definitions: Sequence[dict[str, Any]]
+    scene_definition: dict[str, Any],
+    shot_definitions: Sequence[dict[str, Any]],
+    breaks: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """The boundaries of a scene, in order. `shot_definitions` is the stored specification of
-    each shot of the scene's plan, in plan order, and must not be empty. Each boundary is
-    `{id, before, after, before_state, after_state}`.
+    each shot of the scene's plan that is made by H3, in plan order, and must not be empty. Each
+    boundary is `{id, before, after, before_state, after_state}`.
+
+    The boundary after a shot in `breaks` (`breaks_after`) is left out: a graphic shot stands
+    between it and the next shot. The ids stay positional, so a scene with no graphic shot gets
+    the boundaries it always had. The scene's start and end are always kept.
     """
     if not shot_definitions:
         raise ValueError("A scene needs at least one shot to have boundaries.")
@@ -122,6 +143,8 @@ def boundaries(
     ]
     for position in range(1, len(shot_definitions)):
         earlier, later = shot_definitions[position - 1], shot_definitions[position]
+        if earlier["shot_id"] in breaks:
+            continue
         result.append(
             {
                 "id": f"b{position}",

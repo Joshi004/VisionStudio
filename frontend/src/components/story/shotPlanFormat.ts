@@ -13,13 +13,16 @@ export const SHOT_TYPE: Record<Shot["type"], { label: string; color: string }> =
     transition: { label: "Transition", color: "gray" },
     // A continuous explainer's shot that shows the presenter; only the cut planner writes it.
     presenter: { label: "Presenter", color: "cyan" },
+    // A chart, diagram or text card drawn by code; only the cut planning of a continuous
+    // explainer with graphics on writes it.
+    graphic: { label: "Graphic", color: "yellow" },
   };
 
-/** The shot types a person may choose when editing a shot. `presenter` is only ever written by
- * the cut planning of a continuous explainer, which cannot be edited by hand.
+/** The shot types a person may choose when editing a shot. `presenter` and `graphic` are only
+ * ever written by the cut planning of a continuous explainer, which cannot be edited by hand.
  */
 export const SHOT_TYPES = Object.keys(SHOT_TYPE).filter(
-  (type) => type !== "presenter",
+  (type) => type !== "presenter" && type !== "graphic",
 ) as Shot["type"][];
 
 const EVENT_LABEL: Record<SceneEvent["type"], string> = {
