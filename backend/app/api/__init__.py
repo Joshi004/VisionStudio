@@ -20,6 +20,7 @@ from app.api import (
     environment_views,
     generation_requests,
     gpu,
+    graphic_briefs,
     graphic_theme,
     graphics_lab,
     health,
@@ -69,6 +70,7 @@ api_router.include_router(music_themes.router, tags=["music-themes"])
 api_router.include_router(music_plan.router, tags=["music-plan"])
 api_router.include_router(callout_plan.router, tags=["callout-plan"])
 api_router.include_router(graphic_theme.router, tags=["graphic-theme"])
+api_router.include_router(graphic_briefs.router, tags=["graphic-briefs"])
 api_router.include_router(music_cues.router, tags=["music-cues"])
 api_router.include_router(music_takes.router, tags=["music-takes"])
 api_router.include_router(music_placement.router, tags=["music-placement"])

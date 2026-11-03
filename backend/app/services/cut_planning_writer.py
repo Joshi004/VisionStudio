@@ -290,6 +290,24 @@ def _ends_sentence(text: str) -> bool:
     return text.rstrip(_CLOSERS).endswith(_SENTENCE_MARKS)
 
 
+def sentence_ranges(
+    words: list[dict[str, Any]], spans: list[dict[str, Any]]
+) -> list[tuple[str, int, int]]:
+    """The sentences of a take as `(unit_id, first, last)`, the positions counted from 0 in
+    `words`. A sentence ends at a word that ends with `.`, `!`, `?` or `…` (a closing quote or
+    bracket may follow) and at the last word of a speech unit, so a sentence never crosses a
+    unit. `spans` are `{unit_id, first_word, last_word}` as in `take_block`.
+    """
+    sentences: list[tuple[str, int, int]] = []
+    for span in spans:
+        first = span["first_word"]
+        for position in range(span["first_word"], span["last_word"] + 1):
+            if position == span["last_word"] or _ends_sentence(str(words[position]["text"])):
+                sentences.append((span["unit_id"], first, position))
+                first = position + 1
+    return sentences
+
+
 def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, Any]:
     """The take as the model reads it: its length and its sentences, each with its unit and the
     unit's kind, and each word with its number, time and the pause before it.
@@ -312,20 +330,14 @@ def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, A
             "pause_before": round(max(0.0, float(word["start"]) - before), _SHOWN_DECIMALS),
         }
 
-    sentences: list[dict[str, Any]] = []
-    for span in take["spans"]:
-        current: list[dict[str, Any]] = []
-        for position in range(span["first_word"], span["last_word"] + 1):
-            current.append(shown(position))
-            if position == span["last_word"] or _ends_sentence(str(words[position]["text"])):
-                sentences.append(
-                    {
-                        "unit_id": span["unit_id"],
-                        "unit_kind": kinds[span["unit_id"]],
-                        "words": current,
-                    }
-                )
-                current = []
+    sentences: list[dict[str, Any]] = [
+        {
+            "unit_id": unit_id,
+            "unit_kind": kinds[unit_id],
+            "words": [shown(position) for position in range(first, last + 1)],
+        }
+        for unit_id, first, last in sentence_ranges(words, take["spans"])
+    ]
     return {
         "take_seconds": round(float(take["seconds"]), _SHOWN_DECIMALS),
         "word_count": len(words),

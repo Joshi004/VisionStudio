@@ -102,6 +102,7 @@ def register_handlers() -> None:
     from app.jobs.write_music_cue import WriteMusicCueHandler
     from app.jobs.write_music_plan import WriteMusicPlanHandler
     from app.jobs.write_music_theme_prompt import WriteMusicThemePromptHandler
+    from app.jobs.write_shot_graphic_brief import WriteShotGraphicBriefHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
 
     handlers.register(GenerateLabVideoHandler())
@@ -158,3 +159,4 @@ def register_handlers() -> None:
     handlers.register(WriteLabGraphicComponentHandler())
     handlers.register(RenderLabGraphicHandler())
     handlers.register(WriteGraphicThemeHandler())
+    handlers.register(WriteShotGraphicBriefHandler())

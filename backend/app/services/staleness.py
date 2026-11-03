@@ -44,6 +44,7 @@ from app.services import (
     scene_events,
     scene_staging,
     shot_definitions,
+    shot_graphic_briefs,
     shot_plans,
     shot_prompts,
     shot_references,
@@ -541,6 +542,11 @@ async def _collect_shots(session: AsyncSession, project: Project, found: _Collec
                     )
 
     add_shots("shot_definitions", (await shot_definitions.state(session, project)).entries, True)
+    # The briefs of the graphic shots (EXG-004): an out-of-date brief is written again.
+    if graphic_theme.wanted(project):
+        add_shots(
+            "graphic_briefs", (await shot_graphic_briefs.state(session, project)).entries, False
+        )
     add_shots("references", (await shot_references.state(session, project)).entries, True)
     add_shots(
         "generation_requests",

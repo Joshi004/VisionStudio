@@ -172,6 +172,7 @@ SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
 
 # --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
 # `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+# `write_shot_graphic_brief` (EXG-004) uses the same three phases, one call per graphic shot.
 SAVING_GRAPHIC_BRIEF: Final = "saving the graphic brief"
 # `write_lab_graphic_template_spec` (GFX-006) also uses PREPARING_PROMPT and `asking_model` from
 # above (one call).

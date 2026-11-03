@@ -36,6 +36,9 @@ from app.services.music_bible_writer import parse_answer as parse_answer
 from app.services.number_words import numbers_in
 from app.services.text_limits import length_rule
 
+# How the messages call the words a brief is checked against, when it is a lab line.
+LINE: Final = "the line"
+
 KINDS: Final = ("kpi", "comparison", "trend", "process", "list", "statement", "concept")
 UNITS: Final = ("usd", "percent", "points", "multiple", "count", "none")
 # The units that may carry a scale ("12 billion dollars", "2.5 million users").
@@ -88,12 +91,9 @@ LIMIT_NAMES: Final = {
 
 # --- The instructions ------------------------------------------------------------------------
 
-_RULES: Final = """\
-You are the director of a short explainer graphic. You are given one line of an explainer \
-script. You decide what graphic should be drawn while the line is spoken: what it shows, which \
-numbers it uses, and at which words each part appears. Other programs draw it from your \
-brief. You never draw anything and you never write any time.
-
+# The KIND and DERIVED VALUES sections are shared with the director of an explainer shot
+# (`shot_graphic_brief_writer`, EXG-004).
+KIND_RULES: Final = """\
 KIND (choose one)
 - "kpi": one big number, with or without a change.
 - "comparison": two or more values set side by side.
@@ -103,7 +103,27 @@ KIND (choose one)
 - "statement": one short sentence shown large.
 - "concept": an idea that no data chart fits.
 
-FACTS (the numbers on screen)
+"""
+
+DERIVED_RULES: Final = """\
+DERIVED VALUES (worked out by code, never by you)
+- Ask for one only when it helps the graphic. "op" is one of:
+  - "pct_change": the percent change from the first fact to the second ("of": [from, to]);
+  - "difference": the second fact minus the first;
+  - "ratio": the first fact divided by the second;
+  - "sum": all the facts added up (two or more).
+- "of" lists fact ids only, and all of them have the same unit. Never write the value.
+
+"""
+
+
+_RULES: Final = """\
+You are the director of a short explainer graphic. You are given one line of an explainer \
+script. You decide what graphic should be drawn while the line is spoken: what it shows, which \
+numbers it uses, and at which words each part appears. Other programs draw it from your \
+brief. You never draw anything and you never write any time.
+
+{kind_rules}FACTS (the numbers on screen)
 - Every number on screen must come from the line. A fact is a number the line says.
 - "value" is the number as the line says it and "scale" is the word after it. "12 billion \
 dollars": value 12, unit "usd", scale "billion". "6.5 percent": value 6.5, unit "percent", scale \
@@ -115,15 +135,7 @@ the number in them.
 - Never invent, round, add up or work out a number yourself. Never use a number the line does \
 not say. A line with no numbers has no facts.
 
-DERIVED VALUES (worked out by code, never by you)
-- Ask for one only when it helps the graphic. "op" is one of:
-  - "pct_change": the percent change from the first fact to the second ("of": [from, to]);
-  - "difference": the second fact minus the first;
-  - "ratio": the first fact divided by the second;
-  - "sum": all the facts added up (two or more).
-- "of" lists fact ids only, and all of them have the same unit. Never write the value.
-
-BEATS (when each part appears)
+{derived_rules}BEATS (when each part appears)
 - A beat is a moment of the line. "phrase" is a few words of the line, copied exactly as \
 written, at which the part appears. The beats follow the order of the line: a later beat never \
 starts before an earlier one.
@@ -159,7 +171,9 @@ copy them)"""
 
 def _instructions() -> str:
     return (
-        _RULES.replace("{length_rule}", length_rule(LIMIT_NAMES))
+        _RULES.replace("{kind_rules}", KIND_RULES)
+        .replace("{derived_rules}", DERIVED_RULES)
+        .replace("{length_rule}", length_rule(LIMIT_NAMES))
         + "\n\nAnswer with one JSON object only, in exactly this form: "
         + _SHAPE
     )
@@ -201,10 +215,16 @@ def line_tokens(words: Sequence[str]) -> list[tuple[str, int]]:
     return [(token, index) for index, word in enumerate(words) for token in normalize_words(word)]
 
 
-def phrase_starts(tokens: Sequence[tuple[str, int]], beats: Sequence[tuple[str, str]]) -> list[int]:
+def phrase_starts(
+    tokens: Sequence[tuple[str, int]],
+    beats: Sequence[tuple[str, str]],
+    *,
+    place: str = LINE,
+) -> list[int]:
     """The word index where each beat starts. `beats` are `(id, phrase)` in beat order. Raises
     ValueError, with a message fit for the model's corrected retry, for a phrase that is not in
-    the line or that comes before the beat before it.
+    the line or that comes before the beat before it. `place` is how the messages call the
+    words (the shot's words, for a shot of an explainer).
     """
     texts = [token for token, _ in tokens]
     previous = 0
@@ -213,10 +233,10 @@ def phrase_starts(tokens: Sequence[tuple[str, int]], beats: Sequence[tuple[str, 
         span = locate_phrase(texts[previous:], phrase)
         if span is None:
             if locate_phrase(texts, phrase) is None:
-                raise ValueError(f'The phrase of beat {beat_id} ("{phrase}") is not in the line.')
+                raise ValueError(f'The phrase of beat {beat_id} ("{phrase}") is not in {place}.')
             raise ValueError(
-                f'The phrase of beat {beat_id} ("{phrase}") comes earlier in the line than the '
-                "beat before it. The beats must follow the order of the line."
+                f'The phrase of beat {beat_id} ("{phrase}") comes earlier in {place} than the '
+                f"beat before it. The beats must follow the order of {place}."
             )
         previous += span[0]
         starts.append(tokens[previous][1])
@@ -295,6 +315,7 @@ def _check_fact(
     seen: set[str],
     words: Sequence[str],
     tokens: Sequence[tuple[str, int]],
+    place: str,
 ) -> dict[str, Any]:
     label = f"fact {position}"
     item = _object(raw, label)
@@ -310,7 +331,7 @@ def _check_fact(
             'the units "usd" and "count".'
         )
     said_as = _text(item.get("said_as"), f"said_as of {name}", SAID_AS_MAX_CHARS)
-    _check_said(name, value, scale, said_as, words, tokens)
+    _check_said(name, value, scale, said_as, words, tokens, place)
     return {
         "id": fact_id,
         "label": text,
@@ -328,13 +349,14 @@ def _check_said(
     said_as: str,
     words: Sequence[str],
     tokens: Sequence[tuple[str, int]],
+    place: str = LINE,
 ) -> None:
     """The fact is said in the line: `said_as` is found there, and the number read in those
     words is the value as written or the value with its scale applied.
     """
     span = locate_phrase([token for token, _ in tokens], said_as)
     if span is None:
-        raise ValueError(f'The words "{said_as}" of {name} are not in the line.')
+        raise ValueError(f'The words "{said_as}" of {name} are not in {place}.')
     first, last = tokens[span[0]][1], tokens[span[1] - 1][1]
     said = numbers_in(" ".join(words[first : last + 1]))
     if abs(value) in said or abs(value) * SCALE_FACTORS[scale] in said:
@@ -343,7 +365,11 @@ def _check_said(
     raise ValueError(
         f"The {name} has the value {format_number(value)}"
         f'{"" if scale == "none" else " " + scale}, but the words "{said_as}" say {reads}. '
-        "A fact must be a number the line says."
+        + (
+            "A fact must be a number the line says."
+            if place == LINE
+            else f"A fact must be a number said in {place}."
+        )
     )
 
 
@@ -379,7 +405,7 @@ def _check_derived(
 
 
 def _check_beats(
-    raw: object, refs: set[str], tokens: Sequence[tuple[str, int]]
+    raw: object, refs: set[str], tokens: Sequence[tuple[str, int]], place: str = LINE
 ) -> list[dict[str, Any]]:
     seen: set[str] = set()
     beats: list[dict[str, Any]] = []
@@ -405,7 +431,7 @@ def _check_beats(
             }
         )
     # Raises when a phrase is not in the line or the beats are out of order.
-    phrase_starts(tokens, [(beat["id"], beat["phrase"]) for beat in beats])
+    phrase_starts(tokens, [(beat["id"], beat["phrase"]) for beat in beats], place=place)
     return beats
 
 
@@ -430,12 +456,30 @@ def check_theme(raw: object) -> dict[str, Any]:
     }
 
 
-def check_brief(answer: dict[str, Any], line: str) -> dict[str, Any]:
+def check_brief(
+    answer: dict[str, Any],
+    line: str,
+    *,
+    context: str | None = None,
+    with_theme: bool = True,
+) -> dict[str, Any]:
     """The model's answer as the stored brief, or ValueError with a message fit for the user and
     for the model's corrected retry (§4.3).
+
+    With no `context` (the lab), the line is the reference for the facts and for the beats. For
+    a graphic shot of an explainer (EXG-004) `line` is the shot's own words, which the beats
+    must fall on, and `context` is the text of the sentences around them, in which a fact may be
+    said (the soft number rule, EXG-004). With `with_theme` false, the brief has no theme.
     """
     words = line_words(line)
     tokens = line_tokens(words)
+    if context is None:
+        fact_words, fact_tokens, fact_place, beat_place = words, tokens, LINE, LINE
+    else:
+        fact_words = line_words(context)
+        fact_tokens = line_tokens(fact_words)
+        fact_place = "the shot's words or the sentences around them"
+        beat_place = "the shot's words"
 
     kind = _choice(answer.get("kind"), "kind", KINDS)
     intent = _text(answer.get("intent"), "intent", INTENT_MAX_CHARS)
@@ -443,7 +487,7 @@ def check_brief(answer: dict[str, Any], line: str) -> dict[str, Any]:
 
     seen: set[str] = set()
     facts = [
-        _check_fact(raw, position, seen, words, tokens)
+        _check_fact(raw, position, seen, fact_words, fact_tokens, fact_place)
         for position, raw in enumerate(_list(answer.get("facts"), "facts", 0, MAX_FACTS), start=1)
     ]
     by_id = {fact["id"]: fact for fact in facts}
@@ -453,13 +497,15 @@ def check_brief(answer: dict[str, Any], line: str) -> dict[str, Any]:
             _list(answer.get("derived"), "derived", 0, MAX_DERIVED), start=1
         )
     ]
-    beats = _check_beats(answer.get("beats"), seen, tokens)
-    return {
+    beats = _check_beats(answer.get("beats"), seen, tokens, beat_place)
+    brief: dict[str, Any] = {
         "kind": kind,
         "intent": intent,
         "visual_brief": visual_brief,
         "facts": facts,
         "derived": derived,
         "beats": beats,
-        "theme": check_theme(answer.get("theme")),
     }
+    if with_theme:
+        brief["theme"] = check_theme(answer.get("theme"))
+    return brief

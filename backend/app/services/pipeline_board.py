@@ -66,9 +66,9 @@ WORD_TIMINGS_STEP: Final = "word_timings"
 # (EXPLAINER-009).
 CALLOUT_PLAN_STEP: Final = "callout_plan"
 
-# The step that is switched off for every project but a continuous explainer with graphics on
-# (EXG-002).
-GRAPHIC_THEME_STEP: Final = "graphic_theme"
+# The steps that are switched off for every project but a continuous explainer with graphics on
+# (EXG-002, EXG-004).
+GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs")
 
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
@@ -93,6 +93,7 @@ GROUPS: Final[dict[str, str]] = {
     "word_timings": "speech",
     "callout_plan": "speech",
     "graphic_theme": "graphics",
+    "graphic_briefs": "graphics",
     "music_bible": "music",
     "music_themes": "music",
     "music_plan": "music",
@@ -278,7 +279,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
             (music_off and step.key in MUSIC_STEPS)
             or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
-            or (step.key == GRAPHIC_THEME_STEP and not graphic_theme.wanted(project))
+            or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (

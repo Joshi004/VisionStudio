@@ -104,6 +104,10 @@ const GraphicThemePanel = lazyNamed(
   () => import("../story/GraphicThemePanel"),
   "GraphicThemePanel",
 );
+const GraphicBriefsPanel = lazyNamed(
+  () => import("../story/GraphicBriefsPanel"),
+  "GraphicBriefsPanel",
+);
 const MusicCuesPanel = lazyNamed(() => import("../music/MusicCuesPanel"), "MusicCuesPanel");
 const MusicTakesPanel = lazyNamed(() => import("../music/MusicTakesPanel"), "MusicTakesPanel");
 const MusicPlacementPanel = lazyNamed(
@@ -196,6 +200,8 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <CalloutPlanPanel projectId={projectId} />;
       case "graphic_theme":
         return <GraphicThemePanel projectId={projectId} />;
+      case "graphic_briefs":
+        return <GraphicBriefsPanel projectId={projectId} />;
       case "music_bible":
         return <MusicBiblePanel projectId={projectId} hasStory={hasStory} />;
       case "music_themes":

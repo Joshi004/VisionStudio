@@ -457,6 +457,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/graphic-briefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Graphic Briefs */
+        get: operations["get_graphic_briefs_api_projects__project_id__graphic_briefs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-briefs/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Graphic Brief
+         * @description Starts the job that writes the brief of one graphic shot. If the shot already has a job
+         *     waiting or running, its id is returned and no second job is made.
+         */
+        post: operations["run_graphic_brief_api_projects__project_id__graphic_briefs__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/music-cues": {
         parameters: {
             query?: never;
@@ -5308,6 +5346,111 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** BriefBeatOut */
+        BriefBeatOut: {
+            /** Id */
+            id: string;
+            /** Phrase */
+            phrase: string;
+            /** Shows */
+            shows: string;
+            /** Refs */
+            refs: string[];
+            /** At S */
+            at_s: number | null;
+        };
+        /** BriefContent */
+        BriefContent: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "kpi" | "comparison" | "trend" | "process" | "list" | "statement" | "concept";
+            /** Intent */
+            intent: string;
+            /** Visual Brief */
+            visual_brief: string;
+            /** Facts */
+            facts: components["schemas"]["BriefFactOut"][];
+            /** Derived */
+            derived: components["schemas"]["BriefDerivedOut"][];
+            /** Beats */
+            beats: components["schemas"]["BriefBeatOut"][];
+        };
+        /** BriefDerivedOut */
+        BriefDerivedOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "pct_change" | "difference" | "ratio" | "sum";
+            /** Of */
+            of: string[];
+        };
+        /** BriefFactOut */
+        BriefFactOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "usd" | "percent" | "points" | "multiple" | "count" | "none";
+            /**
+             * Scale
+             * @enum {string}
+             */
+            scale: "none" | "thousand" | "million" | "billion" | "trillion";
+            /** Said As */
+            said_as: string;
+        };
+        /**
+         * BriefJobOut
+         * @description The newest `write_shot_graphic_brief` job of the shot, whatever its status.
+         */
+        BriefJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** BriefOut */
+        BriefOut: {
+            /** Id */
+            id: number;
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
+            content: components["schemas"]["BriefContent"];
+        };
         /** CalloutAccentOut */
         CalloutAccentOut: {
             /** Colour */
@@ -7289,6 +7432,29 @@ export interface components {
             beats: components["schemas"]["GraphicBeatOut"][];
             theme: components["schemas"]["GraphicBriefThemeOut"];
         };
+        /** GraphicBriefRun */
+        GraphicBriefRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** GraphicBriefRunIn */
+        GraphicBriefRunIn: {
+            /** Feedback */
+            feedback?: string | null;
+        };
+        /** GraphicBriefSceneOut */
+        GraphicBriefSceneOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Shots */
+            shots: components["schemas"]["GraphicShotOut"][];
+        };
         /** GraphicBriefThemeOut */
         GraphicBriefThemeOut: {
             /** Palette */
@@ -7301,6 +7467,15 @@ export interface components {
             motion: string;
             /** Mood */
             mood: string;
+        };
+        /** GraphicBriefsState */
+        GraphicBriefsState: {
+            /** Scenes */
+            scenes: components["schemas"]["GraphicBriefSceneOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
         };
         /**
          * GraphicCallOut
@@ -7567,6 +7742,38 @@ export interface components {
              * @enum {string}
              */
             state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
+        };
+        /** GraphicShotOut */
+        GraphicShotOut: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Spoken Text */
+            spoken_text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Words Before */
+            words_before: string;
+            /** Words After */
+            words_after: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "writing" | "ready" | "failed" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /** Last Error */
+            last_error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            job: components["schemas"]["BriefJobOut"] | null;
+            brief: components["schemas"]["BriefOut"] | null;
         };
         /** GraphicTestCardCreate */
         GraphicTestCardCreate: {
@@ -16811,6 +17018,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graphic_briefs_api_projects__project_id__graphic_briefs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicBriefsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_graphic_brief_api_projects__project_id__graphic_briefs__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GraphicBriefRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the Story Bible is missing, the scene's shots are not planned and current, the shot is not a graphic shot, or the note cannot be used. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

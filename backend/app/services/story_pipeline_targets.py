@@ -58,6 +58,7 @@ from app.services import (
     scene_staging,
     shot_continuity,
     shot_definitions,
+    shot_graphic_briefs,
     shot_plans,
     shot_prompts,
     shot_references,
@@ -1803,6 +1804,57 @@ async def _start_shot_plans(
     )
 
 
+# --- Graphic briefs -------------------------------------------------------------------------
+
+
+async def _evaluate_graphic_briefs(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with graphics on has graphic briefs. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not graphic_theme.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await shot_graphic_briefs.state(session, project)
+    targets: list[Target] = []
+    for scene in state.entries:
+        scene_id = scene.item["id"]
+        for shot in scene.shots:
+            shot_id = shot.shot["id"]
+            active = shot.status == "writing"
+            done = shot.status == "ready"
+            targets.append(
+                Target(
+                    _shot_key(scene_id, shot_id),
+                    _shot_label(scene.item, shot.shot),
+                    done,
+                    active=active,
+                    block=None if done or active else shot.blocked_reason,
+                    last_error=None if done else shot.last_error,
+                    ref=(scene_id, shot_id),
+                    stale=shot.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
+    return StepView(targets)
+
+
+async def _start_graphic_briefs(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    return await _start_each(
+        session,
+        targets,
+        deadline,
+        lambda target: _ids_of(
+            shot_graphic_briefs.start_shot(session, project, target.ref[0], target.ref[1])
+        ),
+    )
+
+
 # --- Shot definitions -----------------------------------------------------------------------
 
 
@@ -2323,6 +2375,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
+    "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),
     "shot_definitions": Adapter(_evaluate_shot_definitions, _start_shot_definitions),
     "shot_continuity": Adapter(_evaluate_shot_continuity, _start_shot_continuity),
     "references": Adapter(_evaluate_references, _start_references),
