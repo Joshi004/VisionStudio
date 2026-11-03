@@ -30,6 +30,7 @@ from app.services import (
     environment_definitions,
     environment_views,
     generation_requests,
+    graphic_theme,
     look_state_images,
     look_state_resolution,
     music_bible,
@@ -390,6 +391,16 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
             found.add(
                 "callout_plan",
                 Item("callout_plan", "Callout plan", callouts.reasons, acceptable=False),
+            )
+
+    # The graphics theme of a continuous explainer (EXG-002). Its Story Bible was written again:
+    # the theme has to be written again, since it follows the Story Bible's tone.
+    if graphic_theme.wanted(project):
+        theme = await graphic_theme.state(session, project)
+        if theme.latest is not None and theme.out_of_date:
+            found.add(
+                "graphic_theme",
+                Item("graphic_theme", "Graphics look", theme.reasons, acceptable=False),
             )
 
     # The detail and prompts of each music cue (MUSIC-009). Only for a plan that is current: a

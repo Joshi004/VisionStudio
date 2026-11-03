@@ -20,6 +20,7 @@ export const GROUP_ORDER: readonly string[] = [
   "speech",
   "music",
   "shots",
+  "graphics",
   "render",
 ];
 
@@ -31,6 +32,7 @@ export const GROUP_LABELS: Record<string, string> = {
   speech: "Speech",
   music: "Music",
   shots: "Shots",
+  graphics: "Graphics",
   render: "Render",
 };
 

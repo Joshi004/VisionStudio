@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
-from app.services import callout_plan, word_timings
+from app.services import callout_plan, graphic_theme, word_timings
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
@@ -66,6 +66,10 @@ WORD_TIMINGS_STEP: Final = "word_timings"
 # (EXPLAINER-009).
 CALLOUT_PLAN_STEP: Final = "callout_plan"
 
+# The step that is switched off for every project but a continuous explainer with graphics on
+# (EXG-002).
+GRAPHIC_THEME_STEP: Final = "graphic_theme"
+
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -88,6 +92,7 @@ GROUPS: Final[dict[str, str]] = {
     "speech_synthesis": "speech",
     "word_timings": "speech",
     "callout_plan": "speech",
+    "graphic_theme": "graphics",
     "music_bible": "music",
     "music_themes": "music",
     "music_plan": "music",
@@ -273,6 +278,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
             (music_off and step.key in MUSIC_STEPS)
             or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
+            or (step.key == GRAPHIC_THEME_STEP and not graphic_theme.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (

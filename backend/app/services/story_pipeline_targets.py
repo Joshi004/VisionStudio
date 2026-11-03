@@ -42,6 +42,7 @@ from app.services import (
     environment_views,
     explainer,
     generation_requests,
+    graphic_theme,
     look_state_images,
     look_state_resolution,
     music_bible,
@@ -1693,6 +1694,38 @@ async def _call_callout_plan(session: AsyncSession, project: Project, options: R
     )
 
 
+# --- The graphics theme (EXG-002) -------------------------------------------------------------
+
+
+async def _evaluate_graphic_theme(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with graphics on has a graphics theme. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not graphic_theme.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await graphic_theme.state(session, project)
+    done = state.latest is not None and not state.out_of_date
+    active = _active(state.job)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                last_error=_failure(state.job),
+                stale=state.latest is not None and not done,
+            )
+        ]
+    )
+
+
+async def _call_graphic_theme(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await graphic_theme.start_run(session, project)
+
+
 # --- Shot plans -----------------------------------------------------------------------------
 
 
@@ -2288,6 +2321,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "speech_synthesis": Adapter(_evaluate_speech_synthesis, _start_speech_synthesis),
     "word_timings": Adapter(_evaluate_word_timings, _start_word_timings),
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
+    "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "shot_definitions": Adapter(_evaluate_shot_definitions, _start_shot_definitions),
     "shot_continuity": Adapter(_evaluate_shot_continuity, _start_shot_continuity),

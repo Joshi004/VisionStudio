@@ -166,6 +166,10 @@ SAVING_MUSIC_PLAN: Final = "saving the music plan"
 # `write_callout_plan` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_PLAN: Final = "saving the callout plan"
 
+# --- Running: the graphics theme of an explainer (EXG-002) -------------------------------
+# `write_graphic_theme` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
+
 # --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
 # `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_GRAPHIC_BRIEF: Final = "saving the graphic brief"

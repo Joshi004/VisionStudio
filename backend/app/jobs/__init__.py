@@ -91,6 +91,7 @@ def register_handlers() -> None:
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
+    from app.jobs.write_graphic_theme import WriteGraphicThemeHandler
     from app.jobs.write_lab_graphic_block_scene import WriteLabGraphicBlockSceneHandler
     from app.jobs.write_lab_graphic_brief import WriteLabGraphicBriefHandler
     from app.jobs.write_lab_graphic_component import WriteLabGraphicComponentHandler
@@ -156,3 +157,4 @@ def register_handlers() -> None:
     handlers.register(WriteLabGraphicBlockSceneHandler())
     handlers.register(WriteLabGraphicComponentHandler())
     handlers.register(RenderLabGraphicHandler())
+    handlers.register(WriteGraphicThemeHandler())

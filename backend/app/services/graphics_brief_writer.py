@@ -409,7 +409,11 @@ def _check_beats(
     return beats
 
 
-def _check_theme(raw: object) -> dict[str, Any]:
+def check_theme(raw: object) -> dict[str, Any]:
+    """The theme of an answer, checked: the lab's brief theme, and the explainer's graphics theme
+    (EXG-002), which reuses it. A colour that cannot be read is kept and replaced later by
+    `graphics_resolve.theme_for`.
+    """
     item = _object(raw, "theme")
     accent = item.get("accent")
     if isinstance(accent, str) and _HEX.fullmatch(accent):
@@ -457,5 +461,5 @@ def check_brief(answer: dict[str, Any], line: str) -> dict[str, Any]:
         "facts": facts,
         "derived": derived,
         "beats": beats,
-        "theme": _check_theme(answer.get("theme")),
+        "theme": check_theme(answer.get("theme")),
     }

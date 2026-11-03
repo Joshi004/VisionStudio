@@ -136,6 +136,10 @@ STEPS: Final[tuple[Step, ...]] = (
     # Skipped as complete for a story and for an explainer with callouts off. Nothing after it
     # waits for it yet; the render will (EXPLAINER-010).
     Step("callout_plan", "Plan the callouts", ("speech_units",)),
+    # EXG-002: the one look every graphic of a continuous explainer with graphics on shares. It
+    # is written from the Story Bible alone. Skipped as complete for any other project. Nothing
+    # after it waits for it yet; the graphics will (EXG-005).
+    Step("graphic_theme", "Design the graphics look", ("story_bible",)),
     Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging")),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.

@@ -402,6 +402,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/graphic-theme/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Graphic Theme
+         * @description Starts the job that writes the graphics theme. If one is already waiting or running for
+         *     the project, its id is returned and no second job is made.
+         */
+        post: operations["run_graphic_theme_api_projects__project_id__graphic_theme_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-theme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Graphic Theme */
+        get: operations["get_graphic_theme_api_projects__project_id__graphic_theme_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-theme/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Graphic Theme Version */
+        get: operations["get_graphic_theme_version_api_projects__project_id__graphic_theme_versions__version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/music-cues": {
         parameters: {
             query?: never;
@@ -7555,6 +7610,142 @@ export interface components {
             metrics: unknown;
             /** Warnings */
             warnings: string[];
+        };
+        /**
+         * GraphicThemeColoursOut
+         * @description The colours the graphics are drawn with, from the palette and the accent.
+         */
+        GraphicThemeColoursOut: {
+            /** Background */
+            background: string;
+            /** Surface */
+            surface: string;
+            /** Text */
+            text: string;
+            /** Muted */
+            muted: string;
+            /** Accent */
+            accent: string;
+            /** Positive */
+            positive: string;
+            /** Negative */
+            negative: string;
+            /** Number */
+            number: string;
+        };
+        /** GraphicThemeContent */
+        GraphicThemeContent: {
+            theme: components["schemas"]["GraphicThemeLookOut"];
+            /** Reason */
+            reason: string;
+            /** Notes */
+            notes: string[];
+        };
+        /**
+         * GraphicThemeJobOut
+         * @description The newest `write_graphic_theme` job of the project, whatever its status.
+         */
+        GraphicThemeJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** GraphicThemeLookOut */
+        GraphicThemeLookOut: {
+            /**
+             * Palette
+             * @enum {string}
+             */
+            palette: "dark" | "light";
+            /** Accent */
+            accent: string;
+            /**
+             * Background
+             * @enum {string}
+             */
+            background: "solid" | "gradient" | "grid" | "glow";
+            /**
+             * Motion
+             * @enum {string}
+             */
+            motion: "snappy" | "smooth" | "calm";
+            /** Mood */
+            mood: string;
+        };
+        /** GraphicThemeOut */
+        GraphicThemeOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
+            /** Id */
+            id: number;
+            content: components["schemas"]["GraphicThemeContent"];
+            colours: components["schemas"]["GraphicThemeColoursOut"];
+        };
+        /** GraphicThemeRun */
+        GraphicThemeRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** GraphicThemeRunIn */
+        GraphicThemeRunIn: {
+            /** Feedback */
+            feedback?: string | null;
+        };
+        /** GraphicThemeState */
+        GraphicThemeState: {
+            latest: components["schemas"]["GraphicThemeOut"] | null;
+            /** Versions */
+            versions: components["schemas"]["GraphicThemeVersionOut"][];
+            job: components["schemas"]["GraphicThemeJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+        };
+        /** GraphicThemeVersionOut */
+        GraphicThemeVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
         };
         /**
          * GraphicTrialCostOut
@@ -16477,6 +16668,131 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CalloutPlanOut"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_graphic_theme_api_projects__project_id__graphic_theme_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GraphicThemeRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicThemeRun"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the Story Bible is missing, or the note cannot be used. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_graphic_theme_api_projects__project_id__graphic_theme_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicThemeState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graphic_theme_version_api_projects__project_id__graphic_theme_versions__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicThemeOut"];
                 };
             };
             /** @description No such project or version. */
