@@ -308,6 +308,8 @@ SENDING_GRAPHIC: Final = "sending the graphic to the motion service"
 DRAWING_GRAPHIC_IN_PYTHON: Final = "drawing the graphic in Python"
 DOWNLOADING_GRAPHIC: Final = "downloading the video"
 CHECKING_GRAPHIC: Final = "checking the video"
+# Render again (GFX-011): the frames of the new video are compared with the earlier one's.
+COMPARING_GRAPHIC_FRAMES: Final = "comparing the frames"
 ADDING_GRAPHIC_VOICE: Final = "adding the voice"
 SAVING_GRAPHIC: Final = "saving the video"
 

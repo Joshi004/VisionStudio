@@ -30,17 +30,20 @@ REQUESTED_SPEC: Final = "lab_graphic_template_spec"
 TEMPLATE_ENGINE_KEYS: Final = ("remotion_templates", "python_templates")
 
 
-async def start(session: AsyncSession, run: LabGraphicRun) -> Job:
+async def start(session: AsyncSession, run: LabGraphicRun, *, again: bool = False) -> Job:
     """Starts the template engines for a run whose brief is ready: one spec job, and a render row
     for each of the two engines that waits for it. Returns the job. No commit. When a spec job
-    already exists for the run's template engines, it is returned and nothing is added.
+    already exists for the run's template engines, it is returned and nothing is added, so
+    **Make all** never makes a second call. With `again` (GFX-011) that check is skipped: a new
+    spec job and a new render row (the next attempt) for each of the two engines are made.
     """
     if run.brief is None or run.resolved is None:
         raise ValueError("The brief is not written yet.")
 
-    existing = await _existing_spec_job(session, run.id)
-    if existing is not None:
-        return existing
+    if not again:
+        existing = await _existing_spec_job(session, run.id)
+        if existing is not None:
+            return existing
 
     job, created = await store.create_job(
         session,

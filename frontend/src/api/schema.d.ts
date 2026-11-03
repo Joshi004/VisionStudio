@@ -2180,6 +2180,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/graphics/runs/{run_id}/engines/{engine}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Engine Again
+         * @description A paid call: asks the model again for one engine of the run, with the same brief, and adds
+         *     a new render (the next attempt) beside the earlier ones. The two template engines share one
+         *     call, so both get a new attempt. 409 while the engine is still working, when it is not built
+         *     or the brief is not written. The answer is the run.
+         */
+        post: operations["ask_engine_again_api_lab_graphics_runs__run_id__engines__engine__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/renders/{render_id}/render-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render Again
+         * @description Free, no model: renders the same input again as a new attempt (`repeat_of` names this
+         *     render) and compares the frames of the two videos (`metrics.repeat`). 409 when the render has
+         *     no video yet or its engine is still working. The answer is the run.
+         */
+        post: operations["render_again_api_lab_graphics_renders__render_id__render_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/graphics/test-cards": {
         parameters: {
             query?: never;
@@ -7155,6 +7200,22 @@ export interface components {
             mood: string;
         };
         /**
+         * GraphicCallOut
+         * @description What the model call that wrote a render's input cost (every attempt of the job added up).
+         */
+        GraphicCallOut: {
+            /** Seconds */
+            seconds: number;
+            /** Attempts */
+            attempts: number;
+            /** Prompt Tokens */
+            prompt_tokens: number | null;
+            /** Completion Tokens */
+            completion_tokens: number | null;
+            /** Reasoning Tokens */
+            reasoning_tokens: number | null;
+        };
+        /**
          * GraphicDerivedOut
          * @description A value code works out from facts.
          */
@@ -7226,6 +7287,7 @@ export interface components {
             /** Input */
             input: unknown | null;
             input_job: components["schemas"]["JobSummary"] | null;
+            input_call: components["schemas"]["GraphicCallOut"] | null;
             /** Repeat Of */
             repeat_of: number | null;
             render_job: components["schemas"]["JobSummary"] | null;
@@ -20101,6 +20163,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_engine_again_api_lab_graphics_runs__run_id__engines__engine__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+                engine: "remotion_templates" | "python_templates" | "remotion_blocks" | "generated_component";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_again_api_lab_graphics_renders__render_id__render_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -1,38 +1,84 @@
-import { Badge, Box, Group, Paper, Stack, Text } from "@mantine/core";
+import { Badge, Button, Group, Loader, Paper, Stack, Text } from "@mantine/core";
 
-import type { GraphicEngine } from "../../api/graphicsLab";
+import { describeError } from "../../api/errors";
+import {
+  useAskEngineAgain,
+  useRenderGraphicAgain,
+  type GraphicEngine,
+  type GraphicRender,
+  type GraphicResolved,
+} from "../../api/graphicsLab";
+import { GraphicsAttemptList } from "./GraphicsAttemptList";
 import { GraphicsBlockScene } from "./GraphicsBlockScene";
 import { GraphicsComponentCode } from "./GraphicsComponentCode";
+import { GraphicsRenderMetrics } from "./GraphicsRenderMetrics";
 import { GraphicsRenderVerdict } from "./GraphicsRenderVerdict";
 import { GraphicsTemplateSpec } from "./GraphicsTemplateSpec";
+import { GraphicsVideoFrame } from "./GraphicsVideoFrame";
+import { renderState } from "./graphicsLabView";
 
-/** The engines that draw from a template spec (GFX-006). */
+/** The engines that draw from a template spec (GFX-006). They share one model call. */
 const TEMPLATE_ENGINES: ReadonlyArray<GraphicEngine["key"]> = [
   "remotion_templates",
   "python_templates",
 ];
 
 type GraphicsEngineCardProps = {
+  runId: number;
   engine: GraphicEngine;
+  /** The attempt the card shows: the newest unless one of the older ones was chosen. */
+  shown: GraphicRender | undefined;
   /** The size of every video of the run, so the empty frame has the video's shape. */
   width: number;
   height: number;
+  resolved: GraphicResolved | null;
+  showSafeArea: boolean;
+  showCaptionArea: boolean;
+  /** The ref callback and the loaded event of this card's video in the synced player. */
+  videoRef: (element: HTMLVideoElement | null) => void;
+  onLoaded: () => void;
+  /** Chooses the attempt to show (null: the newest). */
+  onShow: (renderId: number | null) => void;
 };
 
 /**
- * One of the four engines of a run. An engine that is not built says so. A template engine
- * (GFX-006) shows its spec, or why no template fits, before its renderer exists; the
- * building-blocks engine (GFX-009) shows the blocks of its scene and the layout check; the
- * generated-component engine (GFX-010) shows its code and the browser check; once an engine
- * has a video, its card shows it and the verdict. The full comparison (the four videos played
- * together) is a later phase.
+ * One of the four engines of a run (GFX-011). From the top: where the attempt stands, its video
+ * (played with the others by the playback bar of the run page, with the overlays), what the
+ * engine drew from, what was measured, the verdict and the note, **Ask again** and **Render
+ * again**, and the earlier attempts. An engine that is not built says so.
  */
-export function GraphicsEngineCard({ engine, width, height }: GraphicsEngineCardProps) {
-  // The renders are newest first.
-  const newest = engine.renders[0];
+export function GraphicsEngineCard({
+  runId,
+  engine,
+  shown,
+  width,
+  height,
+  resolved,
+  showSafeArea,
+  showCaptionArea,
+  videoRef,
+  onLoaded,
+  onShow,
+}: GraphicsEngineCardProps) {
+  const askAgain = useAskEngineAgain();
+  const renderAgain = useRenderGraphicAgain();
+  const state = shown !== undefined ? renderState(shown) : null;
+  const isTemplate = TEMPLATE_ENGINES.includes(engine.key);
+  // Any attempt of the engine still being written or drawn stops a new click (the server agrees).
+  const working = engine.renders.some((render) => renderState(render).busy);
+
+  function ask() {
+    askAgain.mutate({ runId, engine: engine.key }, { onSuccess: () => onShow(null) });
+  }
+
+  function repeat() {
+    if (shown !== undefined) {
+      renderAgain.mutate(shown.id, { onSuccess: () => onShow(null) });
+    }
+  }
 
   return (
-    <Paper withBorder p="sm" radius="md">
+    <Paper withBorder p="sm" radius="md" data-engine={engine.key}>
       <Stack gap="xs">
         <Group justify="space-between" gap="xs">
           <Text size="sm" fw={600}>
@@ -50,48 +96,87 @@ export function GraphicsEngineCard({ engine, width, height }: GraphicsEngineCard
           )}
         </Group>
 
-        {newest?.url ? (
-          <video
-            controls
-            preload="metadata"
-            src={newest.url}
-            style={{ width: "100%", aspectRatio: `${width} / ${height}`, background: "black" }}
-          />
-        ) : (
-          <Box
-            style={{
-              aspectRatio: `${width} / ${height}`,
-              border: "1px dashed var(--mantine-color-gray-5)",
-              borderRadius: "var(--mantine-radius-sm)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Text size="xs" c="dimmed" ta="center" px="xs">
-              {engine.built ? "No video yet" : "Not built yet"}
-            </Text>
-          </Box>
+        {state !== null && (
+          <Group gap={6} wrap="nowrap">
+            {state.busy && <Loader size="xs" />}
+            <Badge variant="light" color={state.color} style={{ maxWidth: "100%" }}>
+              {state.label}
+            </Badge>
+          </Group>
         )}
 
-        {newest && (
+        <GraphicsVideoFrame
+          url={shown?.url ?? null}
+          width={width}
+          height={height}
+          resolved={resolved}
+          showSafeArea={showSafeArea}
+          showCaptionArea={showCaptionArea}
+          emptyText={engine.built ? "No video yet" : "Not built yet"}
+          videoRef={videoRef}
+          onLoaded={onLoaded}
+        />
+
+        {shown !== undefined && (
           <>
             <Text size="xs" c="dimmed">
-              Attempt {newest.attempt}
+              Attempt {shown.attempt}
               {engine.renders.length > 1 ? ` of ${engine.renders.length}` : ""}
             </Text>
-            {TEMPLATE_ENGINES.includes(engine.key) && (
-              <GraphicsTemplateSpec render={newest} />
-            )}
-            {engine.key === "remotion_blocks" && <GraphicsBlockScene render={newest} />}
-            {engine.key === "generated_component" && <GraphicsComponentCode render={newest} />}
-            {newest.last_error !== null && (
+            {isTemplate && <GraphicsTemplateSpec render={shown} />}
+            {engine.key === "remotion_blocks" && <GraphicsBlockScene render={shown} />}
+            {engine.key === "generated_component" && <GraphicsComponentCode render={shown} />}
+            <GraphicsRenderMetrics render={shown} />
+            {shown.last_error !== null && (
               <Text size="xs" c="red" style={{ wordBreak: "break-word" }}>
-                {newest.last_error}
+                {shown.last_error}
               </Text>
             )}
-            <GraphicsRenderVerdict key={newest.id} render={newest} />
+            <GraphicsRenderVerdict key={shown.id} render={shown} />
           </>
+        )}
+
+        {engine.built && (
+          <Stack gap={4}>
+            <Group gap="xs">
+              <Button
+                size="compact-xs"
+                variant="default"
+                onClick={ask}
+                loading={askAgain.isPending}
+                disabled={working || resolved === null}
+                title="A paid model call: writes this engine's input again and renders it as a new attempt."
+              >
+                {isTemplate ? "Ask again (both template cards)" : "Ask again"}
+              </Button>
+              <Button
+                size="compact-xs"
+                variant="default"
+                onClick={repeat}
+                loading={renderAgain.isPending}
+                disabled={
+                  working || shown?.url == null || shown.input === null || !engine.renderer_built
+                }
+                title="Free: renders the same input again and compares the frames with this attempt."
+              >
+                Render again
+              </Button>
+            </Group>
+            {askAgain.isError && (
+              <Text size="xs" c="red">
+                {describeError(askAgain.error)}
+              </Text>
+            )}
+            {renderAgain.isError && (
+              <Text size="xs" c="red">
+                {describeError(renderAgain.error)}
+              </Text>
+            )}
+          </Stack>
+        )}
+
+        {shown !== undefined && (
+          <GraphicsAttemptList renders={engine.renders} shownId={shown.id} onShow={onShow} />
         )}
       </Stack>
     </Paper>

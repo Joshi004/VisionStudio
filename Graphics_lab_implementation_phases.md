@@ -131,7 +131,7 @@ Three model calls follow the director call (the template spec serves two engines
 ### 4.2 Runs and renders
 
 - A **run** is one line, one orientation and, optionally, one voice. Its brief and its timing belong to it. **Ask again** on the brief makes a new run with the same line, so a brief never changes under the renders made from it.
-- A **render** is one engine's attempt for a run: its input (spec, scene or code), the job that wrote that input, the render job, the video, its metrics and warnings, and the verdict. **Ask again** on an engine makes a new render for that engine (a new model call). **Render again** makes a new render with the same input and no model call, to check that the result is repeatable (§4.7).
+- A **render** is one engine's attempt for a run: its input (spec, scene or code), the job that wrote that input, the render job, the video, its metrics and warnings, and the verdict. **Ask again** on an engine makes a new render for that engine (a new model call). The two template engines share one spec call, so **Ask again** on either of them makes a new attempt on both. **Render again** makes a new render with the same input and no model call, to check that the result is repeatable (§4.7).
 - The two template engines share one template spec: one call, two renders.
 - States are worked out when read, from the jobs and the stored fields, as in the Audio video lab (`services/av_lab.py`). Only `last_error` is stored.
 
@@ -441,7 +441,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-008 | Python templates | Code | 005, 006 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-009 | Building blocks | Code | 003, 005 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-010 | Generated components | Code | 003, 005 | In Progress (built and checked on the host motion service and a throwaway backend; the owner's rebuild and the live check with the real model are open) |
-| GFX-011 | Comparison view | Code | 003, 005 | Not Started |
+| GFX-011 | Comparison view | Code | 003, 005 | In Progress (built and checked on the host, a throwaway backend and headless Chrome; the owner's rebuild and a look at a live run are open) |
 | GFX-012 | Trial batch and summary | Code | 007, 008, 009, 010, 011 | Not Started |
 | GFX-013 | Owner judges the trial and decides | Manual | 001, 012 | Not Started |
 
@@ -1182,7 +1182,7 @@ What was built:
 
 ### GFX-011 — Comparison view
 
-**Status:** Not Started
+**Status:** In Progress (built and checked on 2026-11-03 on the host motion service, a throwaway backend and headless Chrome; the owner's rebuild of the Docker stack and a look at a live run are open)
 
 **Objective.** The run page becomes the comparison of §4.9: the four videos side by side and in sync, each with its input, metrics, warnings and verdict, plus Ask again and Render again.
 
@@ -1221,12 +1221,37 @@ What was built:
 
 **Completion checklist.**
 
-- [ ] Grid, synced control, overlays
-- [ ] Cards with metrics, input, verdict
-- [ ] Ask again, Render again with frame comparison
-- [ ] Docs, standard checks
+- [x] Grid, synced control, overlays
+- [x] Cards with metrics, input, verdict
+- [x] Ask again, Render again with frame comparison
+- [x] Docs, standard checks (`ruff check` and `ruff format --check`, ESLint, `tsc -b`, the production build and `gen:api` pass; no change to `motion/`)
+- [ ] Look at a live run on the owner's Docker stack after the rebuild (`docker compose up -d --build backend frontend`; there is no migration and the motion service is unchanged)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration, no new setting, no new package, no change to the motion service. The two "Planning decides" items:
+
+- **Keeping the videos in sync: one leader.** The first card that has a video is the leader (`frontend/.../useSyncedVideos.ts`). It is the only video with sound; the others are muted, because every video carries the same voice. While playing, a `requestAnimationFrame` loop reads the leader's `currentTime` and moves any other video that is more than one frame away to that time. A seek or a step pauses every video and sets `currentTime = (frame + 0.5) / 24` on each, in the middle of the frame, so every browser shows exactly that frame. The native controls are gone; the playback bar is the only control. At the end every video pauses, and Play at the end starts again from the first frame.
+- **Where the frame comparison runs: a step of `render_lab_graphic`**, taken when the render row has `repeat_of`. No new job type, so no migration.
+
+**A conflict in this document, and how it was settled.** The GFX-009 and GFX-010 notes say "Ask again makes a new run". That is the run-level **Ask again** of the brief, which is unchanged. The Scope of this phase and §4.2 say that **Ask again** on an engine's card makes a new render for that engine on the same run and brief, and that is what the card's button does. For the two template engines it makes a new attempt on both cards (they share one spec call, G-5), and the button says so.
+
+What was built:
+
+- **Backend.**
+  - `StartFn` (the registry's `start`) takes `again: bool = False`. The three engine `start` modules skip their "this run already has a job" check when it is true and make a new job and a new render row (the next attempt) for each engine they own. **Make all** still passes `False`, so it never makes a second call.
+  - `graphics_lab.ask_engine_again(session, run_id, engine_key)`: 409 when the engine is not built, the brief is not written, or any attempt of the engine (for a template engine: of either template engine) has a waiting or running model call or render. Otherwise it calls `start(..., again=True)` and commits.
+  - `graphics_lab.render_again(session, render_id)`: 409 when the renderer is not built, the render has no video or no input, or the engine has a waiting or running attempt. Otherwise a new row (same run and engine, the next attempt, a copy of `input`, no `input_job_id`, `repeat_of` set) is queued with `queue_render`. A second press while it runs gives 409, not a second row.
+  - `graphics_lab.input_call_of(job)` (pure) turns the input job's `output.calls` and `output.usage` into the seconds, the attempts and the tokens of the model call. A repeat has none.
+  - `ffmpeg.frame_md5s(path)` (`ffmpeg -f framemd5`, the first video stream only, so a voice track does not matter; None when FFmpeg cannot read the file) and `graphics_render.frame_difference(a, b)` (`{frames, differing}`). The job's new step, after the probe and before the voice, notes the phase `comparing the frames` (`phases.COMPARING_GRAPHIC_FRAMES`) and stores `metrics.repeat` as `{of, of_attempt, frames, differing}`. A comparison that cannot be made (the original's file is gone or unreadable) is stored as `{of, of_attempt, compared: false, reason}` with a warning, and the render still succeeds.
+- **API** (`api/graphics_lab.py`): `POST /lab/graphics/runs/{run_id}/engines/{engine}/ask-again` (201, the run; 404, 409, 422 for an unknown engine), `POST /lab/graphics/renders/{render_id}/render-again` (201, the run; 404, 409), and a new field `input_call` on every render (`seconds`, `attempts`, `prompt_tokens`, `completion_tokens`, `reasoning_tokens`). `schema.d.ts` regenerated.
+- **Frontend** (`components/graphicsLab/`): `useSyncedVideos`, `GraphicsPlaybackBar` (sticky below the header: Play or Pause, one frame back and forward, previous and next beat, a slider with a mark on each beat, "Frame f of N, t s", and the two overlay switches), `GraphicsVideoFrame` (the video, and over it the safe area as a dashed box and the caption area as a band, drawn in percent of the video's size from the resolved brief), `GraphicsRenderMetrics`, `GraphicsAttemptList`, and the reworked `GraphicsEngineCard` and `GraphicsRunPage` (which holds the chosen attempt of each engine, so the videos in the sync are the ones shown). Helpers in `graphicsLabView.ts`: `beatFrames`, `formatBytes`, `readMetrics`, `repeatText`, `renderState`, `callText`. Mutations `useAskEngineAgain` and `useRenderGraphicAgain`.
+  - Each card shows, from the top: the state (writing the input, rendering with the job's phase, done, failed, no template fits), the video, the attempt number, the engine's input (as before, folded), the five checks, the render time, size, voice and timing source, the layout problems and untraced numbers, the model call's time, attempts and tokens (or "No model call: the input is the same as attempt N"), the repeat result ("Identical to attempt 2 (all 255 frames)" or "D of M frames differ from attempt N"), the warnings, the error, the verdict and note, **Ask again** and **Render again**, and the list of attempts with **Show** (which puts an older attempt in the card; its video joins the sync and the verdict is its own).
+  - The grid is the one that was there: two by two for landscape, four columns for portrait.
+
+**Checked.** Throwaway scripts in `/tmp` (not kept) on the host: the motion service from the host, a throwaway backend with `DATA_DIR` in `/tmp`, a stand-in model server answering the brief, spec, scene and component of excerpt 1 (no paid call), and headless Google Chrome (Playwright) on the built frontend. The real database and the Docker stack were not touched.
+
+- **Ask again.** On `remotion_blocks`: a new attempt beside the old one (both listed), one scene job (two model calls, as for Make all: the layout ask); a second press while it worked gave 409 with the reason. On `python_templates`: one spec call gave both template engines attempt 2 from the same spec job, and the old attempts stayed. An unknown engine gave 422, an unknown run and an unknown render 404.
+- **Render again.** On all four engines (`remotion_templates`, `python_templates`, `remotion_blocks`, `generated_component`) the new attempt had `repeat_of` set, the same input, no input job and no model call, and `metrics.repeat` was `{frames: 255, differing: 0}`: identical. A second press while it worked gave 409. With the original's file moved away, the new render still succeeded with `compared: false`, the reason and a warning.
+- **In the browser** (landscape run with all four videos): the four videos had the same frame after playing and pausing (spread 0 s), after a seek to the middle, after a step forward twice and back once, after the next and previous beat, and everything was paused at the end of the clip; only the first video was unmuted. The overlays: the safe area box was 5 percent from each edge (0.050, 0.050, 0.900, 0.900 of the video) and the caption band `top 0.8129, height 0.1296` of the height, which is 878 to 1018 of 1080 (`caption_zone`). A verdict and a note were still there after a reload. The attempts list showed all attempts with "repeat of" and **Show**.
 
 ### GFX-012 — Trial batch and summary
 
@@ -1359,3 +1384,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-03 | GFX-007 | In Progress | Remotion templates built: the `Templates` composition draws the five templates and their variants, the four backgrounds, the beat motion and the number count-up from the spec of GFX-006; `remotion_templates` has `renderer_built`; the exact layout is written into §4.5.1 for GFX-008. Checked on the host motion service (excerpts 1, 2, 3, 5, 7, 9 and 10, both orientations) and through a throwaway backend with a stand-in model server; the owner's rebuild and the live check are open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-008 | In Progress | Python templates built: `services/graphics_python/` draws the five templates, their variants, the four backgrounds and the beat motion with Pillow at 3x supersampling, in a child process that pipes raw frames into FFmpeg with Remotion's encoding and colour arguments; `python_templates` has `renderer_built`. Checked on 88 videos on the host (frames, beats, caption area, identical frames on render again), and through a throwaway backend with a stand-in model server (Python row 2.3 s against Remotion's 6.7 s; the API answered within 18 ms during the render). The owner's rebuild and the live check are open. Differences from Remotion are in the completion notes. |
 | 2026-11-03 | GFX-009 | In Progress | Building blocks built: ten blocks and their effects on a 12 x 12 grid (`motion/src/blocks/`), `POST /layout` that measures texts in the browser, the scene checks, the scene writer, job `write_lab_graphic_block_scene` with one layout ask (up to 3 attempts), `remotion_blocks` marked built, the block card. Checked on the host motion service and a throwaway backend with a stand-in model; the owner's rebuild and the live check with the real model are open. |
+| 2026-11-03 | GFX-011 | In Progress | Comparison view built: one playback bar plays, pauses, steps and seeks all four videos in sync (a leader video, the others follow), safe-area and caption-area overlays, cards with metrics, the model call's cost, warnings, input, verdict and the list of attempts, **Ask again** on one engine (a new attempt; both template cards for the template engines) and **Render again** (same input, no model call, frames compared with `framemd5` as a step of `render_lab_graphic`, `metrics.repeat`). Checked on the host, a throwaway backend with a stand-in model and headless Chrome; the owner's rebuild and a look at a live run are open. |

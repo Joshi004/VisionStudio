@@ -264,6 +264,42 @@ async def decode_problem(path: Path, *, timeout_s: float = 300.0) -> str | None:
     return first_line[:200] or f"ffmpeg exited with code {result.returncode}."
 
 
+async def frame_md5s(path: Path, *, timeout_s: float = 120.0) -> list[str] | None:
+    """The MD5 of every decoded frame of the first video stream, in order (`-f framemd5`). Two
+    videos have the same pictures when their lists are equal; a sound track does not matter,
+    because only the video stream is read. Returns None when FFmpeg cannot read the file or
+    cannot run. Never raises. (The Graphics lab's Render again compares two files with it.)
+    """
+    args = [
+        "-v",
+        "error",
+        "-nostdin",
+        "-i",
+        file_input(path),
+        "-map",
+        "0:v:0",
+        "-f",
+        "framemd5",
+        "-",
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not hash the frames of a clip: %s", exc)
+        return None
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")[:_STDERR_LOG_CHARS]
+        _logger.info("ffmpeg framemd5 exit code %s: %s", result.returncode, stderr.strip())
+        return None
+    hashes: list[str] = []
+    for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        # `stream, dts, pts, duration, size, md5`
+        hashes.append(line.rsplit(",", 1)[-1].strip())
+    return hashes
+
+
 async def extract_frame(
     clip: Path, frame_index: int, destination: Path, *, timeout_s: float = 120.0
 ) -> str | None:

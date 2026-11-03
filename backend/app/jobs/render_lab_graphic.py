@@ -135,6 +135,8 @@ class RenderLabGraphicHandler(JobHandler):
             probe, width=plan.width, height=plan.height, fps=plan.fps, frames=plan.frames
         )
 
+        repeat, repeat_warnings = await self._compare_with_original(job_id, plan, storage, video)
+
         final = video
         if plan.voice_path is not None:
             await phase_writer.note(job_id, phases.ADDING_GRAPHIC_VOICE)
@@ -182,7 +184,50 @@ class RenderLabGraphicHandler(JobHandler):
         untraced = graphics_render.component_warnings(plan.input)
         if plan.engine == "generated_component":
             metrics["untraced_numbers"] = len(untraced)
-        await _save(job_id, plan, stored.relative_path, metrics, problems + untraced + warnings)
+        if repeat is not None:
+            metrics["repeat"] = repeat
+        await _save(
+            job_id,
+            plan,
+            stored.relative_path,
+            metrics,
+            problems + untraced + warnings + repeat_warnings,
+        )
+
+    async def _compare_with_original(
+        self, job_id: int, plan: _Plan, storage: Storage, video: Path
+    ) -> tuple[dict[str, Any] | None, list[str]]:
+        """Render again (§4.7): compares the decoded frames of the new video with those of the
+        render it repeats, with `ffmpeg -f framemd5`. Returns `metrics.repeat` and the warnings
+        to add, or (None, []) for a render that repeats nothing. A comparison that cannot be made
+        (the original's file is gone, FFmpeg cannot read a file) is recorded as not compared,
+        with a warning; it never fails the render.
+        """
+        if plan.repeat_of is None:
+            return None, []
+        await phase_writer.note(job_id, phases.COMPARING_GRAPHIC_FRAMES)
+        of_attempt = plan.repeat_attempt
+        reason: str | None = None
+        if plan.repeat_path is None:
+            reason = "the video it repeats is gone"
+        else:
+            original = storage.get_path(plan.repeat_path)
+            first = await ffmpeg.frame_md5s(original) if original.exists() else None
+            second = await ffmpeg.frame_md5s(video)
+            if first is None:
+                reason = "the video it repeats could not be read"
+            elif second is None:
+                reason = "the new video could not be read"
+            else:
+                counts = graphics_render.frame_difference(first, second)
+                return {"of": plan.repeat_of, "of_attempt": of_attempt, **counts}, []
+        message = f"The frames were not compared with attempt {of_attempt}: {reason}."
+        return {
+            "of": plan.repeat_of,
+            "of_attempt": of_attempt,
+            "compared": False,
+            "reason": reason,
+        }, [message]
 
     async def _draw_in_motion(
         self, job_id: int, base_url: str, body: dict[str, Any], dest: Path
@@ -232,6 +277,11 @@ class _Plan:
     # The render row of a run, or None for the test card (then `orientation` is set).
     render_id: int | None
     orientation: str | None
+    # Render again (GFX-011): the render this one repeats, its attempt and its stored video (None
+    # when the file is gone). All None for any other render.
+    repeat_of: int | None = None
+    repeat_attempt: int | None = None
+    repeat_path: str | None = None
 
 
 async def _plan(recorded: dict[str, Any]) -> _Plan:
@@ -274,6 +324,11 @@ async def _plan(recorded: dict[str, Any]) -> _Plan:
         voice_path = await graphics_lab.voice_audio_of(session, run)
         if run.speech_run_id is not None and voice_path is None:
             raise RenderFailed("The run's speech has no file, so the voice cannot be added.")
+        original = (
+            await session.get(LabGraphicRender, render.repeat_of)
+            if render.repeat_of is not None
+            else None
+        )
         plan = _Plan(
             engine=render.engine,
             width=int(resolved["width"]),
@@ -287,6 +342,9 @@ async def _plan(recorded: dict[str, Any]) -> _Plan:
             timing_source=resolved.get("timing_source"),
             render_id=render_id,
             orientation=run.orientation,
+            repeat_of=render.repeat_of,
+            repeat_attempt=original.attempt if original is not None else None,
+            repeat_path=original.media_path if original is not None else None,
         )
         await session.commit()
     return plan

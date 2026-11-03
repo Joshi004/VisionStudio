@@ -28,17 +28,19 @@ REQUESTED_COMPONENT: Final = "lab_graphic_component"
 ENGINE_KEY: Final = "generated_component"
 
 
-async def start(session: AsyncSession, run: LabGraphicRun) -> Job:
+async def start(session: AsyncSession, run: LabGraphicRun, *, again: bool = False) -> Job:
     """Starts the generated-component engine for a run whose brief is ready: one component job,
     and a render row that waits for it. Returns the job. No commit. When the run already has a
-    component job, it is returned and nothing is added.
+    component job, it is returned and nothing is added. With `again` (GFX-011) that check is
+    skipped: a new component job and a new render row (the next attempt) are made.
     """
     if run.brief is None or run.resolved is None:
         raise ValueError("The brief is not written yet.")
 
-    existing = await _existing_component_job(session, run.id)
-    if existing is not None:
-        return existing
+    if not again:
+        existing = await _existing_component_job(session, run.id)
+        if existing is not None:
+            return existing
 
     job, created = await store.create_job(
         session,

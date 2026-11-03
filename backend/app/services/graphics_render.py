@@ -178,6 +178,20 @@ def component_warnings(input: Any) -> list[str]:
     return warnings
 
 
+def frame_difference(first: list[str], second: list[str]) -> dict[str, int]:
+    """How two videos' frame hashes (`ffmpeg.frame_md5s`) differ (§4.7): `frames` is the length of
+    the longer list and `differing` the number of positions where the hashes are not equal or one
+    video has no frame. Equal lists give `differing` 0, which the card shows as "identical".
+    """
+    frames = max(len(first), len(second))
+    differing = sum(
+        1
+        for index in range(frames)
+        if index >= len(first) or index >= len(second) or first[index] != second[index]
+    )
+    return {"frames": frames, "differing": differing}
+
+
 def check_probe(
     probe: VideoProbe, *, width: int, height: int, fps: int, frames: int
 ) -> tuple[dict[str, bool], list[str]]:

@@ -31,9 +31,9 @@ This module imports nothing that calls a model, a renderer or the GPU server.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Final, Literal, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,7 +48,16 @@ EngineKey = Literal[
     "remotion_templates", "python_templates", "remotion_blocks", "generated_component"
 ]
 
-StartFn = Callable[[AsyncSession, LabGraphicRun], Awaitable[Job]]
+
+class StartFn(Protocol):
+    """`start(session, run)`, or `start(session, run, again=True)` for **Ask again** on one engine
+    (GFX-011): the engine then makes a new model call and a new render row even though the run
+    already has one.
+    """
+
+    def __call__(
+        self, session: AsyncSession, run: LabGraphicRun, *, again: bool = False
+    ) -> Awaitable[Job]: ...
 
 
 @dataclass(frozen=True)

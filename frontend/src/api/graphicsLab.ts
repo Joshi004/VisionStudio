@@ -167,7 +167,7 @@ function unwrapClick(result: ClickResult, failed: string): GraphicRun {
  * The paid clicks of the director call (GFX-003). Each starts a model call and nothing else
  * runs it, so a button calls one of these only from a click. The runs are read again afterwards.
  */
-function useBriefClick(send: (runId: number) => Promise<GraphicRun>) {
+function useBriefClick<Argument = number>(send: (argument: Argument) => Promise<GraphicRun>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: send,
@@ -207,6 +207,38 @@ export function useAskGraphicsAgain() {
         params: { path: { run_id: runId } },
       }),
       "The new run was not made",
+    ),
+  );
+}
+
+export type GraphicEngineKey = GraphicEngine["key"];
+
+/**
+ * Asks the model again for one engine of a run (GFX-011): a paid call that adds a new attempt
+ * beside the earlier ones. The two template engines share one call, so both get a new attempt.
+ */
+export function useAskEngineAgain() {
+  return useBriefClick(async (input: { runId: number; engine: GraphicEngineKey }) =>
+    unwrapClick(
+      await api.POST("/api/lab/graphics/runs/{run_id}/engines/{engine}/ask-again", {
+        params: { path: { run_id: input.runId, engine: input.engine } },
+      }),
+      "The engine was not asked again",
+    ),
+  );
+}
+
+/**
+ * Renders the same input again as a new attempt (GFX-011). It is free: no model is called. The
+ * job compares the frames of the two videos.
+ */
+export function useRenderGraphicAgain() {
+  return useBriefClick(async (renderId: number) =>
+    unwrapClick(
+      await api.POST("/api/lab/graphics/renders/{render_id}/render-again", {
+        params: { path: { render_id: renderId } },
+      }),
+      "The render was not started again",
     ),
   );
 }

@@ -19,6 +19,11 @@ then starts every engine that is built, and `POST .../runs/{id}/ask-again` makes
 the same line and writes its brief. A run's `brief` is what the director decided, and `resolved`
 is what code worked out from it (§4.3 and §4.4 of `Graphics_lab_implementation_phases.md`).
 
+The comparison view (GFX-011) adds two clicks on one engine: `POST .../runs/{id}/engines/{engine}/
+ask-again` asks the model again for that engine (a paid call, a new attempt), and `POST
+.../renders/{id}/render-again` renders the same input again with no model call and compares the
+frames of the two videos.
+
 The **test card** (GFX-005) proves the motion service and the render job: `POST .../test-cards`
 renders a card of a chosen orientation and length, and `GET .../test-cards/newest` answers the
 newest one and the video of the newest that succeeded. It belongs to no run and costs nothing;
@@ -231,6 +236,17 @@ class GraphicRenderUpdate(BaseModel):
     note: StrictStr | None = None
 
 
+class GraphicCallOut(BaseModel):
+    """What the model call that wrote a render's input cost (every attempt of the job added up)."""
+
+    seconds: float
+    attempts: int
+    # None when the model did not report the count.
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    reasoning_tokens: int | None
+
+
 class GraphicRenderOut(BaseModel):
     id: int
     created_at: datetime
@@ -242,6 +258,9 @@ class GraphicRenderOut(BaseModel):
     # the model call that wrote it. None until then.
     input: Any | None
     input_job: JobSummary | None
+    # The time, attempts and tokens of that call. None while it has none, and for a render made by
+    # Render again, which asks no model.
+    input_call: GraphicCallOut | None
     # The render this one repeats with the same input and no model call, if it does.
     repeat_of: int | None
     render_job: JobSummary | None
@@ -330,6 +349,7 @@ def _job_out(job: Job | None) -> JobSummary | None:
 
 def render_out(row: graphics_lab.RenderRow) -> GraphicRenderOut:
     render = row.render
+    call = graphics_lab.input_call_of(row.input_job)
     return GraphicRenderOut(
         id=render.id,
         created_at=render.created_at,
@@ -338,6 +358,17 @@ def render_out(row: graphics_lab.RenderRow) -> GraphicRenderOut:
         attempt=render.attempt,
         input=render.input,
         input_job=_job_out(row.input_job),
+        input_call=(
+            GraphicCallOut(
+                seconds=call.seconds,
+                attempts=call.attempts,
+                prompt_tokens=call.prompt_tokens,
+                completion_tokens=call.completion_tokens,
+                reasoning_tokens=call.reasoning_tokens,
+            )
+            if call is not None
+            else None
+        ),
         repeat_of=render.repeat_of,
         render_job=_job_out(row.render_job),
         url=media_url(render.media_path) if render.media_path is not None else None,
@@ -531,6 +562,55 @@ async def ask_again(run_id: int, session: SessionDep) -> GraphicRunOut:
     was asked on is not changed. The answer is the new run.
     """
     return await _brief_click(session, run_id, graphics_lab.ask_again)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/engines/{engine}/ask-again",
+    response_model=GraphicRunOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_NOT_FOUND, **_CONFLICT},
+)
+async def ask_engine_again(run_id: int, engine: EngineKey, session: SessionDep) -> GraphicRunOut:
+    """A paid call: asks the model again for one engine of the run, with the same brief, and adds
+    a new render (the next attempt) beside the earlier ones. The two template engines share one
+    call, so both get a new attempt. 409 while the engine is still working, when it is not built
+    or the brief is not written. The answer is the run.
+    """
+    try:
+        row = (
+            await graphics_lab.ask_engine_again(session, run_id, engine)
+            if 1 <= run_id <= _MAX_ID
+            else None
+        )
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
+    return run_out(row)
+
+
+@router.post(
+    "/lab/graphics/renders/{render_id}/render-again",
+    response_model=GraphicRunOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_NOT_FOUND, **_CONFLICT},
+)
+async def render_again(render_id: int, session: SessionDep) -> GraphicRunOut:
+    """Free, no model: renders the same input again as a new attempt (`repeat_of` names this
+    render) and compares the frames of the two videos (`metrics.repeat`). 409 when the render has
+    no video yet or its engine is still working. The answer is the run.
+    """
+    try:
+        row = (
+            await graphics_lab.render_again(session, render_id)
+            if 1 <= render_id <= _MAX_ID
+            else None
+        )
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Render {render_id} does not exist.")
+    return run_out(row)
 
 
 def test_card_out(newest: Job | None, stored: Job | None) -> GraphicTestCardOut:

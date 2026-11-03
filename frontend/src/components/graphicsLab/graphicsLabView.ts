@@ -1,10 +1,13 @@
 import type {
   GraphicBrief,
   GraphicOrientation,
+  GraphicRender,
+  GraphicResolved,
   GraphicRunCreate,
   GraphicRunState,
   GraphicVoiceStage,
 } from "../../api/graphicsLab";
+import { isJobActive } from "../../api/polling";
 
 /** The longest line the lab takes. The server stays the judge; the form only says so early. */
 export const LINE_MAX_CHARS = 300;
@@ -237,4 +240,163 @@ export function readComponentInput(input: unknown): ComponentInput | null {
     warnings: texts(warnings),
     askedAgain: asked_again === true,
   };
+}
+
+// --- The comparison view (GFX-011) -----------------------------------------------------------
+
+/** The frames where a beat arrives, once each and in order (the marks of the playback bar). */
+export function beatFrames(resolved: GraphicResolved | null): number[] {
+  if (resolved === null) {
+    return [];
+  }
+  const frames = Object.values(resolved.beats).map((beat) => beat.frame);
+  return [...new Set(frames)].sort((a, b) => a - b);
+}
+
+/** A size in bytes as "86 KB" or "1.2 MB". */
+export function formatBytes(bytes: number): string {
+  return bytes < 1024 * 1024
+    ? `${(bytes / 1024).toFixed(0)} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** The five checks the backend makes on every video (`metrics.checks`), in this order. */
+export const CHECK_LABELS: Record<string, string> = {
+  frames: "Frames",
+  size: "Size",
+  fps: "Frame rate",
+  codec: "Codec",
+  pix_fmt: "Pixel format",
+};
+
+/** What Render again found when it compared the frames with the render it repeated (§4.7). */
+export type RepeatResult =
+  | { kind: "compared"; ofAttempt: number | null; frames: number; differing: number }
+  | { kind: "not_compared"; ofAttempt: number | null; reason: string };
+
+/** `metrics` of a render, read safely: any part that is missing is null or empty. */
+export type RenderMetrics = {
+  /** Each check that was made, with whether the video came out as asked. */
+  checks: [key: string, ok: boolean][];
+  renderSeconds: number | null;
+  sizeBytes: number | null;
+  frames: number | null;
+  timingSource: string | null;
+  voice: boolean | null;
+  layoutProblems: number | null;
+  /** Only the generated component counts them. */
+  untracedNumbers: number | null;
+  repeat: RepeatResult | null;
+};
+
+function numberOf(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function readMetrics(metrics: unknown): RenderMetrics | null {
+  if (typeof metrics !== "object" || metrics === null) {
+    return null;
+  }
+  const record = metrics as Record<string, unknown>;
+  const checks = (typeof record["checks"] === "object" && record["checks"] !== null
+    ? record["checks"]
+    : {}) as Record<string, unknown>;
+  let repeat: RepeatResult | null = null;
+  const raw = record["repeat"];
+  if (typeof raw === "object" && raw !== null) {
+    const found = raw as Record<string, unknown>;
+    const ofAttempt = numberOf(found["of_attempt"]);
+    const frames = numberOf(found["frames"]);
+    const differing = numberOf(found["differing"]);
+    if (frames !== null && differing !== null) {
+      repeat = { kind: "compared", ofAttempt, frames, differing };
+    } else {
+      const reason = found["reason"];
+      repeat = {
+        kind: "not_compared",
+        ofAttempt,
+        reason: typeof reason === "string" ? reason : "no reason was given",
+      };
+    }
+  }
+  return {
+    checks: Object.keys(CHECK_LABELS).flatMap((key) =>
+      typeof checks[key] === "boolean" ? [[key, checks[key] as boolean] as [string, boolean]] : [],
+    ),
+    renderSeconds: numberOf(record["render_s"]),
+    sizeBytes: numberOf(record["size_bytes"]),
+    frames: numberOf(record["frames"]),
+    timingSource: typeof record["timing_source"] === "string" ? record["timing_source"] : null,
+    voice: typeof record["voice"] === "boolean" ? record["voice"] : null,
+    layoutProblems: numberOf(record["layout_problems"]),
+    untracedNumbers: numberOf(record["untraced_numbers"]),
+    repeat,
+  };
+}
+
+/** "Identical to attempt 1" or "2 of 255 frames differ from attempt 1", in words. */
+export function repeatText(repeat: RepeatResult): string {
+  const of = repeat.ofAttempt !== null ? `attempt ${repeat.ofAttempt}` : "the earlier render";
+  if (repeat.kind === "not_compared") {
+    return `Not compared with ${of}: ${repeat.reason}.`;
+  }
+  return repeat.differing === 0
+    ? `Identical to ${of} (all ${repeat.frames} frames)`
+    : `${repeat.differing} of ${repeat.frames} frames differ from ${of}`;
+}
+
+/** Where one render stands: a short label, a colour for it, and whether something is running. */
+export type RenderState = {
+  label: string;
+  color: "gray" | "blue" | "green" | "red" | "yellow";
+  busy: boolean;
+};
+
+export function renderState(render: GraphicRender): RenderState {
+  if (isJobActive(render.input_job)) {
+    const phase = render.input_job?.phase;
+    return { label: `Writing the input${phase ? `: ${phase}` : ""}`, color: "blue", busy: true };
+  }
+  if (isJobActive(render.render_job)) {
+    const phase = render.render_job?.phase;
+    return { label: `Rendering${phase ? `: ${phase}` : ""}`, color: "blue", busy: true };
+  }
+  if (render.url !== null) {
+    return { label: "Done", color: "green", busy: false };
+  }
+  if (render.last_error !== null) {
+    return { label: "Failed", color: "red", busy: false };
+  }
+  if (readTemplateInput(render.input)?.kind === "no_fit") {
+    return { label: "No template fits", color: "yellow", busy: false };
+  }
+  if (render.input_job?.status === "failed" || render.render_job?.status === "failed") {
+    return { label: "Failed", color: "red", busy: false };
+  }
+  return { label: "No video yet", color: "gray", busy: false };
+}
+
+/**
+ * The model call that wrote a render's input, in words ("41.2 s, 2 attempts, tokens: 9,120 in,
+ * 6,500 out, 3,000 reasoning"). A count the model did not report is left out.
+ */
+export function callText(call: NonNullable<GraphicRender["input_call"]>): string {
+  const parts = [
+    `${call.seconds.toFixed(1)} s`,
+    `${call.attempts} ${call.attempts === 1 ? "attempt" : "attempts"}`,
+  ];
+  const counts: string[] = [];
+  if (call.prompt_tokens !== null) {
+    counts.push(`${call.prompt_tokens.toLocaleString("en-US")} in`);
+  }
+  if (call.completion_tokens !== null) {
+    counts.push(`${call.completion_tokens.toLocaleString("en-US")} out`);
+  }
+  if (call.reasoning_tokens !== null) {
+    counts.push(`${call.reasoning_tokens.toLocaleString("en-US")} reasoning`);
+  }
+  if (counts.length > 0) {
+    parts.push(`tokens: ${counts.join(", ")}`);
+  }
+  return parts.join(", ");
 }

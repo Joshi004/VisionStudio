@@ -46,6 +46,7 @@ from app.services import (
     graphics_engines,
     graphics_render,
     graphics_resolve,
+    graphics_template_engine,
     library_deletion,
     projects,
     voice_lab,
@@ -518,6 +519,144 @@ async def update_render(
         render.note = text or None
     await session.commit()
     return (await _render_rows(session, [render]))[0]
+
+
+# --- Ask again and Render again on one engine (GFX-011) ---------------------------------------
+
+
+@dataclass(frozen=True)
+class InputCall:
+    """What the model call that wrote a render's input cost. Tokens are None when not reported."""
+
+    seconds: float
+    attempts: int
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    reasoning_tokens: int | None
+
+
+def input_call_of(job: Job | None) -> InputCall | None:
+    """The time, attempts and tokens of the model calls of an input job, read from its `output`
+    (`calls`, each with its `attempts`, and the summed `usage`). None when the job has no output
+    or made no call. A render that repeats another has no input job, so it has none.
+    """
+    if job is None or not isinstance(job.output, dict):
+        return None
+    calls = job.output.get("calls")
+    if not isinstance(calls, dict):
+        return None
+    seconds = 0.0
+    attempts = 0
+    for call in calls.values():
+        made = call.get("attempts") if isinstance(call, dict) else None
+        if not isinstance(made, list):
+            continue
+        for attempt in made:
+            attempts += 1
+            elapsed = attempt.get("elapsed_s") if isinstance(attempt, dict) else None
+            if isinstance(elapsed, int | float):
+                seconds += float(elapsed)
+    if attempts == 0:
+        return None
+    usage = job.output.get("usage")
+    counts = usage if isinstance(usage, dict) else {}
+
+    def count(key: str) -> int | None:
+        value = counts.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    return InputCall(
+        seconds=round(seconds, 1),
+        attempts=attempts,
+        prompt_tokens=count("prompt_tokens"),
+        completion_tokens=count("completion_tokens"),
+        reasoning_tokens=count("reasoning_tokens"),
+    )
+
+
+def _is_working(row: RenderRow) -> bool:
+    """True while the model call or the render of the row is waiting or running."""
+    return any(
+        job is not None and job.status in store.ACTIVE_STATUSES
+        for job in (row.input_job, row.render_job)
+    )
+
+
+async def ask_engine_again(session: AsyncSession, run_id: int, engine_key: str) -> RunRow | None:
+    """**Ask again** on one engine: a new model call for it, on the same run and brief, and a new
+    render row (the next attempt) that the earlier ones are kept beside. None when the run does
+    not exist. Commits. The two template engines share one spec call, so asking again on either
+    gives both a new attempt.
+
+    Raises GraphicsLabConflictError when the engine is not built, the brief is not written, or the
+    engine is still working (its call or a render of it is waiting or running).
+    """
+    row = await get_run(session, run_id)
+    if row is None:
+        return None
+    engine = graphics_engines.ENGINES.get(engine_key)
+    if engine is None or engine.start is None:
+        raise GraphicsLabConflictError("This engine is not built yet.")
+    if row.run.brief is None or row.run.resolved is None:
+        raise GraphicsLabConflictError("The brief is not written yet.")
+    group = (
+        graphics_template_engine.TEMPLATE_ENGINE_KEYS
+        if engine_key in graphics_template_engine.TEMPLATE_ENGINE_KEYS
+        else (engine_key,)
+    )
+    if any(_is_working(r) for r in row.renders if r.render.engine in group):
+        raise GraphicsLabConflictError("This engine is still working. Ask again when it is done.")
+    try:
+        await engine.start(session, row.run, again=True)
+        await session.commit()
+    except ValueError as exc:
+        await session.rollback()
+        raise GraphicsLabConflictError(str(exc)) from exc
+    _logger.info("lab graphic run %d: %s asked again", run_id, engine_key)
+    return await get_run(session, run_id)
+
+
+async def render_again(session: AsyncSession, render_id: int) -> RunRow | None:
+    """**Render again**: a new render row of the same run and engine with a copy of the render's
+    input and no model call (`repeat_of` names the original), and its render queued. The job
+    compares the frames of the two videos (`metrics.repeat`). None when the render does not
+    exist. Commits. The answer is the run.
+
+    Raises GraphicsLabConflictError when the engine's renderer is not built, the render has no
+    video yet, or a render of this engine of the run is still waiting or running.
+    """
+    original = await session.get(LabGraphicRender, render_id)
+    if original is None:
+        return None
+    engine = graphics_engines.ENGINES.get(original.engine)  # type: ignore[arg-type]
+    if engine is None or not engine.renderer_built:
+        raise GraphicsLabConflictError("The renderer of this engine is not built yet.")
+    if original.media_path is None or original.input is None:
+        raise GraphicsLabConflictError("This render has no video yet, so nothing to repeat.")
+    row = await get_run(session, original.run_id)
+    if row is None:
+        return None
+    if any(_is_working(r) for r in row.renders if r.render.engine == original.engine):
+        raise GraphicsLabConflictError("This engine is still working. Try again when it is done.")
+    newest = await session.scalar(
+        select(func.max(LabGraphicRender.attempt)).where(
+            LabGraphicRender.run_id == original.run_id,
+            LabGraphicRender.engine == original.engine,
+        )
+    )
+    repeat = LabGraphicRender(
+        run_id=original.run_id,
+        engine=original.engine,
+        attempt=(newest or 0) + 1,
+        input=original.input,
+        repeat_of=original.id,
+    )
+    session.add(repeat)
+    await session.flush()
+    await queue_render(session, repeat)
+    await session.commit()
+    _logger.info("lab graphic render %d: render again as render %d", original.id, repeat.id)
+    return await get_run(session, original.run_id)
 
 
 # --- The director call (GFX-003) --------------------------------------------------------------
