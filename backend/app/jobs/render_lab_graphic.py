@@ -3,8 +3,8 @@
 One job type makes every engine's video, and the test card of the Graphics tab:
 
 1. It sends the work to the engine's renderer: the motion service for the three Remotion engines
-   (and the test card), or the Python renderer for `python_templates` (GFX-008 sets
-   `graphics_render.python_renderer`; until then the job says it is not built yet).
+   (and the test card), or the Python renderer for `python_templates` (GFX-008,
+   `services/graphics_python`, set as `graphics_render.python_renderer` below).
 2. It downloads the file and checks it with `ffprobe`: the exact frame count, the size, 24 frames
    a second, H.264 and `yuv420p`. A check that fails is a warning on the render, not a failure, so
    the trial can count it (§4.9). A file that cannot be read at all fails the job.
@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+import PIL
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
@@ -40,11 +41,15 @@ from app.jobs import phase_writer, phases, store
 from app.jobs.handlers import JobHandler
 from app.jobs.render_story import RenderFailed, run_ffmpeg
 from app.providers import motion_renderer
-from app.services import av_lab_render, ffmpeg, graphics_lab, graphics_render
+from app.services import av_lab_render, ffmpeg, graphics_lab, graphics_python, graphics_render
 from app.services.ffmpeg import VideoProbe
 from app.services.storage import Storage, StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
+
+# The Python renderer of `python_templates` (GFX-008). The hook is set here, its only reader,
+# because `graphics_python` imports `graphics_render` and the other way round would be a cycle.
+graphics_render.python_renderer = graphics_python.render
 
 JOB_TYPE: Final = "render_lab_graphic"
 POLL_INTERVAL_S: Final = 1.0
@@ -102,6 +107,8 @@ class RenderLabGraphicHandler(JobHandler):
                 base_url = await settings_service.get_str(session, settings_service.MOTION_URL_KEY)
             health = await motion_renderer.health(base_url)
             versions = {"remotion": health.get("remotion"), "chrome": health.get("chrome")}
+        else:
+            versions = {"pillow": PIL.__version__}
 
         video = storage.new_temp_path("mp4")
         temp_paths.append(video)
@@ -192,7 +199,10 @@ class RenderLabGraphicHandler(JobHandler):
             raise RenderFailed("The Python renderer is not built yet (GFX-008).")
         await phase_writer.note(job_id, phases.DRAWING_GRAPHIC_IN_PYTHON)
         started = time.monotonic()
-        await renderer(body, dest)
+        try:
+            await renderer(body, dest)
+        except graphics_render.PythonRenderFailed as exc:
+            raise RenderFailed(str(exc)) from exc
         return round(time.monotonic() - started, 3)
 
 

@@ -435,7 +435,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-005 | Motion service and the render job | Code | 002 | In Progress (built and checked; the owner's rebuild and click on the Docker stack is open) |
 | GFX-006 | Template catalogue and the template-spec call | Code | 003 | In Progress (built and checked; the live check with the real model is open) |
 | GFX-007 | Remotion templates | Code | 005, 006 | In Progress (built and checked on the host motion service and a throwaway backend; the owner's rebuild and the live check with the real model are open) |
-| GFX-008 | Python templates | Code | 005, 006 | Not Started |
+| GFX-008 | Python templates | Code | 005, 006 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-009 | Building blocks | Code | 003, 005 | Not Started |
 | GFX-010 | Generated components | Code | 003, 005 | Not Started |
 | GFX-011 | Comparison view | Code | 003, 005 | Not Started |
@@ -930,7 +930,7 @@ What was built (`motion/src/templates/`):
 
 ### GFX-008 — Python templates
 
-**Status:** Not Started
+**Status:** In Progress (built and checked on 2026-11-03 on the host and on a throwaway backend; the owner's rebuild of the Docker stack and the live check with the real model are open)
 
 **Objective.** The backend draws the same five templates from the same template spec, following the same look rules, frame by frame into FFmpeg, so Remotion and Python can be compared on identical input.
 
@@ -964,10 +964,43 @@ What was built (`motion/src/templates/`):
 
 **Completion checklist.**
 
-- [ ] Five templates in Python, FFmpeg pipe, same encoding
-- [ ] Off the event loop, registry, docs, standard checks
+- [x] Five templates in Python, FFmpeg pipe, same encoding
+- [x] Off the event loop, registry, docs, standard checks (`ruff check` and `ruff format --check` pass; no API, frontend or migration change, so no `gen:api`)
+- [ ] Live check: Make all on excerpts 1, 2, 3, 5 and 9 with the real model, then compare the Python and Remotion template cards (paid calls, owner's click)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration, no new setting, no API or frontend change, no new package (Pillow and NumPy were already installed). The "Planning decides" items:
+
+- **Drawing library: Pillow with 3x supersampling.** Each frame is drawn at three times its size and reduced with a box filter. `skia-python` and `pycairo` were not needed: Pillow is already in the image and, with the raqm layout, it draws the two font files of G-11 as the browser does. Shapes and text are drawn on an RGB image with `ImageDraw` in RGBA mode, so transparency blends as in CSS. A part that fades or slides is drawn on a copy of the frame and blended back.
+- **Process, not thread.** The backend runs `python -m app.services.graphics_python <dest>` as a child process (`nice -n 10`) and sends the render body as JSON on its standard input; the child writes raw `rgb24` frames into FFmpeg. The API process only waits (`asyncio`), so a render cannot hold up a request. The time limit is the body's `time_limit_s`; on a timeout or a cancel the child is killed. Exit code 2 means "the template cannot be drawn" and the last line of its error output becomes the card's message; any other failure reports the tail of the output.
+- **Colour conversion.** FFmpeg gets the same arguments that Remotion 4.0.540 gives it (read from its `ffmpeg-args.js`): `-vf zscale=matrix=709:range=limited:primariesin=709:primaries=709:transferin=709:transfer=709`, BT.709 tags, `-color_range tv`, `-pix_fmt yuv420p`, libx264 CRF 18, preset medium, `-video_track_timescale 90000`, plus the values of `graphics_render.ENCODING`. Flat colours come out identical to Remotion's in YUV.
+- **Look rules and layout.** No look rule and no part of the layout was changed. Every file of `graphics_python/` is a line-by-line port of the file of the same name in `motion/src/templates/` (`motion`, `spec`, `layout`, `background`, `text`, the five templates, `templates`), with JavaScript's `Math.round` ported as `js_round`. Text boxes are laid out as the browser does (a line is 1.2 times its size high; the baseline follows from the font's ascent and descent).
+- **Unchanged frames are not drawn again.** A frame is a function of the progress of every beat, so when no part is moving the previous frame's bytes are written again. The first frame is drawn before FFmpeg starts, so a template that cannot be drawn fails without leaving a file.
+- **The hook.** `jobs/render_lab_graphic.py` sets `graphics_render.python_renderer = graphics_python.render` (so `graphics_render` does not import the renderer). A `PythonRenderFailed` becomes `RenderFailed` with its message. The row's `versions` for this engine are `{"pillow": ...}`. `graphics_engines.py`: `renderer_built=True` on `python_templates`.
+
+What was built (`backend/app/services/graphics_python/`): `__init__.py` (the async `render(body, dest)` that runs the child), `__main__.py` (the child: reads the body, draws, pipes into FFmpeg), `encode.py` (the FFmpeg arguments), `canvas.py` (`Canvas`: rectangles, polygons, ellipses, lines and text at 3x, and `layer` for fade and slide), `background.py`, `text.py`, `motion.py`, `spec.py`, `layout.py`, `templates.py`, and `kpi_card.py`, `bar_comparison.py`, `line_trend.py`, `flow_diagram.py`, `bullet_build.py`. `graphics_render.py` gains `PythonRenderFailed`.
+
+**Checked.** Throwaway scripts (not kept) drew hand-written specs through `graphics_templates.check_spec`, in both orientations, on excerpts 1, 2, 3, 5, 7, 9 and 10 (all variants) with the four backgrounds and both palettes, each also with a `solid` background. The checks below were run on 88 videos that were re-encoded losslessly (CRF 0), so that the source frames can be compared without encoder noise: 88 of 88 passed.
+
+- **Frames.** Exact frame count, size, 24 fps, H.264 and `yuv420p` (`ffprobe -count_frames`).
+- **Beats.** On every beat frame a part arrives (the frame differs from the one before), and a frame with no part arriving equals the one before it.
+- **Caption area.** With a `solid` background every pixel of the caption band was within 3 levels of the background.
+- **Render again.** Excerpt 1 portrait rendered three times (once through the backend, twice directly): all frames' `framemd5` were identical.
+- **The API during a render.** `GET /api/health` polled every 200 ms during the 255-frame portrait render through the backend: 192 answers, the slowest 18 ms.
+- **Through the backend.** On a throwaway `DATA_DIR`, with a stand-in model server (answering the brief and the spec of excerpt 1) and the motion service on the host: Make all wrote the brief and the spec, made two render rows and rendered both. The Python row had 255 frames, all five checks true, no warnings, 133 KB, `composition` `python`, `versions` `{"pillow": "12.3.0"}` and `render_s` 2.3 s; the Remotion row had 126 KB and `render_s` 6.7 s. A spec whose text layout lacked an entry failed with "The template cannot be drawn: the spec has no layout for the text "bars.0.label"." and left no file. No paid call was made and the real database was not touched.
+
+**Measured differences from Remotion** (the same spec drawn by both, compared frame by frame on excerpts 1, 3 and 5):
+
+- Flat colours (backgrounds, bars, pills) are identical. Edges of boxes and text are within about 2 to 4 px of Remotion's. Chrome's text looks slightly heavier than Pillow's.
+- Speed: 1.2 to 4.6 s for a video in Python against about 6 to 7 s in Remotion (both on the same machine).
+- **Encoder noise is common to both.** x264 places a keyframe at frame 250 and alternates its noise on static frames; a frame-to-frame check of either engine's video shows small changes at those frames when nothing moves. A lossless re-encode of the Python source frames shows they are static. The encoding settings were not changed (G-4).
+
+**Still to do for this phase.** The owner has to rebuild (`docker compose up -d --build backend`; there is no migration and the motion service is unchanged), then press **Make all** on excerpts 1, 2, 3, 5 and 9 with the real model and compare the two template cards. A run whose spec was saved before this phase has no Python render job: make a new run with **Ask again**, because **Render again** comes in GFX-011.
+
+**For the later phases.**
+
+- GFX-011's **Render again** on the Python card needs only `graphics_lab.queue_render` on the render row and `ffmpeg -f framemd5` on the two files; this phase checked that the Python renderer draws the same frames three times on one machine.
+- A part's timing is the same as in Remotion: fully visible `duration - 1` frames after its beat's frame.
+- The docker image's FFmpeg (7.1.5) and the host's (8.0) gave the same pictures and the same encoder noise.
 
 ### GFX-009 — Building blocks
 
@@ -1244,3 +1277,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-03 | GFX-005 | In Progress | Motion service and render job built: the `motion` container (Remotion 4.0.540, Fastify, isolated, hardened), the provider, job `render_lab_graphic` (checks, voice, metrics), two settings, the test card button. Checked on a throwaway database and in the arm64 image; the owner's rebuild and click are open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-006 | In Progress | Template catalogue (five templates, the checks, the text-fit rule with both fonts), the spec writer, job `write_lab_graphic_template_spec`, one call and two render rows for the two template engines, `renderer_built` on the registry, spec and "no template fits" on the cards. Checked against a stand-in model server; the live check on excerpts 1, 5, 8 and 9 is open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-007 | In Progress | Remotion templates built: the `Templates` composition draws the five templates and their variants, the four backgrounds, the beat motion and the number count-up from the spec of GFX-006; `remotion_templates` has `renderer_built`; the exact layout is written into §4.5.1 for GFX-008. Checked on the host motion service (excerpts 1, 2, 3, 5, 7, 9 and 10, both orientations) and through a throwaway backend with a stand-in model server; the owner's rebuild and the live check are open. Notes for the later phases are in the completion notes. |
+| 2026-11-03 | GFX-008 | In Progress | Python templates built: `services/graphics_python/` draws the five templates, their variants, the four backgrounds and the beat motion with Pillow at 3x supersampling, in a child process that pipes raw frames into FFmpeg with Remotion's encoding and colour arguments; `python_templates` has `renderer_built`. Checked on 88 videos on the host (frames, beats, caption area, identical frames on render again), and through a throwaway backend with a stand-in model server (Python row 2.3 s against Remotion's 6.7 s; the API answered within 18 ms during the render). The owner's rebuild and the live check are open. Differences from Remotion are in the completion notes. |

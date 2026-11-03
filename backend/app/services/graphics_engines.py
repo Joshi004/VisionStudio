@@ -74,6 +74,7 @@ ENGINES: Final[dict[EngineKey, Engine]] = {
         key="python_templates",
         label="Python templates",
         start=graphics_template_engine.start,
+        renderer_built=True,
     ),
     "remotion_blocks": Engine(key="remotion_blocks", label="Remotion building blocks"),
     "generated_component": Engine(key="generated_component", label="Generated component"),

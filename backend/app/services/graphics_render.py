@@ -10,11 +10,13 @@ BT.709 colour tags and no audio from the renderer. These are the settings of the
 graphic looks the same next to them. The motion service takes them in the request, and the Python
 renderer (GFX-008) must use the same `ENCODING`, so the engines are compared on equal terms (G-4).
 
-**The Python renderer hook.** `python_renderer` is None until GFX-008 sets it. It is an async
-function `(body, dest)` that draws the render described by `body` (the same dictionary the motion
-service gets: `engine`, `width`, `height`, `fps`, `frames`, `resolved`, `input`, `encoding`) into
-the new file `dest`, as an H.264 MP4 with no audio. The job then checks the file and adds the voice
-exactly as for a Remotion render.
+**The Python renderer hook.** `python_renderer` is an async function `(body, dest)` that draws the
+render described by `body` (the same dictionary the motion service gets: `engine`, `width`,
+`height`, `fps`, `frames`, `resolved`, `input`, `encoding`) into the new file `dest`, as an H.264
+MP4 with no audio, and raises `PythonRenderFailed` when it cannot. GFX-008's
+`services/graphics_python.render` is set by `jobs/render_lab_graphic.py`, the hook's only reader
+(this module cannot import it: the renderer imports this one). The job then checks the file and
+adds the voice exactly as for a Remotion render.
 """
 
 from __future__ import annotations
@@ -61,6 +63,11 @@ PYTHON_ENGINE: Final = "python_templates"
 TEST_CARD_MIN_FRAMES: Final = graphics_resolve.MIN_FRAMES
 TEST_CARD_MAX_FRAMES: Final = graphics_resolve.MAX_FRAMES
 TEST_CARD_DEFAULT_FRAMES: Final = 101
+
+
+class PythonRenderFailed(Exception):
+    """The Python renderer could not draw the video. The message is for the owner."""
+
 
 PythonRenderFn = Callable[[dict[str, Any], Path], Awaitable[None]]
 python_renderer: PythonRenderFn | None = None
