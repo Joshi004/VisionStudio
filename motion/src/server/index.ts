@@ -2,8 +2,10 @@ import { createReadStream } from "node:fs";
 import Fastify from "fastify";
 
 import { counts, enqueue, fileOf, MAX_PARALLEL, prepareRenderDir, remove, statusOf, sweep } from "./renders.ts";
-import { idParamsSchema, renderRequestSchema } from "./schema.ts";
-import type { RenderRequest } from "./schema.ts";
+import { measureLayout } from "./layout.ts";
+import { idParamsSchema, layoutRequestSchema, renderRequestSchema } from "./schema.ts";
+import type { LayoutRequest, RenderRequest } from "./schema.ts";
+import { BLOCKS_VERSION } from "../blocks/scene.ts";
 import { CATALOGUE_VERSION } from "../templates/spec.ts";
 import { readVersions } from "./versions.ts";
 
@@ -19,14 +21,14 @@ const app = Fastify({
   bodyLimit: BODY_LIMIT_BYTES,
 });
 
-// What the service is made of. The block library has no version until GFX-009.
+// What the service is made of.
 app.get("/health", async () => ({
   ok: true,
   remotion: versions.remotion,
   chrome: versions.chrome,
   node: process.version,
   templates: CATALOGUE_VERSION,
-  blocks: null,
+  blocks: BLOCKS_VERSION,
   max_parallel: MAX_PARALLEL,
   ...counts(),
 }));
@@ -37,6 +39,20 @@ app.post<{ Body: RenderRequest }>(
   async (request, reply) => {
     const renderId = enqueue(request.body);
     return reply.code(202).send({ render_id: renderId });
+  },
+);
+
+// The texts of a block scene as the browser lays them out, at the frames asked for (GFX-009).
+app.post<{ Body: LayoutRequest }>(
+  "/layout",
+  { schema: { body: layoutRequestSchema } },
+  async (request, reply) => {
+    try {
+      return await measureLayout(request.body);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      return reply.code(422).send({ error: text.slice(0, 2000) });
+    }
   },
 );
 

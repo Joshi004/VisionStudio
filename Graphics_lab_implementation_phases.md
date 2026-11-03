@@ -126,7 +126,7 @@ the owner types a line (and optionally picks a voice)
   -> [GFX-012] trial: ten excerpts through every engine, summary
 ```
 
-Three model calls follow the director call (the template spec serves two engines). A run therefore costs four paid calls, plus at most one retry each.
+Three model calls follow the director call (the template spec serves two engines). A run therefore costs four paid calls, plus at most one retry each (the block scene may take one more: its layout ask, §4.5.2).
 
 ### 4.2 Runs and renders
 
@@ -292,20 +292,23 @@ The model designs the scene freely from blocks we wrote once. Code checks it, an
       "region": [1, 1, 8, 2], "enter": { "beat": "b1", "effect": "slide_up" } },
     { "id": "bars", "block": "bar_series", "values": ["f1", "f2", "f3"], "labels": ["2023", "2024", "2025"],
       "orientation": "vertical", "emphasis": ["f3"],
-      "region": [1, 3, 8, 11], "enter": { "beats": ["b2", "b3", "b4"], "effect": "grow" } },
+      "region": [1, 3, 7, 9], "enter": { "beats": ["b2", "b3", "b4"], "effect": "grow" } },
     { "id": "growth", "block": "badge", "value": "d1", "role": "positive",
-      "region": [9, 3, 12, 5], "enter": { "beat": "b5", "effect": "pop" } },
+      "region": [9, 4, 12, 6], "enter": { "beat": "b5", "effect": "pop" } },
     { "id": "link", "block": "arrow", "from": "bars", "to": "growth",
       "enter": { "beat": "b5", "effect": "draw" } }
   ]
 }
 ```
 
-- **Blocks:** `text` (styles `title`, `label`, `body`), `counter`, `bar_series`, `line_series`, `node`, `arrow`, `table` (up to 5 rows and 4 columns), `badge`, `highlight` (a box around another element), `progress_ring`. Whether to add icons, which need an icon set and its licence, is **Planning decides** (GFX-009).
-- **Effects:** `fade`, `slide_up`, `slide_left`, `grow`, `pop`, `draw`, `count_up`, `typewriter`. An optional `exit` takes the same effects.
-- **Regions:** `[first column, first row, last column, last row]` on a 12 x 12 grid inside the safe area, counted from 1. An `arrow` has no region: it runs between two elements.
-- **Code checks:** at most 12 elements and 6 text elements; known blocks, effects, beats and refs; regions inside the grid; no region in the caption area; bars from zero; the number rule (G-7) on every text.
-- **Layout check:** the motion service reports the box of every text element at each beat's frame and at the last frame (§4.6, `POST /layout`). A text outside the safe area, inside the caption area, overlapping another text, or smaller than 2 percent of the height is listed and sent back to the model once.
+- **Blocks (`blocks_version` 1):** `text` (styles `title`, `label`, `body`), `counter`, `bar_series` (2 to 6 bars, vertical or horizontal, from zero), `line_series` (3 to 12 points, optional area), `node`, `arrow`, `table` (up to 5 rows and 4 columns), `badge`, `highlight` (a box around another element) and `progress_ring` (a percent from 0 to 100). There are **no icons** in this phase: they need an icon set and its licence, so they stay a later option.
+- **Effects.** Any block: `fade`, `slide_up`, `slide_left`, `pop`. Per block: `grow` (bars, ring), `draw` (line, arrow, highlight, ring), `count_up` (counter, badge with a value, ring), `typewriter` (text). A `line_series` takes only `draw` or `fade`; a `bar_series` takes `grow`, `fade`, `slide_up`, `slide_left` or `pop`. A series enters part by part (`enter.beats`, one beat for each value, never backwards in the line). An optional `exit` is `{beat, effect}` with one of the four general effects only, played backwards, at a beat after the entrance.
+- **Roles.** One set for every block: `text`, `muted`, `accent`, `positive`, `negative`, `number`.
+- **Regions:** `[first column, first row, last column, last row]` on a 12 x 12 grid inside the safe area, counted from 1. Rows above the caption area only: 10 in landscape and 8 in portrait (a cell is 144 x 81 px in landscape and 81 x 144 px in portrait). `arrow` and `highlight` have no region: they follow other elements (`from`/`to`, `target`) and must not enter before them. Two elements an arrow joins need an empty column or row between them.
+- **Code checks** (`graphics_blocks.check_scene`): at most 12 elements and 6 text elements; known blocks, effects for the block, beats and refs; one unit in a series; regions inside the grid and above the caption area; texts within their length limits; the number rule (G-7) on every text. It returns `{blocks_version, elements}`.
+- **Layout check:** the motion service reports the box and the text of every text at each beat's frame (where an element enters or leaves) and at the last frame (§4.6, `POST /layout`). `graphics_blocks.layout_problems` lists a text outside the safe area, inside the caption area, overlapping the text of another element, smaller than 2 percent of the height, and the service's own issues (a plot under 5 percent of the height, an arrow with no room). At most 12 problems are listed.
+- **The second ask.** With problems, the model is asked once more with its scene and the list (`layout_retry_request`). That call has an attempt of its own (`ask_model(..., max_attempts=1)`), so a scene costs up to 3 paid attempts: 2 for the code checks and 1 for the layout. A usable new scene is measured again and replaces the first unless it has more problems; a failed or unusable answer keeps the first scene.
+- **Stored input** of the render row: `{blocks_version, elements, layout: {checked, problems, asked_again, kept_first?, reason?}}`. `layout.checked` is false when the motion service could not be reached; the scene is saved anyway and the render reports the service's message. The problems are the first warnings of the render and `metrics.layout_problems` counts them.
 
 #### 4.5.3 Generated component (GFX-010)
 
@@ -356,7 +359,7 @@ A new folder `motion/` holds a Node project with Remotion. It builds into a thir
 | `GET /renders/{id}` | 005 | `queued`, `rendering`, `done` or `failed`, with progress, the error and the times |
 | `GET /renders/{id}/file` | 005 | The finished MP4 |
 | `DELETE /renders/{id}` | 005 | Removes the file from the service |
-| `POST /layout` | 009 | The boxes of the text elements at the given frames |
+| `POST /layout` | 009 | The boxes of the texts of a block scene at the given frames: `{width, height, fps, frames, resolved, input, at_frames}` (at most 32 frames). Answers `200 {frames: [{frame, texts: [{element, part, text, font, size, box}]}], issues}`, or `422 {error}` for a scene that cannot be drawn. It uses `selectComposition` on the `BlocksLayout` composition, which measures in the browser; one at a time, 0.2 to 0.7 s, 60 s limit |
 | `POST /checks` | 010 | Transpiles a component and renders still frames, answering the errors |
 
 - **Compositions:** `TestCard` (GFX-005), `Templates` (GFX-007), `Blocks` (GFX-009), `Generated` (GFX-010). GFX-005 registers all four, with the last three showing a "not built yet" card, so each engine phase only fills in its own folder.
@@ -436,7 +439,7 @@ The names below are the sketch. The final names and columns, as built in GFX-002
 | GFX-006 | Template catalogue and the template-spec call | Code | 003 | In Progress (built and checked; the live check with the real model is open) |
 | GFX-007 | Remotion templates | Code | 005, 006 | In Progress (built and checked on the host motion service and a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-008 | Python templates | Code | 005, 006 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
-| GFX-009 | Building blocks | Code | 003, 005 | Not Started |
+| GFX-009 | Building blocks | Code | 003, 005 | In Progress (built and checked on the host and on a throwaway backend; the owner's rebuild and the live check with the real model are open) |
 | GFX-010 | Generated components | Code | 003, 005 | Not Started |
 | GFX-011 | Comparison view | Code | 003, 005 | Not Started |
 | GFX-012 | Trial batch and summary | Code | 007, 008, 009, 010, 011 | Not Started |
@@ -1004,7 +1007,7 @@ What was built (`backend/app/services/graphics_python/`): `__init__.py` (the asy
 
 ### GFX-009 — Building blocks
 
-**Status:** Not Started
+**Status:** In Progress (built and checked on the host motion service and a throwaway backend; the owner's rebuild and the live check with the real model are open)
 
 **Objective.** The model designs each graphic freely from building blocks (§4.5.2). Code checks the scene, the motion service measures it, the model gets one chance to fix any layout problem, and the scene is rendered.
 
@@ -1043,12 +1046,45 @@ What was built (`backend/app/services/graphics_python/`): `__init__.py` (the asy
 
 **Completion checklist.**
 
-- [ ] Blocks, effects, grid, composition
-- [ ] Layout endpoint
-- [ ] Schema, checks, writer, job, layout retry
-- [ ] Registry, docs, standard checks
+- [x] Blocks, effects, grid, composition
+- [x] Layout endpoint
+- [x] Schema, checks, writer, job, layout retry
+- [x] Registry, frontend card, docs, standard checks (`ruff check`, `ruff format --check`, `tsc --noEmit` in `motion/`, and `lint`, `typecheck` and `build` in the frontend pass; no API shape or migration change, so no `gen:api`)
+- [ ] Live check: Make all on excerpts 1, 5, 7 and 8 with the real model, then look at the block cards (paid calls, owner's click)
 
-**Completion notes.** _To be filled in._
+**Completion notes.** Built on 2026-11-03. No migration, no new setting, no API change, no new package. The `job.type` `write_lab_graphic_block_scene` was added in GFX-002. The "Planning decides" items:
+
+- **Icons: none in this phase.** Recorded as a later option (they need an icon set and its licence).
+- **Measuring text.** Text is fitted in the browser with the same font loading as the templates (`fitText`: the largest whole-pixel size within 97 percent of the width, no lower limit). The `BlocksLayout` composition lays the scene out in `calculateMetadata` and returns the report in its `props`, so the backend reads it with `selectComposition` and nothing is drawn.
+- **The second ask.** The code checks use `ask_model`'s 2 attempts; the layout ask is a separate call with `max_attempts=1` (a new keyword of `ask_model`), so a scene uses up to 3 paid attempts (the owner chose this over sharing the two).
+- **`max_tokens`.** 32,000 (as the other story calls; tokens are paid as used), `reasoning_effort` high.
+
+What was built: `motion/src/blocks/` (`scene.ts` types and `readScene`, `ctx.ts`, `fit.ts`, `effects.tsx`, `Item.tsx`, the layout and drawing of each block in `TextBlocks.tsx`, `Series.tsx`, `Table.tsx` and `Shapes.tsx`, `layout.ts`, `report.ts`, `Blocks.tsx`), the `BlocksLayout` composition in `Root.tsx`, `server/layout.ts` and `POST /layout` (`/health` reports `blocks: 1`), `services/graphics_blocks.py` (pure: schema, `check_scene`, `grid_rows`, `layout_frames`, `layout_problems`, `LIMIT_NAMES`), `services/graphics_block_scene_writer.py` (pure: the instructions, `build_request`, `layout_retry_request`), `services/graphics_block_engine.py` (`start`: one scene job and one `remotion_blocks` render row), `jobs/write_lab_graphic_block_scene.py` (`llm`, `never_rerun`, story model, deduped by `run_id`; the scene and the render are saved in one transaction with `finish_job`, then `queue_render`), `providers/motion_renderer.layout`, the phases `CHECKING_BLOCK_LAYOUT` and `SAVING_BLOCK_SCENE`, `graphics_render.input_warnings` (the layout problems become the first warnings of the render, `metrics.layout_problems`), and on the frontend `GraphicsBlockScene` (the blocks of the scene, the layout verdict, the scene as JSON) with `readBlockInput`. Public names changed in the template modules so this phase can reuse them: `graphics_templates.object_of`, `items_of`, `line_of_text` and `graphics_template_spec_writer.brief_for_model` lost their leading underscore.
+
+**Deviations and extensions to §4.5.2.**
+
+- One role set for every block; `highlight` and `arrow` have no region; effects are limited per block (above).
+- Exits are the four general effects, played backwards (a later exit leaves a part out of the layout report once it has started to leave).
+- Overlap is checked between texts of different elements only; boxes are the tight boxes of the text, so two left-aligned texts of different widths in one region may not overlap.
+- A text is never refused for being small: it is made smaller to fit and the layout check lists it when it is under 2 percent of the height. The writer is told to give such a text a larger region.
+- The highlight is drawn inside the gutter of its target's region (so it never reaches the caption area or the next region).
+- A new scene from the layout ask replaces the first only when it has no more problems; otherwise `layout.kept_first` is true.
+
+**Checked.** Throwaway scripts (not kept) on the host motion service and on a throwaway backend (`DATA_DIR` in `/tmp`, a stand-in model server, the real database and Docker stack untouched; no paid call):
+
+- **Renders.** Excerpts 1, 5, 7 and 8 in both orientations, plus a gallery scene with every block, went end to end through the backend: exact frame count, size, 24 fps, H.264 and `yuv420p`. `/layout` took 0.2 to 0.7 s; a render about 7 s.
+- **Beats and caption area.** On every beat frame a part arrives. On a `solid` background the caption area is the background colour in every frame (max difference 2 of 255).
+- **Render again.** Two renders of the same input have identical `framemd5` (landscape and portrait).
+- **Refusals** (`check_scene`): a number the line does not say, an unknown block, a region in row 11 (landscape) or row 9 (portrait), an unknown beat or ref, mixed units, an effect the block does not take, a duplicate id, an arrow to nothing or before its target, 13 elements, beats going backwards, an exit before the entrance, an extra key, a text over its limit. Each message names the element.
+- **The layout ask** with a stand-in server: overlapping texts are sent back with the list and come back fixed (2 calls, no problems); still overlapping (2 calls, problems kept as warnings on the card); an unusable second answer (first scene kept); a second answer with more problems (first scene kept); an unusable first answer then a usable one then the layout ask (3 attempts, no more).
+- **Motion service down:** the scene is saved with `layout.checked` false and the reason, and the render fails with the motion-service message on the card.
+
+**Notes for later phases.**
+
+- GFX-011's **Render again** on a block card is `queue_render` on the row, as for the other engines. **Ask again** makes a new run, so a new scene.
+- A model that leaves two connected elements next to each other gets "no room" for the arrow: the writer tells it to leave an empty column or row.
+- The motion bundle must be rebuilt (`npm run bundle`, or the image) after any change in `motion/src`.
+
 
 ### GFX-010 — Generated components
 
@@ -1234,7 +1270,7 @@ The rules of `Implementation_phases.md` §6 apply. Update a phase's **Status** l
 | GQ-7 | **Estimated timing drifts** from a real voice by a few tenths of a second over a long line. With a voice, the beats follow the real words. | GFX-003, GFX-004 |
 | GQ-8 | **Lines without numbers** (AI concepts) may get "no template fits". That is a result of the trial, not a defect, and it shows where blocks or generated code are needed. | GFX-006, GFX-012 |
 | GQ-9 | **The number reader's known limits** (ordinals, "half", ranges, years said in two parts) can refuse a correct fact. A refusal names the fact, so the owner can reword the line. | GFX-003 |
-| GQ-10 | **Cost.** A run is four paid calls plus at most one retry each, so a trial is about 40 to 80 calls. GFX-012 shows the count before it starts. | GFX-012 |
+| GQ-10 | **Cost.** A run is four paid calls plus at most one retry each (up to 3 attempts for the block scene), so a trial is about 40 to 80 calls. GFX-012 shows the count before it starts. | GFX-012 |
 
 **Out of scope for the whole lab:** data you upload and live market data (both planned for the pipeline, not needed to compare engines), captions or callouts burned into the lab videos, music, and a live Remotion preview in the browser.
 
@@ -1278,3 +1314,4 @@ _The summary copied from the trial page, then the owner's answers to GFX-013's q
 | 2026-11-03 | GFX-006 | In Progress | Template catalogue (five templates, the checks, the text-fit rule with both fonts), the spec writer, job `write_lab_graphic_template_spec`, one call and two render rows for the two template engines, `renderer_built` on the registry, spec and "no template fits" on the cards. Checked against a stand-in model server; the live check on excerpts 1, 5, 8 and 9 is open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-007 | In Progress | Remotion templates built: the `Templates` composition draws the five templates and their variants, the four backgrounds, the beat motion and the number count-up from the spec of GFX-006; `remotion_templates` has `renderer_built`; the exact layout is written into §4.5.1 for GFX-008. Checked on the host motion service (excerpts 1, 2, 3, 5, 7, 9 and 10, both orientations) and through a throwaway backend with a stand-in model server; the owner's rebuild and the live check are open. Notes for the later phases are in the completion notes. |
 | 2026-11-03 | GFX-008 | In Progress | Python templates built: `services/graphics_python/` draws the five templates, their variants, the four backgrounds and the beat motion with Pillow at 3x supersampling, in a child process that pipes raw frames into FFmpeg with Remotion's encoding and colour arguments; `python_templates` has `renderer_built`. Checked on 88 videos on the host (frames, beats, caption area, identical frames on render again), and through a throwaway backend with a stand-in model server (Python row 2.3 s against Remotion's 6.7 s; the API answered within 18 ms during the render). The owner's rebuild and the live check are open. Differences from Remotion are in the completion notes. |
+| 2026-11-03 | GFX-009 | In Progress | Building blocks built: ten blocks and their effects on a 12 x 12 grid (`motion/src/blocks/`), `POST /layout` that measures texts in the browser, the scene checks, the scene writer, job `write_lab_graphic_block_scene` with one layout ask (up to 3 attempts), `remotion_blocks` marked built, the block card. Checked on the host motion service and a throwaway backend with a stand-in model; the owner's rebuild and the live check with the real model are open. |

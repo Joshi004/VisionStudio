@@ -141,3 +141,56 @@ export function readTemplateInput(input: unknown): TemplateInput | null {
   }
   return null;
 }
+
+export const BLOCK_LABELS: Record<string, string> = {
+  text: "Text",
+  counter: "Counter",
+  bar_series: "Bars",
+  line_series: "Line",
+  node: "Node",
+  arrow: "Arrow",
+  table: "Table",
+  badge: "Badge",
+  highlight: "Highlight",
+  progress_ring: "Ring",
+};
+
+/**
+ * What the building-blocks engine holds as its input (GFX-009): the blocks of the scene in order,
+ * and what the layout check found. `problems` is empty when the layout is clean or was not
+ * checked; `checked` tells the two apart.
+ */
+export type BlockInput = {
+  blocks: string[];
+  checked: boolean;
+  /** Why the layout was not checked, when it was not. */
+  reason: string | null;
+  problems: string[];
+  askedAgain: boolean;
+};
+
+export function readBlockInput(input: unknown): BlockInput | null {
+  if (typeof input !== "object" || input === null) {
+    return null;
+  }
+  const { elements, layout } = input as Record<string, unknown>;
+  if (!Array.isArray(elements)) {
+    return null;
+  }
+  const blocks = elements.flatMap((element) => {
+    const block = (element as { block?: unknown } | null)?.block;
+    return typeof block === "string" ? [block] : [];
+  });
+  const { checked, reason, problems, asked_again } = (
+    typeof layout === "object" && layout !== null ? layout : {}
+  ) as Record<string, unknown>;
+  return {
+    blocks,
+    checked: checked !== false,
+    reason: typeof reason === "string" ? reason : null,
+    problems: Array.isArray(problems)
+      ? problems.filter((problem): problem is string => typeof problem === "string")
+      : [],
+    askedAgain: asked_again === true,
+  };
+}

@@ -7,6 +7,8 @@ calls are the ones of §4.6 of `Graphics_lab_implementation_phases.md`:
 - `render_status`: `GET /renders/{id}`: `queued`, `rendering`, `done` or `failed`, with progress;
 - `download_render`: `GET /renders/{id}/file`, streamed to a file;
 - `delete_render`: `DELETE /renders/{id}`;
+- `layout`: `POST /layout`, the boxes of the texts of a block scene as the browser lays them out
+  (GFX-009);
 - `health`: `GET /health`, the versions of Remotion and Chrome.
 
 Every call goes through `core/outbound.py`, so the URL rules and the time limits apply. Every
@@ -31,6 +33,8 @@ HEALTH_TIMEOUT_S: Final = 5.0
 START_TIMEOUT_S: Final = 30.0
 STATUS_TIMEOUT_S: Final = 10.0
 DELETE_TIMEOUT_S: Final = 10.0
+# The service starts a browser for each layout and gives up after 60 s.
+LAYOUT_TIMEOUT_S: Final = 90.0
 DOWNLOAD_TIMEOUT_S: Final = 300.0
 # A graphic is at most 15 s long; a file this large means something is wrong.
 DOWNLOAD_MAX_BYTES: Final = 500 * 1024 * 1024
@@ -113,6 +117,19 @@ async def start_render(base_url: str, body: dict[str, Any]) -> str:
     if not isinstance(render_id, str):
         raise _problem(base_url, "did not give a render id.")
     return _check_render_id(render_id)
+
+
+async def layout(base_url: str, body: dict[str, Any]) -> dict[str, Any]:
+    """The layout report of a block scene (`{frames: [{frame, texts}], issues}`): the body is
+    `{width, height, fps, frames, resolved, input, at_frames}`.
+    """
+    try:
+        response = await outbound.request(
+            "POST", join_url(base_url, "/layout"), json=body, timeout_s=LAYOUT_TIMEOUT_S
+        )
+    except outbound.OutboundError as exc:
+        raise _unreachable(base_url, exc) from exc
+    return _json(base_url, response, 200)
 
 
 async def render_status(base_url: str, render_id: str) -> dict[str, Any]:

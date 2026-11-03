@@ -172,6 +172,10 @@ SAVING_GRAPHIC_BRIEF: Final = "saving the graphic brief"
 # `write_lab_graphic_template_spec` (GFX-006) also uses PREPARING_PROMPT and `asking_model` from
 # above (one call).
 SAVING_TEMPLATE_SPEC: Final = "saving the template spec"
+# `write_lab_graphic_block_scene` (GFX-009) also uses PREPARING_PROMPT and `asking_model` from
+# above (the scene, then at most one more call with the layout problems).
+CHECKING_BLOCK_LAYOUT: Final = "measuring the layout in the browser"
+SAVING_BLOCK_SCENE: Final = "saving the block scene"
 
 # --- Running: the music cues (MUSIC-009) -------------------------------------------------
 # `write_music_cue` and `audit_music_cues` also use PREPARING_PROMPT and `asking_model` from above

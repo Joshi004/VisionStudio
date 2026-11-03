@@ -224,7 +224,7 @@ def fit_text(text: str, role: str, base: int, box_width: float) -> dict[str, Any
 # --- Reading the answer ------------------------------------------------------------------------
 
 
-def _object(
+def object_of(
     value: object, name: str, required: Sequence[str], optional: Sequence[str] = ()
 ) -> dict[str, Any]:
     """The object with its `null` keys dropped. Refused when it is not an object, has a key that
@@ -242,7 +242,7 @@ def _object(
     return given
 
 
-def _items(value: object, name: str, least: int, most: int) -> list[Any]:
+def items_of(value: object, name: str, least: int, most: int) -> list[Any]:
     if not isinstance(value, list):
         raise ValueError(f'The "{name}" were not a list.')
     if not least <= len(value) <= most:
@@ -251,7 +251,7 @@ def _items(value: object, name: str, least: int, most: int) -> list[Any]:
     return value
 
 
-def _line_of_text(value: object, name: str, max_chars: int) -> str:
+def line_of_text(value: object, name: str, max_chars: int) -> str:
     """One piece of text on one line, never cut: refused when it is empty or too long."""
     if not isinstance(value, str):
         raise ValueError(f'The "{name}" was missing or was not text.')
@@ -322,7 +322,7 @@ class _Context:
 
     def beat_list(self, value: object, name: str, count: int) -> list[str]:
         """One beat id for each of `count` parts."""
-        entries = _items(value, name, count, count)
+        entries = items_of(value, name, count, count)
         return self.beats_in_order([self.beat(entry, f"beat in {name}") for entry in entries], name)
 
     def same_unit(self, refs: Sequence[str], name: str) -> None:
@@ -348,7 +348,7 @@ class _Context:
         that fits a space `box_width` pixels wide. Its layout is recorded under `text[path]`.
         `large` draws a `text` field at the title size (a statement).
         """
-        text = _line_of_text(value, path, max_chars)
+        text = line_of_text(value, path, max_chars)
         unsaid = sorted(numbers_in(text) - self.allowed_numbers)
         if unsaid:
             raise ValueError(
@@ -375,7 +375,7 @@ class _Context:
 def _kpi_card(
     ctx: _Context, variant: str, fields: object, beats: object
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    given = _object(fields, "fields", ("title", "value"), ("change", "caption"))
+    given = object_of(fields, "fields", ("title", "value"), ("change", "caption"))
     out_fields: dict[str, Any] = {
         "title": ctx.title(given["title"]),
         "value": ctx.ref(given["value"], "value"),
@@ -390,16 +390,16 @@ def _kpi_card(
             given["caption"], "caption", CAPTION_MAX_CHARS, "text", ctx.safe_width * share
         )
         required.append("caption")
-    placed = _object(beats, "beats", required)
+    placed = object_of(beats, "beats", required)
     return out_fields, {key: ctx.beat(placed[key], f"beat of {key}") for key in required}
 
 
 def _bar_comparison(
     ctx: _Context, variant: str, fields: object, beats: object
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    given = _object(fields, "fields", ("title", "bars"), ("highlight",))
+    given = object_of(fields, "fields", ("title", "bars"), ("highlight",))
     title = ctx.title(given["title"])
-    bars_in = _items(given["bars"], "bars", 2, 6)
+    bars_in = items_of(given["bars"], "bars", 2, 6)
     count = len(bars_in)
     label_box = (
         ctx.safe_width * BAR_LABEL_SHARE_VERTICAL / count
@@ -409,7 +409,7 @@ def _bar_comparison(
     bars: list[dict[str, Any]] = []
     for position, raw in enumerate(bars_in):
         name = f"bar {position + 1}"
-        bar = _object(raw, name, ("label", "value"), ("emphasis",))
+        bar = object_of(raw, name, ("label", "value"), ("emphasis",))
         entry: dict[str, Any] = {
             "label": ctx.words(
                 bar["label"], f"bars.{position}.label", BAR_LABEL_MAX_CHARS, "text", label_box
@@ -424,12 +424,12 @@ def _bar_comparison(
     ctx.same_unit([bar["value"] for bar in bars], "bars")
     out_fields: dict[str, Any] = {"title": title, "bars": bars}
     if "highlight" in given:
-        highlight = _object(given["highlight"], "highlight", ("value", "beat"))
+        highlight = object_of(given["highlight"], "highlight", ("value", "beat"))
         out_fields["highlight"] = {
             "value": ctx.ref(highlight["value"], "value of the highlight"),
             "beat": ctx.beat(highlight["beat"], "beat of the highlight"),
         }
-    placed = _object(beats, "beats", ("title", "bars"))
+    placed = object_of(beats, "beats", ("title", "bars"))
     return out_fields, {
         "title": ctx.beat(placed["title"], "beat of the title"),
         "bars": ctx.beat_list(placed["bars"], "beats.bars", count),
@@ -440,14 +440,14 @@ def _line_trend(
     ctx: _Context, variant: str, fields: object, beats: object
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     del variant
-    given = _object(fields, "fields", ("title", "points"), ("end_label",))
+    given = object_of(fields, "fields", ("title", "points"), ("end_label",))
     title = ctx.title(given["title"])
-    points_in = _items(given["points"], "points", 3, 12)
+    points_in = items_of(given["points"], "points", 3, 12)
     count = len(points_in)
     points: list[dict[str, Any]] = []
     for position, raw in enumerate(points_in):
         name = f"point {position + 1}"
-        point = _object(raw, name, ("label", "value"))
+        point = object_of(raw, name, ("label", "value"))
         points.append(
             {
                 "label": ctx.words(
@@ -466,7 +466,7 @@ def _line_trend(
     if "end_label" in given:
         out_fields["end_label"] = ctx.ref(given["end_label"], "end_label")
         required.append("end_label")
-    placed = _object(beats, "beats", required)
+    placed = object_of(beats, "beats", required)
     out_beats: dict[str, Any] = {
         "title": ctx.beat(placed["title"], "beat of the title"),
         "points": ctx.beat_list(placed["points"], "beats.points", count),
@@ -479,9 +479,9 @@ def _line_trend(
 def _flow_diagram(
     ctx: _Context, variant: str, fields: object, beats: object
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    given = _object(fields, "fields", ("title", "nodes"))
+    given = object_of(fields, "fields", ("title", "nodes"))
     title = ctx.title(given["title"])
-    nodes_in = _items(given["nodes"], "nodes", 2, 6)
+    nodes_in = items_of(given["nodes"], "nodes", 2, 6)
     count = len(nodes_in)
     if variant == "horizontal":
         gaps = (count - 1) * NODE_GAP_SHARE * ctx.safe_width
@@ -490,7 +490,7 @@ def _flow_diagram(
         label_box = ctx.safe_width * NODE_VERTICAL_SHARE
     nodes: list[dict[str, Any]] = []
     for position, raw in enumerate(nodes_in):
-        node = _object(raw, f"node {position + 1}", ("label", "beat"))
+        node = object_of(raw, f"node {position + 1}", ("label", "beat"))
         nodes.append(
             {
                 "label": ctx.words(
@@ -504,7 +504,7 @@ def _flow_diagram(
             }
         )
     ctx.beats_in_order([node["beat"] for node in nodes], "fields.nodes")
-    placed = _object(beats, "beats", ("title",))
+    placed = object_of(beats, "beats", ("title",))
     return {"title": title, "nodes": nodes}, {
         "title": ctx.beat(placed["title"], "beat of the title")
     }
@@ -513,7 +513,7 @@ def _flow_diagram(
 def _bullet_build(
     ctx: _Context, variant: str, fields: object, beats: object
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    given = _object(fields, "fields", ("items",), ("title",))
+    given = object_of(fields, "fields", ("items",), ("title",))
     out_fields: dict[str, Any] = {}
     required: list[str] = []
     if "title" in given:
@@ -521,8 +521,8 @@ def _bullet_build(
         required.append("title")
     most = 1 if variant == "statement" else 4
     items: list[dict[str, Any]] = []
-    for position, raw in enumerate(_items(given["items"], "items", 1, most)):
-        item = _object(raw, f"item {position + 1}", ("text", "beat"))
+    for position, raw in enumerate(items_of(given["items"], "items", 1, most)):
+        item = object_of(raw, f"item {position + 1}", ("text", "beat"))
         if variant == "statement":
             text = ctx.words(
                 item["text"], f"items.{position}.text", ITEM_MAX_CHARS, "display", ctx.safe_width
@@ -538,7 +538,7 @@ def _bullet_build(
         items.append({"text": text, "beat": ctx.beat(item["beat"], f"beat of item {position + 1}")})
     ctx.beats_in_order([item["beat"] for item in items], "fields.items")
     out_fields["items"] = items
-    placed = _object(beats, "beats", required)
+    placed = object_of(beats, "beats", required)
     return out_fields, {key: ctx.beat(placed[key], f"beat of the {key}") for key in required}
 
 
@@ -572,7 +572,7 @@ def check_spec(answer: dict[str, Any], line: str, resolved: dict[str, Any]) -> d
     if template is None:
         return {
             "template": None,
-            "reason": _line_of_text(answer.get("reason"), "reason", REASON_MAX_CHARS),
+            "reason": line_of_text(answer.get("reason"), "reason", REASON_MAX_CHARS),
             "catalogue_version": CATALOGUE_VERSION,
         }
     if not isinstance(template, str) or template not in TEMPLATES:

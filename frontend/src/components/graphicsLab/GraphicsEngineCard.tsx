@@ -1,6 +1,7 @@
 import { Badge, Box, Group, Paper, Stack, Text } from "@mantine/core";
 
 import type { GraphicEngine } from "../../api/graphicsLab";
+import { GraphicsBlockScene } from "./GraphicsBlockScene";
 import { GraphicsRenderVerdict } from "./GraphicsRenderVerdict";
 import { GraphicsTemplateSpec } from "./GraphicsTemplateSpec";
 
@@ -19,7 +20,8 @@ type GraphicsEngineCardProps = {
 
 /**
  * One of the four engines of a run. An engine that is not built says so. A template engine
- * (GFX-006) shows its spec, or why no template fits, before its renderer exists; once an engine
+ * (GFX-006) shows its spec, or why no template fits, before its renderer exists; the
+ * building-blocks engine (GFX-009) shows the blocks of its scene and the layout check; once an engine
  * has a video, its card shows it and the verdict. The full comparison (the four videos played
  * together) is a later phase.
  */
@@ -79,6 +81,7 @@ export function GraphicsEngineCard({ engine, width, height }: GraphicsEngineCard
             {TEMPLATE_ENGINES.includes(engine.key) && (
               <GraphicsTemplateSpec render={newest} />
             )}
+            {engine.key === "remotion_blocks" && <GraphicsBlockScene render={newest} />}
             {newest.last_error !== null && (
               <Text size="xs" c="red" style={{ wordBreak: "break-word" }}>
                 {newest.last_error}

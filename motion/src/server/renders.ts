@@ -6,7 +6,7 @@ import { makeCancelSignal, renderMedia, selectComposition } from "@remotion/rend
 import type { Engine, RenderRequest } from "./schema.ts";
 
 const root = resolve(import.meta.dirname, "../..");
-const BUNDLE_DIR = process.env["MOTION_BUNDLE"] ?? resolve(root, "build/bundle");
+export const BUNDLE_DIR = process.env["MOTION_BUNDLE"] ?? resolve(root, "build/bundle");
 const RENDER_DIR = join(tmpdir(), "motion-renders");
 
 // How many renders run at once. The backend sends only as many as its own setting allows; the

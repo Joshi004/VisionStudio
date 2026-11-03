@@ -76,6 +76,40 @@ export const renderRequestSchema = {
   },
 } as const;
 
+// The body of POST /layout (GFX-009): the size, length and resolved brief of a render, the block
+// scene as its `input`, and the frames at which to report the texts on the screen.
+export type LayoutRequest = {
+  width: number;
+  height: number;
+  fps: number;
+  frames: number;
+  resolved: Record<string, unknown>;
+  input: unknown;
+  at_frames: number[];
+};
+
+export const MAX_LAYOUT_FRAMES = 32;
+
+export const layoutRequestSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["width", "height", "fps", "frames", "resolved", "input", "at_frames"],
+  properties: {
+    width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
+    height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
+    fps: { type: "integer", minimum: 1, maximum: 60 },
+    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
+    resolved: { type: "object" },
+    input: {},
+    at_frames: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_LAYOUT_FRAMES,
+      items: { type: "integer", minimum: 0, maximum: MAX_FRAMES - 1 },
+    },
+  },
+} as const;
+
 export const idParamsSchema = {
   type: "object",
   required: ["id"],

@@ -145,6 +145,19 @@ def card_resolved(
     }
 
 
+def input_warnings(input: Any) -> list[str]:
+    """The warnings an engine's saved input carries into its render (GFX-009): the layout problems
+    of a block scene, or that its layout was not checked. Other engines' inputs have none.
+    """
+    layout = input.get("layout") if isinstance(input, dict) else None
+    if not isinstance(layout, dict):
+        return []
+    if layout.get("checked") is False:
+        return [f"The layout was not checked: {layout.get('reason') or 'no reason given'}"]
+    problems = layout.get("problems")
+    return [str(problem) for problem in problems] if isinstance(problems, list) else []
+
+
 def check_probe(
     probe: VideoProbe, *, width: int, height: int, fps: int, frames: int
 ) -> tuple[dict[str, bool], list[str]]:

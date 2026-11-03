@@ -1,7 +1,11 @@
 import { Composition } from "remotion";
 import type { CalculateMetadataFunction } from "remotion";
 
-import "./fonts";
+import { Blocks } from "./blocks/Blocks";
+import { layoutReport } from "./blocks/report";
+import type { LayoutReport } from "./blocks/report";
+import { readScene } from "./blocks/scene";
+import { fontsLoaded } from "./fonts";
 import { NotBuiltYet } from "./NotBuiltYet";
 import { TestCard } from "./TestCard";
 import { Templates } from "./templates/Templates";
@@ -15,6 +19,23 @@ const metadata: CalculateMetadataFunction<GraphicInput> = ({ props }) => ({
   fps: props.fps,
   durationInFrames: props.frames,
 });
+
+// The props of `BlocksLayout` (GFX-009): the input of a `Blocks` render, the frames to report on,
+// and the report that `calculateMetadata` makes of them. `POST /layout` reads it from the props
+// that `selectComposition` returns, so the report is measured in the browser, with the fonts.
+type LayoutProps = GraphicInput & { at_frames: number[]; report: LayoutReport | null };
+
+const layoutMetadata: CalculateMetadataFunction<LayoutProps> = async ({ props }) => {
+  await fontsLoaded;
+  const report = layoutReport(props, readScene(props.input), props.at_frames);
+  return {
+    width: props.width,
+    height: props.height,
+    fps: props.fps,
+    durationInFrames: props.frames,
+    props: { ...props, report },
+  };
+};
 
 const placeholder: Resolved = {
   width: 1920,
@@ -41,6 +62,10 @@ const placeholder: Resolved = {
   caption_zone: { top: 878, bottom: 1018 },
 };
 
+function Nothing() {
+  return null;
+}
+
 const defaults = (engine: string): GraphicInput => ({
   engine,
   width: 1920,
@@ -52,8 +77,9 @@ const defaults = (engine: string): GraphicInput => ({
   code: null,
 });
 
-// The four compositions of §4.6. The test card (GFX-005) and the templates (GFX-007) are drawn;
-// the other two show "not built yet" until GFX-009 and GFX-010.
+// The compositions of §4.6. The test card (GFX-005), the templates (GFX-007) and the blocks
+// (GFX-009) are drawn; `Generated` shows "not built yet" until GFX-010. `BlocksLayout` draws
+// nothing: it only measures a block scene for `POST /layout`.
 export function Root() {
   return (
     <>
@@ -79,13 +105,23 @@ export function Root() {
       />
       <Composition
         id="Blocks"
-        component={NotBuiltYet}
+        component={Blocks}
         width={1920}
         height={1080}
         fps={24}
         durationInFrames={72}
         defaultProps={defaults("remotion_blocks")}
         calculateMetadata={metadata}
+      />
+      <Composition
+        id="BlocksLayout"
+        component={Nothing}
+        width={1920}
+        height={1080}
+        fps={24}
+        durationInFrames={72}
+        defaultProps={{ ...defaults("remotion_blocks"), at_frames: [], report: null }}
+        calculateMetadata={layoutMetadata}
       />
       <Composition
         id="Generated"

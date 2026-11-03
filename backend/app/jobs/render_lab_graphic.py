@@ -173,7 +173,11 @@ class RenderLabGraphicHandler(JobHandler):
             "encoding": dict(graphics_render.ENCODING),
             "versions": versions,
         }
-        await _save(job_id, plan, stored.relative_path, metrics, warnings)
+        # The layout problems found before the render come first: they explain what the video
+        # shows, the probe's warnings explain what the file is.
+        problems = graphics_render.input_warnings(plan.input)
+        metrics["layout_problems"] = len(problems)
+        await _save(job_id, plan, stored.relative_path, metrics, problems + warnings)
 
     async def _draw_in_motion(
         self, job_id: int, base_url: str, body: dict[str, Any], dest: Path

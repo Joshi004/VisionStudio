@@ -114,8 +114,11 @@ async def ask_model(
     timeout_s: float,
     keep: dict[str, Any] | None = None,
     correct: bool = True,
+    max_attempts: int = MAX_ATTEMPTS,
 ) -> Outcome:
-    """Sends `body` to `target` (up to `MAX_ATTEMPTS` times) until `read` accepts an answer.
+    """Sends `body` to `target` (up to `max_attempts` times, `MAX_ATTEMPTS` by default) until
+    `read` accepts an answer. A job that asks again on purpose after a usable answer (the layout
+    retry of GFX-009) makes that one call with `max_attempts=1`.
 
     `keep` is for a job that makes several calls in a row: what the earlier calls came to. It is
     saved on the job's output next to this call's own record, every time progress is saved, so
@@ -126,8 +129,8 @@ async def ask_model(
     """
     outcome = Outcome()
     correction: str | None = None
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        await _phase(job_id, phases.asking_model(attempt, MAX_ATTEMPTS))
+    for attempt in range(1, max_attempts + 1):
+        await _phase(job_id, phases.asking_model(attempt, max_attempts))
         started = time.monotonic()
         sent = with_correction(body, correction) if correction is not None else body
         try:
@@ -198,7 +201,7 @@ async def ask_model(
                 correction = problem
             await _save_progress(job_id, outcome, keep)
 
-        if attempt < MAX_ATTEMPTS:
+        if attempt < max_attempts:
             await asyncio.sleep(RETRY_DELAY_S)
     return outcome
 

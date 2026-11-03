@@ -88,7 +88,7 @@ def _instructions(width: int, height: int) -> str:
     )
 
 
-def _brief_for_model(brief: dict[str, Any], resolved: dict[str, Any]) -> dict[str, Any]:
+def brief_for_model(brief: dict[str, Any], resolved: dict[str, Any]) -> dict[str, Any]:
     """What the model sees of the brief: the intent, the numbers with the text code shows for
     each, and the beats with the second at which each starts.
     """
@@ -141,7 +141,7 @@ def build_request(
     """The exact request body of the one call. It is stored on the job."""
     user = (
         f"LINE:\n{line}\n\nORIENTATION: {orientation}\n\nBRIEF:\n"
-        f"{json.dumps(_brief_for_model(brief, resolved), ensure_ascii=False, indent=1)}"
+        f"{json.dumps(brief_for_model(brief, resolved), ensure_ascii=False, indent=1)}"
     )
     return {
         "model": model,
