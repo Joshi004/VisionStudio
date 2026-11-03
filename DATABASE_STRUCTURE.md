@@ -192,6 +192,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (GFX-011 Graphics lab comparison view, 2026-11-03):** no migration. **A render can repeat another, and the job says whether the frames matched.** (1) **No table, column, job type or setting is added.** `lab_graphic_render.repeat_of` (migration `0079`) is now filled: **Render again** (`POST /api/lab/graphics/renders/{id}/render-again`, `graphics_lab.render_again`) adds a row of the same run and engine, the next `attempt`, a copy of `input`, `input_job_id` NULL (no model call, so the original's call is not counted twice) and `repeat_of` set to the original, and queues `render_lab_graphic` for it. (2) **`render_lab_graphic` compares the frames** of a render with `repeat_of` set: `ffmpeg -f framemd5` on the new video and on the original's stored file (video stream only, so a voice does not matter). The result is `metrics.repeat` (Section 5, the `render_lab_graphic` job); no new job type was needed. (3) **Ask again on one engine** (`POST /api/lab/graphics/runs/{id}/engines/{engine}/ask-again`, `graphics_lab.ask_engine_again`) adds a new input job and the next attempt through the engine's `start(session, run, again=True)`; the two template engines share one spec call, so both get a new attempt from it. (4) The API's render has a new read-only field `input_call` (seconds, attempts and tokens of the input job's model calls, worked out from the job's `output`; null for a repeat).
 
+**Update (EXG-001 explainer graphics foundation, 2026-11-03):** migration `0080`. **A continuous explainer can be created with graphics on, and every table, column and job type the whole explainer graphics plan needs exists.** (1) **One new column on `project`** (Section 4.1): `graphics` (BOOLEAN, NOT NULL, default `0`; every project made before this reads off). It is chosen when the project is created and never changed: `PATCH /api/projects/{id}` has no such field and refuses it with 422. `POST /api/projects` gives a continuous explainer `graphics = on` unless it sends `false`; every other project is off, and a story, or an explainer with `voice_track = lines`, that sends `true` is refused with 422. (2) **Four new tables**, `graphic_theme` (Section 4.75), `shot_graphic_brief` (4.76), `shot_graphic` (4.77) and `shot_graphic_choice` (4.78). All four belong to a project and are deleted with it (`CASCADE`). `shot_graphic` has a column the design sketch did not list, `failed_outright`, so that the rule that picks a shot's video (EXG-007) reads a stored fact instead of working it out from error text. (3) **`job.type` gains five types**, `write_graphic_theme`, `write_shot_graphic_brief`, `write_shot_graphic_component`, `write_shot_graphic_scene` and `render_shot_graphic`: the CHECK is rebuilt in batch mode, so `job` now has fifty-eight types. **No handler is registered for any of them yet** (EXG-002 onwards), so nothing can queue them. (4) **The graphic videos are project files:** they are stored as `media/<project_id>/<32 hex>.mp4` like every other project file, and are removed with the rest of the folder when the project is deleted (`storage.delete_project_dir`). Nothing makes a graphic yet, and no pipeline step, setting or cut-planning rule changes.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -455,6 +457,18 @@ erDiagram
 | `lab_graphic_render` | `input_job_id` | `job.id` | Yes (the job that wrote the engine's input; `SET NULL`). GFX-002 |
 | `lab_graphic_render` | `repeat_of` | `lab_graphic_render.id` | Yes (the render a "render again" was made from; `SET NULL`). GFX-002 |
 | `lab_graphic_render` | `render_job_id` | `job.id` | Yes (the `render_lab_graphic` job; `SET NULL`). GFX-002 |
+| `graphic_theme` | `project_id` | `project.id` | No (`CASCADE`). EXG-001 |
+| `graphic_theme` | `job_id` | `job.id` | Yes (the `write_graphic_theme` job; `SET NULL`). EXG-001 |
+| `shot_graphic_brief` | `project_id` | `project.id` | No (`CASCADE`). EXG-001 |
+| `shot_graphic_brief` | `shot_plan_id` | `shot_plan.id` | Yes (the plan the brief was written for; `SET NULL`). EXG-001 |
+| `shot_graphic_brief` | `job_id` | `job.id` | Yes (the `write_shot_graphic_brief` job; `SET NULL`). EXG-001 |
+| `shot_graphic` | `project_id` | `project.id` | No (`CASCADE`). EXG-001 |
+| `shot_graphic` | `brief_id` | `shot_graphic_brief.id` | No (`CASCADE`). EXG-001 |
+| `shot_graphic` | `repair_of` | `shot_graphic.id` | Yes (the attempt a repair was made from; `SET NULL`). EXG-001 |
+| `shot_graphic` | `input_job_id` | `job.id` | Yes (the model call that wrote the input; `SET NULL`). EXG-001 |
+| `shot_graphic` | `render_job_id` | `job.id` | Yes (the `render_shot_graphic` job; `SET NULL`). EXG-001 |
+| `shot_graphic_choice` | `project_id` | `project.id` | No (`CASCADE`). EXG-001 |
+| `shot_graphic_choice` | `brief_id` | `shot_graphic_brief.id` | No (`CASCADE`). EXG-001 |
 | `narrator_voice` | `project_id` | `project.id` | No (`CASCADE`). PHASE-011 |
 | `narrator_voice` | `voice_id` | `voice.id` | Yes (the saved voice; `SET NULL`). PHASE-011 |
 | `narrator_voice` | `job_id` | `job.id` | Yes (the `design_voice` job of an `ai` version; `SET NULL`; NULL for a manual one). PHASE-011 |
@@ -592,6 +606,7 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `callouts` | BOOLEAN | NOT NULL | `1` | EXPLAINER-007. Whether an explainer's render draws callouts. The same rules as `captions` |
 | `voice_track` | TEXT | NOT NULL | `'lines'` | `lines` \| `continuous` — how an explainer's speech is made (FLOW-002). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. `lines`: each line is its own speech (what every project did until now). `continuous`: one voice take per scene, the picture cut on top of it. A new explainer defaults to `continuous`; a story, and every project made before this column, is `lines` |
 | `presenter_delivery` | TEXT | NULL | — | FLOW-002. The owner's text that steers the voice of every take of a `continuous` explainer, at most 500 characters. NULL means the Story Bible's `storytelling_style.narration`, or a fixed default. Set only on a continuous explainer. `PATCH /api/projects/{id}` may change it at any time for one (a blank text clears it; any other project gets 422) |
+| `graphics` | BOOLEAN | NOT NULL | `0` | EXG-001. Whether a continuous explainer gets graphic shots (charts, diagrams and text cards drawn by code). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. Only an explainer with `voice_track = continuous` can have it on (`validate_project`). A new continuous explainer defaults to on; every other project, and every project made before this column, is off. Off, the project gets exactly the instructions, jobs and FFmpeg commands it got before |
 
 ```sql
 CREATE TABLE project (
@@ -616,7 +631,8 @@ CREATE TABLE project (
     callouts           BOOLEAN NOT NULL DEFAULT 1,
     voice_track        TEXT NOT NULL DEFAULT 'lines'
         CHECK (voice_track IN ('lines', 'continuous')),
-    presenter_delivery TEXT
+    presenter_delivery TEXT,
+    graphics           BOOLEAN NOT NULL DEFAULT 0
 );
 ```
 
@@ -3486,6 +3502,160 @@ CREATE TABLE lab_graphic_render (
     UNIQUE (run_id, engine, attempt)
 );
 CREATE INDEX idx_lab_graphic_render_run_engine ON lab_graphic_render (run_id, engine);
+```
+
+### 4.75 `graphic_theme`
+
+*Added in EXG-001 (migration `0080`).* One version of the theme every graphic of a project uses: the palette, the accent, the background style, the motion and the mood, written once for the video (EG-7). It follows Section 2.1: every run or edit is a new row with the next `version`, and a stored row is never changed. `inputs` holds the Story Bible the version was written from, so it is out of date when the newest Story Bible is another one (worked out on read, never stored). `content` is `{theme, reason, notes}`. Only the table exists so far; the job that writes it (`write_graphic_theme`) comes with EXG-002.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (project_id, version)` |
+| `version` | INTEGER | NOT NULL | — | From 1, for each project |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote it. NULL for a manual version. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the version was built from (the Story Bible) |
+| `content` | JSON | NOT NULL | — | `{theme, reason, notes}` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE graphic_theme (
+    id         INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version    INTEGER NOT NULL,
+    source     TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id     INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, version)
+);
+CREATE INDEX idx_graphic_theme_project ON graphic_theme (project_id);
+```
+
+### 4.76 `shot_graphic_brief`
+
+*Added in EXG-001 (migration `0080`).* One version of the brief of one **graphic shot**: what the graphic shows, its facts, derived values and beats. It follows Section 2.1 like `shot_definition`: every run is a new row with the next `version` of that shot, and a stored row is never changed. `scene_id` is the scene's slug id and `shot_id` the shot's id in that scene's shot plan; `shot_plan_id` is the plan the brief was written for (NULL once that plan row is deleted). `inputs` holds the plan, the shot's skeleton hash, the context (the sentences around the shot) and its hash, and the take and timing the plan used. A brief is out of date when any of them changed. `content` is the brief. The job that writes it (`write_shot_graphic_brief`) comes with EXG-004.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NOT NULL | — | The scene's slug id |
+| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan. `UNIQUE (project_id, scene_id, shot_id, version)` |
+| `shot_plan_id` | INTEGER, FK → `shot_plan.id` | NULL | — | The plan it was written for. `ON DELETE SET NULL` |
+| `version` | INTEGER | NOT NULL | — | From 1, for each shot |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote it. NULL for a manual version. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the version was built from |
+| `content` | JSON | NOT NULL | — | The brief |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE shot_graphic_brief (
+    id           INTEGER PRIMARY KEY,
+    project_id   INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scene_id     TEXT NOT NULL,
+    shot_id      TEXT NOT NULL,
+    shot_plan_id INTEGER REFERENCES shot_plan(id) ON DELETE SET NULL,
+    version      INTEGER NOT NULL,
+    source       TEXT NOT NULL CHECK (source IN ('ai', 'manual')),
+    job_id       INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs       JSON NOT NULL,
+    content      JSON NOT NULL,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, scene_id, shot_id, version)
+);
+CREATE INDEX idx_shot_graphic_brief_project_scene ON shot_graphic_brief (project_id, scene_id);
+```
+
+### 4.77 `shot_graphic`
+
+*Added in EXG-001 (migration `0080`).* One attempt of one engine for the brief of a graphic shot. Every graphic shot gets both a **generated component** and a **block scene** (EG-4), and each attempt is a row. `engine` is `generated_component` or `remotion_blocks` (`CHECK`). `attempt` counts the attempts of one engine for a brief from 1: asking the model again, or repairing a component, adds one, and nothing is ever replaced. `repair_of` names the attempt a repaired component was made from. The row is made when its model call is queued, so the columns below `engine` stay NULL until they are written.
+
+- **`input`** is what the engine draws from: the component code or the block scene, with its checks and warnings. `input_job_id` is the model call that wrote it.
+- **`inputs`** records what the attempt was made with: the resolved brief and the version of the theme. A video is out of date when the brief resolved now differs from it (a new theme).
+- **`media_path`** is the finished video, `media/<project_id>/<32 hex>.mp4`; `frame_count` is its measured frame count. `render_job_id` is the `render_shot_graphic` job.
+- **`failed_outright`** is set on the newest attempt of a component that has no video and that nothing more will be tried for (its call, its browser check or its render still fails after the repairs). It is **not** set by warnings, by an unreachable motion service, or by a silent visual break. The rule that picks a shot's video (EXG-007) switches to the blocks only when it is set. Nothing writes it before EXG-005 and EXG-006.
+
+Deleting a brief deletes its attempts (`CASCADE`). The video files are deleted by code, and by the project's folder when the project is deleted.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scene_id` | TEXT | NOT NULL | — | The scene's slug id |
+| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan |
+| `brief_id` | INTEGER, FK → `shot_graphic_brief.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (brief_id, engine, attempt)` |
+| `engine` | TEXT | NOT NULL | — | `generated_component` or `remotion_blocks` (`CHECK`) |
+| `attempt` | INTEGER | NOT NULL | — | From 1, for each engine of a brief |
+| `repair_of` | INTEGER, FK → `shot_graphic.id` | NULL | — | The attempt this repairs. `ON DELETE SET NULL` |
+| `input` | JSON | NULL | — | The component code or the block scene, with its checks and warnings |
+| `input_job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote `input`. `ON DELETE SET NULL` |
+| `render_job_id` | INTEGER, FK → `job.id` | NULL | — | The `render_shot_graphic` job. `ON DELETE SET NULL` |
+| `inputs` | JSON | NULL | — | The resolved brief and the theme version it was made with |
+| `media_path` | TEXT | NULL | — | The video, under the project's media folder |
+| `frame_count` | INTEGER | NULL | — | The video's measured frame count |
+| `metrics` | JSON | NULL | — | What was measured on the video |
+| `warnings` | JSON | NULL | — | What the checks found that is not an error |
+| `last_error` | TEXT | NULL | — | A failure no job holds, or the errors of an outright failure |
+| `failed_outright` | BOOLEAN | NOT NULL | `0` | See above |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE shot_graphic (
+    id              INTEGER PRIMARY KEY,
+    project_id      INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scene_id        TEXT NOT NULL,
+    shot_id         TEXT NOT NULL,
+    brief_id        INTEGER NOT NULL REFERENCES shot_graphic_brief(id) ON DELETE CASCADE,
+    engine          TEXT NOT NULL CHECK (engine IN ('generated_component', 'remotion_blocks')),
+    attempt         INTEGER NOT NULL,
+    repair_of       INTEGER REFERENCES shot_graphic(id) ON DELETE SET NULL,
+    input           JSON,
+    input_job_id    INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    render_job_id   INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs          JSON,
+    media_path      TEXT,
+    frame_count     INTEGER,
+    metrics         JSON,
+    warnings        JSON,
+    last_error      TEXT,
+    failed_outright BOOLEAN NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (brief_id, engine, attempt)
+);
+CREATE INDEX idx_shot_graphic_brief_engine ON shot_graphic (brief_id, engine);
+CREATE INDEX idx_shot_graphic_project_scene ON shot_graphic (project_id, scene_id);
+```
+
+### 4.78 `shot_graphic_choice`
+
+*Added in EXG-001 (migration `0080`).* The version of a graphic shot the owner chose to use in the video, instead of the rule's pick (EG-5). One row per shot, like `shot_voice_source`. A row names the brief it was set on (`brief_id`) and counts only while that brief is still the shot's current one, so a new brief puts the shot back on the rule (worked out on every read). The endpoint and the control come with EXG-007.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (project_id, scene_id, shot_id)` |
+| `scene_id` | TEXT | NOT NULL | — | The scene's slug id |
+| `shot_id` | TEXT | NOT NULL | — | The shot's id in the scene's plan |
+| `brief_id` | INTEGER, FK → `shot_graphic_brief.id` | NOT NULL | — | The brief the choice was set on. `ON DELETE CASCADE` |
+| `engine` | TEXT | NOT NULL | — | `generated_component` or `remotion_blocks` (`CHECK`) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE shot_graphic_choice (
+    id         INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scene_id   TEXT NOT NULL,
+    shot_id    TEXT NOT NULL,
+    brief_id   INTEGER NOT NULL REFERENCES shot_graphic_brief(id) ON DELETE CASCADE,
+    engine     TEXT NOT NULL CHECK (engine IN ('generated_component', 'remotion_blocks')),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, scene_id, shot_id)
+);
+CREATE INDEX idx_shot_graphic_choice_project ON shot_graphic_choice (project_id);
 ```
 
 ---

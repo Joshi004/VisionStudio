@@ -129,6 +129,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [callouts, setCallouts] = useState(true);
   const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
   const [delivery, setDelivery] = useState("");
+  const [graphics, setGraphics] = useState(true);
   const [name, setName] = useState("");
 
   const canCreate =
@@ -153,6 +154,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         voice_track: explainer ? voiceTrack : undefined,
         presenter_delivery:
           explainer && voiceTrack === "continuous" && delivery.trim() !== "" ? delivery : undefined,
+        // Only a continuous explainer can have graphics; any other project leaves it out.
+        graphics: explainer && voiceTrack === "continuous" ? graphics : undefined,
       },
       {
         onSuccess: (project) => {
@@ -306,6 +309,14 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
                 autosize
                 minRows={2}
                 maxRows={6}
+              />
+            )}
+            {voiceTrack === "continuous" && (
+              <Switch
+                label="Graphics"
+                description="Charts, diagrams and text cards drawn by code and timed to the presenter's words, for numbers, comparisons, steps and lists. It cannot be changed later."
+                checked={graphics}
+                onChange={(event) => setGraphics(event.currentTarget.checked)}
               />
             )}
             <Stack gap="xs">

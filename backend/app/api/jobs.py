@@ -83,6 +83,11 @@ JobType = Literal[
     "write_lab_graphic_component",
     "render_lab_graphic",
     "time_lab_graphic_words",
+    "write_graphic_theme",
+    "write_shot_graphic_brief",
+    "write_shot_graphic_component",
+    "write_shot_graphic_scene",
+    "render_shot_graphic",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]

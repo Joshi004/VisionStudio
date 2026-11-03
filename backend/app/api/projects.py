@@ -58,11 +58,14 @@ class ProjectCreate(BaseModel):
     # story is always `lines`. The delivery text is for a continuous explainer only.
     voice_track: VoiceTrack | None = None
     presenter_delivery: StrictStr | None = None
+    # Graphic shots (EXG-001). Left out, a continuous explainer gets them on and every other
+    # project off. Asking for them on any other project is refused.
+    graphics: StrictBool | None = None
 
 
 class ProjectUpdate(BaseModel):
-    """Only the fields that are sent are changed. The orientation, the speech mode, the kind and
-    the voice track cannot be changed.
+    """Only the fields that are sent are changed. The orientation, the speech mode, the kind,
+    the voice track and the graphics setting cannot be changed.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -133,6 +136,8 @@ class ProjectDetail(BaseModel):
     voice_track: VoiceTrack
     # The owner's voice text for a continuous explainer. Null when there is none.
     presenter_delivery: str | None
+    # Whether a continuous explainer gets graphic shots (EXG-001). Off for every other project.
+    graphics: bool
     story_length: StoryLengthOut
 
 
@@ -185,6 +190,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         callouts=project.callouts,
         voice_track=_voice_track(project),
         presenter_delivery=project.presenter_delivery,
+        graphics=project.graphics,
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,
@@ -249,6 +255,7 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             body.callouts,
             body.voice_track,
             body.presenter_delivery,
+            body.graphics,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

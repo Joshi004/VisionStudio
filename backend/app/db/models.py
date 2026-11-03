@@ -85,6 +85,9 @@ class Project(Base):
     # explainer (at most 500 characters). NULL means the Story Bible's narration style, or the
     # default. Can be changed at any time.
     presenter_delivery: Mapped[str | None] = mapped_column(default=None)
+    # EXG-001. Whether a continuous explainer gets graphic shots (EG-1). Chosen when the project
+    # is created and never changed; only an explainer with a continuous voice can have it on.
+    graphics: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
 
 class Asset(Base):
@@ -143,7 +146,8 @@ class Job(Base):
         # music on the timeline, since revision 0070, and the preview of a music mix, since revision
         # 0071, and the timing of a speech's words, since revision 0073, and the callout plan,
         # since revision 0074, and the two Audio video lab jobs, since revision 0075, and the six
-        # Graphics lab jobs, since revision 0079.
+        # Graphics lab jobs, since revision 0079, and the five explainer graphics jobs, since
+        # revision 0080.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -162,7 +166,10 @@ class Job(Base):
             "'time_lab_speech_words', 'render_av_test', "
             "'write_lab_graphic_brief', 'write_lab_graphic_template_spec', "
             "'write_lab_graphic_block_scene', 'write_lab_graphic_component', "
-            "'render_lab_graphic', 'time_lab_graphic_words')",
+            "'render_lab_graphic', 'time_lab_graphic_words', "
+            "'write_graphic_theme', 'write_shot_graphic_brief', "
+            "'write_shot_graphic_component', 'write_shot_graphic_scene', "
+            "'render_shot_graphic')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1248,6 +1255,146 @@ class ShotVoiceSource(Base):
     scene_id: Mapped[str]
     shot_id: Mapped[str]
     shot_plan_id: Mapped[int] = mapped_column(ForeignKey("shot_plan.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class GraphicTheme(Base):
+    """One version of the theme every graphic of a project uses (EXG-001, revision 0080).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run or
+    edit is a new row with the next `version`, and a stored row is never changed. `inputs` holds
+    the Story Bible it was written from, so staleness is worked out on read. `content` is
+    `{theme, reason, notes}`.
+    """
+
+    __tablename__ = "graphic_theme"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_graphic_theme_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotGraphicBrief(Base):
+    """One version of the brief of one graphic shot (EXG-001, revision 0080).
+
+    The same provenance shape as `ShotDefinition`: every run is a new row with the next `version`
+    of that shot, and a stored row is never changed. `scene_id` is the scene's slug id and
+    `shot_id` the shot's id in that scene's shot plan; `shot_plan_id` is the plan the brief was
+    written for. `inputs` holds the plan, the skeleton hash, the context and its hash, and the
+    take and timing used. `content` is the brief.
+    """
+
+    __tablename__ = "shot_graphic_brief"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "shot_id", "version"),
+        Index("idx_shot_graphic_brief_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    # The shot plan row this was written for. NULL when that row was deleted.
+    shot_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_plan.id", ondelete="SET NULL"), default=None
+    )
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotGraphic(Base):
+    """One attempt of one engine for the brief of a graphic shot (EXG-001, revision 0080).
+
+    `engine` is `generated_component` or `remotion_blocks`. `attempt` counts the attempts of one
+    engine for a brief from 1, and nothing is replaced. `input` is what the engine draws from
+    (the component code or the block scene), `input_job_id` the model call that wrote it and
+    `repair_of` the attempt a repaired component was made from. `inputs` records the resolved
+    brief and the theme version the attempt was made with. The row is made when its model call
+    is queued, so `input`, `inputs` and the video columns are NULL until they are written.
+    `failed_outright` is set on the newest attempt of a component that has no video and that
+    nothing more will be tried for (EXG-006); the rule of EXG-007 then uses the blocks.
+    """
+
+    __tablename__ = "shot_graphic"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
+        ),
+        UniqueConstraint("brief_id", "engine", "attempt"),
+        Index("idx_shot_graphic_brief_engine", "brief_id", "engine"),
+        Index("idx_shot_graphic_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    brief_id: Mapped[int] = mapped_column(ForeignKey("shot_graphic_brief.id", ondelete="CASCADE"))
+    engine: Mapped[str]
+    attempt: Mapped[int]
+    repair_of: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_graphic.id", ondelete="SET NULL"), default=None
+    )
+    input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    input_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    render_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    media_path: Mapped[str | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    metrics: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+    failed_outright: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotGraphicChoice(Base):
+    """The version of a graphic shot the owner chose (EXG-001, revision 0080).
+
+    One row per shot, like `ShotVoiceSource`. It names the brief it was set on and counts only
+    while that brief is the shot's current one, so a new brief puts the shot back on the rule.
+    """
+
+    __tablename__ = "shot_graphic_choice"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
+        ),
+        UniqueConstraint("project_id", "scene_id", "shot_id"),
+        Index("idx_shot_graphic_choice_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    brief_id: Mapped[int] = mapped_column(ForeignKey("shot_graphic_brief.id", ondelete="CASCADE"))
+    engine: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 

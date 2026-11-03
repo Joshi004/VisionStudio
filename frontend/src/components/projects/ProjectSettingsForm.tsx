@@ -144,6 +144,17 @@ export function ProjectSettingsForm({
                     Every scene's voice take is made with this text, so changing it makes the
                     takes out of date.
                   </Text>
+                  <Group gap="sm">
+                    <Text size="sm" fw={500}>
+                      Graphics
+                    </Text>
+                    <Badge variant="light" color={project.graphics ? "green" : "gray"}>
+                      {project.graphics ? "On" : "Off"}
+                    </Badge>
+                    <Text size="xs" c="dimmed">
+                      Graphics are fixed after creation.
+                    </Text>
+                  </Group>
                 </>
               )}
             </Stack>

@@ -46,6 +46,8 @@ VOICE_CONTINUOUS: Final = "continuous"
 VOICE_TRACKS: Final = (VOICE_LINES, VOICE_CONTINUOUS)
 # The presenter delivery text is sent to the speech model as the take's instruction.
 DELIVERY_MAX_CHARS: Final = speech_synthesizer.INSTRUCTION_MAX_CHARS
+# EXG-001: graphic shots exist only in an explainer with a continuous voice (EG-1).
+GRAPHICS_ONLY_MESSAGE: Final = "Graphics are only for an explainer with a continuous voice."
 
 # What the event and shot prompts branch on (EXPLAINER-004): the project's speech mode, or
 # `explainer` for an explainer project (whose speech mode is always `both`). It is never stored
@@ -180,6 +182,10 @@ def validate_project(project: Project) -> None:
             raise ProjectValidationError(
                 f"The presenter delivery must be at most {DELIVERY_MAX_CHARS} characters."
             )
+    if project.graphics and (
+        project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
+    ):
+        raise ProjectValidationError(GRAPHICS_ONLY_MESSAGE)
 
 
 def _normalise_name(value: str) -> str:
@@ -215,6 +221,7 @@ async def create_project(
     callouts: bool = True,
     voice_track: str | None = None,
     presenter_delivery: str | None = None,
+    graphics: bool | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
@@ -225,6 +232,9 @@ async def create_project(
     `voice_track` (FLOW-002) is `continuous` for an explainer unless it is sent as `lines`, and
     always `lines` for a story (a story that asks for `continuous` is refused).
     `presenter_delivery` is the owner's voice text for a continuous explainer; blank means none.
+
+    `graphics` (EXG-001) is on by default for a continuous explainer and off for every other
+    project; asking for it on any other project is refused.
 
     An explainer (EXPLAINER-002) needs a presenter from the Character Lab and may have a set
     from the Environment Lab. Both go into the project's cast as `as_is`, in the same commit as
@@ -247,6 +257,11 @@ async def create_project(
         raise ProjectValidationError(
             "The presenter delivery is only for an explainer with a continuous voice."
         )
+    continuous_explainer = kind == KIND_EXPLAINER and voice_track == VOICE_CONTINUOUS
+    if graphics and not continuous_explainer:
+        raise ProjectValidationError(GRAPHICS_ONLY_MESSAGE)
+    if graphics is None:
+        graphics = continuous_explainer
     if kind == KIND_EXPLAINER:
         speech_mode = SPEECH_BOTH
         if presenter_character_id is None:
@@ -277,6 +292,7 @@ async def create_project(
         callouts=callouts if kind == KIND_EXPLAINER else True,
         voice_track=voice_track,
         presenter_delivery=delivery,
+        graphics=graphics,
     )
     validate_project(project)
     session.add(project)
