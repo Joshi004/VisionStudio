@@ -46,6 +46,10 @@ REASONING_EFFORT: Final = "high"
 # The most characters each text field of the definition may have.
 CONTEXT_MAX_CHARS: Final = 300
 ENVIRONMENT_STATE_MAX_CHARS: Final = 100
+# SCN-007: the most places inside the main place a scene may list, and the size of the phrase
+# that says how each one stands in the main place.
+MAX_INNER_PLACES: Final = 3
+RELATION_MAX_CHARS: Final = 100
 TIME_OF_DAY_MAX_CHARS: Final = 60
 LIGHTING_MAX_CHARS: Final = 200
 LOOK_MAX_CHARS: Final = 100
@@ -58,6 +62,7 @@ _LIMITS: Final = {
     "story_context.current": CONTEXT_MAX_CHARS,
     "story_context.after": CONTEXT_MAX_CHARS,
     "environment_state": ENVIRONMENT_STATE_MAX_CHARS,
+    "inner_places[].relation": RELATION_MAX_CHARS,
     "time.time_of_day": TIME_OF_DAY_MAX_CHARS,
     "time.lighting_state": LIGHTING_MAX_CHARS,
     "character_looks.(each character)": LOOK_MAX_CHARS,
@@ -77,6 +82,9 @@ _ANSWER_FORM: Final = json.dumps(
         },
         "environment_id": "an id from ENVIRONMENTS",
         "environment_state": "night",
+        "inner_places": [
+            {"environment_id": "an id from ENVIRONMENTS", "relation": "parked in the garage"}
+        ],
         "time": {"time_of_day": "late afternoon", "lighting_state": "low sun through dusty glass"},
         "characters": ["an id from CHARACTERS"],
         "off_screen": ["an id from characters"],
@@ -105,7 +113,14 @@ you can place it in the story.
 scene is about, and "after" is where the story goes next. One sentence each, at most \
 {CONTEXT_MAX_CHARS} characters. When there is no previous or next scene, say so briefly.
 - "environment_id": the id of the ONE environment of ENVIRONMENTS where the scene mainly \
-happens. Use an id exactly as listed. Never invent an id.
+happens: the larger place around the action. Use an id exactly as listed. Never invent an id.
+- "inner_places": the environments of ENVIRONMENTS that some shots of the scene happen INSIDE \
+while they stand in the main place: a vehicle, a lift or a booth that the camera goes into (a \
+car parked in the garage, a lift in the lobby). Each has "environment_id" (an id exactly as \
+listed, never the main place and never twice) and "relation", how it stands in the main place, \
+at most {RELATION_MAX_CHARS} characters (for example "parked on garage level P1"). List one only \
+when the scene really spends time inside it and ENVIRONMENTS has it. At most {MAX_INNER_PLACES}. \
+Use an empty list when the whole scene happens in the main place.
 - "environment_state": the condition of that place the scene needs, in a short phrase of at \
 most {ENVIRONMENT_STATE_MAX_CHARS} characters (for example "night", "after the fire", \
 "flooded"). Write "default" when the place is shown as its definition describes it. Say what is \
@@ -280,6 +295,55 @@ def _character_map(
     return result
 
 
+def _inner_places(
+    answer: dict[str, Any],
+    environment_id: str,
+    environment_ids: Collection[str],
+    warnings: list[str] | None,
+) -> list[dict[str, str]]:
+    """SCN-007: the places inside the main place. A missing or null value is an empty list.
+    Each must be one of the story's environments, never the main place and never listed twice.
+    Raises ValueError.
+    """
+    raw = answer.get("inner_places")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError('The "inner_places" was not a list.')
+    if len(raw) > MAX_INNER_PLACES:
+        raise ValueError(f'The "inner_places" had more than {MAX_INNER_PLACES} places.')
+    places: list[dict[str, str]] = []
+    for position, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"Inner place {position} was not an object.")
+        place_id = item.get("environment_id")
+        if not isinstance(place_id, str) or place_id not in environment_ids:
+            raise ValueError(
+                f'The "environment_id" of inner place {position} was not one of the story\'s '
+                "environments."
+            )
+        if place_id == environment_id:
+            raise ValueError(
+                f'Inner place {position} is the scene\'s main place "{place_id}": an inner '
+                "place must be another environment."
+            )
+        if any(place["environment_id"] == place_id for place in places):
+            raise ValueError(f'The "inner_places" listed "{place_id}" twice.')
+        places.append(
+            {
+                "environment_id": place_id,
+                "relation": _text(
+                    item,
+                    "relation",
+                    f"inner_places[{position}].relation",
+                    RELATION_MAX_CHARS,
+                    warnings,
+                ),
+            }
+        )
+    return places
+
+
 def check_definition(
     answer: Any,
     scene_id: str,
@@ -295,7 +359,8 @@ def check_definition(
     The definition's `id` is `scene_id`, set here and never read from the model.
     `character_ids` and `environment_ids` are the ids of the story's discovered characters and
     environments: the chosen environment and every chosen character must be among them. The
-    look names and the environment state are kept as the model wrote them. Only the fields asked
+    look names and the environment state are kept as the model wrote them. `inner_places`
+    (SCN-007) are checked against the same environment ids. Only the fields asked
     for are kept, in a fixed order.
     """
     if not isinstance(answer, dict):
@@ -336,6 +401,8 @@ def check_definition(
     # Kept in the order of the scene's characters.
     off_screen = [character_id for character_id in characters if character_id in raw_off_screen]
 
+    inner_places = _inner_places(answer, environment_id, environment_ids, warnings)
+
     return {
         "id": scene_id,
         "story_context": {
@@ -353,6 +420,9 @@ def check_definition(
             ENVIRONMENT_STATE_MAX_CHARS,
             warnings,
         ),
+        # SCN-007. Left out when there is none, so a definition stored before this field existed
+        # is exactly what "accept as is" gives back (`provenance.accepted_inputs`).
+        **({"inner_places": inner_places} if inner_places else {}),
         "time": {
             "time_of_day": _text(
                 time, "time_of_day", "time.time_of_day", TIME_OF_DAY_MAX_CHARS, warnings

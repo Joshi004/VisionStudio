@@ -669,6 +669,12 @@ from the camera of the master picture. Set the shot in front of it and never des
 part of the place. When a character of the SHOT DEFINITION has a "screen_side" ("left", \
 "right" or "center"), that character is on that side of the frame: keep it and restate it \
 where the composition is restated.
+- Inside a vehicle, a lift, a booth or any small enclosed space (an ENVIRONMENT that is one, or \
+that has "inside_of", the larger place it stands in), describe the enclosure first: the roof \
+and headliner above the people, the pillars, the windscreen frame, the dashboard and the door \
+panels, whatever it has. Show the outside only through the glass or the openings, and let the \
+light come in through the windows. The larger place is never around the people or above them: \
+no ceiling, lights, pipes or pillars of it over their heads.
 - Plain, concrete, present-tense English prose. Concrete verbs and physical cues; \
 show feeling through the body (eyes, head, shoulders, hands, breath), never through a label \
 such as "sad". No quality tags and no mood words (such as cinematic or beautiful) on their \

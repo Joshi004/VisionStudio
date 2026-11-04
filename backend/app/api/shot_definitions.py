@@ -113,6 +113,27 @@ class ShotViewOut(BaseModel):
     allowed_for: list[str]
 
 
+class ShotInnerViewOut(BaseModel):
+    """A view of a place inside the scene's main place (SCN-007). It has no `allowed_for`:
+    nobody is staged inside such a place, so any of its views may stand behind the shot.
+    """
+
+    id: str
+    name: str
+    side: str
+    framing: str
+    description: str
+
+
+class ShotInnerPlaceOut(BaseModel):
+    """The place inside the scene's main place that a shot is inside (SCN-007)."""
+
+    id: str
+    name: str
+    relation: str
+    views: list[ShotInnerViewOut]
+
+
 class ShotPlacementOut(BaseModel):
     character_id: str
     zone: str
@@ -159,6 +180,9 @@ class ShotAudioIntentOut(BaseModel):
 class ShotDefinitionContentOut(BaseModel):
     shot_id: str
     scene_id: str
+    # SCN-007: the id of the place inside the scene's main place the shot is inside; None for a
+    # shot of the main place and for a specification made before it.
+    place: str | None = None
     # Seconds, from the scene's timeline.
     duration: float
     visual_story: str
@@ -197,6 +221,8 @@ class ShotSkeletonOut(BaseModel):
     duration_seconds: float
     # Seconds from the start of the scene; None when the timeline cannot be worked out.
     start_seconds: float | None
+    # SCN-007: the id of the place inside the scene's main place the shot is inside, or None.
+    place: str | None = None
 
 
 class ShotDefinitionEntryOut(BaseModel):
@@ -215,6 +241,8 @@ class ShotDefinitionEntryOut(BaseModel):
     needs_confirmation: bool
     # None when the scene is not staged or its place has no planned views yet (PHASE-054).
     staging: ShotStagingOut | None = None
+    # SCN-007: the place this shot is inside, with its views; None for a shot of the main place.
+    inner_place: ShotInnerPlaceOut | None = None
 
 
 class SceneShotDefinitionsOut(BaseModel):
@@ -364,6 +392,7 @@ def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
             speech_unit_ids=shot["speech_unit_ids"],
             duration_seconds=entry.duration_s,
             start_seconds=entry.start_s,
+            place=shot.get("place"),
         ),
         status=entry.status,
         reasons=entry.reasons,
@@ -396,6 +425,11 @@ def _shot_out(entry: ShotEntry) -> ShotDefinitionEntryOut:
         blocked_reason=entry.blocked_reason,
         needs_confirmation=entry.needs_confirmation,
         staging=_staging_out(entry.staging),
+        inner_place=(
+            ShotInnerPlaceOut.model_validate(entry.inner_place)
+            if entry.inner_place is not None
+            else None
+        ),
     )
 
 

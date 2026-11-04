@@ -105,6 +105,9 @@ async def _users(
                     add(character_id, scene_id)
             else:
                 add(definition["environment_id"], scene_id)
+                # SCN-007: a place inside the main place is used by the scene too.
+                for place in definition.get("inner_places", []):
+                    add(place["environment_id"], scene_id)
         scene_events = events.get(scene_id)
         if kind == "characters" and scene_events is not None:
             for event in scene_events.get("events", []):

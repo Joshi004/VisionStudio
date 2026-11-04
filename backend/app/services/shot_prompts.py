@@ -389,7 +389,18 @@ def _environment_with_view(context: dict[str, Any], definition: dict[str, Any]) 
     """
     composition = definition.get("composition")
     view_id = composition.get("view") if isinstance(composition, dict) else None
-    view = shot_staging.view_for_prompt(context.get("staging"), view_id)
+    inner_place = context.get("inner_place")
+    if isinstance(inner_place, dict):
+        # SCN-007: a shot inside a place within the scene's main place has the views of that
+        # place and no staging.
+        found = next((item for item in inner_place["views"] if item["id"] == view_id), None)
+        view = (
+            {key: found[key] for key in ("name", "side", "description")}
+            if found is not None
+            else None
+        )
+    else:
+        view = shot_staging.view_for_prompt(context.get("staging"), view_id)
     return {**context["environment"], "view": view} if view is not None else context["environment"]
 
 

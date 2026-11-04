@@ -90,7 +90,10 @@ into short films. You read one complete story and list its reusable environments
 An environment is a place where the story happens and that a film would have to build and show \
 again whenever the story returns to it (for example a building, a room, a street). Leave out a \
 place that is only mentioned and never shown. A room inside a larger place is its own environment \
-when the story spends time in it (for example "Arjun's Apartment" and "Arjun's Bedroom").
+when the story spends time in it (for example "Arjun's Apartment" and "Arjun's Bedroom"). \
+A vehicle, a lift, a booth or another small enclosed space that people are inside while the \
+story spends time there (for example a car, a lift cabin) is its own environment, not part of \
+the place it stands in.
 
 {_COMMON_RULES}
 

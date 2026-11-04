@@ -85,6 +85,9 @@ class ShotOut(BaseModel):
     # PHASE-043: the shot is a quick back-and-forth between two characters, with a cut at each
     # line. Plans made before this phase have no such field and read as False.
     rapid_exchange: bool = False
+    # SCN-007: the id of the place inside the scene's main place that the shot happens inside
+    # (a car in a garage). None for a shot of the main place and for plans made before it.
+    place: str | None = None
     description: str
     # FLOW-005: only the shots of a continuous explainer start on words of its voice take. The
     # number of the first and the last word of the shot (counted from 1 over the scene's take),
@@ -284,6 +287,7 @@ class ShotEditIn(BaseModel):
     target_duration: float
     continues_previous: bool = False
     rapid_exchange: bool = False
+    place: str | None = Field(default=None, max_length=200)
     description: str = Field(max_length=2000)
 
 

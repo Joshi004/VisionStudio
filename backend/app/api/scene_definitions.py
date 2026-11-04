@@ -71,12 +71,21 @@ class SceneMoodOut(BaseModel):
     end: str
 
 
+class InnerPlaceOut(BaseModel):
+    """A place inside the scene's main place (SCN-007)."""
+
+    environment_id: str
+    relation: str
+
+
 class SceneDefinitionOut(BaseModel):
     id: str
     story_context: SceneStoryContextOut
     environment_id: str
     # A request in the model's own words, resolved later (PHASE-016).
     environment_state: str
+    # SCN-007. Empty for a definition written before this field existed or with no inner place.
+    inner_places: list[InnerPlaceOut] = []
     time: SceneTimeOut
     characters: list[str]
     # The characters who are only heard in the scene and never seen. Empty for a definition
@@ -177,6 +186,13 @@ class SceneMoodIn(BaseModel):
     end: str = _Text
 
 
+class InnerPlaceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    environment_id: str = Field(max_length=200)
+    relation: str = _Text
+
+
 class SceneDefinitionIn(BaseModel):
     """An edited definition. The `id` is the scene's and is set by code. The rules (known
     ids, sizes) are checked by `scene_definition_writer.check_definition`; these limits only
@@ -188,6 +204,7 @@ class SceneDefinitionIn(BaseModel):
     story_context: SceneStoryContextIn
     environment_id: str = Field(max_length=200)
     environment_state: str = _Text
+    inner_places: list[InnerPlaceIn] = Field(default_factory=list, max_length=20)
     time: SceneTimeIn
     characters: list[str] = Field(max_length=200)
     off_screen: list[str] = Field(default_factory=list, max_length=200)

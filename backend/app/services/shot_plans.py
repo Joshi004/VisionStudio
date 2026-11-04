@@ -260,11 +260,15 @@ def _unit_problems(scene: speech_synthesis.SceneAudio) -> list[str]:
 
 
 def _chosen(definition: dict[str, Any]) -> list[tuple[str, str]]:
-    """What a scene definition chose, as `(kind, discovery id)`: its environment, then its
-    characters.
+    """What a scene definition chose, as `(kind, discovery id)`: its environment, the places
+    inside it (SCN-007), then its characters.
     """
     return [
         (ENVIRONMENT_DEFINITION_KIND, definition["environment_id"]),
+        *(
+            (ENVIRONMENT_DEFINITION_KIND, place["environment_id"])
+            for place in definition.get("inner_places", [])
+        ),
         *((CHARACTER_DEFINITION_KIND, character) for character in definition["characters"]),
     ]
 
@@ -366,6 +370,9 @@ class _Prepared:
     chosen_characters: list[tuple[str, str]]
     environment_key: tuple[str, str]
     inputs: dict[str, Any]
+    # SCN-007: the places inside the scene's main place, as the planner reads them. Empty for
+    # a scene with none.
+    inner_places: list[dict[str, Any]]
     # A continuous explainer's take as the cut planning reads it: `{seconds, words, spans}`.
     # None for every other project.
     take: dict[str, Any] | None = None
@@ -441,7 +448,18 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
     chosen_characters = [
         (CHARACTER_DEFINITION_KIND, character_id) for character_id in definition["characters"]
     ]
-    chosen = [environment_key, *chosen_characters]
+    inner_keys = [
+        (ENVIRONMENT_DEFINITION_KIND, place["environment_id"])
+        for place in definition.get("inner_places", [])
+    ]
+    chosen = [environment_key, *inner_keys, *chosen_characters]
+    inner_places = [
+        {
+            **_for_model(loaded.current[key]),
+            "relation": place["relation"],
+        }
+        for key, place in zip(inner_keys, definition.get("inner_places", []), strict=True)
+    ]
 
     units: list[dict[str, Any]] = []
     infos: list[scene_timeline.UnitInfo] = []
@@ -527,6 +545,7 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         infos=infos,
         chosen_characters=chosen_characters,
         environment_key=environment_key,
+        inner_places=inner_places,
         inputs=inputs,
         take=take,
     )
@@ -589,6 +608,8 @@ async def _queue(
                 _for_model(loaded.current[key]) for key in prepared.chosen_characters
             ],
             "environment": _for_model(loaded.current[prepared.environment_key]),
+            # Only for a scene with places inside its main place (SCN-007).
+            **({"inner_places": prepared.inner_places} if prepared.inner_places else {}),
             "staging": _staging_for_planner(loaded, item["id"], prepared),
             "events": prepared.events,
             "units": prepared.units,
@@ -1371,6 +1392,8 @@ async def save_manual(
             prepared.events,
             prepared.units,
             speech_mode=prompt_mode(project),
+            inner_place_ids=[place["id"] for place in prepared.inner_places],
+            main_place_id=prepared.environment_key[1],
         )
     except ValueError as exc:
         raise ShotPlansError(str(exc)) from exc

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import type {
   ShotDefinitionContent,
+  ShotInnerPlace,
   ShotStaging,
 } from "../../api/shotDefinitions";
 
@@ -10,6 +11,8 @@ type ShotDefinitionViewProps = {
   definition: ShotDefinitionContent;
   /** The shot's staging and views, to name the view behind the shot; null when not staged. */
   staging?: ShotStaging | null;
+  /** The place inside the scene's main place this shot is inside, with its views (SCN-007). */
+  innerPlace?: ShotInnerPlace | null;
   /** The story's characters by id, so a character is shown by name. */
   characterNames: Record<string, string>;
 };
@@ -62,6 +65,7 @@ function sizeLabel(size: string): string {
 export function ShotDefinitionView({
   definition,
   staging = null,
+  innerPlace = null,
   characterNames,
 }: ShotDefinitionViewProps) {
   const nameOf = (id: string) => characterNames[id] ?? id;
@@ -69,7 +73,9 @@ export function ShotDefinitionView({
   const continuityStart = Object.entries(definition.continuity_start);
   const continuityEnd = Object.entries(definition.continuity_end);
   const environment = Object.entries(definition.environment_state);
-  const view = staging?.views.find((item) => item.id === composition.view);
+  const view = (innerPlace?.views ?? staging?.views)?.find(
+    (item) => item.id === composition.view,
+  );
   const viewText =
     composition.view == null
       ? "Not set (defined before views existed)"
@@ -89,6 +95,16 @@ export function ShotDefinitionView({
         <Badge variant="light" color="indigo">
           {sizeLabel(composition.shot_size)}
         </Badge>
+        {innerPlace !== null && (
+          <Badge
+            variant="light"
+            color="teal"
+            style={{ textTransform: "none" }}
+            title={`This shot is inside ${innerPlace.name}, which stands ${innerPlace.relation}`}
+          >
+            {`Inside: ${innerPlace.name}`}
+          </Badge>
+        )}
       </Group>
       <Text size="sm">{definition.visual_story}</Text>
 

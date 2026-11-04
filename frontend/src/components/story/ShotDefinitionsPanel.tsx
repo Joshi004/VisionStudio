@@ -239,6 +239,7 @@ function ShotRow({
           <ShotDefinitionEditor
             initial={entry.definition}
             staging={entry.staging ?? null}
+            innerPlace={entry.inner_place ?? null}
             sceneCharacterIds={sceneCharacterIds}
             characterNames={characterNames}
             saving={saving}
@@ -260,6 +261,7 @@ function ShotRow({
             <ShotDefinitionView
               definition={entry.definition}
               staging={entry.staging ?? null}
+              innerPlace={entry.inner_place ?? null}
               characterNames={characterNames}
             />
           </ArtifactViewer>

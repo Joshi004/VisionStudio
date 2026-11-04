@@ -284,10 +284,31 @@ a chair), the shot may be "medium_close_up" or "medium", never wider. Without PR
 the presenter stands in the set and is framed from the chest up or closer."""
 
 
-def instructions(explainer: bool = False, continuous: bool = False) -> str:
+# SCN-007: a shot inside a place within the scene's main place (a car parked in a garage). Only
+# such a shot gets the note, so the instructions of every other shot are what they were.
+_INNER_PLACE_NOTE: Final = """This shot happens INSIDE a place within the scene's main place. \
+ENVIRONMENT is that place (a car, a lift, a booth), and its "inside_of" names the main place it \
+stands in, with that place's state and how ENVIRONMENT stands in it ("relation"). The people are \
+inside ENVIRONMENT: describe its enclosure first (roof, pillars, windows, dashboard, door \
+panels, whatever it has), and let the main place appear only through the windows or openings of \
+ENVIRONMENT, never around or above the people. No zones or screen sides are staged for this \
+shot, so there is no STAGING AT THIS SHOT and you write none. VIEWS lists the views of \
+ENVIRONMENT: "composition.view" is exactly one "id" from VIEWS, the part of the place seen \
+behind the shot, and any of them may be chosen. "environment_state" says what is true of \
+ENVIRONMENT in this shot."""
+
+
+def instructions(
+    explainer: bool = False, continuous: bool = False, inner_place: bool = False
+) -> str:
     """The system message: the same for every project except an explainer's, which has a note
-    added after the rules (the note of a continuous explainer is its own).
+    added after the rules (the note of a continuous explainer is its own). `inner_place`
+    (SCN-007) adds the note of a shot inside a place within the scene's main place.
     """
+    if inner_place and not explainer:
+        marker = "\n\n" + length_rule(LIMITS)
+        head, tail = _INSTRUCTIONS.split(marker, 1)
+        return f"{head}\n\n{_INNER_PLACE_NOTE}{marker}{tail}"
     if not explainer:
         return _INSTRUCTIONS
     note = _CONTINUOUS_NOTE if continuous else _EXPLAINER_NOTE
@@ -314,9 +335,14 @@ def build_request(
     explainer: bool = False,
     continuous: bool = False,
     presenter_staging: str | None = None,
+    inner_place: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
+
+    `inner_place` (SCN-007) is set for a shot inside a place within the scene's main place
+    (`shot_definitions._inner_place`): `environment` is then that place, with `inside_of`, and
+    `VIEWS` lists its views; there is no `staging`.
 
     `feedback` is the user's note on the earlier specification of this shot (PHASE-038): it adds
     `PREVIOUS SPECIFICATION` (see `previous_specification`) and `USER FEEDBACK` as data blocks.
@@ -351,6 +377,10 @@ def build_request(
     ]
     if staging is not None:
         parts += staging_blocks(staging)
+    elif inner_place is not None:
+        parts.append(
+            "VIEWS (JSON):\n" + json.dumps(inner_place["views"], ensure_ascii=False, indent=2)
+        )
     if explainer and presenter_staging:
         parts.append("PRESENTER STAGING (plain text from the owner):\n" + presenter_staging)
     if feedback is not None:
@@ -358,7 +388,10 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": instructions(explainer, continuous)},
+            {
+                "role": "system",
+                "content": instructions(explainer, continuous, inner_place is not None),
+            },
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
@@ -589,6 +622,23 @@ def _view(
     return view
 
 
+def _inner_view(raw_composition: dict[str, Any], inner_place: dict[str, Any]) -> str:
+    """SCN-007: the view of the place behind a shot inside an inner place, checked to be one of
+    that place's views. Raises ValueError.
+    """
+    value = raw_composition.get("view")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('The "composition.view" was missing: choose an id from VIEWS.')
+    view = value.strip()
+    allowed = [item["id"] for item in inner_place["views"]]
+    if view not in allowed:
+        raise ValueError(
+            f'The "composition.view" was "{view[:40]}", which is not a view of '
+            f"{inner_place['name']}. The views are: {', '.join(allowed)}."
+        )
+    return view
+
+
 def _check_presence(
     characters: list[dict[str, str]],
     composition: dict[str, str],
@@ -658,6 +708,7 @@ def check_answer(
     staging: dict[str, Any] | None = None,
     explainer: bool = False,
     check_presence: bool = False,
+    inner_place: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the specification that is stored. Raises ValueError,
@@ -681,6 +732,10 @@ def check_answer(
     the shot must not show anyone who is away, and a shot framed on the group must show everyone
     who is present (`_check_presence`). It is false for a specification the owner edits, who may
     hide someone on purpose. A rapid exchange and an explainer are never checked.
+
+    `inner_place` (SCN-007) is set for a shot inside a place within the scene's main place: its
+    `composition.view` must be one of the place's views, and the content records the place's id
+    as `place`. Such a shot has no `staging`.
 
     `shot_id`, `scene_id`, `duration` and `audio_intent.dialogue` are set here from what code
     knows and are never read from the model. `scene_character_ids` are the ids of the scene's
@@ -720,10 +775,15 @@ def check_answer(
         if check_presence and not exchange and not explainer:
             _check_presence(characters, shot_composition, staging, exchange=exchange)
         characters = shot_staging.apply_to_characters(characters, staging)
+    elif inner_place is not None:
+        shot_composition["view"] = _inner_view(composition, inner_place)
 
     return {
         "shot_id": shot_id,
         "scene_id": scene_id,
+        # Written only for a shot inside an inner place, so every other specification is stored
+        # as before.
+        **({"place": inner_place["id"]} if inner_place is not None else {}),
         "duration": round(duration, _DURATION_DECIMALS),
         "visual_story": _text(
             answer, "visual_story", "visual_story", VISUAL_STORY_MAX_CHARS, warnings

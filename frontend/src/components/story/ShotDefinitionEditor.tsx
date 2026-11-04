@@ -15,6 +15,7 @@ import {
 import type {
   ShotDefinitionContent,
   ShotDefinitionInput,
+  ShotInnerPlace,
   ShotStaging,
 } from "../../api/shotDefinitions";
 import { EditorActions, StringListInput } from "./editorParts";
@@ -24,6 +25,8 @@ type ShotDefinitionEditorProps = {
   initial: ShotDefinitionContent;
   /** The views that may stand behind this shot; null when the scene is not staged. */
   staging: ShotStaging | null;
+  /** The place inside the scene's main place this shot is inside, with its views; else null. */
+  innerPlace?: ShotInnerPlace | null;
   /** The ids of the scene's characters: only these can be on screen or tracked. */
   sceneCharacterIds: string[];
   /** The story's characters by id, so a character is shown by name. */
@@ -180,7 +183,11 @@ function allowedViews(draft: Draft, staging: ShotStaging) {
 }
 
 /** Whether every field the server needs has words. The server checks the rest. */
-function isComplete(draft: Draft, staging: ShotStaging | null): boolean {
+function isComplete(
+  draft: Draft,
+  staging: ShotStaging | null,
+  innerPlace: ShotInnerPlace | null,
+): boolean {
   const required = [
     draft.visualStory,
     draft.angle,
@@ -196,6 +203,7 @@ function isComplete(draft: Draft, staging: ShotStaging | null): boolean {
   const keys = draft.environment.map((row) => row.key.trim());
   return (
     (staging === null || draft.view !== "") &&
+    (innerPlace === null || draft.view !== "") &&
     required.every((text) => text.trim() !== "") &&
     keys.every((key) => STATE_KEY.test(key)) &&
     new Set(keys).size === keys.length &&
@@ -247,6 +255,7 @@ function TextField({ label, value, maxLength, onChange }: TextFieldProps) {
 export function ShotDefinitionEditor({
   initial,
   staging,
+  innerPlace = null,
   sceneCharacterIds,
   characterNames,
   saving,
@@ -407,6 +416,20 @@ export function ShotDefinitionEditor({
           maxLength={LIMIT.composition}
           onChange={(value) => change({ focus: value })}
         />
+        {innerPlace !== null && (
+          <Select
+            label={`View of ${innerPlace.name} behind the shot`}
+            description="This shot is inside this place: any of its views may stand behind the shot."
+            size="xs"
+            data={innerPlace.views.map((view) => ({
+              value: view.id,
+              label: `${view.name} (${view.side})`,
+            }))}
+            value={draft.view === "" ? null : draft.view}
+            onChange={(value) => change({ view: value ?? "" })}
+            w={360}
+          />
+        )}
         {staging !== null && (
           <Select
             label="View behind the shot"
@@ -595,7 +618,7 @@ export function ShotDefinitionEditor({
         saving={saving}
         error={error}
         errorTitle="Could not save the shot definition"
-        canSave={isComplete(draft, staging)}
+        canSave={isComplete(draft, staging, innerPlace)}
         onSave={() => onSave(toInput(draft))}
         onCancel={onCancel}
       />

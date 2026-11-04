@@ -699,6 +699,9 @@ async def _queue_repair(
             "duration": item.fields["duration"],
             # Where the characters stand in this shot and the views that may stand behind it.
             "staging": item.fields["staging"],
+            # The place inside the scene's main place this shot is inside, with its views
+            # (SCN-007); left out for a shot of the main place.
+            **({"inner_place": item.fields["inner_place"]} if "inner_place" in item.fields else {}),
             # What the repair read: it is not saved over a newer version.
             "specification": item.row.content,
             "read_definition_id": item.row.id,

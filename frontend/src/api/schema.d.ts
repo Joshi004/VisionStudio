@@ -12679,6 +12679,23 @@ export interface components {
             /** Needs Confirmation */
             needs_confirmation: boolean;
         };
+        /** InnerPlaceIn */
+        InnerPlaceIn: {
+            /** Environment Id */
+            environment_id: string;
+            /** Relation */
+            relation: string;
+        };
+        /**
+         * InnerPlaceOut
+         * @description A place inside the scene's main place (SCN-007).
+         */
+        InnerPlaceOut: {
+            /** Environment Id */
+            environment_id: string;
+            /** Relation */
+            relation: string;
+        };
         /**
          * SceneDefinitionIn
          * @description An edited definition. The `id` is the scene's and is set by code. The rules (known
@@ -12691,6 +12708,8 @@ export interface components {
             environment_id: string;
             /** Environment State */
             environment_state: string;
+            /** Inner Places */
+            inner_places?: components["schemas"]["InnerPlaceIn"][];
             time: components["schemas"]["SceneTimeIn"];
             /** Characters */
             characters: string[];
@@ -12721,6 +12740,11 @@ export interface components {
             environment_id: string;
             /** Environment State */
             environment_state: string;
+            /**
+             * Inner Places
+             * @default []
+             */
+            inner_places: components["schemas"]["InnerPlaceOut"][];
             time: components["schemas"]["SceneTimeOut"];
             /** Characters */
             characters: string[];
@@ -13660,6 +13684,8 @@ export interface components {
             shot_id: string;
             /** Scene Id */
             scene_id: string;
+            /** Place */
+            place?: string | null;
             /** Duration */
             duration: number;
             /** Visual Story */
@@ -13703,6 +13729,7 @@ export interface components {
             /** Needs Confirmation */
             needs_confirmation: boolean;
             staging?: components["schemas"]["ShotStagingOut"] | null;
+            inner_place?: components["schemas"]["ShotInnerPlaceOut"] | null;
         };
         /** ShotDefinitionIn */
         ShotDefinitionIn: {
@@ -13834,6 +13861,8 @@ export interface components {
              * @default false
              */
             rapid_exchange: boolean;
+            /** Place */
+            place?: string | null;
             /** Description */
             description: string;
         };
@@ -14034,6 +14063,8 @@ export interface components {
              * @default false
              */
             rapid_exchange: boolean;
+            /** Place */
+            place?: string | null;
             /** Description */
             description: string;
             /** Start Word */
@@ -14046,6 +14077,37 @@ export interface components {
             end_s?: number | null;
             /** Spoken Text */
             spoken_text?: string | null;
+        };
+        /**
+         * ShotInnerPlaceOut
+         * @description The place inside the scene's main place that a shot is inside (SCN-007).
+         */
+        ShotInnerPlaceOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Relation */
+            relation: string;
+            /** Views */
+            views: components["schemas"]["ShotInnerViewOut"][];
+        };
+        /**
+         * ShotInnerViewOut
+         * @description A view of a place inside the scene's main place (SCN-007). It has no `allowed_for`:
+         *     nobody is staged inside such a place, so any of its views may stand behind the shot.
+         */
+        ShotInnerViewOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Side */
+            side: string;
+            /** Framing */
+            framing: string;
+            /** Description */
+            description: string;
         };
         /** ShotPlacementOut */
         ShotPlacementOut: {
@@ -14495,6 +14557,8 @@ export interface components {
             duration_seconds: number;
             /** Start Seconds */
             start_seconds: number | null;
+            /** Place */
+            place?: string | null;
         };
         /** ShotSpanOut */
         ShotSpanOut: {

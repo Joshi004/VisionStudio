@@ -112,6 +112,9 @@ actions and states only; keep the shot's "composition.view" unless the shot is a
 its view is no longer allowed. When a shot's "staging" has "presence", a medium-wide, wide or \
 extreme-wide shot framed on the group must list every id in its "present" list in "characters", \
 and no shot shows anyone in its "away" list.
+- A shot under SHOTS that has "inner_place" is inside that place within the scene's main place \
+(a car in a garage), not inside ENVIRONMENT: keep it there, and "composition.view" is one "id" \
+from that inner place's "views" (it has no "staging").
 - At least one editable shot must change.
 - Do not write a shot's duration or its dialogue: they are filled in for you.
 
@@ -137,9 +140,10 @@ def build_request(
 
     `scene` is `{index, id, title, description}`; `cut` is `{id, before, after, before_state,
     after_state, problem, editable_shots, frozen}`; `shots` has, for each shot on the sides of
-    the cut in order, `{shot, events, speech, specification, staging}` (the skeleton with its
-    length and place, the events and speech it shows, its newest specification, and where
-    its characters stand with the views allowed behind it); `characters` and
+    the cut in order, `{shot, events, speech, specification, staging[, inner_place]}` (the
+    skeleton with its length and place, the events and speech it shows, its newest
+    specification, and where its characters stand with the views allowed behind it, or the
+    inner place it is inside with that place's views); `characters` and
     `environment` are as for `shot_definition_writer.build_request`.
     """
     parts = [
@@ -231,6 +235,7 @@ def check_answer(
                 staging=shot.get("staging"),
                 explainer=shot.get("explainer") is True,
                 check_presence=True,
+                inner_place=shot.get("inner_place"),
                 warnings=warnings,
             )
         except ValueError as exc:

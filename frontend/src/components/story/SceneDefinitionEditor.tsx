@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { MultiSelect, Select, Stack, Text, TextInput, Textarea, Title } from "@mantine/core";
+import {
+  Button,
+  Group,
+  MultiSelect,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Textarea,
+  Title,
+} from "@mantine/core";
 
 import type { DiscoveryItem } from "../../api/discovery";
 import type { SceneDefinition, SceneDefinitionInput } from "../../api/sceneDefinitions";
@@ -18,13 +28,18 @@ type SceneDefinitionEditorProps = {
 };
 
 /** What the user edits. The scene's id is not here: it is the scene's own. */
-type Draft = SceneDefinitionInput & { off_screen: string[] };
+type InnerPlace = { environment_id: string; relation: string };
+type Draft = SceneDefinitionInput & { off_screen: string[]; inner_places: InnerPlace[] };
+
+/** The most places inside the main place a scene may list (the server checks it as well). */
+const MAX_INNER_PLACES = 3;
 
 function toDraft(definition: SceneDefinition): Draft {
   return {
     story_context: { ...definition.story_context },
     environment_id: definition.environment_id,
     environment_state: definition.environment_state,
+    inner_places: (definition.inner_places ?? []).map((place) => ({ ...place })),
     time: { ...definition.time },
     characters: [...definition.characters],
     off_screen: [...(definition.off_screen ?? [])],
@@ -80,6 +95,15 @@ export function SceneDefinitionEditor({
       ? [{ value: draft.environment_id, label: draft.environment_id }]
       : []),
   ];
+  const innerOptions = [
+    ...environmentOptions.filter((option) => option.value !== draft.environment_id),
+  ];
+  const setInnerPlace = (index: number, part: Partial<InnerPlace>) =>
+    change({
+      inner_places: draft.inner_places.map((place, at) =>
+        at === index ? { ...place, ...part } : place,
+      ),
+    });
   const nameOf = (id: string) => characters.find((item) => item.id === id)?.name ?? id;
 
   const setCharacterText = (
@@ -142,6 +166,55 @@ export function SceneDefinitionEditor({
         value={draft.environment_state}
         onChange={(event) => change({ environment_state: event.currentTarget.value })}
       />
+      <Text size="sm" fw={500}>
+        Places inside the place
+      </Text>
+      <Text size="xs" c="dimmed">
+        A vehicle, a lift or a booth that some shots of the scene happen inside, such as a car
+        parked in the garage. Leave empty when the whole scene happens in the place above.
+      </Text>
+      {draft.inner_places.map((place, index) => (
+        <Group key={index} align="flex-end" wrap="nowrap">
+          <Select
+            label="Environment"
+            data={innerOptions}
+            value={place.environment_id === "" ? null : place.environment_id}
+            allowDeselect={false}
+            searchable
+            onChange={(value) => setInnerPlace(index, { environment_id: value ?? "" })}
+          />
+          <TextInput
+            label="How it stands in the place"
+            placeholder="parked on garage level P1"
+            style={{ flex: 1 }}
+            value={place.relation}
+            onChange={(event) => setInnerPlace(index, { relation: event.currentTarget.value })}
+          />
+          <Button
+            variant="default"
+            onClick={() =>
+              change({ inner_places: draft.inner_places.filter((_, at) => at !== index) })
+            }
+          >
+            Remove
+          </Button>
+        </Group>
+      ))}
+      {draft.inner_places.length < MAX_INNER_PLACES && (
+        <Group>
+          <Button
+            variant="default"
+            size="xs"
+            onClick={() =>
+              change({
+                inner_places: [...draft.inner_places, { environment_id: "", relation: "" }],
+              })
+            }
+          >
+            Add a place inside
+          </Button>
+        </Group>
+      )}
       <TextInput
         label="Time of day"
         value={draft.time.time_of_day}

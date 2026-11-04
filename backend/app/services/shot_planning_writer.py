@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Collection
 from typing import Any, Final
 
 from app.services import discovery_writer, user_feedback
@@ -168,6 +169,38 @@ _ANSWER_TAIL: Final = f"""\
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
 
+# SCN-007: a scene with places inside its main place (a car in a garage). Only such a scene gets
+# the note, the `place` of a shot and the INNER PLACES block, so every other request is exactly
+# what it was.
+_INNER_PLACES_NOTE: Final = """The scene also has INNER PLACES: places inside the scene's main \
+place (a car parked in the garage, a lift in the lobby), each with "relation", how it stands in \
+the main place. A shot also has "place": the id of the inner place when the shot happens INSIDE \
+it (the camera is in the car, in the lift), and null for a shot of the main place, including a \
+shot of the car seen from outside. A shot has one place, so a shot never goes in and out. Use \
+"place" only for a shot that is really inside; most shots are null. A shot with \
+"continues_previous" true has the same "place" as the shot before it. Do not change the \
+description's wording because of "place": the description still says what the audience sees."""
+
+_PLACE_ANSWER_FORM: Final = json.dumps(
+    {
+        "shots": [
+            {
+                "source_event_ids": ["an id from EVENTS"],
+                "speech_unit_ids": ["an id from SPEECH UNITS, or none"],
+                "type": "one of the allowed types",
+                "target_duration": 2.5,
+                "continues_previous": False,
+                "rapid_exchange": False,
+                "place": "an id from INNER PLACES, or null",
+                "description": "A woman waits in the car, listening.",
+            }
+        ]
+    }
+)
+_PLACE_ANSWER_TAIL: Final = f"""\
+Answer with one JSON object only, in exactly this form (the values here are only examples of \
+the type): {_PLACE_ANSWER_FORM}"""
+
 # A project with no narration (PHASE-049): no narrator carries the story, so the shots must.
 _NO_NARRATION_NOTE: Final = """This story has no narrator. Nothing explains the story in words, so \
 the shots alone must carry it: show what the events show clearly, and give a silent action shot \
@@ -188,14 +221,17 @@ picture that makes sense without the presenter and that needs no one's speech to
 could draw."""
 
 
-def instructions(speech_mode: str = SPEECH_BOTH) -> str:
+def instructions(speech_mode: str = SPEECH_BOTH, inner_places: bool = False) -> str:
     """The system message for a project's speech mode. For every mode except `no_narration` and
-    `explainer` it is what every project used before PHASE-049.
+    `explainer` it is what every project used before PHASE-049. `inner_places` (SCN-007) adds
+    the note and the `place` of a shot, for a scene that has places inside its main place.
     """
     note = {SPEECH_NO_NARRATION: _NO_NARRATION_NOTE, SPEECH_EXPLAINER: _EXPLAINER_NOTE}.get(
         speech_mode
     )
     note = f"\n\n{note}" if note else ""
+    if inner_places:
+        return f"{_BODY}{note}\n\n{_INNER_PLACES_NOTE}\n\n{_PLACE_ANSWER_TAIL}"
     return f"{_BODY}{note}\n\n{_ANSWER_TAIL}"
 
 
@@ -216,9 +252,13 @@ def build_request(
     feedback: user_feedback.Feedback | None = None,
     speech_mode: str = SPEECH_BOTH,
     staging: dict[str, Any] | None = None,
+    inner_places: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
+
+    `inner_places` (SCN-007) is the scene's places inside its main place, each `{id, name,
+    description, relation}`, or None: it adds `INNER PLACES` and the `place` of a shot.
 
     `speech_mode` is the project's (`both`, `no_dialogue` or `no_narration`); only
     `no_narration` adds to the instructions.
@@ -261,6 +301,10 @@ def build_request(
     ]
     if staging is not None:
         parts.append("STAGING (JSON):\n" + json.dumps(staging, ensure_ascii=False, indent=2))
+    if inner_places:
+        parts.append(
+            "INNER PLACES (JSON):\n" + json.dumps(inner_places, ensure_ascii=False, indent=2)
+        )
     if replan is not None:
         parts.append(
             "PREVIOUS SHOTS (JSON):\n"
@@ -275,7 +319,7 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": instructions(speech_mode)},
+            {"role": "system", "content": instructions(speech_mode, bool(inner_places))},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
@@ -327,6 +371,40 @@ def _rapid_exchange(shot: dict[str, Any]) -> bool:
     False; `_check_exchanges` judges the shots that say True.
     """
     return shot.get("rapid_exchange") is True
+
+
+def _place(
+    shot: dict[str, Any],
+    position: int,
+    inner_place_ids: Collection[str] | None,
+    main_place_id: str | None,
+) -> str | None:
+    """SCN-007: the inner place a shot happens inside, or None for the main place. A scene with
+    no inner place has no shot with a place, so the field is ignored there. An empty value, null
+    and the main place's own id mean the main place. Raises ValueError for any other id.
+    """
+    if not inner_place_ids:
+        return None
+    value = shot.get("place")
+    if value is None or (isinstance(value, str) and value.strip() in ("", main_place_id)):
+        return None
+    if not isinstance(value, str) or value.strip() not in inner_place_ids:
+        raise ValueError(
+            f'The "place" of shot {position} was not one of the scene\'s inner places: '
+            f"{', '.join(sorted(inner_place_ids))}."
+        )
+    return value.strip()
+
+
+def _check_places(shots: list[dict[str, Any]]) -> None:
+    """A shot that carries straight on from the shot before it is in the same place."""
+    for position, shot in enumerate(shots[1:], start=2):
+        if shot["continues_previous"] and shot.get("place") != shots[position - 2].get("place"):
+            raise ValueError(
+                f"Shot {position} continues the shot before it, but they are not in the same "
+                'place ("place" differs). Use a normal cut when the shot goes in or out of an '
+                "inner place."
+            )
 
 
 def _ids(shot: dict[str, Any], key: str, position: int, known: set[str], *, what: str) -> list[str]:
@@ -506,6 +584,8 @@ def check_shots(
     units: list[dict[str, Any]],
     warnings: list[str] | None = None,
     speech_mode: str = SPEECH_BOTH,
+    inner_place_ids: Collection[str] | None = None,
+    main_place_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """The answer's shots checked and cleaned, without their ids. Raises ValueError, with a
     message fit for the user, for the first problem found. With `warnings` (a model's answer),
@@ -515,6 +595,9 @@ def check_shots(
     order (each has `id`, `event_id`, `kind` and, for dialogue, `speaker_id`). Only the fields
     of a shot are kept, in a fixed order. For an explainer (`speech_mode` is `explainer`) the
     presenter's dialogue shots are checked as well.
+
+    `inner_place_ids` (SCN-007) are the ids of the scene's places inside its main place
+    (`main_place_id`): a shot may name one as its `place`, which is kept only when set.
     """
     if not isinstance(answer, dict):
         raise ValueError("The shots were not a JSON object.")
@@ -547,6 +630,7 @@ def check_shots(
             entry, "speech_unit_ids", position, known_units, what="a speech unit"
         )
         spans.append(_event_span(source_event_ids, order, position))
+        place = _place(entry, position, inner_place_ids, main_place_id)
         shots.append(
             {
                 "source_event_ids": source_event_ids,
@@ -555,6 +639,9 @@ def check_shots(
                 "target_duration": _duration(entry, position),
                 "continues_previous": _continues_previous(entry, position),
                 "rapid_exchange": _rapid_exchange(entry),
+                # Written only when the shot is inside an inner place, so every other plan is
+                # stored exactly as before (SCN-007).
+                **({"place": place} if place is not None else {}),
                 "description": _description(entry, position, warnings),
             }
         )
@@ -562,6 +649,7 @@ def check_shots(
     _check_event_cover(spans, len(event_ids))
     _check_speech_placement(shots, units, event_ids)
     _check_exchanges(shots, units)
+    _check_places(shots)
     if speech_mode == SPEECH_EXPLAINER:
         _check_explainer_shots(shots, units)
     return shots
@@ -574,14 +662,18 @@ def check_answer(
     units: list[dict[str, Any]],
     warnings: list[str] | None = None,
     speech_mode: str = SPEECH_BOTH,
+    inner_place_ids: Collection[str] | None = None,
+    main_place_id: str | None = None,
 ) -> dict[str, Any]:
     """Runs `check_shots` and returns the content that is stored: `{scene_id, shots}`, each
     shot `{id, scene_id, source_event_ids, speech_unit_ids, type, target_duration,
-    continues_previous, rapid_exchange, description}` with the id (`shot_1`, `shot_2`, ...) and
-    the scene id set here, never read from the model. Raises ValueError, with a message fit for
-    the user, for the first problem found.
+    continues_previous, rapid_exchange, [place], description}` with the id (`shot_1`, `shot_2`,
+    ...) and the scene id set here, never read from the model. Raises ValueError, with a
+    message fit for the user, for the first problem found.
     """
-    checked = check_shots(answer, events, units, warnings, speech_mode)
+    checked = check_shots(
+        answer, events, units, warnings, speech_mode, inner_place_ids, main_place_id
+    )
     shots = [
         {"id": f"shot_{position}", "scene_id": scene_id, **shot}
         for position, shot in enumerate(checked, start=1)
