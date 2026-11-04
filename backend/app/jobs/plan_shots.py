@@ -66,7 +66,7 @@ from app.services import (
     user_feedback,
 )
 from app.services.llm_target import STORY_MODEL_KEY
-from app.services.projects import PROMPT_MODES, SPEECH_BOTH
+from app.services.projects import PROMPT_MODES, SPEECH_BOTH, SPEECH_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -428,6 +428,28 @@ class PlanShotsHandler(JobHandler):
             )
             return
 
+        # SCN-008: runs of short lines between two people become rapid exchanges. Only a model's
+        # answer is merged (a plan saved by hand never is), and never a cut plan or an explainer.
+        exchanges_merged = 0
+        if read.take is None and read.speech_mode != SPEECH_EXPLAINER:
+            seconds = {info.id: info.seconds for info in _unit_infos(read.units, read.inputs)}
+            content, exchanges_merged = shot_planning_writer.merge_exchanges(
+                content,
+                read.units,
+                seconds,
+                read.staging,
+                read.target_min_seconds,
+                read.events,
+                warnings,
+            )
+            if exchanges_merged:
+                _logger.info(
+                    "job %d: %d runs of short lines in scene '%s' made rapid exchanges",
+                    job_id,
+                    exchanges_merged,
+                    scene_id,
+                )
+
         await self._phase(job_id, phases.SAVING_SHOT_PLAN)
         async with SessionLocal() as session:
             # The lengths are moved onto the lengths H3 makes (D-9), so the render cuts nothing.
@@ -468,6 +490,7 @@ class PlanShotsHandler(JobHandler):
                 "scene_id": scene_id,
                 "version": row.version,
                 "shots": len(content["shots"]),
+                "exchanges_merged": exchanges_merged,
                 "timeline_problems": problems,
                 "seconds": round(time.monotonic() - started, 1),
             }

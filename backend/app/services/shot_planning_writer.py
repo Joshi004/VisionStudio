@@ -42,7 +42,7 @@ import math
 from collections.abc import Collection
 from typing import Any, Final
 
-from app.services import discovery_writer, user_feedback
+from app.services import discovery_writer, scene_timeline, user_feedback
 from app.services.projects import SPEECH_BOTH, SPEECH_EXPLAINER, SPEECH_NO_NARRATION
 from app.services.text_limits import fit_text, length_rule
 
@@ -59,6 +59,10 @@ MAX_SHOTS: Final = 80
 # who take turns. Three is the most audios the video model takes as references.
 EXCHANGE_MIN_LINES: Final = 2
 EXCHANGE_MAX_LINES: Final = 3
+# SCN-008: a line is short enough to be put in a rapid exchange when its recording lasts at most
+# this long, and a run of such lines carries at most this much speech in all.
+SHORT_LINE_MAX_S: Final = 2.0
+EXCHANGE_SPEECH_MAX_S: Final = 8.0
 DESCRIPTION_MAX_CHARS: Final = 300
 # Durations are kept to a tenth of a second.
 _DURATION_DECIMALS: Final = 1
@@ -107,10 +111,13 @@ a shot that continues the previous one starts exactly where that one ends, so us
 - "rapid_exchange": true or false. True only for a quick back-and-forth between two characters \
 inside ONE shot, where the video then cuts between them as each speaks. It needs "speech_unit_ids" \
 to list two or three lines of dialogue (no narration) from exactly two different speakers who \
-take turns (A then B, or A then B then A), and "continues_previous" must be false. Use false for \
-almost every shot, including a shot with a single line. Most dialogue is better as a sequence of \
-short dialogue shots; use a rapid exchange only where the scene needs the lines to answer each \
-other without a pause.
+take turns (A then B, or A then B then A), and "continues_previous" must be false. Use it for a \
+run of two or three SHORT lines (each recording about {SHORT_LINE_MAX_S:g} seconds or less, \
+{EXCHANGE_SPEECH_MAX_S:g} seconds or less in all) that the same two characters say to each other \
+in turn: one clip that cuts between them flows better than a separate short clip for each line. \
+Give a line a shot of its own when it is long, when it is important and needs time to land, when \
+its speaker is off screen or only heard, or when a reaction without words must be seen between \
+the lines. Use false for every other shot.
 - "description": one plain sentence in English, at most {DESCRIPTION_MAX_CHARS} characters, of \
 what the audience sees. Give no camera movement, lens or framing detail beyond what the sentence \
 needs; a later step decides those.
@@ -125,11 +132,12 @@ consecutive, and together they should last at least as long as the unit's measur
 - Every event must be shown by at least one shot, and the shots must follow the story's order. \
 The first shot starts at the first event and the last shot ends at the last event.
 - Every speech unit must be heard in at least one shot. A unit of dialogue goes in exactly one \
-shot. Prefer one line of dialogue per shot.
+shot. Prefer one line of dialogue per shot, except in a rapid exchange.
 - A shot that carries dialogue must last at least as long as that line's measured length, plus a \
-little time for the face to settle.
-- A very short line of speech still gets a shot of about the shortest duration in the DURATION \
-POLICY: the video does not have to be as short as the speech.
+little time for the face to settle. A rapid exchange must last as long as all its lines together, \
+plus that time.
+- A very short line of speech that is not part of a rapid exchange still gets a shot of about the \
+shortest duration in the DURATION POLICY: the video does not have to be as short as the speech.
 - A "pause" event has no recording. You decide how long it lasts: it is the target_duration of \
 the shot that shows it. You also decide whether a very short event is combined with its \
 neighbours or given a shot of its own.
@@ -679,6 +687,214 @@ def check_answer(
         for position, shot in enumerate(checked, start=1)
     ]
     return {"scene_id": scene_id, "shots": shots}
+
+
+# --- Merging runs of short lines into rapid exchanges (SCN-008) ----------------------------
+
+
+def _staged_speakers(staging: dict[str, Any]) -> set[str]:
+    """The characters who may speak in a rapid exchange: placed in the scene, not only heard
+    (`off_screen`), and with no arrival or leaving (`presence`), so they are in the place for
+    the whole scene.
+    """
+    placed = {item["id"] for item in staging.get("characters") or []}
+    heard_only = {
+        item["id"] if isinstance(item, dict) else item for item in staging.get("off_screen") or []
+    }
+    coming_and_going = {
+        item["character_id"] for item in staging.get("presence") or [] if isinstance(item, dict)
+    }
+    return placed - heard_only - coming_and_going
+
+
+def _short_line_speaker(
+    shot: dict[str, Any],
+    following: dict[str, Any] | None,
+    units: dict[str, dict[str, Any]],
+    seconds: dict[str, float],
+    speakers: set[str],
+) -> str | None:
+    """The speaker of a shot that may be merged into an exchange, or None when it may not: a
+    plain dialogue shot (no cut-in, no exchange, no continuity) with exactly one short line from
+    a speaker who is on screen, and not followed by a shot that carries straight on from it.
+    """
+    if shot["type"] != "dialogue" or shot["rapid_exchange"] or shot["continues_previous"]:
+        return None
+    if following is not None and following["continues_previous"]:
+        return None
+    if len(shot["speech_unit_ids"]) != 1:
+        return None
+    unit_id = shot["speech_unit_ids"][0]
+    unit = units[unit_id]
+    length = seconds.get(unit_id)
+    if unit["kind"] != "dialogue" or length is None or length > SHORT_LINE_MAX_S:
+        return None
+    speaker = unit.get("speaker_id")
+    return speaker if speaker in speakers else None
+
+
+def _chunk_sizes(count: int) -> list[int]:
+    """How a run of `count` (2 or more) short lines is cut into exchanges of 2 or 3 lines, with
+    no lone line: 2, 3, 2+2, 3+2, 3+3, 3+2+2, ...
+    """
+    sizes: list[int] = []
+    left = count
+    while left:
+        size = left if left <= EXCHANGE_MAX_LINES else 2 if left == 4 else 3
+        sizes.append(size)
+        left -= size
+    return sizes
+
+
+def _merged_shot(
+    chunk: list[dict[str, Any]],
+    seconds: dict[str, float],
+    target_min_seconds: float,
+    settle_seconds: float,
+    warnings: list[str] | None,
+) -> dict[str, Any]:
+    """One rapid-exchange shot standing for the shots of `chunk`. The model's words are kept:
+    the description is the descriptions joined. Its id is set by the caller.
+    """
+    events: list[str] = []
+    for shot in chunk:
+        events += [item for item in shot["source_event_ids"] if item not in events]
+    speech = sum(seconds[shot["speech_unit_ids"][0]] for shot in chunk)
+    length = max(float(target_min_seconds), speech + settle_seconds)
+    place = chunk[0].get("place")
+    description = _one_line(" ".join(shot["description"] for shot in chunk))
+    return {
+        "source_event_ids": events,
+        "speech_unit_ids": [shot["speech_unit_ids"][0] for shot in chunk],
+        "type": "dialogue",
+        "target_duration": round(length, _DURATION_DECIMALS),
+        "continues_previous": False,
+        "rapid_exchange": True,
+        **({"place": place} if place is not None else {}),
+        "description": fit_text(
+            description, "shots[].description", DESCRIPTION_MAX_CHARS, warnings
+        ),
+    }
+
+
+def merge_exchanges(
+    content: dict[str, Any],
+    units: list[dict[str, Any]],
+    unit_seconds: dict[str, float],
+    staging: dict[str, Any] | None,
+    target_min_seconds: float,
+    events: list[dict[str, Any]],
+    warnings: list[str] | None = None,
+) -> tuple[dict[str, Any], int]:
+    """SCN-008 (4B): `content` (as `check_answer` returns it) with runs of short lines between
+    the same two people turned into rapid exchanges. Returns `(content, exchanges made)`.
+
+    A run is shots in a row that each carry one dialogue line of at most `SHORT_LINE_MAX_S`
+    seconds, from two speakers taking turns, who are placed in the scene and neither only heard
+    nor arriving or leaving, in the same place. A run is cut into exchanges of two or three
+    lines (`_chunk_sizes`), and a group of lines with more than `EXCHANGE_SPEECH_MAX_S` seconds
+    of speech is left as it is. `unit_seconds` is each unit's recorded length, `events` the
+    scene's stored events, `target_min_seconds` the shortest planned shot. Nothing is
+    merged with no `staging` (who is on screen is then unknown). The merged plan is checked like
+    an answer; if that fails, `content` is returned as it came with 0, so a merge never loses or
+    reorders an event.
+
+    Only a model's answer is merged: a plan a person saved is never changed.
+    """
+    if staging is None:
+        return content, 0
+    speakers = _staged_speakers(staging)
+    by_id = {unit["id"]: unit for unit in units}
+    shots = content["shots"]
+
+    # Group the shots into runs of candidate positions.
+    groups: list[list[int]] = []
+    run: list[int] = []
+    run_speakers: list[str] = []
+
+    def close_run() -> None:
+        if len(run) >= EXCHANGE_MIN_LINES:
+            groups.append(list(run))
+        run.clear()
+        run_speakers.clear()
+
+    for position, shot in enumerate(shots):
+        following = shots[position + 1] if position + 1 < len(shots) else None
+        speaker = _short_line_speaker(shot, following, by_id, unit_seconds, speakers)
+        if speaker is None:
+            close_run()
+            continue
+        fits_run = (
+            bool(run)
+            and shot.get("place") == shots[run[0]].get("place")
+            and speaker != run_speakers[-1]
+            and (len(set(run_speakers)) < 2 or speaker in run_speakers)
+        )
+        if not fits_run:
+            close_run()
+        run.append(position)
+        run_speakers.append(speaker)
+    close_run()
+
+    # Cut each run into exchanges of 2 or 3 lines; a chunk with too much speech stays single.
+    merged_at: dict[int, list[int]] = {}
+    for positions in groups:
+        start = 0
+        for size in _chunk_sizes(len(positions)):
+            chunk = positions[start : start + size]
+            start += size
+            speech = sum(unit_seconds[shots[item]["speech_unit_ids"][0]] for item in chunk)
+            if speech <= EXCHANGE_SPEECH_MAX_S:
+                merged_at[chunk[0]] = chunk
+    if not merged_at:
+        return content, 0
+
+    new_warnings: list[str] = []
+    rebuilt: list[dict[str, Any]] = []
+    position = 0
+    while position < len(shots):
+        chunk = merged_at.get(position)
+        if chunk is None:
+            rebuilt.append(shots[position])
+            position += 1
+            continue
+        rebuilt.append(
+            _merged_shot(
+                [shots[item] for item in chunk],
+                unit_seconds,
+                target_min_seconds,
+                scene_timeline.DIALOGUE_SETTLE_S,
+                new_warnings,
+            )
+        )
+        position += len(chunk)
+
+    # The same checks as a model's answer: events all shown in order, lines carried, exchanges
+    # well formed. Anything wrong leaves the plan as the model made it.
+    checkable = [{k: v for k, v in shot.items() if k not in ("id", "scene_id")} for shot in rebuilt]
+    order = {event["id"]: index for index, event in enumerate(events)}
+    try:
+        _check_event_cover(
+            [
+                _event_span(shot["source_event_ids"], order, number)
+                for number, shot in enumerate(checkable, start=1)
+            ],
+            len(events),
+        )
+        _check_speech_placement(checkable, units, [event["id"] for event in events])
+        _check_exchanges(checkable, units)
+        _check_places(checkable)
+    except ValueError:
+        return content, 0
+
+    if warnings is not None:
+        warnings += new_warnings
+    scene_id = content["scene_id"]
+    numbered = [
+        {"id": f"shot_{number}", "scene_id": scene_id, **shot}
+        for number, shot in enumerate(checkable, start=1)
+    ]
+    return {**content, "shots": numbered}, len(merged_at)
 
 
 def total_seconds(shots: list[dict[str, Any]]) -> float:
