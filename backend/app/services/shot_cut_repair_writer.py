@@ -109,7 +109,9 @@ or music.
 the screen, what is behind them) and the "views" that may stand behind it. Never change where \
 a character stands or which side of the screen they are on: the repair changes poses, gazes, \
 actions and states only; keep the shot's "composition.view" unless the shot is a single and \
-its view is no longer allowed.
+its view is no longer allowed. When a shot's "staging" has "presence", a medium-wide, wide or \
+extreme-wide shot framed on the group must list every id in its "present" list in "characters", \
+and no shot shows anyone in its "away" list.
 - At least one editable shot must change.
 - Do not write a shot's duration or its dialogue: they are filled in for you.
 
@@ -228,6 +230,7 @@ def check_answer(
                 exchange=shot.get("exchange") is True,
                 staging=shot.get("staging"),
                 explainer=shot.get("explainer") is True,
+                check_presence=True,
                 warnings=warnings,
             )
         except ValueError as exc:

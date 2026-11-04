@@ -20,13 +20,17 @@ people can stand in. It answers with:
   stays in (the 180-degree rule); empty when fewer than two characters are placed;
 - `group_side`: the side seen behind the group in a two-shot or a wide shot;
 - `moves`: a character who walks somewhere after an event, with the placement they have from
-  then on.
+  then on;
+- `presence` (SCN-006): the placed characters who are not in the place for the whole scene,
+  each with the event they arrive after and/or the event they leave after. Everyone placed who
+  is not listed is there throughout.
 
 - `build_request` makes the exact request body sent to the model.
 - `check_answer` checks everything the model wrote against the scene (its characters, its events
   and the environment's zones) and returns the content that is stored. The scene id is set by
   code.
 - `staging_at` is what a shot reads: the placements at the shot's first event.
+- `presence_at` is who is in the place, and who is away, during a shot.
 
 The call is made by `jobs/llm_call.py`; the job is `jobs/stage_scene.py` and the rows are saved
 by `services/scene_staging.py`.
@@ -81,6 +85,13 @@ _ANSWER_FORM: Final = json.dumps(
                 "faces": "a side, a zone id or a character id",
                 "screen_side": "right",
                 "background_side": "left",
+            }
+        ],
+        "presence": [
+            {
+                "character_id": "a placed character id who arrives or leaves",
+                "arrives_after_event_id": "an id from EVENTS, or null",
+                "leaves_after_event_id": "an id from EVENTS, or null",
             }
         ],
     }
@@ -140,6 +151,13 @@ the new "zone", "faces", "screen_side" and "background_side". List them in event
 a move only when the events or the scene's definition say that someone who is placed changes \
 place; most scenes have none, so use an empty list. The two characters of the axis keep \
 opposite screen sides after every move. At most {MAX_MOVES} moves.
+- "presence" lists only the placed characters who are NOT in the place for the whole scene: \
+someone who arrives after the scene starts ("arrives_after_event_id": the event after which they \
+are there) or who leaves before it ends ("leaves_after_event_id": the last event they are \
+there for). Use null for the one that does not apply, and the arrival must come before the \
+leaving. Everyone placed who is not listed is in the place from the first event to the last. \
+Never list a character who is only heard. Most scenes have nobody who comes or goes, so use an \
+empty list.
 - Everything must agree with the scene's definition and with the events: who is where at the \
 start comes from "continuity_start" of the scene definition.
 
@@ -487,7 +505,96 @@ def check_answer(
         "axis": {"between": between, "camera_half": camera_half, "note": note},
         "group_side": group_side,
         "moves": moves,
+        "presence": _check_presence(
+            answer.get("presence"), placed_ids=placed_ids, event_ids=event_ids
+        ),
     }
+
+
+def _check_presence(
+    raw: object, *, placed_ids: list[str], event_ids: list[str]
+) -> list[dict[str, Any]]:
+    """The characters who arrive or leave during the scene (SCN-006), in the order of the
+    scene's characters. Raises ValueError. A missing value is an empty list.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError('The "presence" of the model\'s answer was not a list.')
+    found: dict[str, dict[str, Any]] = {}
+    for position, entry in enumerate(raw, start=1):
+        path = f"presence[{position}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f'The "{path}" of the model\'s answer was not an object.')
+        character_id = entry.get("character_id")
+        if character_id not in placed_ids:
+            raise ValueError(
+                f'The "{path}.character_id" of the model\'s answer was not a character who is '
+                "placed in this scene (a character who is only heard has no presence)."
+            )
+        if character_id in found:
+            raise ValueError(f'{character_id} is listed twice in the model\'s "presence".')
+        events: dict[str, str | None] = {}
+        for key in ("arrives_after_event_id", "leaves_after_event_id"):
+            value = entry.get(key)
+            if value is None:
+                events[key] = None
+            elif isinstance(value, str) and value in event_ids:
+                events[key] = value
+            else:
+                raise ValueError(f'The "{path}.{key}" of the model\'s answer was not an event.')
+        arrives = events["arrives_after_event_id"]
+        leaves = events["leaves_after_event_id"]
+        if arrives is None and leaves is None:
+            raise ValueError(
+                f'The "{path}" of the model\'s answer has neither an arrival nor a leaving: '
+                'leave the character out of "presence" if they are there throughout.'
+            )
+        if arrives is not None and leaves is not None:
+            if event_ids.index(arrives) >= event_ids.index(leaves):
+                raise ValueError(
+                    f"{character_id} arrives after the event they leave after, in the model's "
+                    '"presence".'
+                )
+        found[character_id] = {"character_id": character_id, **events}
+    return [found[item] for item in placed_ids if item in found]
+
+
+def presence_at(
+    content: dict[str, Any], event_ids: list[str], shot_event_ids: list[str]
+) -> tuple[list[str], list[str]] | None:
+    """Who is in the place during a shot, and who is not (SCN-006), as `(present, away)`: lists
+    of the ids of placed characters, in the order of the placements. `present` are there for the
+    whole shot, `away` are not there at any moment of it. A character who arrives or leaves
+    during the shot is in neither list. A shot with none of the scene's events sees everyone who
+    has no arrival or leaving as present. None when the staging has no `presence` (it was
+    written before SCN-006), so nothing can be said. Pure.
+    """
+    entries = content.get("presence")
+    if entries is None:
+        return None
+    by_character = {item["character_id"]: item for item in entries}
+    positions = [event_ids.index(item) for item in shot_event_ids if item in event_ids]
+    present: list[str] = []
+    away: list[str] = []
+    for placing in content["placements"]:
+        character_id = placing["character_id"]
+        entry = by_character.get(character_id)
+        if entry is None:
+            present.append(character_id)
+            continue
+        if not positions:
+            continue
+        first, last = min(positions), max(positions)
+        arrives = entry.get("arrives_after_event_id")
+        leaves = entry.get("leaves_after_event_id")
+        arrival = event_ids.index(arrives) if arrives in event_ids else None
+        leaving = event_ids.index(leaves) if leaves in event_ids else None
+        if (arrival is not None and arrival >= last) or (leaving is not None and leaving < first):
+            away.append(character_id)
+        elif (arrival is None or arrival < first) and (leaving is None or leaving >= last):
+            present.append(character_id)
+    return present, away
 
 
 # --- Reading a stored staging -------------------------------------------------------------

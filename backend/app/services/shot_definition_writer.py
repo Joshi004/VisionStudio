@@ -69,6 +69,11 @@ FRAMING_OF_SIZE: Final = {
     "extreme_wide": "wide",
 }
 
+# SCN-006: the most people one shot can show, because the video model takes at most 9 reference
+# pictures and the place is always one of them (`reference_selection` keeps the same room). A
+# group shot with more people present than this is not checked for who is left out.
+MAX_PEOPLE_IN_SHOT: Final = 8
+
 # The most characters each text field of the specification may have.
 VISUAL_STORY_MAX_CHARS: Final = 300
 EXPRESSION_MAX_CHARS: Final = 240
@@ -156,7 +161,13 @@ neighbouring shots are given so that this one fits between them.
 shot shows and what it means.
 - "characters": one entry for each character who is VISIBLE in this shot, with the id exactly as \
 listed in CHARACTERS IN THE SCENE. Use an empty list when nobody is visible. A character who is \
-only heard, or who is not in this shot, gets no entry. "expression" (at most \
+only heard, or who is not in this shot, gets no entry. Never show a person who is not a \
+character of the scene (no extras, guests, diners, staff or passers-by): only the characters you \
+list are in the picture. In a medium-wide, wide or extreme-wide shot framed on the group, list \
+EVERY character who is in the place at that moment, even one who does nothing in the shot (a \
+shot of the place with nobody in it keeps "characters" empty): when STAGING AT THIS SHOT has \
+"presence", those are the ids in its "present" list, and nobody in its "away" list is ever \
+shown. "expression" (at most \
 {EXPRESSION_MAX_CHARS} characters), "pose" (at most {POSE_MAX_CHARS}) and "gaze" (at most \
 {GAZE_MAX_CHARS}) are short phrases saying how that character looks, how they stand or sit, and \
 where they look. Keep each character's appearance consistent with the look given for them.
@@ -368,6 +379,7 @@ def staging_blocks(staging: dict[str, Any]) -> list[str]:
         "axis": staging["axis"],
         "group_side": staging["group_side"],
         **({"off_screen": staging["off_screen"]} if staging.get("off_screen") else {}),
+        **({"presence": staging["presence"]} if staging.get("presence") is not None else {}),
     }
     return [
         "STAGING AT THIS SHOT (JSON):\n" + json.dumps(placed, ensure_ascii=False, indent=2),
@@ -577,6 +589,45 @@ def _view(
     return view
 
 
+def _check_presence(
+    characters: list[dict[str, str]],
+    composition: dict[str, str],
+    staging: dict[str, Any],
+    *,
+    exchange: bool,
+) -> None:
+    """SCN-006: a shot never shows someone who is not in the place at that time, and a shot
+    framed on the group (`shot_staging.is_group_shot`) and showing people shows everyone who is
+    there. Raises ValueError,
+    naming the characters, so the model can answer again. Nothing is checked when the staging
+    says nothing about presence (it was written before SCN-006), and a group with more people
+    than a shot can show is not checked for who is missing.
+    """
+    presence = staging.get("presence")
+    if not isinstance(presence, dict):
+        return
+    shown = [character["id"] for character in characters]
+    away = [item for item in shown if item in presence["away"]]
+    if away:
+        raise ValueError(
+            f"{', '.join(away)} {'is' if len(away) == 1 else 'are'} not in the place during this "
+            'shot (see "presence" of STAGING AT THIS SHOT), so they must not be in "characters".'
+        )
+    present = presence["present"]
+    if len(present) > MAX_PEOPLE_IN_SHOT:
+        return
+    # A shot of the place with nobody in it (an empty "characters") is not a shot of the group.
+    if not shown or not shot_staging.is_group_shot(composition, shown, staging, exchange=exchange):
+        return
+    missing = [item for item in present if item not in shown]
+    if missing:
+        raise ValueError(
+            f"This shot is framed on the group ({composition['shot_size']}), so it must show "
+            'everyone who is in the place, but "characters" has no entry for: '
+            f"{', '.join(missing)}. Add them, or frame the shot on one character."
+        )
+
+
 def _check_explainer_characters(
     characters: list[dict[str, str]], dialogue: list[dict[str, str]]
 ) -> None:
@@ -606,6 +657,7 @@ def check_answer(
     exchange: bool = False,
     staging: dict[str, Any] | None = None,
     explainer: bool = False,
+    check_presence: bool = False,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the specification that is stored. Raises ValueError,
@@ -624,6 +676,11 @@ def check_answer(
 
     `explainer` is true for an explainer project (EXPLAINER-004): a shot with a line of dialogue
     shows exactly its speaker, the presenter, and any other shot (B-roll) shows no character.
+
+    `check_presence` (SCN-006) is true for a model's answer: with a `staging` that has `presence`,
+    the shot must not show anyone who is away, and a shot framed on the group must show everyone
+    who is present (`_check_presence`). It is false for a specification the owner edits, who may
+    hide someone on purpose. A rapid exchange and an explainer are never checked.
 
     `shot_id`, `scene_id`, `duration` and `audio_intent.dialogue` are set here from what code
     knows and are never read from the model. `scene_character_ids` are the ids of the scene's
@@ -660,6 +717,8 @@ def check_answer(
         shot_composition["view"] = _view(
             composition, shot_composition, characters, staging, exchange=exchange
         )
+        if check_presence and not exchange and not explainer:
+            _check_presence(characters, shot_composition, staging, exchange=exchange)
         characters = shot_staging.apply_to_characters(characters, staging)
 
     return {

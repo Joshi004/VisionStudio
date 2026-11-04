@@ -11596,6 +11596,27 @@ export interface components {
             /** Queued */
             queued: number;
         };
+        /** PresenceIn */
+        PresenceIn: {
+            /** Character Id */
+            character_id: string;
+            /** Arrives After Event Id */
+            arrives_after_event_id?: string | null;
+            /** Leaves After Event Id */
+            leaves_after_event_id?: string | null;
+        };
+        /**
+         * PresenceOut
+         * @description A placed character who arrives or leaves during the scene (SCN-006).
+         */
+        PresenceOut: {
+            /** Character Id */
+            character_id: string;
+            /** Arrives After Event Id */
+            arrives_after_event_id: string | null;
+            /** Leaves After Event Id */
+            leaves_after_event_id: string | null;
+        };
         /** ProfileRef */
         ProfileRef: {
             /** Id */
@@ -15059,6 +15080,11 @@ export interface components {
             group_side: "ahead" | "left" | "right" | "behind";
             /** Moves */
             moves: components["schemas"]["MoveOut"][];
+            /**
+             * Presence
+             * @default []
+             */
+            presence: components["schemas"]["PresenceOut"][];
         };
         /**
          * StagingEntryOut
@@ -15133,6 +15159,8 @@ export interface components {
             group_side: string;
             /** Moves */
             moves?: components["schemas"]["MoveIn"][];
+            /** Presence */
+            presence?: components["schemas"]["PresenceIn"][];
         };
         /** StagingSkippedOut */
         StagingSkippedOut: {

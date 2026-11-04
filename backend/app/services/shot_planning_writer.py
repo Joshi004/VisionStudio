@@ -150,7 +150,9 @@ cut between a shot of each speaker, each with their own background, or shown tog
 shot of the group. Never plan a shot that needs two characters on the same side of the screen \
 or on the same background. Do not describe the staging in the shots' descriptions. When it \
 has an "off_screen" list, those characters are only heard in the scene: never plan a shot that \
-shows them.
+shows them. When it has a "presence" list, those characters arrive or leave during the scene: \
+never plan a shot that shows one of them before the event they arrive after, or after the event \
+they leave after.
 
 If the user message also holds PREVIOUS SHOTS and TIMELINE PROBLEMS, an earlier plan of this \
 same scene was checked by code and had the problems listed. Plan the whole scene again so that \

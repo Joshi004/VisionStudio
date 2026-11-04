@@ -59,6 +59,24 @@ export function SceneStagingView({ staging, characterNames }: SceneStagingViewPr
           {axis.note}
         </Text>
       )}
+      {(staging.presence ?? []).length > 0 && (
+        <Stack gap={2}>
+          <Text size="sm" fw={600}>
+            Comes and goes
+          </Text>
+          {(staging.presence ?? []).map((item) => {
+            const parts = [
+              item.arrives_after_event_id !== null && `arrives after ${item.arrives_after_event_id}`,
+              item.leaves_after_event_id !== null && `leaves after ${item.leaves_after_event_id}`,
+            ].filter(Boolean);
+            return (
+              <Text key={item.character_id} size="sm">
+                {name(item.character_id)} {parts.join(", ")}.
+              </Text>
+            );
+          })}
+        </Stack>
+      )}
       {staging.moves.length > 0 && (
         <Stack gap={2}>
           <Text size="sm" fw={600}>

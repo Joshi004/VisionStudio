@@ -75,6 +75,14 @@ class MoveOut(BaseModel):
     background_side: Side
 
 
+class PresenceOut(BaseModel):
+    """A placed character who arrives or leaves during the scene (SCN-006)."""
+
+    character_id: str
+    arrives_after_event_id: str | None
+    leaves_after_event_id: str | None
+
+
 class AxisOut(BaseModel):
     between: list[str]
     camera_half: Side | None
@@ -90,6 +98,9 @@ class StagingContentOut(BaseModel):
     axis: AxisOut
     group_side: Side
     moves: list[MoveOut]
+    # Who arrives or leaves during the scene; everyone else placed is there throughout. Empty for
+    # a staging written before this field existed (SCN-006).
+    presence: list[PresenceOut] = []
 
 
 # --- The stage's state ----------------------------------------------------------------------
@@ -194,6 +205,14 @@ class MoveIn(BaseModel):
     background_side: str = Field(max_length=20)
 
 
+class PresenceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    character_id: str = Field(max_length=200)
+    arrives_after_event_id: str | None = Field(default=None, max_length=200)
+    leaves_after_event_id: str | None = Field(default=None, max_length=200)
+
+
 class AxisIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -210,6 +229,7 @@ class StagingSaveIn(BaseModel):
     axis: AxisIn
     group_side: str = Field(max_length=20)
     moves: list[MoveIn] = Field(default_factory=list, max_length=50)
+    presence: list[PresenceIn] = Field(default_factory=list, max_length=50)
 
 
 def _entry_out(entry: SceneEntry) -> StagingEntryOut:

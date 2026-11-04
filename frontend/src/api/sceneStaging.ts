@@ -13,6 +13,7 @@ export type SceneStagingEntry = components["schemas"]["StagingEntryOut"];
 export type SceneStagingContent = components["schemas"]["StagingContentOut"];
 export type StagingPlacement = components["schemas"]["PlacementOut"];
 export type StagingMove = components["schemas"]["MoveOut"];
+export type StagingPresence = components["schemas"]["PresenceOut"];
 export type StagingEnvironment = components["schemas"]["StagingEnvironmentOut"];
 export type StagingSaveInput = components["schemas"]["StagingSaveIn"];
 

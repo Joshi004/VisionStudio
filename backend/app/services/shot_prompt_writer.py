@@ -681,6 +681,9 @@ pedestal down, arc shot, tracking shot, static shot, shake slightly, POV.
 and non-verbal human sounds (breath, cloth, footsteps, a chair): no speech, no voices of any \
 kind (no conversation, chatter, murmur, whisper, laughter or phone voice, even far away or \
 muffled) and no music, no score and no song, not even a hint of one.
+- Show no person who is not a subject in LABELS: no extras, crowd, guests, diners, staff or \
+passers-by, in the foreground or the background. Seats or places with nobody listed stay empty. \
+The app writes the exact number of people.
 - Only the audios listed under LABELS are spoken. When LABELS lists no audio, nobody in the clip \
 talks, explains, asks, answers or whispers, in any sentence: show listening, gaze, gestures and \
 closed mouths instead. When it lists audios, only their speakers talk and every other visible \
@@ -1019,6 +1022,27 @@ def _listeners_sentence(listeners: list[Subject]) -> str | None:
     return f"{labels} listen with their mouths closed throughout."
 
 
+def _head_count(shot_layout: Layout) -> str | None:
+    """SCN-006: the sentence code writes to state exactly who is in the clip, built from the
+    subjects the pictures show (so it always matches them), never by the model. It stops the
+    video model from inventing guests and from leaving chairs empty. None for an explainer
+    (its one presenter is always on screen) and for a clip with no person picture.
+    """
+    people = _characters(shot_layout)
+    if shot_layout.explainer or not people:
+        return None
+    if len(people) == 1:
+        return (
+            f"{people[0].label} is the only person in this clip. Nobody else appears, not even "
+            "in the background."
+        )
+    labels = _label_list([item.label for item in people])
+    return (
+        f"Exactly {len(people)} people appear in this clip: {labels}. Nobody else appears, not "
+        "even in the background."
+    )
+
+
 def _speaking_roles(shot_layout: Layout) -> list[str]:
     """SCN-005: the sentences code writes in a shot with dialogue, so the video model is told
     who speaks on screen, whose voice is only heard, who listens, and that the speech ends with
@@ -1149,19 +1173,23 @@ def _assemble_reference(pieces: dict[str, str], shot_layout: Layout) -> str:
         "[reference generation + audio reuse]" if shot_layout.speakers else "[reference generation]"
     )
     extra = _speaking_roles(shot_layout) if shot_layout.speakers else [NOBODY_SPEAKS]
+    # SCN-006: who is in the clip, right after the shot's own text. In a rapid exchange the same
+    # two people are on screen throughout, so it is written once, in [Shot 1].
+    head_count = _head_count(shot_layout)
     if shot_layout.exchange:
         texts = _exchange_shot_texts(pieces, shot_layout)
         # Each shot says who speaks in it, and the last one that the speech ends there.
-        texts = [
-            f"{text} {_exchange_roles(shot_layout, cut)}"
-            for text, cut in zip(texts, shot_layout.cuts, strict=True)
-        ]
+        roles = [_exchange_roles(shot_layout, cut) for cut in shot_layout.cuts]
+        if head_count is not None:
+            roles[0] = f"{head_count} {roles[0]}"
+        texts = [f"{text} {role}" for text, role in zip(texts, roles, strict=True)]
         texts[-1] = f"{texts[-1]} {END_OF_SPEECH}"
         detailed = "\n".join(
             f"[Shot {number}] {text}" for number, text in enumerate(texts, start=1)
         )
     else:
-        detailed = f"[Shot 1] {' '.join([pieces[SHOT], *extra])}"
+        lead = [head_count] if head_count is not None else []
+        detailed = f"[Shot 1] {' '.join([pieces[SHOT], *lead, *extra])}"
     soundscape = _COPY_ALL_SOUNDSCAPE if shot_layout.copy_all else pieces[SOUNDSCAPE]
     sections = [
         "subject_definitions:\n" + "\n".join(definitions),

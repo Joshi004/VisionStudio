@@ -212,6 +212,7 @@ class DefineShotHandler(JobHandler):
                 exchange=read.shot.get("rapid_exchange") is True,
                 staging=read.staging,
                 explainer=read.explainer,
+                check_presence=True,
                 warnings=found,
             )
         except ValueError as exc:
