@@ -4796,6 +4796,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-takes/rescore-dialogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rescore Dialogue
+         * @description Judges every failed dialogue check of the project again from the words it recorded as
+         *     heard, with the current matching rules (SCN-001). Nothing is transcribed, no clip is made and
+         *     no job is queued. A shot with no selected take gets its newest take that passes now.
+         */
+        post: operations["rescore_dialogue_api_projects__project_id__shot_takes_rescore_dialogue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-takes/run": {
         parameters: {
             query?: never;
@@ -12268,6 +12290,31 @@ export interface components {
             /** Delivery Instruction */
             delivery_instruction?: string | null;
         };
+        /**
+         * RescoreDialogueOut
+         * @description What "Score dialogue again" did (SCN-001): no clip was made and no job was queued.
+         */
+        RescoreDialogueOut: {
+            /** Rescored */
+            rescored: number;
+            /** Now Passing By Rule */
+            now_passing_by_rule: {
+                [key: string]: number;
+            };
+            /** Still Failing */
+            still_failing: number;
+            /** Selected */
+            selected: components["schemas"]["RescoredTakeOut"][];
+        };
+        /** RescoredTakeOut */
+        RescoredTakeOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string;
+            /** Take Number */
+            take_number: number;
+        };
         /** Restraint */
         Restraint: {
             /** Amount */
@@ -14325,6 +14372,11 @@ export interface components {
             continues_from?: string | null;
             /** Voice Source */
             voice_source?: ("take" | "clip") | null;
+            /**
+             * Needs Review
+             * @default false
+             */
+            needs_review: boolean;
         };
         /** ShotTakesOut */
         ShotTakesOut: {
@@ -14339,6 +14391,11 @@ export interface components {
             check_job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Max Retries */
             max_retries: number;
+            /**
+             * Rescorable Count
+             * @default 0
+             */
+            rescorable_count: number;
         };
         /** ShotTakesRunManyOut */
         ShotTakesRunManyOut: {
@@ -15373,6 +15430,14 @@ export interface components {
             checked_at: string | null;
             /** Accepted */
             accepted: boolean;
+            /**
+             * Outcome
+             * @default matched
+             * @enum {string}
+             */
+            outcome: "matched" | "close_match" | "not_verifiable" | "mismatch" | "no_speech";
+            /** Rule */
+            rule?: string | null;
         };
         /** TakeIn */
         TakeIn: {
@@ -27073,6 +27138,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    rescore_dialogue_api_projects__project_id__shot_takes_rescore_dialogue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RescoreDialogueOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

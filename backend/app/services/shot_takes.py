@@ -171,6 +171,9 @@ class ShotEntry:
     waiting_on: str | None = None
     # FLOW-008: `take` or `clip` for a presenter shot of a continuous explainer, else None.
     voice_source: str | None = None
+    # SCN-001: the shot failed, and its two newest takes heard the same words, so no more takes
+    # are made by themselves (see `_repeated_answer`).
+    needs_review: bool = False
 
     @property
     def selected(self) -> TakeEntry | None:
@@ -199,6 +202,9 @@ class ShotTakesState:
     check_job: Job | None
     # The `shot_take_max_retries` setting, for showing "retry n of m".
     max_retries: int
+    # SCN-001: how many takes have a stored dialogue check that failed, which "Score dialogue
+    # again" can judge again.
+    rescorable_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -586,6 +592,9 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                     blocked_reason=blocked,
                     continues_from=continues_from,
                     waiting_on=continues_from if only_waiting else None,
+                    needs_review=(
+                        status == "failed" and len(rows) >= 2 and _repeated_answer(rows[0], rows[1])
+                    ),
                     voice_source=(
                         (
                             shot_voice_sources.CLIP
@@ -608,6 +617,11 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
         check_job=await store.latest_job(session, project.id, CHECK_JOB_TYPE),
         max_retries=await settings_service.get_int(
             session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY
+        ),
+        rescorable_count=sum(
+            1
+            for row in all_rows
+            if isinstance(row.dialogue_check, dict) and row.dialogue_check.get("passed") is False
         ),
     )
 
@@ -1178,6 +1192,124 @@ async def select_take(
     return take
 
 
+def _any_job_active(
+    rows: list[ShotTake], jobs: dict[int, Job], dialogue_jobs: dict[int, Job]
+) -> bool:
+    """Whether a take of the list is being made, or its speech is being checked."""
+    for row in rows:
+        job = jobs.get(row.job_id) if row.job_id is not None else None
+        if not _is_ready(row) and job is not None and job.status in store.ACTIVE_STATUSES:
+            return True
+        checking = dialogue_jobs.get(row.id)
+        if checking is not None and checking.status in store.ACTIVE_STATUSES:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class RescoreReport:
+    """What "Score dialogue again" did (SCN-001)."""
+
+    # How many stored checks that had failed were judged again.
+    rescored: int
+    # Of those, how many pass now, by the matching step at which they passed.
+    now_passing_by_rule: dict[str, int]
+    still_failing: int
+    # The takes it selected: `(scene_id, shot_id, take_number)`.
+    selected: list[tuple[str, str, int]]
+
+
+async def rescore_dialogue(session: AsyncSession, project: Project) -> RescoreReport:
+    """Judges every stored dialogue check that failed again, from the words it recorded as
+    heard, with the current rules and threshold, and commits (SCN-001). It sends nothing to the
+    server and queues no job (S-11).
+
+    - A check that passed is never touched, so a take is never turned from passing to failing.
+    - The check keeps its `checked_at` and any `accepted_at`, and gets `rescored_at`.
+    - A shot that has no selected take, and no clip being made or checked, gets its newest take
+      that passes now as its selected take. A shot that has a selected take keeps it.
+    - It does not start the shot that continues a selected take: the owner does that.
+    """
+    threshold = await settings_service.get_int(
+        session, settings_service.DIALOGUE_MATCH_THRESHOLD_KEY
+    )
+    grouped = await _takes_by_shot(session, project.id)
+    all_rows = [row for rows in grouped.values() for row in rows]
+    jobs = await _jobs_of(session, all_rows)
+    dialogue_jobs = await _dialogue_jobs(session, project.id)
+    requests = await _requests_of(session, all_rows)
+    lines_by_take = {
+        row.id: _dialogue_of(
+            row, requests.get(row.generation_request_id) if row.generation_request_id else None
+        )
+        for row in all_rows
+    }
+
+    rescored = 0
+    still_failing = 0
+    by_rule: dict[str, int] = {}
+    now_passing: set[int] = set()
+    now = utcnow().isoformat()
+    for row in all_rows:
+        old = row.dialogue_check
+        lines = lines_by_take[row.id]
+        if not isinstance(old, dict) or old.get("passed") is not False or not lines:
+            continue
+        spoken = dialogue_check.spoken_of(old)
+        result = dialogue_check.compare(lines, spoken, threshold)
+        stored = result.to_json(lines, spoken, threshold=threshold, checked_at=utcnow())
+        stored["checked_at"] = old.get("checked_at")
+        stored["rescored_at"] = now
+        if old.get("accepted_at") is not None:
+            stored["accepted_at"] = old["accepted_at"]
+        row.dialogue_check = stored
+        rescored += 1
+        if result.passed:
+            now_passing.add(row.id)
+            rule = result.rule or "exact"
+            by_rule[rule] = by_rule.get(rule, 0) + 1
+        else:
+            still_failing += 1
+
+    selected: list[tuple[str, str, int]] = []
+    for rows in grouped.values():
+        # `rows` is newest first. A take that is being made or checked leaves the shot alone.
+        if _any_job_active(rows, jobs, dialogue_jobs):
+            continue
+        if _selected_id(rows, lines_by_take) is not None:
+            continue
+        winner = next(
+            (
+                row
+                for row in rows
+                if row.id in now_passing
+                and take_validation.passed(row.validation)
+                and _is_ready(row)
+            ),
+            None,
+        )
+        if winner is None:
+            continue
+        winner.selected_at = await selection_time(
+            session, winner.project_id, winner.scene_id, winner.shot_id
+        )
+        selected.append((winner.scene_id, winner.shot_id, winner.take_number))
+    await session.commit()
+    _logger.info(
+        "project %d: %d dialogue checks judged again, %d pass now, %d takes selected",
+        project.id,
+        rescored,
+        len(now_passing),
+        len(selected),
+    )
+    return RescoreReport(
+        rescored=rescored,
+        now_passing_by_rule=by_rule,
+        still_failing=still_failing,
+        selected=selected,
+    )
+
+
 async def active_retry_jobs(
     session: AsyncSession, project_id: int, scene_id: str, shot_id: str
 ) -> list[Job]:
@@ -1326,13 +1458,41 @@ def _retryable_failure(take: ShotTake) -> dict[str, Any] | None:
     return None
 
 
+def _repeated_answer(newest: ShotTake, before: ShotTake) -> bool:
+    """SCN-001: whether two takes in a row failed the dialogue check and heard the same words
+    (after every matching step; two empty transcripts are the same), from the same prompt. A
+    new seed is then unlikely to help, so no more takes are made by themselves and the shot
+    needs the owner's review. Worked out on read from the stored checks, never stored.
+    """
+    if newest.shot_prompt_id != before.shot_prompt_id:
+        return False
+    checks = (newest.dialogue_check, before.dialogue_check)
+    if not all(isinstance(check, dict) and check.get("passed") is False for check in checks):
+        return False
+    return dialogue_check.heard_key(checks[0]) == dialogue_check.heard_key(checks[1])
+
+
+async def _take_before(session: AsyncSession, take: ShotTake) -> ShotTake | None:
+    """The take of the same shot with the next lower number, or None."""
+    statement = select(ShotTake).where(
+        ShotTake.project_id == take.project_id,
+        ShotTake.scene_id == take.scene_id,
+        ShotTake.shot_id == take.shot_id,
+        ShotTake.take_number < take.take_number,
+    )
+    statement = statement.order_by(ShotTake.take_number.desc()).limit(1)
+    return (await session.execute(statement)).scalar_one_or_none()
+
+
 async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
     """Queues another take of a shot whose take `take_id` failed its technical check or its
     dialogue check, with a new seed, and commits. Returns the job, or None when no retry is made:
     the take did not fail for a reason another seed can fix (`kind` is not `clip`), the tries are
     used up (`shot_take_max_retries`), the take is not the shot's newest take any more, the user
-    selected a take of the shot while this one was being made (`chosen_since`), or the shot
-    cannot be generated now (its prompt or request changed meanwhile; the user presses Generate).
+    selected a take of the shot while this one was being made (`chosen_since`), the take and the
+    one before it failed the dialogue check hearing the same words (`_repeated_answer`, SCN-001),
+    or the shot cannot be generated now (its prompt or request changed meanwhile; the user
+    presses Generate).
     """
     take = await session.get(ShotTake, take_id)
     if take is None:
@@ -1350,6 +1510,20 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
     validation = _retryable_failure(take)
     if validation is None:
         return None
+    if validation is take.dialogue_check:
+        # SCN-001: two takes in a row that hear the same words point at the check, not the clip.
+        before = await _take_before(session, take)
+        if before is not None and _repeated_answer(take, before):
+            _logger.info(
+                "shot '%s' of scene '%s' of project %d: takes %d and %d heard the same words; "
+                "not retried, the shot needs review",
+                take.shot_id,
+                take.scene_id,
+                take.project_id,
+                before.take_number,
+                take.take_number,
+            )
+            return None
     attempt = _retry_attempt(take)
     max_tries = await settings_service.get_int(session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY)
     if attempt >= max_tries:

@@ -9,6 +9,8 @@
   be pressed. Out of date is worked out on every read.
 - `POST .../check` ("Check takes") starts the local job that checks the clips made before the
   checks existed. It starts no generation.
+- `POST .../rescore-dialogue` ("Score dialogue again", SCN-001) judges every failed dialogue check
+  again from its stored transcript, with no GPU work and no new job, and answers what changed.
 - `POST .../run` ("Generate all") starts one job for every shot, in every scene, whose prompt is
   compiled and current and that has no current take and is not already being generated.
 - `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
@@ -90,6 +92,7 @@ ShotType = Literal[
     "graphic",
 ]
 ProblemKind = Literal["clip", "plan"]
+DialogueOutcome = Literal["matched", "close_match", "not_verifiable", "mismatch", "no_speech"]
 VoiceSource = Literal["take", "clip"]
 
 
@@ -135,6 +138,12 @@ class TakeDialogueOut(BaseModel):
     checked_at: datetime | None
     # True when the check failed and the user selected the take anyway.
     accepted: bool
+    # SCN-001: what kind of answer the check gave, and the matching step at which it passed
+    # (`exact`, `numbers`, `spelling`, `homophones`, `short_line`, `not_verifiable`; None when it
+    # failed). `close_match` is a pass under the short-line rule, and `not_verifiable` a pass
+    # because nothing was heard on a line too slight to check.
+    outcome: DialogueOutcome = "matched"
+    rule: str | None = None
 
 
 AnchorUse = Literal["first_frame", "reference"]
@@ -220,6 +229,9 @@ class ShotTakesEntryOut(BaseModel):
     # FLOW-008: the voice a presenter shot of a continuous explainer is heard with in the render,
     # the scene's voice take or its clip's own sound. None for every other shot.
     voice_source: VoiceSource | None = None
+    # SCN-001: the shot failed and its two newest takes heard the same words, so no more takes
+    # are made by themselves. The owner listens and uses a take anyway, or changes the prompt.
+    needs_review: bool = False
 
 
 class SceneShotTakesOut(BaseModel):
@@ -245,6 +257,8 @@ class ShotTakesOut(BaseModel):
     check_job: DiscoveryJobOut | None
     # The most automatic retries a failed clip gets (0 means none).
     max_retries: int
+    # SCN-001: how many takes have a failed dialogue check that "Score dialogue again" can judge.
+    rescorable_count: int = 0
 
 
 class ShotTakesSkippedOut(BaseModel):
@@ -271,6 +285,24 @@ class SelectedTakeOut(BaseModel):
 
 class ShotTakesCheckOut(BaseModel):
     job_id: int
+
+
+class RescoredTakeOut(BaseModel):
+    scene_id: str
+    shot_id: str
+    take_number: int
+
+
+class RescoreDialogueOut(BaseModel):
+    """What "Score dialogue again" did (SCN-001): no clip was made and no job was queued."""
+
+    # How many failed dialogue checks were judged again.
+    rescored: int
+    # How many of them pass now, by the matching step at which they passed.
+    now_passing_by_rule: dict[str, int]
+    still_failing: int
+    # The takes that became their shot's selected take.
+    selected: list[RescoredTakeOut]
 
 
 class VoiceSourceIn(BaseModel):
@@ -308,13 +340,29 @@ def _validation_out(validation: dict[str, Any] | None) -> TakeValidationOut | No
     )
 
 
+def _dialogue_outcome(result: dict[str, Any], problems: list[Any]) -> DialogueOutcome:
+    """The outcome a check recorded. A check made before SCN-001 recorded none: a pass is
+    `matched`, and a failure is told by its problem code.
+    """
+    stored = result.get("outcome")
+    if stored in ("matched", "close_match", "not_verifiable", "mismatch", "no_speech"):
+        return cast(DialogueOutcome, stored)
+    if result.get("passed") is True:
+        return "matched"
+    codes = [problem.get("code") for problem in problems if isinstance(problem, dict)]
+    return "no_speech" if "no_speech" in codes else "mismatch"
+
+
 def _dialogue_check_out(result: dict[str, Any] | None) -> TakeDialogueOut | None:
     if result is None:
         return None
     checked_at = result.get("checked_at")
     similarity = result.get("similarity")
     threshold = result.get("threshold")
+    problems = result.get("problems", [])
     return TakeDialogueOut(
+        outcome=_dialogue_outcome(result, problems),
+        rule=result.get("rule") if isinstance(result.get("rule"), str) else None,
         passed=result.get("passed") is True,
         similarity=float(similarity) if isinstance(similarity, int | float) else 0.0,
         threshold=threshold if isinstance(threshold, int) else 0,
@@ -403,6 +451,7 @@ def _shot_out(entry: ShotEntry, frame_urls: dict[int, str]) -> ShotTakesEntryOut
         blocked_reason=entry.blocked_reason,
         continues_from=entry.continues_from,
         voice_source=cast(VoiceSource | None, entry.voice_source),
+        needs_review=entry.needs_review,
     )
 
 
@@ -491,6 +540,7 @@ async def get_shot_takes(
         unchecked_count=result.unchecked_count,
         check_job=_job_out(result.check_job),
         max_retries=result.max_retries,
+        rescorable_count=result.rescorable_count,
     )
 
 
@@ -511,6 +561,29 @@ async def check_takes(project_id: int, session: SessionDep) -> ShotTakesCheckOut
         raise _refused(exc) from exc
     dispatcher.nudge()
     return ShotTakesCheckOut(job_id=job.id)
+
+
+@router.post(
+    "/projects/{project_id}/shot-takes/rescore-dialogue",
+    response_model=RescoreDialogueOut,
+    responses=_NOT_FOUND,
+)
+async def rescore_dialogue(project_id: int, session: SessionDep) -> RescoreDialogueOut:
+    """Judges every failed dialogue check of the project again from the words it recorded as
+    heard, with the current matching rules (SCN-001). Nothing is transcribed, no clip is made and
+    no job is queued. A shot with no selected take gets its newest take that passes now.
+    """
+    project = await load_project(session, project_id)
+    report = await shot_takes.rescore_dialogue(session, project)
+    return RescoreDialogueOut(
+        rescored=report.rescored,
+        now_passing_by_rule=report.now_passing_by_rule,
+        still_failing=report.still_failing,
+        selected=[
+            RescoredTakeOut(scene_id=scene_id, shot_id=shot_id, take_number=number)
+            for scene_id, shot_id, number in report.selected
+        ],
+    )
 
 
 @router.post(

@@ -243,6 +243,35 @@ export function useSetVoiceSource(projectId: number) {
  * "Check takes": starts the local job that checks the clips made before the checks existed. It
  * starts no generation, so it costs seconds and no remote server time.
  */
+export type RescoreDialogue = components["schemas"]["RescoreDialogueOut"];
+
+/**
+ * Judges every failed dialogue check of the project again from its stored transcript (SCN-001).
+ * It starts no clip and no job, so there is no job to poll: the lists just refresh.
+ */
+export function useRescoreDialogue(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/shot-takes/rescore-dialogue",
+        { params: { path: { project_id: projectId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not score the dialogue again (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
 export function useCheckShotTakes(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({

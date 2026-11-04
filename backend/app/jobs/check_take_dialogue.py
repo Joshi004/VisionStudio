@@ -263,6 +263,8 @@ class CheckTakeDialogueHandler(JobHandler):
                 "processing_time": _processing_time(body),
                 "check": {
                     "passed": result.passed,
+                    "outcome": result.outcome,
+                    "rule": result.rule,
                     "similarity": result.similarity,
                     "threshold": threshold,
                     "problems": [problem.code for problem in result.problems],
@@ -294,10 +296,12 @@ class CheckTakeDialogueHandler(JobHandler):
             await session.commit()
 
         _logger.info(
-            "job %d: dialogue of take %s checked: passed=%s similarity=%s%% (needed %s%%)",
+            "job %d: dialogue of take %s checked: passed=%s outcome=%s similarity=%s%% "
+            "(needed %s%%)",
             job.id,
             take_id,
             result.passed,
+            result.outcome,
             result.similarity,
             threshold,
         )

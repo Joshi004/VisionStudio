@@ -2264,6 +2264,10 @@ def _failed_shot_reason(shot: shot_takes.ShotEntry) -> str:
             if isinstance(problem, dict) and problem.get("message")
         ]
         text = " ".join(messages) or "The speech in the clip does not match the dialogue."
+        if shot.needs_review:
+            text += (
+                " Two takes in a row heard the same words, so no more takes are made by themselves."
+            )
         return (
             f"No take passed its dialogue check: {text} "
             "Generate the shot from its own button to retry, or select one of its takes to use "

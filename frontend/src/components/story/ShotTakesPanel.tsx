@@ -29,6 +29,7 @@ import {
   useGenerateAllShots,
   useGenerateOneShot,
   useGenerateSceneShots,
+  useRescoreDialogue,
   useSelectTake,
   useSetVoiceSource,
   useShotTakes,
@@ -56,6 +57,16 @@ const STATUS: Record<
   out_of_date: { label: "Out of date", color: "yellow" },
   failed: { label: "Failed checks", color: "red" },
   unchecked: { label: "Not checked", color: "orange" },
+};
+
+/** What kind of difference "Score dialogue again" forgave, by the matching step. */
+const RULE_LABEL: Record<string, string> = {
+  exact: "same words",
+  numbers: "numbers",
+  spelling: "UK and US spelling",
+  homophones: "words that sound alike",
+  short_line: "one close word on a short line",
+  not_verifiable: "nothing heard on a very short line",
 };
 
 /** The technical check of a take, as a badge. */
@@ -108,6 +119,28 @@ function DialogueBadge({ take }: { take: ShotTake }) {
     ) : (
       <Badge variant="light" color="orange">
         Dialogue not checked
+      </Badge>
+    );
+  }
+  if (check.passed && check.outcome === "not_verifiable") {
+    return (
+      <Badge
+        variant="light"
+        color="orange"
+        title="Nothing was heard, but the line is too short for the check to tell whether it was said, so the take is not failed."
+      >
+        Speech not verifiable
+      </Badge>
+    );
+  }
+  if (check.passed && check.outcome === "close_match") {
+    return (
+      <Badge
+        variant="light"
+        color="green"
+        title="One word differs from the line but sounds or is spelled almost the same, on a short line."
+      >
+        Dialogue close match
       </Badge>
     );
   }
@@ -266,6 +299,13 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
           </Text>
         </Stack>
       )}
+      {take.dialogue_check?.passed &&
+        take.dialogue_check.outcome === "not_verifiable" && (
+          <Text size="xs" c="orange" ml={8}>
+            Nothing was heard, but this line is too short for the check to tell
+            whether it was said, so the take was not failed. Listen to it.
+          </Text>
+        )}
       {take.anchor != null && (
         <Text size="xs" c="dimmed" ml={8}>
           Continues shot {take.anchor.from_shot_id}: starts from{" "}
@@ -349,6 +389,11 @@ function failureLines(
     lines.push({
       text: "Another take cannot fix this. Plan this scene's shots again.",
       key: "plan",
+    });
+  } else if (entry.needs_review) {
+    lines.push({
+      text: "Two takes in a row heard the same words, so no more takes are made by themselves.",
+      key: "needs-review",
     });
   } else if (newest.retry_attempt >= maxRetries) {
     lines.push({
@@ -489,6 +534,15 @@ function ShotRow({
             {hasTakes && (
               <Badge variant="light" color="gray">
                 {takes.length} {takes.length === 1 ? "take" : "takes"}
+              </Badge>
+            )}
+            {entry.needs_review && (
+              <Badge
+                variant="light"
+                color="red"
+                title="Two takes in a row heard the same words, so the check may be wrong rather than the clip"
+              >
+                Needs your review
               </Badge>
             )}
             {job && job.status !== "succeeded" && <JobStatusBadge job={job} />}
@@ -834,6 +888,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const selectTake = useSelectTake(projectId);
   const setVoiceSource = useSetVoiceSource(projectId);
   const checkTakes = useCheckShotTakes(projectId);
+  const rescoreDialogue = useRescoreDialogue(projectId);
   // The prompts the clips are made from, which can be edited or rewritten from here.
   const shotPrompts = useShotPrompts(projectId, openSceneId).data;
   const compilePrompt = useCompileOnePrompt(projectId);
@@ -847,6 +902,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
     selectTake.isPending ||
     setVoiceSource.isPending ||
     checkTakes.isPending ||
+    rescoreDialogue.isPending ||
     compilePrompt.isPending ||
     savePrompt.isPending;
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
@@ -854,6 +910,8 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const checkJob = data?.check_job ?? null;
   const checking = isJobActive(checkJob);
   const maxRetries = data?.max_retries ?? 0;
+  const rescorable = data?.rescorable_count ?? 0;
+  const rescored = rescoreDialogue.data;
   // What "Generate all" would do: the shots that may be generated and have no good clip.
   const allCount = entries.reduce((sum, scene) => sum + scene.summary.todo, 0);
   // The shots the last press could not do, with why.
@@ -906,10 +964,10 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             <Text size="sm" c="dimmed">
               Sends each shot&apos;s prompt, pictures and dialogue speech to the
               video model and keeps the clip as a take of the shot. Shots run
-              side by side when the remote server has room. Each press adds a take,
-              and the take that finished or was selected last is the one used.
-              Each clip gets a technical check (it decodes, has sound, and has
-              the size and number of frames asked for), and for a shot with
+              side by side when the remote server has room. Each press adds a
+              take, and the take that finished or was selected last is the one
+              used. Each clip gets a technical check (it decodes, has sound, and
+              has the size and number of frames asked for), and for a shot with
               dialogue the speech in the clip is transcribed and must match the
               lines. A clip that fails either check is generated again by itself
               with another seed, up to the limit in Settings. You can still use
@@ -927,6 +985,17 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
                 title="Checks the clips that have not been fully checked (technical check, and for dialogue the speech). It starts no clip generation."
               >
                 Check takes ({unchecked} not checked)
+              </Button>
+            )}
+            {rescorable > 0 && (
+              <Button
+                variant="default"
+                onClick={() => rescoreDialogue.mutate()}
+                loading={rescoreDialogue.isPending}
+                disabled={isLoading || isError || busy}
+                title="Judges the failed dialogue checks again from the words already heard, with the current matching rules. It transcribes nothing and starts no clip."
+              >
+                Score dialogue again ({rescorable})
               </Button>
             )}
             <Button
@@ -959,6 +1028,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
           selectTake,
           setVoiceSource,
           checkTakes,
+          rescoreDialogue,
         ].map(
           (mutation, position) =>
             mutation.isError && (
@@ -970,6 +1040,37 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
                 {describeError(mutation.error)}
               </Alert>
             ),
+        )}
+        {rescored !== undefined && (
+          <Alert
+            color="blue"
+            title="Dialogue scored again"
+            withCloseButton
+            onClose={() => rescoreDialogue.reset()}
+          >
+            <Stack gap={2}>
+              <Text size="sm">
+                {rescored.rescored} failed{" "}
+                {rescored.rescored === 1 ? "check was" : "checks were"} judged
+                again from the words already heard: {rescored.still_failing}{" "}
+                still {rescored.still_failing === 1 ? "fails" : "fail"}.
+              </Text>
+              {Object.entries(rescored.now_passing_by_rule).map(
+                ([rule, count]) => (
+                  <Text key={rule} size="sm">
+                    {count} now pass{count === 1 ? "es" : ""} (
+                    {RULE_LABEL[rule] ?? rule}).
+                  </Text>
+                ),
+              )}
+              {rescored.selected.map((item) => (
+                <Text key={`${item.scene_id}/${item.shot_id}`} size="sm">
+                  Selected take {item.take_number} of {item.shot_id} in{" "}
+                  {item.scene_id}.
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
         )}
         {compilePrompt.isError && (
           <Alert color="red" title="Could not write the prompt again">
