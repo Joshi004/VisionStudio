@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped, join_url
 from app.providers import llm, qwen38
+from app.services import gpu_priority
 
 LLM_URL_KEY: Final = "llm_base_url"
 GPU_URL_KEY: Final = "gpu_api_base_url"
@@ -105,7 +106,10 @@ async def complete(
     Raises `llm.LlmCallError`, with the same kinds for both providers.
     """
     if target.is_qwen38:
-        return await qwen38.complete(target.base_url, body, timeout_s=timeout_s)
+        # A call to the model is short work that lets a scene's lane move on (SCN-002).
+        return await qwen38.complete(
+            target.base_url, body, timeout_s=timeout_s, priority=gpu_priority.SHORT_WORK
+        )
     return await llm.complete(
         target.base_url, body, timeout_s=timeout_s, idle_timeout_s=idle_timeout_s
     )

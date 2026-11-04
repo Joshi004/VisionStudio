@@ -44,7 +44,7 @@ from app.jobs.gpu_job import (
 from app.jobs.handlers import MODEL_TRANSCRIPTION, JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
-from app.services import word_timings
+from app.services import gpu_priority, word_timings
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -78,6 +78,7 @@ class TimeSpeechWordsHandler(JobHandler):
             speech_path = await self._speech_path(session, audio_id)
             base_url = await settings_service.get_str(session, TRANSCRIPTION_URL_KEY)
             partition = await settings_service.get_str(session, PARTITION_KEY)
+            priority = await gpu_priority.level_for(session, job)  # SCN-002
             await session.commit()
 
         if speech_path is None:
@@ -102,7 +103,9 @@ class TimeSpeechWordsHandler(JobHandler):
                     base_url, path, filename, SPEECH_MIME
                 )
                 await self._phase(job_id, phases.SUBMITTING)
-                provider_job_id = await transcriber.submit(base_url, remote_asset_id, partition)
+                provider_job_id = await transcriber.submit(
+                    base_url, remote_asset_id, partition, priority
+                )
                 break
             except GpuCallError as exc:
                 if exc.kind == "server_error" and not retried_server_error:
@@ -124,7 +127,7 @@ class TimeSpeechWordsHandler(JobHandler):
             "server_url": docker_mapped(base_url),
             "upload": {"filename": filename, "remote_asset_id": remote_asset_id},
             "endpoint": transcriber.TRANSCRIBE_PATH,
-            "body": transcriber.build_body(remote_asset_id, partition),
+            "body": transcriber.build_body(remote_asset_id, partition, priority),
         }
         async with SessionLocal() as session:
             await store.mark_submitted(session, job_id, provider_job_id, submitted)

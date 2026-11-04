@@ -60,14 +60,19 @@ def prompt_chars(body: dict[str, Any]) -> int:
     return total
 
 
-def to_request(body: dict[str, Any]) -> dict[str, Any]:
-    """The Qwen3.8 request for an OpenAI-style body."""
-    return {
+def to_request(body: dict[str, Any], priority: int | None = None) -> dict[str, Any]:
+    """The Qwen3.8 request for an OpenAI-style body. `priority` is the server's 1 to 10
+    (SCN-002), sent only when there is one.
+    """
+    request: dict[str, Any] = {
         "messages": body["messages"],
         "thinking": True,
         "include_reasoning": False,
         "max_tokens": MAX_TOKENS_CAP,
     }
+    if priority is not None:
+        request["priority"] = priority
+    return request
 
 
 def _to_llm_error(exc: GpuCallError) -> LlmCallError:
@@ -129,11 +134,13 @@ def _read_result(job_id: str, result: dict[str, Any]) -> ChatResult:
     )
 
 
-async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> ChatResult:
+async def complete(
+    base_url: str, body: dict[str, Any], *, timeout_s: float, priority: int | None = None
+) -> ChatResult:
     """Asks Qwen3.8 on the GPU server and returns its text.
 
     `timeout_s` is the time the model may take, at least `MIN_GENERATION_S`. The wait also
-    allows for a cold server start.
+    allows for a cold server start. `priority` is the server's 1 to 10 (SCN-002).
     Raises `LlmCallError` for anything that is not a usable answer. An answer with no text is
     returned with `content == ""` so the caller can record its `finish_reason`.
     """
@@ -147,7 +154,7 @@ async def complete(base_url: str, body: dict[str, Any], *, timeout_s: float) -> 
 
     deadline = time.monotonic() + max(timeout_s, MIN_GENERATION_S) + COLD_START_ALLOWANCE_S
     try:
-        job_id = await gpu_server.submit_job(base_url, GENERATE_PATH, to_request(body))
+        job_id = await gpu_server.submit_job(base_url, GENERATE_PATH, to_request(body, priority))
     except GpuCallError as exc:
         raise _to_llm_error(exc) from exc
 

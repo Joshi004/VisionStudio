@@ -54,7 +54,7 @@ from app.jobs.gpu_job import (
 from app.jobs.handlers import MODEL_TTS, JobHandler, PollContext
 from app.providers import gpu_server, speech_synthesizer
 from app.providers.gpu_server import GpuCallError
-from app.services import ffmpeg, speech_audio
+from app.services import ffmpeg, gpu_priority, speech_audio
 from app.services.storage import StorageError, TempFile, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -193,6 +193,9 @@ class SpeechHandler(JobHandler):
         the recording again once. Any other refusal is raised.
         """
         parts = len(plan.chunks)
+        async with SessionLocal() as session:
+            priority = await gpu_priority.level_for(session, job)  # SCN-002
+            await session.commit()
         remote_reference_id = plan.remote_reference_id
         retried_server_error = False
         retried_asset = False
@@ -211,6 +214,7 @@ class SpeechHandler(JobHandler):
                     cfg_scale=plan.cfg_scale,
                     partition=partition,
                 )
+                body = gpu_priority.with_priority(body, priority)
                 provider_job_id = await speech_synthesizer.submit(base_url, body)
                 break
             except GpuCallError as exc:

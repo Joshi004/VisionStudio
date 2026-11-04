@@ -29,10 +29,13 @@ import {
   useGenerateAllShots,
   useGenerateOneShot,
   useGenerateSceneShots,
+  usePushScene,
   useRescoreDialogue,
   useSelectTake,
   useSetVoiceSource,
   useShotTakes,
+  useStopPush,
+  type PushScene,
   type SceneShotTakes,
   type ShotTake,
   type ShotTakesEntry,
@@ -781,6 +784,10 @@ type SceneRowProps = {
   maxRetries: number;
   busy: boolean;
   onGenerateScene: () => void;
+  /** True when this scene is the one pushed to the front of the server's queue (SCN-002). */
+  pushed: boolean;
+  onPush: () => void;
+  onStopPush: () => void;
   onGenerateShot: (shotId: string) => void;
   promptsOf: (shotId: string) => ShotPromptTools;
   onSelect: (shotId: string, takeId: number) => void;
@@ -798,6 +805,9 @@ function SceneRow({
   maxRetries,
   busy,
   onGenerateScene,
+  pushed,
+  onPush,
+  onStopPush,
   onGenerateShot,
   promptsOf,
   onSelect,
@@ -817,6 +827,11 @@ function SceneRow({
       loading={shotsNotLoaded(scene)}
       badges={
         <>
+          {pushed && (
+            <Badge variant="light" color="grape">
+              Pushed to front
+            </Badge>
+          )}
           <Badge variant="light" color="gray">
             {generated} of {total} generated
           </Badge>
@@ -838,14 +853,30 @@ function SceneRow({
         </>
       }
       actions={
-        <Button
-          size="compact-sm"
-          variant="default"
-          disabled={busy || todo === 0}
-          onClick={onGenerateScene}
-        >
-          Generate scene
-        </Button>
+        <Group gap="xs" wrap="nowrap">
+          <Button
+            size="compact-sm"
+            variant="default"
+            disabled={busy}
+            onClick={pushed ? onStopPush : onPush}
+            title={
+              pushed
+                ? "Puts this scene's clips back in their place in story order on the server's queue."
+                : "Sends this scene's clips to the front of the server's queue, and moves up the ones already waiting there. It starts no clip."
+            }
+          >
+            {pushed ? "Stop pushing" : "Push to front"}
+          </Button>
+          <Button
+            size="compact-sm"
+            variant="default"
+            disabled={busy || todo === 0}
+            onClick={onGenerateScene}
+            title="Generates the clips of this scene and pushes the scene to the front of the server's queue."
+          >
+            Generate scene
+          </Button>
+        </Group>
       }
     >
       {scene.shots.map((entry) => (
@@ -889,6 +920,8 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const setVoiceSource = useSetVoiceSource(projectId);
   const checkTakes = useCheckShotTakes(projectId);
   const rescoreDialogue = useRescoreDialogue(projectId);
+  const pushScene = usePushScene(projectId);
+  const stopPush = useStopPush(projectId);
   // The prompts the clips are made from, which can be edited or rewritten from here.
   const shotPrompts = useShotPrompts(projectId, openSceneId).data;
   const compilePrompt = useCompileOnePrompt(projectId);
@@ -903,6 +936,8 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
     setVoiceSource.isPending ||
     checkTakes.isPending ||
     rescoreDialogue.isPending ||
+    pushScene.isPending ||
+    stopPush.isPending ||
     compilePrompt.isPending ||
     savePrompt.isPending;
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
@@ -912,6 +947,11 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const maxRetries = data?.max_retries ?? 0;
   const rescorable = data?.rescorable_count ?? 0;
   const rescored = rescoreDialogue.data;
+  const pushedSceneId = data?.pushed_scene_id ?? null;
+  // What the last push or stop did to the clips already waiting on the server.
+  const pushReport: PushScene | undefined = stopPush.isSuccess
+    ? stopPush.data
+    : pushScene.data;
   // What "Generate all" would do: the shots that may be generated and have no good clip.
   const allCount = entries.reduce((sum, scene) => sum + scene.summary.todo, 0);
   // The shots the last press could not do, with why.
@@ -1029,6 +1069,8 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
           setVoiceSource,
           checkTakes,
           rescoreDialogue,
+          pushScene,
+          stopPush,
         ].map(
           (mutation, position) =>
             mutation.isError && (
@@ -1072,6 +1114,30 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             </Stack>
           </Alert>
         )}
+        {pushReport !== undefined && (
+          <Alert
+            color="blue"
+            title={
+              stopPush.isSuccess ? "Push ended" : "Scene pushed to the front"
+            }
+            withCloseButton
+            onClose={() => {
+              pushScene.reset();
+              stopPush.reset();
+            }}
+          >
+            <Text size="sm">
+              {pushReport.changed}{" "}
+              {pushReport.changed === 1 ? "clip" : "clips"} waiting on the
+              server {pushReport.changed === 1 ? "was" : "were"} moved
+              {pushReport.already_running > 0 &&
+                `, ${pushReport.already_running} had already started`}
+              {pushReport.not_reached > 0 &&
+                `, ${pushReport.not_reached} could not be reached and keep their old place`}
+              . Clips not sent yet are sent in their new place.
+            </Text>
+          </Alert>
+        )}
         {compilePrompt.isError && (
           <Alert color="red" title="Could not write the prompt again">
             {describeError(compilePrompt.error)}
@@ -1108,6 +1174,15 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             maxRetries={maxRetries}
             busy={busy}
             onGenerateScene={() => generateScene.mutate(scene.id)}
+            pushed={scene.id === pushedSceneId}
+            onPush={() => {
+              stopPush.reset();
+              pushScene.mutate(scene.id);
+            }}
+            onStopPush={() => {
+              pushScene.reset();
+              stopPush.mutate();
+            }}
             onGenerateShot={(shotId) =>
               generateOne.mutate({ sceneId: scene.id, shotId })
             }

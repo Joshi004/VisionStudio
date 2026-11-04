@@ -48,7 +48,7 @@ from app.jobs.gpu_job import (
 from app.jobs.handlers import MODEL_TRANSCRIPTION, JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
-from app.services import dialogue_check, shot_takes, take_validation
+from app.services import dialogue_check, gpu_priority, shot_takes, take_validation
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -80,6 +80,7 @@ class CheckTakeDialogueHandler(JobHandler):
             base_url = await settings_service.get_str(session, TRANSCRIPTION_URL_KEY)
             partition = await settings_service.get_str(session, PARTITION_KEY)
             clip_path = take.path if take is not None else None
+            priority = await gpu_priority.level_for(session, job)  # SCN-002
             await session.commit()
 
         if take is None or clip_path is None:
@@ -102,7 +103,9 @@ class CheckTakeDialogueHandler(JobHandler):
                 await note_uploading(job_id, phases.UPLOADING_CLIP_FOR_TRANSCRIPT)
                 remote_asset_id = await gpu_server.upload_file(base_url, path, filename, CLIP_MIME)
                 await self._phase(job_id, phases.SUBMITTING)
-                provider_job_id = await transcriber.submit(base_url, remote_asset_id, partition)
+                provider_job_id = await transcriber.submit(
+                    base_url, remote_asset_id, partition, priority
+                )
                 break
             except GpuCallError as exc:
                 if exc.kind == "server_error" and not retried_server_error:
@@ -127,7 +130,7 @@ class CheckTakeDialogueHandler(JobHandler):
                 "remote_asset_id": remote_asset_id,
             },
             "endpoint": transcriber.TRANSCRIBE_PATH,
-            "body": transcriber.build_body(remote_asset_id, partition),
+            "body": transcriber.build_body(remote_asset_id, partition, priority),
         }
         async with SessionLocal() as session:
             await store.mark_submitted(session, job_id, provider_job_id, submitted)

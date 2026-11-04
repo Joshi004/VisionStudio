@@ -102,6 +102,9 @@ class Project(Base):
     # EXG-001. Whether a continuous explainer gets graphic shots (EG-1). Chosen when the project
     # is created and never changed; only an explainer with a continuous voice can have it on.
     graphics: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # SCN-002. The scene the owner pushed to the front of the GPU server's queue (its id in the
+    # scene discovery). Its clips are sent with the most urgent priority. NULL: none is pushed.
+    pushed_scene_id: Mapped[str | None] = mapped_column(default=None)
 
 
 class Asset(Base):

@@ -42,7 +42,7 @@ from app.jobs.handlers import MODEL_MUSIC
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import gpu_server, music_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import ffmpeg, music_lab, music_models, music_takes, music_themes
+from app.services import ffmpeg, gpu_priority, music_lab, music_models, music_takes, music_themes
 from app.services.music_models import EditOperation, MusicModel
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -127,6 +127,7 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
                 await session.commit()
                 return
             base_url = await settings_service.get_str(session, GPU_URL_KEY)
+            priority = await gpu_priority.level_for(session, job)  # SCN-002
             await session.commit()
 
         plan = _plan(job.input)
@@ -152,6 +153,7 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
                     body = music_generator.with_source(body, remote_id)
                     if not await self._is_running(job_id):
                         return  # cancelled while uploading: nothing was submitted
+                body = gpu_priority.with_priority(body, priority)
                 await self._phase(job_id, phases.SUBMITTING)
                 answer = await gpu_server.submit(base_url, plan.endpoint, body)
                 break
@@ -180,10 +182,11 @@ class GenerateLabMusicHandler(RemoteVideoHandler):
             "server_url": docker_mapped(base_url),
             "submit_answer": answer.to_json(),
         }
+        # The request exactly as it was sent (it carries the server's priority, SCN-002), and,
+        # for an edit, what was uploaded.
+        submitted["body"] = body
         if plan.source is not None:
-            # What was uploaded, and the request exactly as it was sent.
             submitted["uploads"] = uploads
-            submitted["body"] = body
         async with SessionLocal() as session:
             saved = await store.mark_submitted(session, job_id, answer.job_id, submitted)
         if not saved:

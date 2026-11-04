@@ -4860,6 +4860,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-takes/{scene_id}/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Scene
+         * @description Pushes one scene to the front of the GPU server's queue (SCN-002): its clips are sent
+         *     with the most urgent priority, and the ones already waiting on the server are changed. A
+         *     scene pushed before goes back to its place in story order. Starts no generation.
+         */
+        post: operations["push_scene_api_projects__project_id__shot_takes__scene_id__push_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Stop Push
+         * @description Ends the push: the scene's clips go back to their place in story order. Does nothing
+         *     when no scene is pushed.
+         */
+        delete: operations["stop_push_api_projects__project_id__shot_takes_push_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-takes/{scene_id}/{shot_id}/run": {
         parameters: {
             query?: never;
@@ -8637,6 +8680,10 @@ export interface components {
             upload?: components["schemas"]["UploadProgressOut"] | null;
             download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
+            /** Server Priority */
+            server_priority?: number | null;
+            /** Queue State */
+            queue_state?: string | null;
             /** Provider Job Id */
             provider_job_id: string | null;
             /** Input */
@@ -8755,6 +8802,10 @@ export interface components {
             upload?: components["schemas"]["UploadProgressOut"] | null;
             download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
+            /** Server Priority */
+            server_priority?: number | null;
+            /** Queue State */
+            queue_state?: string | null;
             /**
              * Stage
              * @description The step the job is in, worked out from `status` and `phase` (`phases.stage_of`).
@@ -11836,6 +11887,21 @@ export interface components {
             /** Views */
             views: string[];
         };
+        /**
+         * PushSceneOut
+         * @description What a push (or "Stop pushing") did to the clips of the scene that already wait on the
+         *     GPU server. Clips not yet sent take the new level when they are sent.
+         */
+        PushSceneOut: {
+            /** Scene Id */
+            scene_id: string | null;
+            /** Changed */
+            changed: number;
+            /** Already Running */
+            already_running: number;
+            /** Not Reached */
+            not_reached: number;
+        };
         /** PushbackOut */
         PushbackOut: {
             /** Problem */
@@ -14396,6 +14462,8 @@ export interface components {
              * @default 0
              */
             rescorable_count: number;
+            /** Pushed Scene Id */
+            pushed_scene_id?: string | null;
         };
         /** ShotTakesRunManyOut */
         ShotTakesRunManyOut: {
@@ -27259,6 +27327,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    push_scene_api_projects__project_id__shot_takes__scene_id__push_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSceneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stop_push_api_projects__project_id__shot_takes_push_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSceneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

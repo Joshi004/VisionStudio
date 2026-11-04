@@ -49,6 +49,7 @@ from app.services import (
     environment_references,
     environment_views,
     frame_images,
+    gpu_priority,
     image_lab,
     look_state_images,
 )
@@ -72,6 +73,7 @@ class GenerateLabImageHandler(RemoteImageHandler):
                 await session.commit()
                 return
             base_url = await settings_service.get_str(session, GPU_URL_KEY)
+            priority = await gpu_priority.level_for(session, job)
             await session.commit()
 
         recorded = job.input if isinstance(job.input, dict) else {}
@@ -92,9 +94,10 @@ class GenerateLabImageHandler(RemoteImageHandler):
                 recorded,
                 endpoint=image_generator.EDIT_PATH,
                 build_body=build_body,
+                priority=priority,
             )
             return
-        await self.submit(job_id, base_url, request, recorded)
+        await self.submit(job_id, base_url, request, recorded, priority=priority)
 
     @staticmethod
     async def _reference_path(source: str, ref_id: int) -> str | None:

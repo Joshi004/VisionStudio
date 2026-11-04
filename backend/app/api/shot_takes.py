@@ -13,7 +13,10 @@
   again from its stored transcript, with no GPU work and no new job, and answers what changed.
 - `POST .../run` ("Generate all") starts one job for every shot, in every scene, whose prompt is
   compiled and current and that has no current take and is not already being generated.
-- `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
+- `POST .../{scene_id}/run` starts the jobs for the shots of one scene, and pushes the scene to the
+  front of the GPU server's queue.
+- `POST .../{scene_id}/push` and `DELETE .../push` (SCN-002) push one scene to the front of the
+  server's queue, and end the push. Neither starts a generation.
 - `POST .../{scene_id}/{shot_id}/run` starts one more take of one shot (Generate or Regenerate).
 - `PUT .../{scene_id}/{shot_id}/voice-source` (FLOW-008) sets which voice a presenter shot of a
   continuous explainer is heard with in the render: `take` (the default) or `clip`. It only makes
@@ -59,7 +62,7 @@ from app.api.scene_filter import (
 from app.db.models import Asset, Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import shot_takes, shot_voice_sources, storage
+from app.services import gpu_priority, shot_takes, shot_voice_sources, storage
 from app.services.shot_takes import SceneEntry, ShotEntry, TakeEntry
 
 _logger = logging.getLogger(__name__)
@@ -259,6 +262,23 @@ class ShotTakesOut(BaseModel):
     max_retries: int
     # SCN-001: how many takes have a failed dialogue check that "Score dialogue again" can judge.
     rescorable_count: int = 0
+    # SCN-002: the scene pushed to the front of the GPU server's queue, or None.
+    pushed_scene_id: str | None = None
+
+
+class PushSceneOut(BaseModel):
+    """What a push (or "Stop pushing") did to the clips of the scene that already wait on the
+    GPU server. Clips not yet sent take the new level when they are sent.
+    """
+
+    # The scene pushed (or, after a stop, the scene that was pushed). None when none was.
+    scene_id: str | None
+    # Clips whose priority on the server was changed.
+    changed: int
+    # Clips that had already started (or were gone): nothing to change.
+    already_running: int
+    # Clips whose change the server did not answer. They keep their old level.
+    not_reached: int
 
 
 class ShotTakesSkippedOut(BaseModel):
@@ -541,6 +561,7 @@ async def get_shot_takes(
         check_job=_job_out(result.check_job),
         max_retries=result.max_retries,
         rescorable_count=result.rescorable_count,
+        pushed_scene_id=project.pushed_scene_id,
     )
 
 
@@ -624,8 +645,54 @@ async def run_scene(
     except shot_takes.ShotTakesError as exc:
         raise _refused(exc) from exc
     if started.job_ids:
+        # The owner asked for this scene now (SCN-002): its clips go to the front of the
+        # server's queue. Done before the nudge, so the new jobs are sent at level 1.
+        try:
+            await gpu_priority.push_scene(session, project, scene_id)
+        except gpu_priority.PushError:
+            _logger.warning("scene '%s' of project %d could not be pushed", scene_id, project.id)
         dispatcher.nudge()
     return _run_many_out(started)
+
+
+def _push_out(report: gpu_priority.PushReport) -> PushSceneOut:
+    return PushSceneOut(
+        scene_id=report.scene_id,
+        changed=report.changed,
+        already_running=report.already_running,
+        not_reached=report.not_reached,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/shot-takes/{scene_id}/push",
+    response_model=PushSceneOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def push_scene(project_id: int, scene_id: DiscoveryId, session: SessionDep) -> PushSceneOut:
+    """Pushes one scene to the front of the GPU server's queue (SCN-002): its clips are sent
+    with the most urgent priority, and the ones already waiting on the server are changed. A
+    scene pushed before goes back to its place in story order. Starts no generation.
+    """
+    project = await load_project(session, project_id)
+    try:
+        report = await gpu_priority.push_scene(session, project, scene_id)
+    except gpu_priority.PushError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return _push_out(report)
+
+
+@router.delete(
+    "/projects/{project_id}/shot-takes/push",
+    response_model=PushSceneOut,
+    responses=_NOT_FOUND,
+)
+async def stop_push(project_id: int, session: SessionDep) -> PushSceneOut:
+    """Ends the push: the scene's clips go back to their place in story order. Does nothing
+    when no scene is pushed.
+    """
+    project = await load_project(session, project_id)
+    return _push_out(await gpu_priority.stop_push(session, project))
 
 
 @router.post(

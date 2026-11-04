@@ -196,6 +196,18 @@ def begin_uploads() -> None:
 # The server's own ids are 32 hex characters. Anything else never goes into a URL path.
 _JOB_ID = re.compile(r"[A-Za-z0-9_-]{1,100}")
 _REMOTE_STATUSES = ("queued", "running", "succeeded", "failed")
+# Why a queued job is not running yet (`queue_state` of a job's status, guide 0.25.0).
+QUEUE_STATES = (
+    "scheduling",
+    "model_limit",
+    "gpu_limit",
+    "priority",
+    "slurm_pending",
+    "model_loading",
+)
+# The server's own range for a job's priority.
+PRIORITY_MOST_URGENT = 1
+PRIORITY_LEAST_URGENT = 10
 
 GpuErrorKind = Literal["unreachable", "not_found", "busy", "rejected", "server_error", "bad_answer"]
 RemoteState = Literal["queued", "running", "succeeded", "failed"]
@@ -391,10 +403,16 @@ class RemoteStatus:
     # `estimated_run_seconds` over `typical_run_seconds` when it is there.
     gpus: int | None = None
     estimated_run_seconds: float | None = None
+    # Version 0.23.0 and 0.25.0 of the server's guide: the job's priority (1 most urgent, 10
+    # least) and, only while it is queued, why it is not running yet (one of `QUEUE_STATES`).
+    priority: int | None = None
+    queue_state: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         """What a job stores as `output.remote` while it runs."""
         return {
+            "priority": self.priority,
+            "queue_state": self.queue_state,
             "status": self.status,
             "pipeline": self.pipeline,
             "partition": self.partition,
@@ -712,7 +730,20 @@ async def job_status(base_url: str, job_id: str) -> RemoteStatus:
         lip_sync=_lip_sync(body.get("lip_sync")),
         gpus=_count(body.get("gpus")),
         estimated_run_seconds=_seconds(body.get("estimated_run_seconds")),
+        priority=_priority(body.get("priority")),
+        queue_state=_queue_state(body.get("queue_state")),
     )
+
+
+def _priority(value: object) -> int | None:
+    """A priority the server's range allows, or None when it sent nothing usable."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if PRIORITY_MOST_URGENT <= value <= PRIORITY_LEAST_URGENT else None
+
+
+def _queue_state(value: object) -> str | None:
+    return value if isinstance(value, str) and value in QUEUE_STATES else None
 
 
 def _lip_sync(value: object) -> dict[str, Any] | None:
@@ -876,6 +907,25 @@ async def cancel_job(base_url: str, job_id: str) -> CancelAnswer:
         raise _transport_error(exc) from exc
     body = _json_object(response, "cancel answer")
     return CancelAnswer(cancelled=body.get("cancelled") is True, reason=_text(body.get("reason")))
+
+
+async def set_priority(base_url: str, job_id: str, priority: int) -> None:
+    """Changes the priority of a job that is still queued (`PUT /v1/jobs/{job_id}/priority`).
+
+    409 (the job already runs or finished, or its backend does not order its queue by priority)
+    arrives as GpuCallError("rejected") with that `status_code`, and 404 as "not_found". The
+    caller decides whether either one matters.
+    """
+    if not PRIORITY_MOST_URGENT <= priority <= PRIORITY_LEAST_URGENT:
+        raise ValueError("A priority is a whole number from 1 to 10.")
+    url = join_url(base_url, f"{JOBS_PATH}/{_check_job_id(job_id)}/priority")
+    try:
+        response = await outbound.request(
+            "PUT", url, json={"priority": priority}, timeout_s=SUBMIT_TIMEOUT_S
+        )
+    except outbound.OutboundError as exc:
+        raise _transport_error(exc) from exc
+    _json_object(response, "priority answer")
 
 
 async def purge_job(base_url: str, job_id: str) -> PurgeAnswer:

@@ -58,21 +58,27 @@ class SpokenWord:
     end: float
 
 
-def build_body(remote_asset_id: str, partition: str) -> dict[str, Any]:
-    """The request body. `partition` is sent only when the setting is not blank."""
+def build_body(remote_asset_id: str, partition: str, priority: int | None = None) -> dict[str, Any]:
+    """The request body. `partition` is sent only when the setting is not blank, and
+    `priority` (the server's 1 to 10, SCN-002) only when there is one.
+    """
     body: dict[str, Any] = {"audio_asset_id": remote_asset_id}
     if partition:
         body["partition"] = partition
+    if priority is not None:
+        body["priority"] = priority
     return body
 
 
-async def submit(base_url: str, remote_asset_id: str, partition: str) -> str:
+async def submit(
+    base_url: str, remote_asset_id: str, partition: str, priority: int | None = None
+) -> str:
     """Submits the transcription and returns the server's job id.
 
     Raises `gpu_server.GpuCallError`.
     """
     return await gpu_server.submit_job(
-        base_url, TRANSCRIBE_PATH, build_body(remote_asset_id, partition)
+        base_url, TRANSCRIBE_PATH, build_body(remote_asset_id, partition, priority)
     )
 
 

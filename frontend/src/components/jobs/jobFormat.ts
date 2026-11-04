@@ -250,6 +250,32 @@ export function elapsedText(job: Timed, now: number): string {
   return `${verb} ${formatElapsed((finished - created) / 1000)}`;
 }
 
+const QUEUE_STATE_LABELS: Record<string, string> = {
+  scheduling: "being scheduled",
+  model_limit: "model at its limit",
+  gpu_limit: "all GPUs busy",
+  priority: "behind more urgent work",
+  slurm_pending: "waiting for the cluster",
+  model_loading: "model loading",
+};
+
+/**
+ * The GPU server's priority for a job and why it holds the job back: "Priority 3 · all GPUs
+ * busy". Empty when the job has no priority on the server and no reason to show.
+ */
+export function priorityText(
+  job: Pick<JobSummary, "server_priority" | "queue_state">,
+): string {
+  const parts: string[] = [];
+  if (job.server_priority != null) {
+    parts.push(`Priority ${job.server_priority}`);
+  }
+  if (job.queue_state != null) {
+    parts.push(QUEUE_STATE_LABELS[job.queue_state] ?? job.queue_state);
+  }
+  return parts.join(" · ");
+}
+
 /** Only a job that has not finished shows its phase: for the others it repeats the status. */
 export function showsPhase(status: JobSummary["status"]): boolean {
   return status === "queued" || status === "running";

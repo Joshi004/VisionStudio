@@ -132,6 +132,59 @@ export function useGenerateSceneShots(projectId: number) {
   });
 }
 
+export type PushScene = components["schemas"]["PushSceneOut"];
+
+/**
+ * Pushes one scene to the front of the GPU server's queue (SCN-002). It starts no clip: the
+ * clips of the scene are sent first, and those already waiting on the server are moved up.
+ */
+export function usePushScene(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sceneId: string) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/shot-takes/{scene_id}/push",
+        { params: { path: { project_id: projectId, scene_id: sceneId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not push the scene to the front (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Ends the push: the scene's clips go back to their place in story order. */
+export function useStopPush(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error, response } = await api.DELETE(
+        "/api/projects/{project_id}/shot-takes/push",
+        { params: { path: { project_id: projectId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not stop pushing the scene (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
 /** Starts the job that makes one more take of one shot (Generate or Regenerate). */
 export function useGenerateOneShot(projectId: number) {
   const queryClient = useQueryClient();
