@@ -63,6 +63,9 @@ TIMING_DEDUPE_KEY: Final = "run_id"
 # How the saved voice reads the line: the same delivery as the explainer pipeline.
 SPEECH_DELIVERY: Final = explainer.DEFAULT_PRESENTER_DELIVERY
 
+# The answer to Ask again and Render again on a retired engine (EXG-008).
+RETIRED_ENGINE_MESSAGE: Final = "Templates are no longer made. Older attempts are kept."
+
 LINE_MAX_CHARS: Final = 300
 NOTE_MAX_CHARS: Final = 1000
 VERDICTS: Final = ("good", "usable", "bad")
@@ -635,6 +638,8 @@ async def ask_engine_again(session: AsyncSession, run_id: int, engine_key: str) 
     engine = graphics_engines.ENGINES.get(engine_key)
     if engine is None or engine.start is None:
         raise GraphicsLabConflictError("This engine is not built yet.")
+    if engine.retired:
+        raise GraphicsLabConflictError(RETIRED_ENGINE_MESSAGE)
     if row.run.brief is None or row.run.resolved is None:
         raise GraphicsLabConflictError("The brief is not written yet.")
     group = (
@@ -669,6 +674,8 @@ async def render_again(session: AsyncSession, render_id: int) -> RunRow | None:
     engine = graphics_engines.ENGINES.get(original.engine)  # type: ignore[arg-type]
     if engine is None or not engine.renderer_built:
         raise GraphicsLabConflictError("The renderer of this engine is not built yet.")
+    if engine.retired:
+        raise GraphicsLabConflictError(RETIRED_ENGINE_MESSAGE)
     if original.media_path is None or original.input is None:
         raise GraphicsLabConflictError("This render has no video yet, so nothing to repeat.")
     row = await get_run(session, original.run_id)
@@ -784,8 +791,8 @@ async def start_brief(
 
 
 async def start_engines(session: AsyncSession, run_id: int) -> RunRow | None:
-    """Starts every engine that is built and has no render yet, for a run whose brief is ready.
-    Engines that are not built are skipped. None when the run does not exist. Commits.
+    """Starts every engine that is built, not retired (EXG-008) and has no render yet, for a run
+    whose brief is ready. Other engines are skipped. None when the run does not exist. Commits.
 
     Best effort: each engine is started and committed on its own, so one that fails never undoes
     another. A failure is kept as a render of that engine with its message in `last_error`, which
@@ -798,7 +805,7 @@ async def start_engines(session: AsyncSession, run_id: int) -> RunRow | None:
         raise GraphicsLabConflictError("The brief is not written yet.")
     started = {render_row.render.engine for render_row in row.renders}
     for engine in graphics_engines.ENGINES.values():
-        if engine.start is None or engine.key in started:
+        if not engine.startable or engine.key in started:
             continue
         try:
             # Read again: a failed start rolls back, which expires the objects of the session.
@@ -834,9 +841,10 @@ async def _record_start_failure(
 
 
 async def make_all(session: AsyncSession, run_id: int) -> RunRow | None:
-    """**Make all**: writes the brief and then starts every built engine. When the brief is
-    already written, only the built engines that have no render are started. None when the run
-    does not exist. Raises GraphicsLabConflictError and GraphicsLabInputError as `start_brief`.
+    """**Make all**: writes the brief and then starts every built engine that is not retired. When
+    the brief is already written, only those engines that have no render are started. None when
+    the run does not exist. Raises GraphicsLabConflictError and GraphicsLabInputError as
+    `start_brief`.
     """
     row = await get_run(session, run_id)
     if row is None:

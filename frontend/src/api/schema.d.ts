@@ -2242,8 +2242,9 @@ export interface paths {
         put?: never;
         /**
          * Make All
-         * @description Writes the brief, then starts every engine that is built. With the brief already written,
-         *     it only starts the built engines that have no render. An engine that is not built is skipped.
+         * @description Writes the brief, then starts every engine that is built and not retired. With the brief
+         *     already written, it only starts those engines that have no render. An engine that is not
+         *     built, and the retired template engines (EXG-008), are skipped.
          */
         post: operations["make_all_api_lab_graphics_runs__run_id__make_all_post"];
         delete?: never;
@@ -2285,9 +2286,9 @@ export interface paths {
         /**
          * Ask Engine Again
          * @description A paid call: asks the model again for one engine of the run, with the same brief, and adds
-         *     a new render (the next attempt) beside the earlier ones. The two template engines share one
-         *     call, so both get a new attempt. 409 while the engine is still working, when it is not built
-         *     or the brief is not written. The answer is the run.
+         *     a new render (the next attempt) beside the earlier ones. 409 while the engine is still
+         *     working, when it is not built or is retired (the template engines, EXG-008), or when the
+         *     brief is not written. The answer is the run.
          */
         post: operations["ask_engine_again_api_lab_graphics_runs__run_id__engines__engine__ask_again_post"];
         delete?: never;
@@ -2309,7 +2310,8 @@ export interface paths {
          * Render Again
          * @description Free, no model: renders the same input again as a new attempt (`repeat_of` names this
          *     render) and compares the frames of the two videos (`metrics.repeat`). 409 when the render has
-         *     no video yet or its engine is still working. The answer is the run.
+         *     no video yet, its engine is still working or its engine is retired (EXG-008). The answer is
+         *     the run.
          */
         post: operations["render_again_api_lab_graphics_renders__render_id__render_again_post"];
         delete?: never;
@@ -7604,6 +7606,8 @@ export interface components {
             built: boolean;
             /** Renderer Built */
             renderer_built: boolean;
+            /** Retired */
+            retired: boolean;
             /** Renders */
             renders: components["schemas"]["GraphicRenderOut"][];
         };

@@ -1,5 +1,5 @@
 """The trial batch of the Graphics lab (GFX-012): the ten excerpts of Appendix A through every
-engine, and a summary that counts the results per engine (§4.9 of
+engine that is still started, and a summary that counts the results per engine (§4.9 of
 `Graphics_lab_implementation_phases.md`).
 
 **A trial set** is the ten runs one click makes. Each run's `trial_case_key` is `"<set>:<case>"`
@@ -9,7 +9,8 @@ is an ordinary run: it is opened, judged, asked again and deleted like any other
 **How a trial starts.** `start_trial` makes the ten runs, then:
 
 - without a voice, it presses **Make all** on each (`graphics_lab.make_all`): the brief is
-  written, and then every built engine starts;
+  written, and then every built engine that is not retired starts (EXG-008: the two template
+  engines are not started any more, so a run makes three calls);
 - with a voice, each run's speech is made first. The brief waits for the voice's timing
   (GFX-004), so `time_lab_graphic_words` calls `start_after_timing` when it has stored the timing
   of a trial run, and that starts the brief and then the engines.
@@ -46,11 +47,11 @@ _logger = logging.getLogger(__name__)
 OrientationMode = Literal["own", "landscape", "portrait"]
 ORIENTATION_MODES: Final = ("own", "landscape", "portrait")
 
-# What each run of a trial asks of the paid model (§4.1): the brief, the one template spec both
-# template engines share, the block scene and the component. With every retry the most is 2 + 2
-# + 3 + 3 attempts (a scene and a component may be asked a third time, GFX-009 and GFX-010).
-CALLS_PER_RUN: Final = 4
-MOST_CALLS_PER_RUN: Final = 10
+# What each run of a trial asks of the paid model (§4.1): the brief, the block scene and the
+# component. The template spec is no longer asked for (EXG-008). With every retry the most is
+# 2 + 3 + 3 attempts (a scene and a component may be asked a third time, GFX-009 and GFX-010).
+CALLS_PER_RUN: Final = 3
+MOST_CALLS_PER_RUN: Final = 8
 
 
 @dataclass(frozen=True)
@@ -495,9 +496,13 @@ def _count_repeats(summary: EngineSummary, rows: list[graphics_lab.RunRow], key:
 
 def summarize_rows(set_no: int, rows: list[graphics_lab.RunRow]) -> TrialSummary:
     """The counts and medians of §4.9 for the runs of one set. Pure: it reads the rows only."""
+    # A retired engine (EXG-008) is counted only in a set that has a render of it: an old set
+    # keeps its columns, a new one has none to show.
+    with_renders = {render_row.render.engine for run_row in rows for render_row in run_row.renders}
     summaries = {
         key: EngineSummary(key=key, label=engine.label)
         for key, engine in graphics_engines.ENGINES.items()
+        if not engine.retired or key in with_renders
     }
     seconds: dict[str, list[float]] = {key: [] for key in summaries}
     tokens: dict[str, list[int]] = {key: [] for key in summaries}

@@ -107,7 +107,8 @@ export function GraphicsBriefPanel({ run, onOpenRun }: GraphicsBriefPanelProps) 
         {!waitingForVoice && run.state !== "brief_ready" && run.state !== "writing_brief" && (
           <Text size="xs" c="dimmed">
             Writing the brief is one paid model call (two at most, if the first answer cannot be
-            used). Make all writes the brief and then starts every engine that is built.
+            used). Make all writes the brief and then starts the building blocks and the generated
+            component.
           </Text>
         )}
         {run.state === "brief_ready" && noEngineBuilt && (

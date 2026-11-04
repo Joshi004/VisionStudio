@@ -79,9 +79,13 @@ export function measureRows(engines: GraphicTrialEngine[]): MeasureRow[] {
     values: engines.map(text),
   });
   const ofVideos = (count: number, engine: GraphicTrialEngine) => `${count} of ${engine.videos}`;
+  // A set made after the templates were retired (EXG-008) has no template column, so no row.
+  const hasTemplates = engines.some((engine) => TEMPLATE_ENGINES.includes(engine.key));
   return [
     row("Made a video", (e) => `${e.videos} of ${e.runs}`),
-    row("No template fits", (e) => (TEMPLATE_ENGINES.includes(e.key) ? String(e.no_fit) : NONE)),
+    ...(hasTemplates
+      ? [row("No template fits", (e) => (TEMPLATE_ENGINES.includes(e.key) ? String(e.no_fit) : NONE))]
+      : []),
     row("Failed", (e) => String(e.failed)),
     row("Not finished", (e) => String(e.working + e.not_started)),
     row("Frames, size and frame rate right", (e) => ofVideos(e.checks_passed, e)),

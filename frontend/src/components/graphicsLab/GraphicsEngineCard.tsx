@@ -42,10 +42,11 @@ type GraphicsEngineCardProps = {
 };
 
 /**
- * One of the four engines of a run (GFX-011). From the top: where the attempt stands, its video
+ * One engine of a run (GFX-011). From the top: where the attempt stands, its video
  * (played with the others by the playback bar of the run page, with the overlays), what the
  * engine drew from, what was measured, the verdict and the note, **Ask again** and **Render
- * again**, and the earlier attempts. An engine that is not built says so.
+ * again**, and the earlier attempts. An engine that is not built says so. A retired engine (the
+ * templates, EXG-008) shows its older attempts only: no Ask again and no Render again.
  */
 export function GraphicsEngineCard({
   runId,
@@ -89,12 +90,23 @@ export function GraphicsEngineCard({
               Not built yet
             </Badge>
           )}
-          {engine.built && !engine.renderer_built && (
+          {engine.retired && (
+            <Badge variant="light" color="gray">
+              Retired
+            </Badge>
+          )}
+          {engine.built && !engine.retired && !engine.renderer_built && (
             <Badge variant="light" color="gray">
               Renderer not built yet
             </Badge>
           )}
         </Group>
+
+        {engine.retired && (
+          <Text size="xs" c="dimmed">
+            Templates are no longer made. Older attempts are shown.
+          </Text>
+        )}
 
         {state !== null && (
           <Group gap={6} wrap="nowrap">
@@ -136,7 +148,7 @@ export function GraphicsEngineCard({
           </>
         )}
 
-        {engine.built && (
+        {engine.built && !engine.retired && (
           <Stack gap={4}>
             <Group gap="xs">
               <Button

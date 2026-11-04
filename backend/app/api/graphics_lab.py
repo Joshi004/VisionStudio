@@ -286,6 +286,8 @@ class GraphicEngineOut(BaseModel):
     # template engines have a spec before they have a renderer): the card then shows the input
     # and says that the renderer is not built yet.
     renderer_built: bool
+    # True for an engine that is no longer started (EXG-008): its card shows older attempts only.
+    retired: bool
     # Every render made for this engine, newest first.
     renders: list[GraphicRenderOut]
 
@@ -445,6 +447,7 @@ def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
                 label=engine.label,
                 built=engine.built,
                 renderer_built=engine.renderer_built,
+                retired=engine.retired,
                 renders=by_engine[engine.key],
             )
             for engine in graphics_engines.ENGINES.values()
@@ -549,8 +552,9 @@ async def write_brief(run_id: int, session: SessionDep) -> GraphicRunOut:
     responses={**_NOT_FOUND, **_CONFLICT, **_INVALID},
 )
 async def make_all(run_id: int, session: SessionDep) -> GraphicRunOut:
-    """Writes the brief, then starts every engine that is built. With the brief already written,
-    it only starts the built engines that have no render. An engine that is not built is skipped.
+    """Writes the brief, then starts every engine that is built and not retired. With the brief
+    already written, it only starts those engines that have no render. An engine that is not
+    built, and the retired template engines (EXG-008), are skipped.
     """
     return await _brief_click(session, run_id, graphics_lab.make_all)
 
@@ -576,9 +580,9 @@ async def ask_again(run_id: int, session: SessionDep) -> GraphicRunOut:
 )
 async def ask_engine_again(run_id: int, engine: EngineKey, session: SessionDep) -> GraphicRunOut:
     """A paid call: asks the model again for one engine of the run, with the same brief, and adds
-    a new render (the next attempt) beside the earlier ones. The two template engines share one
-    call, so both get a new attempt. 409 while the engine is still working, when it is not built
-    or the brief is not written. The answer is the run.
+    a new render (the next attempt) beside the earlier ones. 409 while the engine is still
+    working, when it is not built or is retired (the template engines, EXG-008), or when the
+    brief is not written. The answer is the run.
     """
     try:
         row = (
@@ -602,7 +606,8 @@ async def ask_engine_again(run_id: int, engine: EngineKey, session: SessionDep) 
 async def render_again(render_id: int, session: SessionDep) -> GraphicRunOut:
     """Free, no model: renders the same input again as a new attempt (`repeat_of` names this
     render) and compares the frames of the two videos (`metrics.repeat`). 409 when the render has
-    no video yet or its engine is still working. The answer is the run.
+    no video yet, its engine is still working or its engine is retired (EXG-008). The answer is
+    the run.
     """
     try:
         row = (

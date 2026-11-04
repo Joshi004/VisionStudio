@@ -64,10 +64,11 @@ export function GraphicsTrialPanel({ onOpenTrial }: GraphicsTrialPanelProps) {
   return (
     <Stack gap="sm">
       <Text size="sm" c="dimmed">
-        Runs the ten excerpts of Appendix A through all four engines, one run each, and counts the
-        results. It is a paid action: it asks the model for ten briefs and for what each engine
-        needs, and it starts only after you confirm the number of calls. The runs are ordinary
-        runs: open, judge or delete them like any other.
+        Runs the ten excerpts of Appendix A through the building blocks and the generated
+        component, one run each, and counts the results. It is a paid action: it asks the model
+        for ten briefs and for what each engine needs, and it starts only after you confirm the
+        number of calls. The runs are ordinary runs: open, judge or delete them like any other.
+        The template engines are no longer made; older trial sets keep their template results.
       </Text>
 
       {trials.isLoading && <Loader size="sm" />}

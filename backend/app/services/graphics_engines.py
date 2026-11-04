@@ -26,6 +26,12 @@ two template engines (GFX-006) can be started, because their spec is written by 
 (`services/graphics_template_engine.py`), before their renderers exist: GFX-007 and GFX-008 each
 only set `renderer_built=True`, and the spec job then queues their render.
 
+**Retired engines (EXG-008).** GFX-013 dropped both template engines, so they are marked
+`retired`. A retired engine stays in the registry, because old runs have renders of it and the
+run page, the API and the trial summary read its label from here. Nothing starts it any more
+(**Make all**, the trial and **Ask again** skip it, `startable` is False), and **Render again**
+refuses it. Its code, its job type and its rows are all kept.
+
 This module imports nothing that calls a model, a renderer or the GPU server.
 """
 
@@ -68,10 +74,17 @@ class Engine:
     start: StartFn | None = None
     # Set by the engine's renderer phase: a saved input of this engine is rendered.
     renderer_built: bool = False
+    # EXG-008: the engine is no longer started. Its older attempts are shown and nothing more.
+    retired: bool = False
 
     @property
     def built(self) -> bool:
         return self.start is not None
+
+    @property
+    def startable(self) -> bool:
+        """True when Make all, the trial and Ask again may start the engine."""
+        return self.start is not None and not self.retired
 
 
 # In the order of the design (§4.5): the two template engines render the same template spec, so
@@ -82,12 +95,14 @@ ENGINES: Final[dict[EngineKey, Engine]] = {
         label="Remotion templates",
         start=graphics_template_engine.start,
         renderer_built=True,
+        retired=True,
     ),
     "python_templates": Engine(
         key="python_templates",
         label="Python templates",
         start=graphics_template_engine.start,
         renderer_built=True,
+        retired=True,
     ),
     "remotion_blocks": Engine(
         key="remotion_blocks",

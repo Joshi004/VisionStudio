@@ -25,7 +25,8 @@ type GraphicsRunPageProps = {
 
 /**
  * One run, as the comparison of §4.9 (GFX-011): its line and its brief (GFX-003), one playback
- * bar that plays, pauses, steps and seeks every video together, and the four engine cards. A
+ * bar that plays, pauses, steps and seeks every video together, and the engine cards: two for a
+ * new run, and also the two retired template cards (EXG-008) for an older run that has them. A
  * landscape run shows the cards two by two, a portrait run in four columns.
  */
 export function GraphicsRunPage({ runId, onBack, onOpenRun }: GraphicsRunPageProps) {
@@ -39,7 +40,10 @@ export function GraphicsRunPage({ runId, onBack, onOpenRun }: GraphicsRunPagePro
 
   const shownOf = (engine: GraphicEngine): GraphicRender | undefined =>
     engine.renders.find((render) => render.id === chosen[engine.key]) ?? engine.renders[0];
-  const engines = data?.engines ?? [];
+  // A retired engine (the templates, EXG-008) has a card only on a run that has attempts of it.
+  const engines = (data?.engines ?? []).filter(
+    (engine) => !engine.retired || engine.renders.length > 0,
+  );
   const withVideo = engines.filter((engine) => shownOf(engine)?.url != null);
   const frames = data?.resolved?.frames ?? 1;
 
@@ -115,7 +119,7 @@ export function GraphicsRunPage({ runId, onBack, onOpenRun }: GraphicsRunPagePro
           />
 
           <SimpleGrid cols={data.orientation === "portrait" ? { base: 2, md: 4 } : { base: 1, sm: 2 }}>
-            {data.engines.map((engine) => (
+            {engines.map((engine) => (
               <GraphicsEngineCard
                 key={engine.key}
                 runId={data.id}
