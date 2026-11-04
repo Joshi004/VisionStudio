@@ -64,7 +64,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
 from app.services import callout_render, caption_plan, font_metrics, frame_counts, render_commands
@@ -129,6 +129,22 @@ TAKE_OUT_OF_DATE: Final = "take_out_of_date"
 TAKE_WITHOUT_SOUND: Final = "take_without_sound"
 # A speech has no stored word timing, so its captions use estimated times (EXPLAINER-008).
 CAPTION_TIMING_ESTIMATED: Final = "caption_timing_estimated"
+# Scene renders (SCN-003): a shot has no clip (or graphic) to show yet and a frame stands in for
+# it; a line of dialogue is spoken inside a clip that is not there, so it is not heard; the scene
+# starts at an unknown place in the story because an earlier scene has no plan.
+SHOT_PLACEHOLDER: Final = "shot_placeholder"
+DIALOGUE_NOT_HEARD: Final = "dialogue_not_heard"
+SCENE_START_UNKNOWN: Final = "scene_start_unknown"
+
+# Why a shot is a placeholder in a scene render.
+PLACEHOLDER_NO_CLIP: Final = "No clip yet"
+PLACEHOLDER_CLIP_FILE_MISSING: Final = "Clip file missing"
+PLACEHOLDER_NO_GRAPHIC: Final = "No graphic yet"
+PLACEHOLDER_GRAPHIC_FILE_MISSING: Final = "Graphic file missing"
+
+# A music sound cut by the edge of a scene render fades over this long (a starting value, not yet
+# tuned by ear).
+SCENE_MUSIC_FADE_S: Final = 0.5
 
 
 class RenderPlanError(ValueError):
@@ -180,6 +196,8 @@ class ShotSource:
     # A graphic shot (EXG-007) has no take: its video is `graphic`, or None while it has none.
     is_graphic: bool = False
     graphic: GraphicSource | None = None
+    # The plan's one-sentence description of the shot, shown on its placeholder (SCN-003).
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +227,9 @@ class UnitSource:
     file_exists: bool
     # Only for an explainer whose captions are on: the word timing of the speech.
     timing: WordTimingSource | None = None
+    # The shots of the scene that carry the unit, in order (SCN-003: a line whose shots are all
+    # placeholders is played from its own speech file).
+    shot_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -646,9 +667,27 @@ def _check_scenes(scenes: list[SceneSource]) -> None:
             raise RenderPlanError(f"{_scene_label(scene)} has no shots yet.")
 
 
-def _check_takes(scenes: list[SceneSource]) -> None:
+def placeholder_reason(shot: ShotSource) -> str | None:
+    """Why a shot has nothing to show yet (a scene render puts a placeholder there), or None when
+    its clip, or the video of its graphic, is there.
+    """
+    if shot.is_graphic:
+        if shot.graphic is None:
+            return PLACEHOLDER_NO_GRAPHIC
+        if not shot.graphic.file_exists:
+            return PLACEHOLDER_GRAPHIC_FILE_MISSING
+        return None
+    if shot.take is None:
+        return PLACEHOLDER_NO_CLIP
+    if not shot.take.file_exists:
+        return PLACEHOLDER_CLIP_FILE_MISSING
+    return None
+
+
+def _check_takes(scenes: list[SceneSource], *, placeholders: bool = False) -> None:
     """Every shot needs a selected take whose file is there. A graphic shot needs the video of its
-    graphic instead (EXG-007).
+    graphic instead (EXG-007). With `placeholders` (a scene render), a shot that has none is let
+    through: the render shows a placeholder for it.
     """
     without_clip: list[str] = []
     missing_file: list[str] = []
@@ -656,6 +695,8 @@ def _check_takes(scenes: list[SceneSource]) -> None:
     missing_graphic: list[str] = []
     for scene in scenes:
         for shot in scene.shots:
+            if placeholders and placeholder_reason(shot) is not None:
+                continue
             label = f"{shot.shot_id} of scene {scene.index}"
             if shot.is_graphic:
                 if shot.graphic is None:
@@ -752,11 +793,45 @@ def build_plan(
     `callouts` is None for a render without callouts. `measure` measures a callout's text (the
     bundled font's by default).
     """
+    return _build(
+        scenes,
+        fps=fps,
+        width=width,
+        height=height,
+        mix=mix,
+        music=music,
+        captions=captions,
+        callouts=callouts,
+        measure=measure,
+        placeholders=False,
+        first_frame=0,
+    )
+
+
+def _build(
+    scenes: list[SceneSource],
+    *,
+    fps: int,
+    width: int,
+    height: int,
+    mix: MixSettings | None,
+    music: MusicSource | None,
+    captions: caption_plan.CaptionStyle | None,
+    callouts: callout_render.CalloutSource | None,
+    measure: callout_render.Measure | None,
+    placeholders: bool,
+    first_frame: int,
+) -> RenderPlan:
+    """What `build_plan` and `build_scene_plan` share. With `placeholders` (a scene render), a shot
+    without a clip or graphic gets a placeholder instead of refusing the plan, and a line of
+    dialogue whose shots are all placeholders is played from its own speech file. The first shot
+    starts on frame `first_frame` (0 for a whole story, the scene's first frame for a scene).
+    """
     mix = mix or MixSettings()
     if fps < 1 or width < 2 or height < 2:
         raise RenderPlanError("The project's output size or frame rate is not usable.")
     _check_scenes(scenes)
-    _check_takes(scenes)
+    _check_takes(scenes, placeholders=placeholders)
 
     shots: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -774,7 +849,7 @@ def build_plan(
     presenter_spans: list[tuple[int, int]] = []  # the presenter shots, in ms
     clip_spans: dict[str, list[tuple[int, int]]] = {}  # by scene: shots on their own voice, samples
     silent_clips: list[str] = []
-    cursor = 0  # the frame the last shot ended on
+    cursor = first_frame  # the frame the last shot ended on
     continuous = any(scene.voice is not None for scene in scenes)
     if continuous:
         for scene in scenes:
@@ -787,15 +862,16 @@ def build_plan(
 
     for scene in scenes:
         assert scene.story_start_s is not None  # `_check_scenes` made sure
-        for shot in scene.shots:
+        # The shots of this scene that have nothing to show yet (a scene render only).
+        stand_ins: dict[str, str] = {}
+        if placeholders:
+            for candidate in scene.shots:
+                found = placeholder_reason(candidate)
+                if found is not None:
+                    stand_ins[candidate.shot_id] = found
+        for position, shot in enumerate(scene.shots, start=1):
             take = shot.take
             graphic = shot.graphic
-            if shot.is_graphic:
-                assert graphic is not None  # `_check_takes` made sure
-                source_frame_count = graphic.frame_count
-            else:
-                assert take is not None  # `_check_takes` made sure
-                source_frame_count = take.frame_count
             start_ms = _ms(scene.story_start_s + shot.start_s)
             end_ms = _ms(scene.story_start_s + shot.end_s)
             start_frame = cursor
@@ -806,6 +882,52 @@ def build_plan(
             if frames < 1:
                 raise RenderPlanError(f"The shot {label} lasts less than one frame.")
             needed = source_frames_needed(frames, fps)
+            if shot.shot_id in stand_ins:
+                if shot.is_graphic:
+                    graphic_spans.append((start_ms, end_ms))
+                shots.append(
+                    {
+                        "scene_id": scene.scene_id,
+                        "shot_id": shot.shot_id,
+                        "scene_index": scene.index,
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                        "start_frame": start_frame,
+                        "frames": frames,
+                        "take_id": None,
+                        "take_number": None,
+                        "path": None,
+                        "source_frames": needed,
+                        "has_audio": False,
+                        "voice": None,
+                        "voice_window": None,
+                        "duck": [],
+                        "bed_duck": [],
+                        "placeholder": {
+                            "reason": stand_ins[shot.shot_id],
+                            "position": position,
+                            "shot_count": len(scene.shots),
+                            "description": shot.description,
+                            "seconds": round(frames / fps, 3),
+                        },
+                    }
+                )
+                warnings.append(
+                    {
+                        "code": SHOT_PLACEHOLDER,
+                        "scene_id": scene.scene_id,
+                        "shot_id": shot.shot_id,
+                        "message": f"The shot {label} shows a placeholder: "
+                        f"{stand_ins[shot.shot_id].lower()}.",
+                    }
+                )
+                continue
+            if shot.is_graphic:
+                assert graphic is not None  # `_check_takes` made sure
+                source_frame_count = graphic.frame_count
+            else:
+                assert take is not None  # `_check_takes` made sure
+                source_frame_count = take.frame_count
             # One source frame short is allowed: the render repeats the last frame (D-9).
             if source_frame_count is None or source_frame_count < needed - 1:
                 have = (
@@ -940,6 +1062,39 @@ def build_plan(
                 continue
             if unit.kind == "dialogue":
                 dialogue_spans.append((start_s, end_s))
+                covered = [shot_id for shot_id in unit.shot_ids if shot_id in stand_ins]
+                if not covered:
+                    continue
+                if (
+                    len(covered) == len(unit.shot_ids)
+                    and unit.audio_id is not None
+                    and unit.path is not None
+                    and unit.seconds is not None
+                    and unit.file_exists
+                ):
+                    # Every shot that carries the line is a placeholder: its recorded speech is
+                    # played at its place, so the timing can be judged (SCN-003).
+                    narration.append(
+                        {
+                            "scene_id": scene.scene_id,
+                            "unit_id": unit.unit_id,
+                            "audio_id": unit.audio_id,
+                            "path": unit.path,
+                            "start_ms": _ms(start_s),
+                            "seconds": unit.seconds,
+                            "stand_in": True,
+                        }
+                    )
+                else:
+                    warnings.append(
+                        {
+                            "code": DIALOGUE_NOT_HEARD,
+                            "scene_id": scene.scene_id,
+                            "shot_id": None,
+                            "message": f"The line {unit.unit_id} of scene {scene.index} is "
+                            "spoken inside a clip that is not there yet, so it is not heard.",
+                        }
+                    )
                 continue
             if unit.audio_id is None or unit.path is None or unit.seconds is None:
                 unplaced.append(f"{unit.unit_id} of scene {scene.index}")
@@ -1083,3 +1238,183 @@ def build_plan(
         "warnings": warnings,
     }
     return RenderPlan(timeline=timeline, warnings=warnings)
+
+
+# --- One scene (SCN-003) --------------------------------------------------------------------
+
+_UNREADABLE_MUSIC: Final = "The music placement is not one this version can render. Place again."
+
+
+def _cut_fade(samples: int) -> dict[str, Any]:
+    return {"samples": samples, "shape": "linear"}
+
+
+def _music_in_window(music: MusicSource, window_start: int, window_end: int) -> MusicSource:
+    """The music source with only what plays inside the window (samples of the story's own
+    timeline). A sound that reaches over an edge is cut at it and fades there over
+    `SCENE_MUSIC_FADE_S`; a sound inside keeps its own fades. Positions stay on the story's
+    timeline: the scene plan shifts them with everything else. A placement this version cannot
+    read is returned as it is, for the full builder to refuse.
+    """
+    content = music.content
+    rate = content.get("sample_rate")
+    placements = content.get("placements")
+    if rate != render_commands.SAMPLE_RATE or not isinstance(placements, list):
+        return music
+    fade = round(SCENE_MUSIC_FADE_S * render_commands.SAMPLE_RATE)
+    kept: list[dict[str, Any]] = []
+    try:
+        for placed in placements:
+            start = int(placed["story_start_sample"])
+            length = int(placed["length_samples"])
+            if length < 1 or start + length <= window_start or start >= window_end:
+                continue
+            clipped = dict(placed)
+            if start < window_start:
+                cut = window_start - start
+                clipped["story_start_sample"] = window_start
+                clipped["source_in_sample"] = int(placed["source_in_sample"]) + cut
+                clipped["length_samples"] = length - cut
+                clipped["fade_in"] = _cut_fade(fade)
+                start, length = window_start, length - cut
+            if start + length > window_end:
+                clipped["length_samples"] = window_end - start
+                clipped["fade_out"] = _cut_fade(fade)
+            kept.append(clipped)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RenderPlanError(_UNREADABLE_MUSIC) from exc
+    start_s, end_s = window_start / rate, window_end / rate
+    narrowed = {
+        **content,
+        "placements": kept,
+        "h3_sounds": [
+            item
+            for item in content.get("h3_sounds") or []
+            if start_s <= float(item["chosen_s"]) <= end_s
+        ],
+        "mix_requests": [
+            item
+            for item in content.get("mix_requests") or []
+            if float(item["second"]) < end_s
+            and float(item["second"]) + float(item["length_s"]) > start_s
+        ],
+    }
+    return replace(music, content=narrowed)
+
+
+def _shift_timeline(timeline: dict[str, Any], first_frame: int, fps: int) -> None:
+    """Moves a timeline made from frame `first_frame` so that the scene starts at 0: frames by
+    `first_frame` exactly, samples by the samples of those frames exactly, and milliseconds by
+    the same time to the nearest millisecond. The duck, dip and bump windows are in the shot's
+    or the sound's own time and do not move.
+    """
+    if first_frame == 0:
+        return
+    ms = _ms(first_frame / fps)
+    samples = render_commands.sample_count(first_frame, fps)
+
+    def earlier(value: int) -> int:
+        return max(0, value - ms)
+
+    timeline["total_frames"] -= first_frame
+    for shot in timeline["shots"]:
+        shot["start_frame"] -= first_frame
+        shot["start_ms"] = earlier(shot["start_ms"])
+        shot["end_ms"] = earlier(shot["end_ms"])
+    for speech in timeline["narration"]:
+        speech["start_ms"] = earlier(speech["start_ms"])
+
+    voice = timeline["voice"]
+    for take in (voice or {}).get("takes", []):
+        take["start_ms"] = earlier(take["start_ms"])
+        for piece in take["pieces"]:
+            piece["start_sample"] = max(0, piece["start_sample"] - samples)
+
+    total_samples = render_commands.sample_count(timeline["total_frames"], fps)
+    music = timeline["music"]
+    if music is not None:
+        music["total_samples"] = total_samples
+        for sound in music["sounds"]:
+            sound["start_sample"] = max(0, sound["start_sample"] - samples)
+            sound["length_samples"] = min(
+                sound["length_samples"], total_samples - sound["start_sample"]
+            )
+
+    captions = timeline["captions"]
+    for group in (captions or {}).get("groups", []):
+        group["start_ms"] = earlier(group["start_ms"])
+        group["end_ms"] = earlier(group["end_ms"])
+        for word in group["words"]:
+            word["start_ms"] = earlier(word["start_ms"])
+            word["end_ms"] = earlier(word["end_ms"])
+    callouts = timeline["callouts"]
+    for entry in (callouts or {}).get("entries", []):
+        entry["start_ms"] = earlier(entry["start_ms"])
+        entry["end_ms"] = earlier(entry["end_ms"])
+        for part in entry["parts"]:
+            part["start_ms"] = earlier(part["start_ms"])
+
+
+def build_scene_plan(
+    scene: SceneSource,
+    *,
+    fps: int,
+    width: int,
+    height: int,
+    mix: MixSettings | None = None,
+    music: MusicSource | None = None,
+    captions: caption_plan.CaptionStyle | None = None,
+    callouts: callout_render.CalloutSource | None = None,
+    measure: callout_render.Measure | None = None,
+) -> RenderPlan:
+    """The frozen timeline of one scene's render, on the same timeline builder as the whole story
+    (S-5): every shot, line, caption and callout is placed exactly as in the full render and the
+    timeline is then moved so the scene's first frame is frame 0. A shot with no clip or graphic
+    is a placeholder of its planned length. `music` is cut to the scene's window. Raises
+    RenderPlanError with the reason when the scene cannot be rendered now.
+    """
+    if fps < 1 or width < 2 or height < 2:
+        raise RenderPlanError("The project's output size or frame rate is not usable.")
+    extra: list[dict[str, Any]] = []
+    if scene.story_start_s is None and scene.blocked_reason is None and scene.shots:
+        # A scene before this one has no plan, so its place in the story is unknown.
+        scene = replace(scene, story_start_s=0.0)
+        extra.append(
+            {
+                "code": SCENE_START_UNKNOWN,
+                "scene_id": scene.scene_id,
+                "shot_id": None,
+                "message": "A scene before this one has no shot plan yet, so its place in the "
+                "story is not known, so this render has no music and starts the scene at 0.",
+            }
+        )
+    _check_scenes([scene])
+    assert scene.story_start_s is not None  # `_check_scenes` made sure
+    first_frame = frame_at(_ms(scene.story_start_s), fps)
+    last_end_s = max(shot.end_s for shot in scene.shots)
+    last_frame = frame_at(_ms(scene.story_start_s + last_end_s), fps)
+    window_music = (
+        _music_in_window(
+            music,
+            render_commands.sample_count(first_frame, fps),
+            render_commands.sample_count(last_frame, fps),
+        )
+        if music is not None and not extra
+        else None
+    )
+    plan = _build(
+        [scene],
+        fps=fps,
+        width=width,
+        height=height,
+        mix=mix,
+        music=window_music,
+        captions=captions,
+        callouts=callouts,
+        measure=measure,
+        placeholders=True,
+        first_frame=first_frame,
+    )
+    _shift_timeline(plan.timeline, first_frame, fps)
+    plan.warnings.extend(extra)
+    return plan

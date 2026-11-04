@@ -60,6 +60,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.session import SessionLocal
 from app.jobs import phase_writer, phases, store
 from app.jobs.handlers import JobHandler
@@ -69,6 +71,7 @@ from app.services import (
     caption_plan,
     ffmpeg,
     font_metrics,
+    placeholder_frame,
     render_commands,
     story_render_plan,
     story_renders,
@@ -124,6 +127,17 @@ class VoiceWindow:
 
 
 @dataclass(frozen=True)
+class Placeholder:
+    """What a scene render (SCN-003) draws for a shot that has no clip yet."""
+
+    reason: str
+    position: int
+    shot_count: int
+    description: str | None
+    seconds: float
+
+
+@dataclass(frozen=True)
 class Shot:
     scene_id: str
     scene_index: int
@@ -141,6 +155,8 @@ class Shot:
     voice: str | None = None
     voice_window: VoiceWindow | None = None
     graphic_id: int | None = None
+    # Only in a scene render: the shot has no clip, so `path` is empty and a frame is drawn.
+    placeholder: Placeholder | None = None
 
     @property
     def label(self) -> str:
@@ -494,6 +510,28 @@ def _parse_voice_window(raw: object) -> VoiceWindow | None:
     return VoiceWindow(start, end)
 
 
+def _parse_placeholder(raw: object) -> Placeholder | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    reason, position, count = raw.get("reason"), _whole(raw.get("position")), raw.get("shot_count")
+    description, seconds = raw.get("description"), _number(raw.get("seconds"))
+    if (
+        not isinstance(reason, str)
+        or position is None
+        or position < 1
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count < position
+        or not (description is None or isinstance(description, str))
+        or seconds is None
+        or seconds <= 0
+    ):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return Placeholder(reason, position, count, description, seconds)
+
+
 def parse_timeline(recorded: object) -> Timeline:
     """Reads `job.input` (or a `{"timeline": ...}` made in memory) back into a timeline. Raises
     `RenderFailed` for anything the handler does not understand, instead of rendering something
@@ -533,6 +571,17 @@ def parse_timeline(recorded: object) -> Timeline:
         duck, bed_duck = _windows(entry.get("duck")), _windows(entry.get("bed_duck"))
         voice_of_shot, window = entry.get("voice"), _parse_voice_window(entry.get("voice_window"))
         scene_id, shot_id, path = entry.get("scene_id"), entry.get("shot_id"), entry.get("path")
+        # A placeholder (a scene render) has neither take, graphic nor file.
+        placeholder = _parse_placeholder(entry.get("placeholder"))
+        if placeholder is not None:
+            if (
+                take_id is not None
+                or number is not None
+                or entry.get("graphic") is not None
+                or path is not None
+            ):
+                raise RenderFailed(_CHANGED_MESSAGE)
+            path = ""
         # A graphic shot (EXG-007) has the id of its graphic in place of a take; any other shot
         # needs its take.
         graphic = entry.get("graphic")
@@ -544,10 +593,10 @@ def parse_timeline(recorded: object) -> Timeline:
         if (
             frames is None
             or frames < 1
-            or (take_id is None and graphic_id is None)
+            or (placeholder is None and take_id is None and graphic_id is None)
             or source_frames is None
             or source_frames < 1
-            or (number is None and graphic_id is None)
+            or (placeholder is None and number is None and graphic_id is None)
             or index is None
             or duck is None
             or bed_duck is None
@@ -572,6 +621,7 @@ def parse_timeline(recorded: object) -> Timeline:
                 voice_of_shot,
                 window,
                 graphic_id,
+                placeholder,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -670,6 +720,9 @@ class RenderStoryHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "local"
     restart_rule = "start_again"
+    # Only a scene render (`jobs/render_scene.py`) has placeholders; a story render refuses a
+    # timeline that has one.
+    allows_placeholders = False
 
     async def start(self, job_id: int) -> None:
         storage = get_storage()
@@ -692,9 +745,14 @@ class RenderStoryHandler(JobHandler):
         if job is None or job.status != "running" or job.project_id is None:
             return
         timeline = parse_timeline(job.input)
+        if not self.allows_placeholders and any(shot.placeholder for shot in timeline.shots):
+            raise RenderFailed(_CHANGED_MESSAGE)
 
         await self._phase(job_id, phases.CHECKING_RENDER_CLIPS)
-        sources = [await probe_shot(storage, shot) for shot in timeline.shots]
+        sources = [
+            None if shot.placeholder is not None else await probe_shot(storage, shot)
+            for shot in timeline.shots
+        ]
         speeches = [(speech, *await probe_speech(storage, speech)) for speech in timeline.narration]
         take_files = [(take, *await probe_take(storage, take)) for take in timeline.voice or []]
         music_files = (
@@ -707,7 +765,7 @@ class RenderStoryHandler(JobHandler):
         shot_lufs = [
             # The sound of a presenter clip on the take's voice is dropped: not measured.
             None
-            if shot.voice == story_render_plan.VOICE_TAKE
+            if source is None or shot.voice == story_render_plan.VOICE_TAKE
             else await measure_shot(shot, source, timeline.fps)
             for shot, source in zip(timeline.shots, sources, strict=True)
         ]
@@ -745,8 +803,12 @@ class RenderStoryHandler(JobHandler):
         for number, shot in enumerate(timeline.shots, start=1):
             await self._phase(job_id, phases.trimming_shot(number, len(timeline.shots)))
             source = sources[number - 1]
-            audio = clip_audio(
-                timeline, shot, source, shot_lufs[number - 1], matches.get(number - 1)
+            audio = (
+                None
+                if source is None
+                else clip_audio(
+                    timeline, shot, source, shot_lufs[number - 1], matches.get(number - 1)
+                )
             )
             sounds.append(
                 _ShotSound(
@@ -757,19 +819,46 @@ class RenderStoryHandler(JobHandler):
             )
             dest = storage.new_temp_path("mov")
             temp_paths.append(dest)
-            await run_ffmpeg(
-                render_commands.trim_args(
-                    source.path,
-                    dest,
-                    frames=shot.frames,
-                    fps=timeline.fps,
-                    width=timeline.width,
-                    height=timeline.height,
-                    audio=audio,
-                ),
-                TRIM_TIMEOUT_S,
-                f"trimming the clip of shot {shot.label}",
-            )
+            if source is None or shot.placeholder is not None:
+                assert shot.placeholder is not None  # only a placeholder has no source
+                picture = storage.new_temp_path("png")
+                temp_paths.append(picture)
+                await asyncio.to_thread(
+                    placeholder_frame.draw,
+                    picture,
+                    timeline.width,
+                    timeline.height,
+                    title=_placeholder_title(shot),
+                    reason=shot.placeholder.reason,
+                    description=shot.placeholder.description,
+                    seconds=shot.placeholder.seconds,
+                )
+                await run_ffmpeg(
+                    render_commands.placeholder_args(
+                        picture,
+                        dest,
+                        frames=shot.frames,
+                        fps=timeline.fps,
+                        width=timeline.width,
+                        height=timeline.height,
+                    ),
+                    TRIM_TIMEOUT_S,
+                    f"drawing the placeholder of shot {shot.label}",
+                )
+            else:
+                await run_ffmpeg(
+                    render_commands.trim_args(
+                        source.path,
+                        dest,
+                        frames=shot.frames,
+                        fps=timeline.fps,
+                        width=timeline.width,
+                        height=timeline.height,
+                        audio=audio,
+                    ),
+                    TRIM_TIMEOUT_S,
+                    f"trimming the clip of shot {shot.label}",
+                )
             trimmed.append(dest)
         trim_seconds = time.monotonic() - started
 
@@ -840,8 +929,8 @@ class RenderStoryHandler(JobHandler):
             (trim_seconds, join_seconds),
         )
 
-    @staticmethod
     async def _save(
+        self,
         job_id: int,
         project_id: int,
         recorded: Any,
@@ -876,6 +965,7 @@ class RenderStoryHandler(JobHandler):
                     "shot_id": shot.shot_id,
                     "take_id": shot.take_id,
                     **({"graphic_id": shot.graphic_id} if shot.graphic_id is not None else {}),
+                    **({"placeholder": True} if shot.placeholder is not None else {}),
                     "sound": sound.label,
                     "loudness_lufs": _tenth(sound.loudness_lufs),
                     "gain_db": _tenth(sound.gain_db),
@@ -927,15 +1017,16 @@ class RenderStoryHandler(JobHandler):
             "video": VIDEO_SETTINGS,
             "audio": AUDIO_SETTINGS,
             "seconds": {"trim": round(seconds[0], 1), "join": round(seconds[1], 1)},
+            **self._extra_output(recorded, timeline),
         }
 
         # The render, the finished job and nothing else: saved together or not at all.
         async with SessionLocal() as session:
-            row = await story_renders.save_story_render(
+            row = await self._add_row(
                 session,
                 project_id=project_id,
                 job_id=job_id,
-                inputs=recorded["timeline"],
+                recorded=recorded,
                 levels=levels,
                 path=stored.relative_path,
                 size_bytes=temp.size_bytes,
@@ -969,6 +1060,46 @@ class RenderStoryHandler(JobHandler):
             seconds[0],
             seconds[1],
         )
+
+    async def _add_row(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: int,
+        job_id: int,
+        recorded: Any,
+        levels: dict[str, Any],
+        path: str,
+        size_bytes: int,
+        sha256: str,
+        width: int | None,
+        height: int | None,
+        frame_count: int | None,
+        duration_s: float | None,
+        audio: dict[str, Any] | None,
+    ) -> Any:
+        """Adds the finished video's row, which has a `render_number`. A scene render
+        (`jobs/render_scene.py`) adds its own kind of row.
+        """
+        return await story_renders.save_story_render(
+            session,
+            project_id=project_id,
+            job_id=job_id,
+            inputs=recorded["timeline"],
+            levels=levels,
+            path=path,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            width=width,
+            height=height,
+            frame_count=frame_count,
+            duration_s=duration_s,
+            audio=audio,
+        )
+
+    def _extra_output(self, recorded: Any, timeline: Timeline) -> dict[str, Any]:
+        """What a kind of render adds to the finished job's output."""
+        return {}
 
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
@@ -1340,8 +1471,20 @@ async def measure_master(
     )
 
 
+def _placeholder_title(shot: Shot) -> str:
+    """The first line of a shot's placeholder picture."""
+    placeholder = shot.placeholder
+    assert placeholder is not None
+    return (
+        f"Scene {shot.scene_index} \u00b7 Shot {placeholder.position} of "
+        f"{placeholder.shot_count} ({shot.shot_id})"
+    )
+
+
 def _sound_label(shot: Shot, audio: render_commands.ClipAudio | None) -> str:
     """What a shot's sound was, for the render's record."""
+    if shot.placeholder is not None:
+        return "none (a placeholder)"
     if shot.voice == story_render_plan.VOICE_TAKE:
         return "dropped (the take is the voice)"
     if shot.voice == story_render_plan.VOICE_CLIP:

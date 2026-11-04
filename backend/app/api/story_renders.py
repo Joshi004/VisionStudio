@@ -24,7 +24,7 @@ from app.api.discovery import DiscoveryJobOut
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import Job
+from app.db.models import Job, SceneRender, StoryRender
 from app.db.session import SessionDep
 from app.jobs import dispatcher
 from app.services import storage, story_renders
@@ -48,6 +48,9 @@ WarningCode = Literal[
     "caption_timing_estimated",
     "callout_at_unit_start",
     "callout_dropped",
+    "shot_placeholder",
+    "dialogue_not_heard",
+    "scene_start_unknown",
 ]
 
 
@@ -79,6 +82,8 @@ class RenderTakeOut(BaseModel):
     take_id: int | None
     take_number: int | None
     graphic: RenderGraphicOut | None
+    # True when the render shows a placeholder for the shot (a scene render, SCN-003).
+    placeholder: bool
     frames: int
     # The loudness measured over the part of the clip the shot uses, and the gain applied.
     sound: str | None
@@ -166,7 +171,7 @@ class StoryRenderRunOut(BaseModel):
     job_id: int
 
 
-def _job_out(job: Job | None) -> DiscoveryJobOut | None:
+def job_out(job: Job | None) -> DiscoveryJobOut | None:
     if job is None:
         return None
     return DiscoveryJobOut(
@@ -177,7 +182,7 @@ def _job_out(job: Job | None) -> DiscoveryJobOut | None:
     )
 
 
-def _warning_out(warning: dict[str, Any]) -> RenderWarningOut:
+def warning_out(warning: dict[str, Any]) -> RenderWarningOut:
     return RenderWarningOut(
         code=warning["code"],
         scene_id=warning.get("scene_id"),
@@ -186,9 +191,8 @@ def _warning_out(warning: dict[str, Any]) -> RenderWarningOut:
     )
 
 
-def _takes_out(entry: RenderEntry) -> list[RenderTakeOut]:
+def takes_out(row: StoryRender | SceneRender) -> list[RenderTakeOut]:
     """The take of each shot, from what the render recorded (never from the shots now)."""
-    row = entry.row
     levels = {
         (item.get("scene_id"), item.get("shot_id")): item
         for item in (row.levels or {}).get("shots", [])
@@ -209,6 +213,7 @@ def _takes_out(entry: RenderEntry) -> list[RenderTakeOut]:
                     if isinstance(shot.get("graphic"), dict)
                     else None
                 ),
+                placeholder=isinstance(shot.get("placeholder"), dict),
                 frames=shot["frames"],
                 sound=level.get("sound"),
                 loudness_lufs=level.get("loudness_lufs"),
@@ -218,8 +223,8 @@ def _takes_out(entry: RenderEntry) -> list[RenderTakeOut]:
     return takes
 
 
-def _narration_out(entry: RenderEntry) -> RenderNarrationOut | None:
-    narration = (entry.row.levels or {}).get("narration")
+def narration_out(row: StoryRender | SceneRender) -> RenderNarrationOut | None:
+    narration = (row.levels or {}).get("narration")
     if not isinstance(narration, dict):
         return None
     return RenderNarrationOut(
@@ -229,8 +234,8 @@ def _narration_out(entry: RenderEntry) -> RenderNarrationOut | None:
     )
 
 
-def _music_out(entry: RenderEntry) -> RenderMusicOut | None:
-    music = (entry.row.levels or {}).get("music")
+def music_out(row: StoryRender | SceneRender) -> RenderMusicOut | None:
+    music = (row.levels or {}).get("music")
     if not isinstance(music, dict):
         return None
     lanes = music.get("lanes")
@@ -243,8 +248,8 @@ def _music_out(entry: RenderEntry) -> RenderMusicOut | None:
     )
 
 
-def _master_out(entry: RenderEntry) -> RenderMasterOut | None:
-    master = (entry.row.levels or {}).get("master")
+def master_out(row: StoryRender | SceneRender) -> RenderMasterOut | None:
+    master = (row.levels or {}).get("master")
     if not isinstance(master, dict):
         return None
     return RenderMasterOut(
@@ -273,13 +278,13 @@ def _render_out(entry: RenderEntry) -> StoryRenderOut:
         height=row.height,
         size_bytes=row.size_bytes,
         has_audio=row.audio is not None,
-        warnings=[_warning_out(item) for item in row.inputs.get("warnings", [])],
-        takes=_takes_out(entry),
-        narration=_narration_out(entry),
-        music=_music_out(entry),
-        master=_master_out(entry),
+        warnings=[warning_out(item) for item in row.inputs.get("warnings", [])],
+        takes=takes_out(row),
+        narration=narration_out(row),
+        music=music_out(row),
+        master=master_out(row),
         created_at=row.created_at,
-        job=_job_out(entry.job),
+        job=job_out(entry.job),
     )
 
 
@@ -294,7 +299,7 @@ async def get_story_renders(project_id: int, session: SessionDep) -> StoryRender
     return StoryRendersOut(
         can_render=result.can_render,
         blocked_reason=result.blocked_reason,
-        warnings=[_warning_out(item) for item in result.warnings],
+        warnings=[warning_out(item) for item in result.warnings],
         planned_frames=result.planned_frames,
         fps=result.fps,
         planned_seconds=(
@@ -304,7 +309,7 @@ async def get_story_renders(project_id: int, session: SessionDep) -> StoryRender
         ),
         music_placement_version=result.music_placement_version,
         ambience_enabled=result.ambience_enabled,
-        job=_job_out(result.job),
+        job=job_out(result.job),
         renders=[_render_out(entry) for entry in result.renders],
     )
 

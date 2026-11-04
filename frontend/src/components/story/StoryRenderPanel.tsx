@@ -22,6 +22,7 @@ import {
 } from "../../api/storyRenders";
 import { formatBytes, formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { SceneRenderList } from "./SceneRenderList";
 
 type StoryRenderPanelProps = {
   projectId: number;
@@ -300,6 +301,8 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
             </Collapse>
           </Stack>
         )}
+
+        <SceneRenderList projectId={projectId} />
       </Stack>
     </Paper>
   );

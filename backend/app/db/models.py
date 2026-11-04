@@ -164,7 +164,8 @@ class Job(Base):
         # 0071, and the timing of a speech's words, since revision 0073, and the callout plan,
         # since revision 0074, and the two Audio video lab jobs, since revision 0075, and the six
         # Graphics lab jobs, since revision 0079, and the five explainer graphics jobs, since
-        # revision 0080, and the reading of a reference photo, since revision 0083.
+        # revision 0080, and the reading of a reference photo, since revision 0083, and the render
+        # of one scene, since revision 0085.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -186,7 +187,7 @@ class Job(Base):
             "'render_lab_graphic', 'time_lab_graphic_words', "
             "'write_graphic_theme', 'write_shot_graphic_brief', "
             "'write_shot_graphic_component', 'write_shot_graphic_scene', "
-            "'render_shot_graphic', 'describe_photo')",
+            "'render_shot_graphic', 'describe_photo', 'render_scene')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1120,6 +1121,43 @@ class StoryRender(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    render_number: Mapped[int]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    levels: Mapped[Any] = mapped_column(JSON)
+    path: Mapped[str]
+    size_bytes: Mapped[int]
+    sha256: Mapped[str]
+    width: Mapped[int | None] = mapped_column(default=None)
+    height: Mapped[int | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class SceneRender(Base):
+    """One finished render of one scene's video (SCN-003, migration 0085).
+
+    Like `StoryRender`, the row is made only when a `render_scene` job succeeds, in the same
+    transaction that finishes it, and a stored render is never changed or deleted. Renders are
+    numbered from 1 for each `(project_id, scene_id)`; `scene_id` is the slug id of the scene in
+    the project's scene discovery. `inputs` holds the frozen timeline the job rendered (the scene
+    starts at frame 0), `levels` what was measured and changed. Whether a render is out of date is
+    worked out on every read, never stored.
+    """
+
+    __tablename__ = "scene_render"
+    __table_args__ = (
+        UniqueConstraint("project_id", "scene_id", "render_number"),
+        Index("idx_scene_render_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
     render_number: Mapped[int]
     job_id: Mapped[int | None] = mapped_column(
         ForeignKey("job.id", ondelete="SET NULL"), default=None

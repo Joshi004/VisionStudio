@@ -251,6 +251,15 @@ def trim_args(
         "[v]",
         "-map",
         "[a]",
+        *_trimmed_output_args(frames, fps, dest),
+    ]
+
+
+def _trimmed_output_args(frames: int, fps: int, dest: Path) -> list[str]:
+    """How a trimmed clip is written, for `trim_args` and `placeholder_args`. One definition, so a
+    placeholder and a clip can never differ in the parameters the concat join needs to match.
+    """
+    return [
         "-frames:v",
         str(frames),
         "-c:v",
@@ -278,6 +287,37 @@ def trim_args(
         "-f",
         "mov",
         file_input(dest),
+    ]
+
+
+def placeholder_args(
+    picture: Path, dest: Path, *, frames: int, fps: int, width: int, height: int
+) -> list[str]:
+    """Stage 1 for a shot with no clip yet (a scene render, SCN-003): the still picture held for
+    `frames` frames at the output size, with silence, written like any trimmed clip.
+    """
+    if frames < 1:
+        raise ValueError("A placeholder needs at least one frame.")
+    video = (
+        f"[0:v:0]fps={fps},trim=end_frame={frames},setpts=PTS-STARTPTS,"
+        f"scale={width}:{height}:flags=lanczos,setsar=1,format=yuv420p[v]"
+    )
+    sound = shot_sound_graph(None, sample_count(frames, fps))
+    return [
+        *_BASE,
+        "-loop",
+        "1",
+        "-framerate",
+        str(fps),
+        "-i",
+        file_input(picture),
+        "-filter_complex",
+        f"{video};{sound}",
+        "-map",
+        "[v]",
+        "-map",
+        "[a]",
+        *_trimmed_output_args(frames, fps, dest),
     ]
 
 

@@ -29,6 +29,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   compile_shot_prompt: "Shot prompt",
   generate_shot: "Shot clip",
   render_story: "Story video",
+  render_scene: "Scene video",
   check_shot_takes: "Take check",
   story_pipeline: "Story pipeline",
   check_take_dialogue: "Dialogue check",

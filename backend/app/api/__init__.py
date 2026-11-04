@@ -41,6 +41,7 @@ from app.api import (
     projects,
     scene_definitions,
     scene_events,
+    scene_renders,
     scene_staging,
     scenes,
     settings,
@@ -113,6 +114,7 @@ api_router.include_router(generation_requests.router, tags=["generation-requests
 api_router.include_router(shot_prompts.router, tags=["shot-prompts"])
 api_router.include_router(shot_takes.router, tags=["shot-takes"])
 api_router.include_router(story_renders.router, tags=["story-renders"])
+api_router.include_router(scene_renders.router, tags=["scene-renders"])
 api_router.include_router(story_pipeline.router, tags=["story-pipeline"])
 api_router.include_router(pipeline_board.router, tags=["pipeline-board"])
 api_router.include_router(project_cast.router, tags=["project-cast"])

@@ -13,7 +13,7 @@
   `define_environment.py`, `define_scene.py`, `extract_events.py`,
   `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`, `define_shot.py`,
   `check_shot_continuity.py`, `repair_shot_cut.py`, `compile_shot_prompt.py`, `generate_shot.py`,
-  `render_story.py`, `check_shot_takes.py`, `check_take_dialogue.py`,
+  `render_story.py`, `render_scene.py`, `check_shot_takes.py`, `check_take_dialogue.py`,
   `select_shot_references.py`), the run of the whole story pipeline (`story_pipeline.py`)
   and the environment library
   (`write_environment_prompt.py`), the Music Bible (`write_music_bible.py`) and the music themes
@@ -76,6 +76,7 @@ def register_handlers() -> None:
     from app.jobs.preview_music_mix import PreviewMusicMixHandler
     from app.jobs.render_av_test import RenderAvTestHandler
     from app.jobs.render_lab_graphic import RenderLabGraphicHandler
+    from app.jobs.render_scene import RenderSceneHandler
     from app.jobs.render_shot_graphic import RenderShotGraphicHandler
     from app.jobs.render_story import RenderStoryHandler
     from app.jobs.repair_shot_cut import RepairShotCutHandler
@@ -138,6 +139,7 @@ def register_handlers() -> None:
     handlers.register(CompileShotPromptHandler())
     handlers.register(GenerateShotHandler())
     handlers.register(RenderStoryHandler())
+    handlers.register(RenderSceneHandler())
     handlers.register(CheckShotTakesHandler())
     handlers.register(StoryPipelineHandler())
     handlers.register(CheckTakeDialogueHandler())

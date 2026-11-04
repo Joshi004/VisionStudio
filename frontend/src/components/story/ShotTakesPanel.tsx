@@ -17,6 +17,11 @@ import {
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
+import {
+  useRenderScene,
+  useSceneRenders,
+  type SceneRenderState,
+} from "../../api/sceneRenders";
 import { shotsNotLoaded } from "../../api/sceneQuery";
 import {
   useCompileOnePrompt,
@@ -43,6 +48,7 @@ import {
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { FeedbackModal } from "./FeedbackModal";
 import { PromptHoverCard } from "./PromptHoverCard";
+import { SceneRenderStatus, SceneVideo } from "./SceneRenderList";
 import { SceneSection } from "./SceneSection";
 import { ShotPromptEditor } from "./ShotPromptEditor";
 import { ShotPromptReview } from "./ShotPromptReview";
@@ -788,6 +794,10 @@ type SceneRowProps = {
   pushed: boolean;
   onPush: () => void;
   onStopPush: () => void;
+  /** Where this scene's video stands (SCN-003), or undefined while it is loading. */
+  sceneRender: SceneRenderState | undefined;
+  onRenderScene: () => void;
+  renderStarting: boolean;
   onGenerateShot: (shotId: string) => void;
   promptsOf: (shotId: string) => ShotPromptTools;
   onSelect: (shotId: string, takeId: number) => void;
@@ -808,6 +818,9 @@ function SceneRow({
   pushed,
   onPush,
   onStopPush,
+  sceneRender,
+  onRenderScene,
+  renderStarting,
   onGenerateShot,
   promptsOf,
   onSelect,
@@ -831,6 +844,9 @@ function SceneRow({
             <Badge variant="light" color="grape">
               Pushed to front
             </Badge>
+          )}
+          {sceneRender !== undefined && (
+            <SceneRenderStatus scene={sceneRender} />
           )}
           <Badge variant="light" color="gray">
             {generated} of {total} generated
@@ -870,6 +886,21 @@ function SceneRow({
           <Button
             size="compact-sm"
             variant="default"
+            loading={renderStarting || isJobActive(sceneRender?.job)}
+            disabled={
+              busy || sceneRender === undefined || !sceneRender.can_render
+            }
+            onClick={onRenderScene}
+            title={
+              sceneRender?.blocked_reason ??
+              "Renders this scene on its own, with a placeholder for every shot that has no clip yet. It uses no GPU time."
+            }
+          >
+            Render scene
+          </Button>
+          <Button
+            size="compact-sm"
+            variant="default"
             disabled={busy || todo === 0}
             onClick={onGenerateScene}
             title="Generates the clips of this scene and pushes the scene to the front of the server's queue."
@@ -879,6 +910,7 @@ function SceneRow({
         </Group>
       }
     >
+      {sceneRender !== undefined && <SceneVideo scene={sceneRender} />}
       {scene.shots.map((entry) => (
         <ShotRow
           key={entry.shot.id}
@@ -922,6 +954,12 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const rescoreDialogue = useRescoreDialogue(projectId);
   const pushScene = usePushScene(projectId);
   const stopPush = useStopPush(projectId);
+  // The video of each scene (SCN-003).
+  const sceneRenders = useSceneRenders(projectId).data;
+  const renderScene = useRenderScene(projectId);
+  const sceneRenderOf = new Map(
+    (sceneRenders?.scenes ?? []).map((item) => [item.scene_id, item] as const),
+  );
   // The prompts the clips are made from, which can be edited or rewritten from here.
   const shotPrompts = useShotPrompts(projectId, openSceneId).data;
   const compilePrompt = useCompileOnePrompt(projectId);
@@ -1071,6 +1109,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
           rescoreDialogue,
           pushScene,
           stopPush,
+          renderScene,
         ].map(
           (mutation, position) =>
             mutation.isError && (
@@ -1183,6 +1222,11 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
               pushScene.reset();
               stopPush.mutate();
             }}
+            sceneRender={sceneRenderOf.get(scene.id)}
+            onRenderScene={() => renderScene.mutate(scene.id)}
+            renderStarting={
+              renderScene.isPending && renderScene.variables === scene.id
+            }
             onGenerateShot={(shotId) =>
               generateOne.mutate({ sceneId: scene.id, shotId })
             }

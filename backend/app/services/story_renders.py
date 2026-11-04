@@ -21,7 +21,7 @@ changes nothing in a render that has started.
   render, and a newer placement makes the render out of date. The mix and loudness settings are
   recorded on the render too.
 - **Callouts (EXPLAINER-010).** An explainer with `callouts` on is rendered with the callouts
-  that are turned on in its current callout plan, and is refused without one (`_callout_gate`):
+  that are turned on in its current callout plan, and is refused without one (`callout_gate`):
   the plan must exist, be current and not be written just now. The plan's accent colour is the
   caption highlight then. A newer callout plan makes the render out of date.
 - **Voice (FLOW-008).** A continuous explainer has no speech file per unit: each scene's voice
@@ -119,7 +119,7 @@ class StoryRendersState:
 # --- Gathering what the plan is made from ---------------------------------------------------
 
 
-def _file_exists(relative_path: str | None) -> bool:
+def file_exists(relative_path: str | None) -> bool:
     if not relative_path:
         return False
     try:
@@ -154,7 +154,7 @@ def callouts_wanted(project: Project) -> bool:
     return callout_plan.wanted(project)
 
 
-async def _caption_timings(
+async def caption_timings(
     session: AsyncSession, project: Project
 ) -> dict[int, SpeechWordTiming] | None:
     """The stored word timing of every speech of the project, by the speech's audio id, or None
@@ -246,7 +246,8 @@ async def _unit_sources(
                 seconds=audio.duration_s if audio is not None else None,
                 audio_id=audio.id if audio is not None else None,
                 path=audio.path if audio is not None else None,
-                file_exists=audio is not None and _file_exists(audio.path),
+                shot_ids=tuple(span.shot_ids),
+                file_exists=audio is not None and file_exists(audio.path),
                 timing=(
                     _caption_timing(
                         audio, made.unit.get("text") if made is not None else None, timings
@@ -271,7 +272,7 @@ def _voice_units(
     if timeline is None or audio is None:
         return []
     spans = {span.unit_id: span for span in clock.spans}
-    exists = _file_exists(audio.path)
+    exists = file_exists(audio.path)
     units: list[story_render_plan.UnitSource] = []
     for placed in timeline.units:
         span = spans.get(placed.unit_id)
@@ -317,7 +318,18 @@ def _voice_blocked_reason(
     return None
 
 
-def _take_source(entry: shot_takes.ShotEntry | None) -> story_render_plan.TakeSource | None:
+def _shot_descriptions(entry: shot_plans.SceneEntry) -> dict[str, str]:
+    """The plan's one-sentence description of each shot, by shot id (shown on a placeholder)."""
+    content = entry.row.content if entry.row is not None else None
+    shots = content.get("shots") if isinstance(content, dict) else None
+    return {
+        str(shot["id"]): shot["description"]
+        for shot in shots or []
+        if isinstance(shot, dict) and isinstance(shot.get("description"), str)
+    }
+
+
+def take_source(entry: shot_takes.ShotEntry | None) -> story_render_plan.TakeSource | None:
     selected = entry.selected if entry is not None else None
     if selected is None or selected.row.path is None:
         return None
@@ -328,12 +340,12 @@ def _take_source(entry: shot_takes.ShotEntry | None) -> story_render_plan.TakeSo
         path=row.path,
         frame_count=row.frame_count,
         has_audio=row.audio is not None,
-        file_exists=_file_exists(row.path),
+        file_exists=file_exists(row.path),
         reasons=tuple(selected.reasons),
     )
 
 
-def _speech_by_unit(
+def speech_by_unit(
     audio: speech_synthesis.AudioState,
 ) -> dict[tuple[str, str], speech_synthesis.UnitEntry]:
     """Where each unit's speech stands now, by `(scene id, unit id)`."""
@@ -344,7 +356,7 @@ def _speech_by_unit(
     }
 
 
-async def _graphic_videos(
+async def graphic_videos(
     session: AsyncSession, project: Project
 ) -> dict[tuple[str, str], shot_graphics.UsedVideo | None]:
     """The video each graphic shot of a continuous explainer with graphics on uses now (§3.8), by
@@ -370,11 +382,11 @@ def _graphic_source(used: shot_graphics.UsedVideo | None) -> story_render_plan.G
         attempt=row.attempt,
         path=row.media_path,
         frame_count=row.frame_count,
-        file_exists=_file_exists(row.media_path),
+        file_exists=file_exists(row.media_path),
     )
 
 
-async def _scene_sources(
+async def scene_sources(
     session: AsyncSession,
     project: Project,
     plans: shot_plans.ShotPlansState,
@@ -389,7 +401,7 @@ async def _scene_sources(
     clocks = await take_timings.scene_clocks(session, project)
     switched = await shot_voice_sources.clip_shots(session, project)
     continuous = word_timings.times_takes(project)
-    graphics = await _graphic_videos(session, project)
+    graphics = await graphic_videos(session, project)
     scenes: list[story_render_plan.SceneSource] = []
     for entry in plans.entries:
         scene_id = entry.item["id"]
@@ -403,6 +415,7 @@ async def _scene_sources(
         if blocked is None and entry.timeline is not None:
             presenter_ids: set[str] = set()
             graphic_ids: set[str] = set()
+            descriptions = _shot_descriptions(entry)
             if continuous and entry.row is not None:
                 presenter_ids = {
                     str(shot["id"])
@@ -425,6 +438,7 @@ async def _scene_sources(
                             take=None,
                             is_graphic=True,
                             graphic=_graphic_source(graphics.get((scene_id, span.shot_id))),
+                            description=descriptions.get(span.shot_id),
                         )
                     )
                     continue
@@ -434,9 +448,10 @@ async def _scene_sources(
                         shot_id=span.shot_id,
                         start_s=span.start_s,
                         end_s=span.end_s,
-                        take=_take_source(take_entry),
+                        take=take_source(take_entry),
                         presenter=span.shot_id in presenter_ids,
                         clip_voice=(scene_id, span.shot_id) in switched,
+                        description=descriptions.get(span.shot_id),
                     )
                 )
             if continuous:
@@ -446,7 +461,7 @@ async def _scene_sources(
                     audio_id=clock.audio.id,
                     path=clock.audio.path,
                     seconds=float(clock.audio.duration_s or 0.0),
-                    file_exists=_file_exists(clock.audio.path),
+                    file_exists=file_exists(clock.audio.path),
                     lead_in_s=float(
                         entry.row.content[cut_planning_writer.CUT_PLAN_KEY]["lead_in_s"]
                     ),
@@ -485,7 +500,7 @@ async def mix_settings(session: AsyncSession) -> story_render_plan.MixSettings:
     )
 
 
-async def _music_gate(session: AsyncSession, project: Project) -> Any:
+async def music_gate(session: AsyncSession, project: Project) -> Any:
     """What the next render does about music (`render_music.gate`). Imported here because
     `music_placement` imports this module.
     """
@@ -545,7 +560,7 @@ class CalloutGate:
     blocked_reason: str | None
 
 
-async def _callout_gate(session: AsyncSession, project: Project) -> CalloutGate:
+async def callout_gate(session: AsyncSession, project: Project) -> CalloutGate:
     """Whether the next render has callouts, and if it must, whether it can. It must have the
     current callout plan (the owner's choice): a render is refused, never made without them.
     """
@@ -587,7 +602,7 @@ _MIX_CONSTANTS: Final = (
 _MASTER_CONSTANTS: Final = ("master_lufs", "master_true_peak_db")
 
 
-def _music_reasons(
+def music_reasons(
     recorded: dict[str, Any],
     project: Project,
     source: story_render_plan.MusicSource | None,
@@ -640,7 +655,7 @@ def _render_reasons(
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
     `switched` is every presenter shot now on its clip's own voice (`shot_voice_sources`).
-    `graphics` is the video each graphic shot uses now (`_graphic_videos`).
+    `graphics` is the video each graphic shot uses now (`graphic_videos`).
     """
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
     current = {entry.item["id"]: entry for entry in plans.entries}
@@ -666,7 +681,7 @@ def _render_reasons(
         if not isinstance(shot, dict):
             continue
         if isinstance(shot.get("graphic"), dict):
-            reasons.extend(_graphic_reasons(shot, graphics or {}))
+            reasons.extend(graphic_reasons(shot, graphics or {}))
             continue
         now = shots.get((shot.get("scene_id"), shot.get("shot_id")))
         selected = now.selected if now is not None else None
@@ -709,11 +724,11 @@ def _render_reasons(
             reasons.append(f"{label} is no longer ready.")
         elif made.audio.id != unit.get("audio_id"):
             reasons.append(f"{label} was made again since this video was made.")
-    reasons.extend(_music_reasons(recorded, *music))
+    reasons.extend(music_reasons(recorded, *music))
     # The captions are burned into the picture, so a changed switch needs a new render.
     if isinstance(recorded.get("captions"), dict) != captions_wanted(music[0]):
         reasons.append("The captions setting has changed since this video was made.")
-    reasons.extend(_callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
+    reasons.extend(callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
     return reasons
 
 
@@ -721,7 +736,7 @@ def _version_text(engine: object, attempt: object) -> str:
     return f"{shot_graphics.ENGINE_LABELS.get(str(engine), engine)}, attempt {attempt}"
 
 
-def _graphic_reasons(
+def graphic_reasons(
     shot: dict[str, Any], graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None]
 ) -> list[str]:
     """Why the graphic a render used for a shot is not the one the shot uses now (EXG-007)."""
@@ -742,7 +757,7 @@ def _graphic_reasons(
     ]
 
 
-def _callout_reasons(recorded: dict[str, Any], gate: CalloutGate, *, wanted: bool) -> list[str]:
+def callout_reasons(recorded: dict[str, Any], gate: CalloutGate, *, wanted: bool) -> list[str]:
     """Why the callouts of a render, which are burned into the picture, no longer match."""
     used = recorded.get("callouts") if isinstance(recorded.get("callouts"), dict) else None
     if used is not None and not wanted:
@@ -786,16 +801,16 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     """
     plans = await shot_plans.state(session, project)
     takes = await shot_takes.state(session, project)
-    speech = _speech_by_unit(await speech_synthesis.state(session, project))
+    speech = speech_by_unit(await speech_synthesis.state(session, project))
     job = await store.latest_job(session, project.id, JOB_TYPE)
     renders = await _all_renders(session, project.id)
     jobs = await _jobs_of(session, renders)
 
     mix = await mix_settings(session)
-    gate = await _music_gate(session, project)
-    callouts = await _callout_gate(session, project)
+    gate = await music_gate(session, project)
+    callouts = await callout_gate(session, project)
     switched = await shot_voice_sources.clip_shots(session, project)
-    graphics = await _graphic_videos(session, project)
+    graphics = await graphic_videos(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None and callouts.blocked_reason is not None:
@@ -803,8 +818,8 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     if blocked is None:
         plan, blocked = _plan_of(
             project,
-            await _scene_sources(
-                session, project, plans, takes, speech, await _caption_timings(session, project)
+            await scene_sources(
+                session, project, plans, takes, speech, await caption_timings(session, project)
             ),
             mix,
             gate.source,
@@ -875,8 +890,8 @@ async def next_render_sources(session: AsyncSession, project: Project) -> Render
     blocked = plans.blocked_reason or takes.blocked_reason
     if blocked is not None:
         return RenderSources([], None, blocked, takes)
-    speech = _speech_by_unit(await speech_synthesis.state(session, project))
-    scenes = await _scene_sources(session, project, plans, takes, speech)
+    speech = speech_by_unit(await speech_synthesis.state(session, project))
+    scenes = await scene_sources(session, project, plans, takes, speech)
     # Where the shots and the speech sit does not depend on the music, so the plan is made
     # without it (the placement itself is made from this timeline).
     # ... nor on the captions, which are drawn over the finished picture.
@@ -898,18 +913,18 @@ async def start_render(session: AsyncSession, project: Project) -> Job:
 
     plans = await shot_plans.state(session, project)
     takes = await shot_takes.state(session, project)
-    speech = _speech_by_unit(await speech_synthesis.state(session, project))
+    speech = speech_by_unit(await speech_synthesis.state(session, project))
     blocked = plans.blocked_reason or takes.blocked_reason
     if blocked is not None:
         raise StoryRendersError(blocked)
-    gate = await _music_gate(session, project)
-    callouts = await _callout_gate(session, project)
+    gate = await music_gate(session, project)
+    callouts = await callout_gate(session, project)
     if callouts.blocked_reason is not None:
         raise StoryRendersError(callouts.blocked_reason)
     plan, blocked = _plan_of(
         project,
-        await _scene_sources(
-            session, project, plans, takes, speech, await _caption_timings(session, project)
+        await scene_sources(
+            session, project, plans, takes, speech, await caption_timings(session, project)
         ),
         await mix_settings(session),
         gate.source,
