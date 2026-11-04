@@ -286,6 +286,7 @@ function ShotRow({ entry, busy, onPlan }: ShotRowProps) {
 }
 
 type SceneRowProps = {
+  projectId: number;
   scene: SceneGenerationRequests;
   opened: boolean;
   onToggle: () => void;
@@ -299,6 +300,7 @@ type SceneRowProps = {
  * scene's summary, so they show while the scene is closed and its shots are not loaded.
  */
 function SceneRow({
+  projectId,
   scene,
   opened,
   onToggle,
@@ -313,6 +315,7 @@ function SceneRow({
   return (
     <SceneSection
       index={scene.index}
+      runScene={{ projectId, sceneId: scene.id }}
       title={scene.title}
       opened={opened}
       onToggle={onToggle}
@@ -451,6 +454,7 @@ export function GenerationRequestsPanel({
         {entries.map((scene) => (
           <SceneRow
             key={scene.id}
+            projectId={projectId}
             scene={scene}
             opened={scene.id === openSceneId}
             onToggle={() =>

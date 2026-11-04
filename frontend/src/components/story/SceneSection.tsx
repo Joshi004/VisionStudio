@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Badge, Button, Group, Loader, Stack, Text } from "@mantine/core";
 
+import { RunSceneButton } from "./RunSceneButton";
+
 type SceneSectionProps = {
   /** The scene's number, shown in front of its title. */
   index: number;
@@ -11,6 +13,8 @@ type SceneSectionProps = {
   note?: ReactNode;
   /** The scene's own buttons (for example "Generate scene"). They do not open or close it. */
   actions?: ReactNode;
+  /** Adds "Run this scene" before the scene's own buttons (SCN-004). */
+  runScene?: { projectId: number; sceneId: string };
   opened: boolean;
   onToggle: () => void;
   /** True while the open scene's shots are being loaded. */
@@ -32,6 +36,7 @@ export function SceneSection({
   badges,
   note,
   actions,
+  runScene,
   opened,
   onToggle,
   loading = false,
@@ -64,6 +69,13 @@ export function SceneSection({
           {note}
         </Stack>
         <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+          {runScene !== undefined && (
+            <RunSceneButton
+              projectId={runScene.projectId}
+              sceneId={runScene.sceneId}
+              sceneLabel={`Scene ${index}: ${title}`}
+            />
+          )}
           {actions}
           <Button
             size="compact-sm"

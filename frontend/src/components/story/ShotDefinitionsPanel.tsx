@@ -270,6 +270,7 @@ function ShotRow({
 }
 
 type SceneRowProps = {
+  projectId: number;
   scene: SceneShotDefinitions;
   opened: boolean;
   onToggle: () => void;
@@ -404,6 +405,7 @@ function CutRow({ mismatch, busy, onRepair }: CutRowProps) {
 
 /** One scene: how many of its shots are defined, why they cannot be, and its shots. */
 function SceneRow({
+  projectId,
   scene,
   opened,
   onToggle,
@@ -441,6 +443,7 @@ function SceneRow({
   return (
     <SceneSection
       index={scene.index}
+      runScene={{ projectId, sceneId: scene.id }}
       title={scene.title}
       opened={opened}
       onToggle={onToggle}
@@ -715,6 +718,7 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
         {entries.map((scene) => (
           <SceneRow
             key={scene.id}
+            projectId={projectId}
             scene={scene}
             opened={scene.id === openSceneId}
             onToggle={() =>

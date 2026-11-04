@@ -55,6 +55,7 @@ from app.services import (
     review_points,
     scene_definitions,
     scene_events,
+    scene_renders,
     scene_staging,
     shot_continuity,
     shot_definitions,
@@ -75,6 +76,7 @@ from app.services import (
 from app.services.projects import SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION
 from app.services.story_pipeline import (
     PROJECT_KEY,
+    SCENE_RUN_SKIPS,
     SCOPE_OUT_OF_DATE,
     STEP_KEYS,
     STEP_LABELS,
@@ -82,6 +84,9 @@ from app.services.story_pipeline import (
     Started,
     StepView,
     Target,
+    in_run_scenes,
+    in_scope,
+    is_story_wide,
 )
 
 _logger = logging.getLogger(__name__)
@@ -843,7 +848,7 @@ async def _evaluate_scene_definitions(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
-                consent=_MANUAL_DEFINITION if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_DEFINITION if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -892,7 +897,7 @@ async def _evaluate_events(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
-                consent=_MANUAL_EVENTS if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_EVENTS if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -1257,7 +1262,7 @@ async def _evaluate_scene_staging(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
-                consent=_MANUAL_STAGING if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_STAGING if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -1323,6 +1328,8 @@ async def _evaluate_environment_views(
                 last_error=last_error,
                 ref=(entry.discovery_id, step),
                 stale=entry.status == "out_of_date" or any(item.reasons for item in entry.views),
+                # A scene run looks at the places its scenes are set in (SCN-004).
+                scenes=tuple(need.scene_id for need in entry.needs),
             )
         )
     return StepView(targets)
@@ -1446,11 +1453,7 @@ async def _evaluate_speech_units(
                 _scene_label(entry.item),
                 entry.status == "planned",
                 block=None if entry.status == "planned" else entry.blocked_reason,
-                consent=(
-                    _MANUAL_UNITS
-                    if entry.needs_confirmation and entry.status != "planned"
-                    else None
-                ),
+                consent=_MANUAL_UNITS if entry.needs_confirmation else None,
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
                 group=entry.item["id"],
@@ -1467,7 +1470,7 @@ async def _start_speech_units(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    if options.scope == SCOPE_OUT_OF_DATE:
+    if options.scope == SCOPE_OUT_OF_DATE or options.scenes:
         # Only the scenes the run chose: "plan all" would also plan scenes it leaves alone.
         async def plan_scene(target: Target) -> tuple[int, ...]:
             await speech_units.plan_scene(
@@ -1773,7 +1776,7 @@ async def _evaluate_shot_plans(
                 active=active,
                 block=block,
                 settling=settling,
-                consent=_MANUAL_SHOT_PLAN if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_SHOT_PLAN if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -1937,9 +1940,7 @@ async def _evaluate_shot_definitions(
                     done,
                     active=active,
                     block=None if done or active else (shot.blocked_reason or scene.blocked_reason),
-                    consent=(
-                        _MANUAL_SHOT_DEFINITION if shot.needs_confirmation and not done else None
-                    ),
+                    consent=_MANUAL_SHOT_DEFINITION if shot.needs_confirmation else None,
                     last_error=_failure(shot.job),
                     ref=(scene_id, shot_id),
                     stale=shot.status == "out_of_date",
@@ -2088,7 +2089,7 @@ async def _start_references(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    if options.scope == SCOPE_OUT_OF_DATE:
+    if options.scope == SCOPE_OUT_OF_DATE or options.scenes:
         # Only the shots the run chose: "select all" would also choose for shots it leaves alone.
         async def select(target: Target) -> tuple[int, ...]:
             result = await shot_references.select_shot(
@@ -2161,7 +2162,7 @@ async def _start_generation_requests(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    if options.scope == SCOPE_OUT_OF_DATE:
+    if options.scope == SCOPE_OUT_OF_DATE or options.scenes:
         # Only the shots the run chose: "plan all" would also plan shots it leaves alone.
         async def plan(target: Target) -> tuple[int, ...]:
             await generation_requests.plan_shot(session, project, target.ref[0], target.ref[1])
@@ -2201,7 +2202,7 @@ async def _evaluate_prompts(
                     done,
                     active=active,
                     block=None if done or active else shot.blocked_reason,
-                    consent=_MANUAL_PROMPT if shot.needs_confirmation and not done else None,
+                    consent=_MANUAL_PROMPT if shot.needs_confirmation else None,
                     last_error=_failure(shot.job),
                     ref=(scene.item["id"], shot.shot["id"]),
                     stale=shot.status == "out_of_date",
@@ -2395,6 +2396,57 @@ async def _call_render(session: AsyncSession, project: Project, options: RunOpti
     return await story_renders.start_render(session, project)
 
 
+# --- The render of each scene of a scene run (SCN-004) ---------------------------------------
+
+
+async def _evaluate_scene_render(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # A run of the whole story has no scene to render: the step has one target that is already
+    # done, so the run reports it as skipped (SCN-010 gives the lanes of a full run theirs).
+    if not options.scenes:
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await scene_renders.state(session, project)
+    targets: list[Target] = []
+    for scene in state.scenes:
+        if scene.scene_id not in options.scenes:
+            continue
+        active = _active(scene.job)
+        newest = scene.renders[0] if scene.renders else None
+        done = newest is not None and newest.status == scene_renders.STATUS_CURRENT and not active
+        targets.append(
+            Target(
+                f"scene:{scene.scene_id}",
+                f"Scene {scene.index}: {scene.title}",
+                done,
+                active=active,
+                block=None if done or active or scene.can_render else scene.blocked_reason,
+                last_error=_failure(scene.job),
+                ref=(scene.scene_id,),
+                # A scene with no render yet is made one by the run, as one that is out of date.
+                stale=not done,
+                group=scene.scene_id,
+                existing=newest is not None,
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_scene_render(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    return await _start_each(
+        session,
+        targets,
+        deadline,
+        lambda target: _ids_of(scene_renders.start_render(session, project, target.ref[0])),
+    )
+
+
 # --- The adapters ---------------------------------------------------------------------------
 
 ADAPTERS: Final[dict[str, Adapter]] = {
@@ -2435,6 +2487,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "generation_requests": Adapter(_evaluate_generation_requests, _start_generation_requests),
     "prompts": Adapter(_evaluate_prompts, _start_prompts),
     "shot_generation": Adapter(_evaluate_shot_generation, _start_shot_generation),
+    "scene_render": Adapter(_evaluate_scene_render, _start_scene_render),
     "music_placement": Adapter(_evaluate_music_placement, _project_start(_call_music_placement)),
     "render": Adapter(_evaluate_render, _project_start(_call_render)),
 }
@@ -2485,19 +2538,36 @@ class Confirmation:
     stale: bool = False
 
 
-async def confirmations(session: AsyncSession, project: Project) -> list[Confirmation]:
+async def confirmations(
+    session: AsyncSession, project: Project, options: RunOptions | None = None
+) -> list[Confirmation]:
     """The targets that a run started now would replace, and that need the user's consent: the
     ones that are not up to date and hold what the user chose or wrote. Read-only.
+
+    For a run of some scenes (SCN-004, `options`) only what that run looks at is listed: the
+    targets of those scenes (and no step it skips), the story-wide ones it would make, and,
+    with `remake_from`, the targets of that step in those scenes that are up to date.
     """
+    options = options if options is not None else RunOptions()
     found: list[Confirmation] = []
-    options = RunOptions()
     for key in _CONSENT_STEPS:
+        if options.scenes and key in SCENE_RUN_SKIPS:
+            continue
         view = await ADAPTERS[key].evaluate(session, project, options)
-        found.extend(
-            Confirmation(key, STEP_LABELS[key], target.label, target.consent, target.stale)
-            for target in view.targets
-            if not target.done and target.consent is not None
-        )
+        for target in view.targets:
+            if target.consent is None or not in_run_scenes(target, options.scenes):
+                continue
+            again = key == options.remake_from and not is_story_wide(target)
+            if target.done and not again:
+                continue
+            # What the run leaves alone is not replaced (a stale story-wide target).
+            if not target.done and not in_scope(
+                target, replace(options, scope="all"), False, set()
+            ):
+                continue
+            found.append(
+                Confirmation(key, STEP_LABELS[key], target.label, target.consent, target.stale)
+            )
     return found
 
 
@@ -2515,7 +2585,10 @@ class ReviewStep:
 
 
 async def review_targets(
-    session: AsyncSession, project: Project, point_key: str
+    session: AsyncSession,
+    project: Project,
+    point_key: str,
+    options: RunOptions | None = None,
 ) -> list[ReviewStep]:
     """The done targets of every step of a review point, read through the adapters. Read-only.
     An unknown point has none.
@@ -2523,9 +2596,15 @@ async def review_targets(
     point = review_points.POINTS_BY_KEY.get(point_key)
     if point is None:
         return []
-    options = RunOptions()
+    options = options if options is not None else RunOptions()
     steps: list[ReviewStep] = []
     for key in point.steps:
         view = await ADAPTERS[key].evaluate(session, project, options)
-        steps.append(ReviewStep(key, STEP_LABELS[key], [t for t in view.targets if t.done]))
+        steps.append(
+            ReviewStep(
+                key,
+                STEP_LABELS[key],
+                [t for t in view.targets if t.done and in_run_scenes(t, options.scenes)],
+            )
+        )
     return steps

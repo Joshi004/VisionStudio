@@ -75,6 +75,9 @@ class BoardRunOut(BaseModel):
     # is waiting for the user to press Continue.
     paused_at: str | None
     review_at: str | None
+    # The scenes a run of some scenes is limited to, as "Scene 3: The cellar". Empty for a run of
+    # the whole story.
+    scenes: list[str]
 
 
 class PipelineBoardOut(BaseModel):
@@ -127,6 +130,7 @@ async def get_pipeline_board(project_id: int, session: SessionDep) -> PipelineBo
                 phase=board.run.phase,
                 paused_at=board.run.paused_at,
                 review_at=board.run.review_at,
+                scenes=list(board.run.scenes),
             )
             if board.run is not None
             else None

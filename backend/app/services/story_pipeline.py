@@ -19,6 +19,11 @@ lives in `services/story_pipeline_targets.py`.
 - **Scope (PHASE-040).** A run is of scope `all` (everything that is not up to date, including
   what was never made) or `out_of_date` (only what exists and is out of date, plus what those
   regenerations make necessary; anything else is "left alone"). See `plan_step`.
+- **Scenes (SCN-004).** A run may be limited to some scenes (`RunOptions.scenes`). It then looks
+  only at the targets of those scenes, makes the story-wide work that is missing (never what is
+  only out of date), makes no music and no full video, and ends with a render of each scene
+  (the step `scene_render`). `remake_from` names one step whose targets in those scenes are made
+  again once, even when they are up to date.
 - **Overwrites.** Some targets hold what the user chose or wrote (a library character, a
   hand-written relation, a hand-picked narrator voice). The run replaces them only when the user
   allowed it once at the start (`confirm_overwrite`).
@@ -38,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, Project
 from app.jobs import phases, store
+from app.services import discovery
 from app.services import review_points as review_rules
 
 JOB_TYPE: Final = store.PIPELINE_RUN_TYPE
@@ -177,6 +183,9 @@ STEPS: Final[tuple[Step, ...]] = (
     Step("generation_requests", "Plan the generation requests", ("references",), inline=True),
     Step("prompts", "Compile the shot prompts", ("generation_requests",)),
     Step("shot_generation", "Generate the clips", ("prompts",)),
+    # SCN-004: the render of each scene a scene run was started for. A run of the whole story
+    # has no scene to render, so the step is complete as it starts (SCN-010 will give lanes one).
+    Step("scene_render", "Render the scenes", ("shot_generation", "graphics")),
     # MUSIC-011: the exact place of every selected music take on the render's own timeline. It
     # needs the takes of the music and of the shots. Skipped as complete when music is off.
     # The render waits for it (MUSIC-012): it mixes the placed music in.
@@ -191,6 +200,33 @@ STEPS: Final[tuple[Step, ...]] = (
 
 STEP_KEYS: Final = tuple(step.key for step in STEPS)
 STEP_LABELS: Final = {step.key: step.label for step in STEPS}
+
+# SCN-004: the steps a run of some scenes does not look at. The music is planned and placed for
+# the whole story, and the full video is rendered from all of it (S-2, S-8).
+SCENE_RUN_SKIPS: Final[frozenset[str]] = frozenset(
+    {
+        "music_bible",
+        "music_themes",
+        "music_plan",
+        "music_cues",
+        "music_generation",
+        "music_placement",
+        "render",
+    }
+)
+# SCN-004: the steps a scene run can make again from, once, although they are up to date. Each
+# stage's own start function makes a new version for a target that is up to date; the choosing of
+# references and the generation requests do not (they skip it), and a clip needs its chain, so
+# neither is offered.
+REMAKE_STEPS: Final[tuple[str, ...]] = (
+    "scene_definitions",
+    "events",
+    "scene_staging",
+    "speech_units",
+    "shot_plans",
+    "shot_definitions",
+    "prompts",
+)
 
 
 def _check_graph() -> None:
@@ -225,6 +261,19 @@ def _check_review_points() -> None:
 _check_review_points()
 
 
+def _check_scene_run_steps() -> None:
+    """The steps of a scene run exist, and a step to remake from is not skipped."""
+    for name, keys in (("SCENE_RUN_SKIPS", SCENE_RUN_SKIPS), ("REMAKE_STEPS", REMAKE_STEPS)):
+        unknown = [key for key in keys if key not in STEP_KEYS]
+        if unknown:
+            raise ValueError(f"{name} names the unknown step {unknown[0]}")
+    if SCENE_RUN_SKIPS & set(REMAKE_STEPS):
+        raise ValueError("a step cannot be both skipped and remade in a scene run")
+
+
+_check_scene_run_steps()
+
+
 # --- What the user chose when starting ------------------------------------------------------
 
 
@@ -241,12 +290,21 @@ class RunOptions:
     # The keys of the project's review points that the run stops at (PHASE-041). Copied from the
     # project when the run starts, so changing the settings does not change a run that is going.
     review_points: frozenset[str] = frozenset()
+    # The ids of the scenes the run is limited to (SCN-004). Empty: the whole story.
+    scenes: frozenset[str] = frozenset()
+    # The step whose targets in those scenes are made again once. Only with scenes.
+    remake_from: str | None = None
 
     @classmethod
     def from_input(cls, value: object) -> RunOptions:
         data: dict[str, Any] = value if isinstance(value, dict) else {}
         keys = data.get("pause_after")
         points = data.get("review_points")
+        chosen = data.get("scenes")
+        scenes = frozenset(
+            item for item in (chosen if isinstance(chosen, list) else []) if isinstance(item, str)
+        )
+        remake = data.get("remake_from")
         return cls(
             pause_after=frozenset(
                 key for key in (keys if isinstance(keys, list) else []) if key in STEP_KEYS
@@ -256,6 +314,8 @@ class RunOptions:
             review_points=frozenset(
                 review_rules.normalize(points if isinstance(points, list) else [])
             ),
+            scenes=scenes,
+            remake_from=remake if scenes and remake in REMAKE_STEPS else None,
         )
 
 
@@ -297,6 +357,12 @@ class Target:
     # again. Set by `plan_step`, never by an adapter. The stage's start function is then given
     # consent to replace it, because rejecting it is what asks for that.
     redo: bool = False
+    # The scenes a target that belongs to several scenes is for (a place the views of which are
+    # planned from the scenes set there). Empty for any other target (SCN-004).
+    scenes: tuple[str, ...] = ()
+    # The scene run asked for this target to be made again although it is done. Set by
+    # `plan_step`, never by an adapter. Unlike `redo`, the user's consent is still needed.
+    remake: bool = False
 
 
 @dataclass(frozen=True)
@@ -378,6 +444,28 @@ def consent_message(consent: str) -> str:
     )
 
 
+def is_story_wide(target: Target) -> bool:
+    """Whether a target belongs to no scene in particular (a character, the Story Bible, the
+    project). Pure.
+    """
+    return target.group is None and not target.scenes
+
+
+def in_run_scenes(target: Target, scenes: Collection[str]) -> bool:
+    """Whether a run limited to `scenes` looks at a target at all (SCN-004). Pure.
+
+    With no scenes the run is of the whole story. Otherwise it looks at the targets of those
+    scenes, the targets of a place that one of them is set in, and the story-wide targets.
+    """
+    if not scenes:
+        return True
+    if target.group is not None:
+        return target.group in scenes
+    if target.scenes:
+        return any(scene_id in scenes for scene_id in target.scenes)
+    return True
+
+
 def in_scope(
     target: Target, options: RunOptions, made_upstream: bool, groups: set[str | None]
 ) -> bool:
@@ -387,10 +475,16 @@ def in_scope(
     being worked on, or one that was never made but that the run's own work upstream makes
     necessary (`made_upstream`) in a group that already has an output (a new shot of a scene
     that was planned again). Everything else is left alone.
+
+    A run of some scenes (SCN-004) makes story-wide work that is missing, but leaves alone
+    what exists and is out of date: that changes more than the scenes it was started for. The
+    stages of the scenes then say so (their upstream is out of date) instead of making it.
     """
+    if options.scenes and is_story_wide(target) and target.stale and not target.active:
+        return False
     if options.scope == SCOPE_ALL:
         return True
-    if target.stale or target.active or target.settling or target.redo:
+    if target.stale or target.active or target.settling or target.redo or target.remake:
         return True
     return made_upstream and not target.existing and target.group in groups
 
@@ -403,6 +497,7 @@ def plan_step(
     options: RunOptions,
     made_upstream: bool = False,
     rejected: Collection[str] = (),
+    remake: bool = False,
 ) -> StepPlan:
     """What to do now about a step. Pure.
 
@@ -418,20 +513,25 @@ def plan_step(
     `rejected` holds the keys of the targets the user rejected at a review point (PHASE-041).
     Such a target is not done until it has been made again: while nothing was started for it
     (`tries` is 0), while work is in progress for it, and while its newest job failed.
+
+    A run of some scenes (`options.scenes`, SCN-004) looks only at the targets of those scenes
+    (`in_run_scenes`). With `remake` (the step the run was told to remake from) every done
+    target of a scene is made again in the same way, but unlike a rejected target it still needs
+    the user's consent to replace what the user wrote.
     """
+    targets = [target for target in view.targets if in_run_scenes(target, options.scenes)]
     pending: list[Target] = []
-    for target in view.targets:
+    for target in targets:
+        again = target.active or not tries.get(target.key, 0) or target.last_error is not None
         if not target.done:
             pending.append(target)
-        elif target.key in rejected and (
-            target.active or not tries.get(target.key, 0) or target.last_error is not None
-        ):
+        elif target.key in rejected and again:
             pending.append(replace(target, done=False, redo=True))
+        elif remake and not is_story_wide(target) and again:
+            pending.append(replace(target, done=False, remake=True))
     # The groups that already have an output (a done or an out-of-date target, or one that is
     # being worked on): what "the same scene already has shots" is judged by.
-    groups = {
-        target.group for target in view.targets if target.done or target.stale or target.active
-    }
+    groups = {target.group for target in targets if target.done or target.stale or target.active}
     left_alone = [
         target for target in pending if not in_scope(target, options, made_upstream, groups)
     ]
@@ -456,7 +556,7 @@ def plan_step(
             progressing.add(target.key)
         elif target.block is not None:
             problems.append(Problem(step.key, target.key, target.label, tried, target.block))
-        elif target.consent is not None and not options.confirm_overwrite:
+        elif target.consent is not None and not options.confirm_overwrite and not target.redo:
             problems.append(
                 Problem(step.key, target.key, target.label, tried, consent_message(target.consent))
             )
@@ -476,7 +576,7 @@ def plan_step(
         # Otherwise the one it waits for is reported, and counting this one as going on would
         # keep the run alive for ever.
 
-    pending_count = len(view.targets) - len(left_alone)
+    pending_count = len(targets) - len(left_alone)
     return StepPlan(
         done=pending_count - len(pending),
         total=pending_count,
@@ -628,11 +728,16 @@ def add_warnings(output: dict[str, Any], warnings: Sequence[str]) -> None:
 def phase_of(
     output: Mapping[str, Any],
     running: Sequence[tuple[str, int, int]],
-    scope: Scope = SCOPE_ALL,
+    options: RunOptions,
 ) -> str:
     """The phase label of the run: how many steps are complete and what is going on."""
     text = phases.pipeline_progress(len(complete_keys(output)), len(STEPS), running)
-    return f"Regenerating what is out of date: {text}" if scope == SCOPE_OUT_OF_DATE else text
+    if options.scenes:
+        count = len(options.scenes)
+        text = f"{count} {'scene' if count == 1 else 'scenes'}: {text}"
+    return (
+        f"Regenerating what is out of date: {text}" if options.scope == SCOPE_OUT_OF_DATE else text
+    )
 
 
 # --- Starting, continuing and stopping a run ------------------------------------------------
@@ -671,6 +776,25 @@ def start_block(project: Project, active: Sequence[Job]) -> str | None:
     return None
 
 
+async def scene_items(session: AsyncSession, project_id: int) -> list[dict[str, Any]]:
+    """The scenes of the newest list of scenes (`id`, `index`, `title`, ...), in story order.
+    Empty when the project has no list yet.
+    """
+    row = await discovery.latest(session, "scenes", project_id)
+    content = getattr(row, "content", None)
+    items = content.get("scenes") if isinstance(content, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict) and isinstance(item.get("id"), str)]
+
+
+def scene_label(item: Mapping[str, Any]) -> str:
+    """ "Scene 3: The cellar", the way a run names a scene."""
+    index = item.get("index")
+    title = item.get("title") or item.get("id") or ""
+    return f"Scene {index}: {title}" if index is not None else f"Scene {title}"
+
+
 async def start_run(
     session: AsyncSession,
     project: Project,
@@ -678,10 +802,15 @@ async def start_run(
     pause_after: Sequence[str],
     confirm_overwrite: bool,
     scope: Scope = SCOPE_ALL,
+    scenes: Sequence[str] = (),
+    remake_from: str | None = None,
 ) -> tuple[Job, bool]:
     """Queues a run, and commits. Returns `(job, created)`: a run that is already waiting or
     running is returned as it is (`created` False), with the choices it was started with.
-    Raises StoryPipelineError for an unknown step or when a run cannot start now.
+    Raises StoryPipelineError for an unknown step or scene or when a run cannot start now.
+
+    `scenes` (SCN-004) limits the run to those scenes (their ids); `remake_from` is the step
+    whose targets in them are made again once (one of `REMAKE_STEPS`, and only with scenes).
 
     Whether the user has allowed the overwrites is decided by the caller (`confirmations`).
     """
@@ -690,6 +819,22 @@ async def start_run(
     unknown = [key for key in pause_after if key not in STEP_KEYS]
     if unknown:
         raise StoryPipelineError(f"There is no step {', '.join(repr(key) for key in unknown)}.")
+    if remake_from is not None:
+        if remake_from not in REMAKE_STEPS:
+            raise StoryPipelineError(f"A scene cannot be made again from the step {remake_from!r}.")
+        if not scenes:
+            raise StoryPipelineError("Choose a scene to make again from a step.")
+    # In story order, without repeats.
+    chosen = set(scenes)
+    in_order = [
+        item["id"] for item in await scene_items(session, project.id) if item["id"] in chosen
+    ]
+    missing = sorted(chosen - set(in_order))
+    if missing:
+        raise StoryPipelineError(
+            f"There is no scene {', '.join(repr(key) for key in missing)} in the newest list "
+            "of scenes."
+        )
     existing = await active_run(session, project.id)
     if existing is not None:
         return existing, False
@@ -711,6 +856,9 @@ async def start_run(
             "review_points": review_rules.normalize(
                 project.review_points if isinstance(project.review_points, list) else []
             ),
+            # SCN-004: the scenes the run is limited to (none: the whole story).
+            "scenes": in_order,
+            "remake_from": remake_from,
         },
     )
     return job, created
@@ -755,7 +903,7 @@ async def continue_run(
     if not await store.save_progress(
         session,
         run.id,
-        phase=phase_of(output, [], RunOptions.from_input(run.input).scope),
+        phase=phase_of(output, [], RunOptions.from_input(run.input)),
         output=output,
     ):
         await session.rollback()

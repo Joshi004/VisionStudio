@@ -176,9 +176,9 @@ def _stop_reason(
     return pipeline.idle_message(done, len(pipeline.STEPS), [item.step for item in going])
 
 
-def _phase_of(output: dict[str, Any], going: list[_Going], scope: pipeline.Scope) -> str:
+def _phase_of(output: dict[str, Any], going: list[_Going], options: pipeline.RunOptions) -> str:
     running = [(item.step.label, item.plan.done, item.plan.total) for item in going]
-    return pipeline.phase_of(output, running, scope)
+    return pipeline.phase_of(output, running, options)
 
 
 async def _cancel_jobs(session: AsyncSession, job_ids: list[int]) -> None:
@@ -224,7 +224,7 @@ class StoryPipelineHandler(JobHandler):
             saved = await store.save_progress(
                 session,
                 job_id,
-                phase=_phase_of(output, [], pipeline.RunOptions.from_input(job.input).scope),
+                phase=_phase_of(output, [], pipeline.RunOptions.from_input(job.input)),
                 output=output,
                 provider_job_id=pipeline.MARKER,
             )
@@ -351,6 +351,11 @@ class StoryPipelineHandler(JobHandler):
         paused_review: str | None = None
 
         for step in pipeline.STEPS:
+            if options.scenes and step.key in pipeline.SCENE_RUN_SKIPS:
+                # A run of some scenes makes no music and no full video (SCN-004).
+                output["steps"][step.key]["status"] = "skipped"
+                complete.add(step.key)
+                continue
             was_complete = step.key in complete
             if was_complete:
                 if not recheck:
@@ -373,6 +378,7 @@ class StoryPipelineHandler(JobHandler):
                 options,
                 made_upstream,
                 output["rejected"].get(step.key, ()),
+                remake=step.key == options.remake_from,
             )
             pipeline.add_warnings(output, plan.warnings)
             if plan.complete and was_complete:
@@ -478,7 +484,7 @@ class StoryPipelineHandler(JobHandler):
                     if key in output["steps"]:
                         output["steps"][key]["status"] = "failed"
 
-        phase = paused_phase or _phase_of(output, result.going, options.scope)
+        phase = paused_phase or _phase_of(output, result.going, options)
         nothing_new = (
             not started_any
             and failure is None

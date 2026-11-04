@@ -230,6 +230,7 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <ShotPromptsPanel projectId={projectId} />;
       case "shot_generation":
         return <ShotTakesPanel projectId={projectId} />;
+      case "scene_render":
       case "render":
         return <StoryRenderPanel projectId={projectId} />;
       default:

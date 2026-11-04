@@ -784,6 +784,7 @@ function ShotRow({
 }
 
 type SceneRowProps = {
+  projectId: number;
   scene: SceneShotTakes;
   opened: boolean;
   onToggle: () => void;
@@ -809,6 +810,7 @@ type SceneRowProps = {
  * summary, so they show while the scene is closed and its shots are not loaded.
  */
 function SceneRow({
+  projectId,
   scene,
   opened,
   onToggle,
@@ -834,6 +836,7 @@ function SceneRow({
   return (
     <SceneSection
       index={scene.index}
+      runScene={{ projectId, sceneId: scene.id }}
       title={scene.title}
       opened={opened}
       onToggle={onToggle}
@@ -1203,6 +1206,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
         {entries.map((scene) => (
           <SceneRow
             key={scene.id}
+            projectId={projectId}
             scene={scene}
             opened={scene.id === openSceneId}
             onToggle={() =>

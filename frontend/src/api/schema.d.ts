@@ -5053,7 +5053,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Story Pipeline */
+        /**
+         * Get Story Pipeline
+         * @description The panel's state. `scenes` and `remake_from` are what a run would be started with, so
+         *     `confirmations` say what that run would replace (SCN-004).
+         */
         get: operations["get_story_pipeline_api_projects__project_id__story_pipeline_get"];
         put?: never;
         post?: never;
@@ -5587,6 +5591,8 @@ export interface components {
             paused_at: string | null;
             /** Review At */
             review_at: string | null;
+            /** Scenes */
+            scenes: string[];
         };
         /** BoardStepOut */
         BoardStepOut: {
@@ -11111,6 +11117,10 @@ export interface components {
              * @enum {string}
              */
             scope: "all" | "out_of_date";
+            /** Scenes */
+            scenes?: string[];
+            /** Remake From */
+            remake_from?: string | null;
         };
         /** PipelineRunOut */
         PipelineRunOut: {
@@ -11153,6 +11163,10 @@ export interface components {
              * @enum {string}
              */
             scope: "all" | "out_of_date";
+            /** Scenes */
+            scenes: components["schemas"]["PipelineSceneOut"][];
+            /** Remake From */
+            remake_from: string | null;
             /** Jobs Made */
             jobs_made: number;
         };
@@ -11160,6 +11174,18 @@ export interface components {
         PipelineRunStartedOut: {
             /** Job Id */
             job_id: number;
+        };
+        /**
+         * PipelineSceneOut
+         * @description A scene a run is limited to.
+         */
+        PipelineSceneOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
         };
         /**
          * PipelineStepOut
@@ -15367,6 +15393,8 @@ export interface components {
             regenerate_confirmations: components["schemas"]["PipelineConfirmationOut"][];
             /** Max Tries */
             max_tries: number;
+            /** Remake Steps */
+            remake_steps: components["schemas"]["PipelineStepOut"][];
         };
         /** StoryRenderOut */
         StoryRenderOut: {
@@ -27829,7 +27857,10 @@ export interface operations {
     };
     get_story_pipeline_api_projects__project_id__story_pipeline_get: {
         parameters: {
-            query?: never;
+            query?: {
+                scenes?: string[];
+                remake_from?: string | null;
+            };
             header?: never;
             path: {
                 project_id: number;
