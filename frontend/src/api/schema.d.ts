@@ -4071,6 +4071,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/choice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Shot Graphic Choice
+         * @description Chooses the version the video uses for a shot, or `null` for the rule (the generated
+         *     component, and the blocks only when it failed outright). A version needs a current video.
+         *     A new brief puts the shot back on the rule.
+         */
+        put: operations["set_shot_graphic_choice_api_projects__project_id__graphics__scene_id___shot_id__choice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-plans": {
         parameters: {
             query?: never;
@@ -11756,6 +11778,21 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * RenderGraphicOut
+         * @description The graphic a render used for a graphic shot (EXG-007): which attempt of which version.
+         */
+        RenderGraphicOut: {
+            /** Id */
+            id: number;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "generated_component" | "remotion_blocks";
+            /** Attempt */
+            attempt: number;
+        };
         /** RenderInfoOut */
         RenderInfoOut: {
             /** Fps */
@@ -11821,7 +11858,8 @@ export interface components {
         };
         /**
          * RenderTakeOut
-         * @description The take a render used for one shot.
+         * @description The take a render used for one shot, or the graphic it used for a graphic shot (which has
+         *     no take).
          */
         RenderTakeOut: {
             /** Scene Id */
@@ -11831,9 +11869,10 @@ export interface components {
             /** Shot Id */
             shot_id: string;
             /** Take Id */
-            take_id: number;
+            take_id: number | null;
             /** Take Number */
-            take_number: number;
+            take_number: number | null;
+            graphic: components["schemas"]["RenderGraphicOut"] | null;
             /** Frames */
             frames: number;
             /** Sound */
@@ -13335,6 +13374,16 @@ export interface components {
             /** Repair Of */
             repair_of: number | null;
         };
+        /** ShotGraphicChoiceIn */
+        ShotGraphicChoiceIn: {
+            /** Engine */
+            engine: ("generated_component" | "remotion_blocks") | null;
+        };
+        /** ShotGraphicChoiceOut */
+        ShotGraphicChoiceOut: {
+            /** Engine */
+            engine: ("generated_component" | "remotion_blocks") | null;
+        };
         /** ShotGraphicEngineOut */
         ShotGraphicEngineOut: {
             /**
@@ -13405,8 +13454,31 @@ export interface components {
             brief_status: "none" | "writing" | "ready" | "failed" | "out_of_date";
             resolved: components["schemas"]["GraphicResolvedOut"] | null;
             voice: components["schemas"]["ShotVoiceOut"] | null;
+            /** Choice */
+            choice: ("generated_component" | "remotion_blocks") | null;
+            used: components["schemas"]["ShotGraphicUsedOut"] | null;
             /** Engines */
             engines: components["schemas"]["ShotGraphicEngineOut"][];
+        };
+        /**
+         * ShotGraphicUsedOut
+         * @description The video the story render uses for a shot (§3.8).
+         */
+        ShotGraphicUsedOut: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "generated_component" | "remotion_blocks";
+            /** Attempt Id */
+            attempt_id: number;
+            /** Attempt */
+            attempt: number;
+            /**
+             * Because
+             * @enum {string}
+             */
+            because: "chosen" | "default" | "component_failed";
         };
         /** ShotGraphicsRun */
         ShotGraphicsRun: {
@@ -25180,6 +25252,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ShotGraphicAskRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_shot_graphic_choice_api_projects__project_id__graphics__scene_id___shot_id__choice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotGraphicChoiceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicChoiceOut"];
                 };
             };
             /** @description No such project. */

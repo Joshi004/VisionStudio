@@ -153,6 +153,20 @@ class TakeSource:
 
 
 @dataclass(frozen=True)
+class GraphicSource:
+    """The video of a graphic shot (EXG-007): the attempt of the version the rule picks. It has no
+    sound and no take; code drew it at the shot's frames plus one spare frame.
+    """
+
+    graphic_id: int
+    engine: str
+    attempt: int
+    path: str
+    frame_count: int | None
+    file_exists: bool
+
+
+@dataclass(frozen=True)
 class ShotSource:
     shot_id: str
     # Where the shot sits in its scene's timeline.
@@ -163,6 +177,9 @@ class ShotSource:
     # switched it to its clip's own voice.
     presenter: bool = False
     clip_voice: bool = False
+    # A graphic shot (EXG-007) has no take: its video is `graphic`, or None while it has none.
+    is_graphic: bool = False
+    graphic: GraphicSource | None = None
 
 
 @dataclass(frozen=True)
@@ -630,13 +647,22 @@ def _check_scenes(scenes: list[SceneSource]) -> None:
 
 
 def _check_takes(scenes: list[SceneSource]) -> None:
-    """Every shot needs a selected take whose file is there."""
+    """Every shot needs a selected take whose file is there. A graphic shot needs the video of its
+    graphic instead (EXG-007).
+    """
     without_clip: list[str] = []
     missing_file: list[str] = []
+    without_graphic: list[str] = []
+    missing_graphic: list[str] = []
     for scene in scenes:
         for shot in scene.shots:
             label = f"{shot.shot_id} of scene {scene.index}"
-            if shot.take is None:
+            if shot.is_graphic:
+                if shot.graphic is None:
+                    without_graphic.append(label)
+                elif not shot.graphic.file_exists:
+                    missing_graphic.append(label)
+            elif shot.take is None:
                 without_clip.append(label)
             elif not shot.take.file_exists:
                 missing_file.append(label)
@@ -647,6 +673,16 @@ def _check_takes(scenes: list[SceneSource]) -> None:
     if missing_file:
         raise RenderPlanError(
             f"The clip file of these shots is missing: {_named(missing_file)}. Generate them again."
+        )
+    if without_graphic:
+        raise RenderPlanError(
+            f"These graphic shots have no video yet: {_named(without_graphic)}. "
+            "Make the graphics first."
+        )
+    if missing_graphic:
+        raise RenderPlanError(
+            f"The video file of these graphic shots is missing: {_named(missing_graphic)}. "
+            "Make the graphics again."
         )
 
 
@@ -725,6 +761,8 @@ def build_plan(
     shots: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     too_short: list[str] = []
+    graphics_too_short: list[str] = []
+    graphic_spans: list[tuple[int, int]] = []  # the graphic shots, in ms
     narration: list[dict[str, Any]] = []
     narration_spans: list[tuple[float, float]] = []
     dialogue_spans: list[tuple[float, float]] = []
@@ -751,7 +789,13 @@ def build_plan(
         assert scene.story_start_s is not None  # `_check_scenes` made sure
         for shot in scene.shots:
             take = shot.take
-            assert take is not None  # `_check_takes` made sure
+            graphic = shot.graphic
+            if shot.is_graphic:
+                assert graphic is not None  # `_check_takes` made sure
+                source_frame_count = graphic.frame_count
+            else:
+                assert take is not None  # `_check_takes` made sure
+                source_frame_count = take.frame_count
             start_ms = _ms(scene.story_start_s + shot.start_s)
             end_ms = _ms(scene.story_start_s + shot.end_s)
             start_frame = cursor
@@ -763,9 +807,45 @@ def build_plan(
                 raise RenderPlanError(f"The shot {label} lasts less than one frame.")
             needed = source_frames_needed(frames, fps)
             # One source frame short is allowed: the render repeats the last frame (D-9).
-            if take.frame_count is None or take.frame_count < needed - 1:
-                have = "an unreadable number of" if take.frame_count is None else take.frame_count
-                too_short.append(f"{label} has {have} frames, needs {needed}")
+            if source_frame_count is None or source_frame_count < needed - 1:
+                have = (
+                    "an unreadable number of" if source_frame_count is None else source_frame_count
+                )
+                (graphics_too_short if shot.is_graphic else too_short).append(
+                    f"{label} has {have} frames, needs {needed}"
+                )
+            if shot.is_graphic:
+                # A graphic has no sound and no take: the voice take plays over it, as over
+                # B-roll, and callouts stay off it (EXG-007).
+                assert graphic is not None
+                graphic_spans.append((start_ms, end_ms))
+                shots.append(
+                    {
+                        "scene_id": scene.scene_id,
+                        "shot_id": shot.shot_id,
+                        "scene_index": scene.index,
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                        "start_frame": start_frame,
+                        "frames": frames,
+                        "take_id": None,
+                        "take_number": None,
+                        "path": graphic.path,
+                        "source_frames": needed,
+                        "has_audio": False,
+                        "voice": None,
+                        "voice_window": None,
+                        "duck": [],
+                        "bed_duck": [],
+                        "graphic": {
+                            "id": graphic.graphic_id,
+                            "engine": graphic.engine,
+                            "attempt": graphic.attempt,
+                        },
+                    }
+                )
+                continue
+            assert take is not None
             # What this shot's sound is in a continuous explainer (FLOW-008).
             voice_of_shot: str | None = None
             if scene.voice is not None and shot.presenter:
@@ -889,6 +969,11 @@ def build_plan(
             f"A clip is shorter than its shot: {_named(too_short)}. Regenerate it, or select "
             "another take."
         )
+    if graphics_too_short:
+        raise RenderPlanError(
+            f"A graphic is shorter than its shot: {_named(graphics_too_short)}. Plan the shots "
+            "again, then make the graphics again."
+        )
     if unplaced:
         raise RenderPlanError(
             f"The speech of these narration units is missing: {_named(unplaced)}. Make it again."
@@ -946,6 +1031,7 @@ def build_plan(
             width,
             height,
             measure or font_metrics.measure,
+            graphics=graphic_spans,
         )
         callouts_entry = callout_render.track_dict(resolution.track)
         callouts_entry["plan_id"] = callouts.plan_id

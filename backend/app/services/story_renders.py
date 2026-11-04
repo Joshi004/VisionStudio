@@ -53,7 +53,10 @@ from app.services import (
     callout_render,
     caption_plan,
     cut_planning_writer,
+    graphic_theme,
     provenance,
+    scene_timeline,
+    shot_graphics,
     shot_plans,
     shot_takes,
     shot_voice_sources,
@@ -341,6 +344,36 @@ def _speech_by_unit(
     }
 
 
+async def _graphic_videos(
+    session: AsyncSession, project: Project
+) -> dict[tuple[str, str], shot_graphics.UsedVideo | None]:
+    """The video each graphic shot of a continuous explainer with graphics on uses now (§3.8), by
+    `(scene id, shot id)`. Empty for every other project, which reads nothing of the graphics.
+    """
+    if not graphic_theme.wanted(project):
+        return {}
+    state = await shot_graphics.state(session, project)
+    return {
+        (scene.item["id"], shot.shot["id"]): shot.used
+        for scene in state.entries
+        for shot in scene.shots
+    }
+
+
+def _graphic_source(used: shot_graphics.UsedVideo | None) -> story_render_plan.GraphicSource | None:
+    row = used.attempt.row if used is not None else None
+    if used is None or row is None or row.media_path is None:
+        return None
+    return story_render_plan.GraphicSource(
+        graphic_id=row.id,
+        engine=used.engine,
+        attempt=row.attempt,
+        path=row.media_path,
+        frame_count=row.frame_count,
+        file_exists=_file_exists(row.media_path),
+    )
+
+
 async def _scene_sources(
     session: AsyncSession,
     project: Project,
@@ -356,6 +389,7 @@ async def _scene_sources(
     clocks = await take_timings.scene_clocks(session, project)
     switched = await shot_voice_sources.clip_shots(session, project)
     continuous = word_timings.times_takes(project)
+    graphics = await _graphic_videos(session, project)
     scenes: list[story_render_plan.SceneSource] = []
     for entry in plans.entries:
         scene_id = entry.item["id"]
@@ -368,13 +402,32 @@ async def _scene_sources(
             blocked = _voice_blocked_reason(entry, clock)
         if blocked is None and entry.timeline is not None:
             presenter_ids: set[str] = set()
+            graphic_ids: set[str] = set()
             if continuous and entry.row is not None:
                 presenter_ids = {
                     str(shot["id"])
                     for shot in entry.row.content["shots"]
                     if shot.get("type") == shot_voice_sources.PRESENTER_TYPE
                 }
+                graphic_ids = {
+                    str(shot["id"])
+                    for shot in entry.row.content["shots"]
+                    if shot.get("type") == scene_timeline.GRAPHIC_SHOT_TYPE
+                }
             for span in entry.timeline.shots:
+                if span.shot_id in graphic_ids:
+                    # No take (EXG-007): the video is the one the graphic rule picks.
+                    shots.append(
+                        story_render_plan.ShotSource(
+                            shot_id=span.shot_id,
+                            start_s=span.start_s,
+                            end_s=span.end_s,
+                            take=None,
+                            is_graphic=True,
+                            graphic=_graphic_source(graphics.get((scene_id, span.shot_id))),
+                        )
+                    )
+                    continue
                 take_entry = shots_by_scene.get(scene_id, {}).get(span.shot_id)
                 shots.append(
                     story_render_plan.ShotSource(
@@ -582,10 +635,12 @@ def _render_reasons(
     ],
     callouts: CalloutGate,
     switched: set[tuple[str, str]],
+    graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None] | None = None,
 ) -> list[str]:
     """Why a render no longer matches the story, one sentence each. `music` is the project, the
     music source and refusal of the next render (`render_music.gate`) and the mix settings.
     `switched` is every presenter shot now on its clip's own voice (`shot_voice_sources`).
+    `graphics` is the video each graphic shot uses now (`_graphic_videos`).
     """
     recorded = row.inputs if isinstance(row.inputs, dict) else {}
     current = {entry.item["id"]: entry for entry in plans.entries}
@@ -609,6 +664,9 @@ def _render_reasons(
     }
     for shot in recorded.get("shots") or []:
         if not isinstance(shot, dict):
+            continue
+        if isinstance(shot.get("graphic"), dict):
+            reasons.extend(_graphic_reasons(shot, graphics or {}))
             continue
         now = shots.get((shot.get("scene_id"), shot.get("shot_id")))
         selected = now.selected if now is not None else None
@@ -657,6 +715,31 @@ def _render_reasons(
         reasons.append("The captions setting has changed since this video was made.")
     reasons.extend(_callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
     return reasons
+
+
+def _version_text(engine: object, attempt: object) -> str:
+    return f"{shot_graphics.ENGINE_LABELS.get(str(engine), engine)}, attempt {attempt}"
+
+
+def _graphic_reasons(
+    shot: dict[str, Any], graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None]
+) -> list[str]:
+    """Why the graphic a render used for a shot is not the one the shot uses now (EXG-007)."""
+    key = (shot.get("scene_id"), shot.get("shot_id"))
+    if key not in graphics:
+        return []  # the scenes' own reason says so
+    label = f"The graphic of shot {shot.get('shot_id')} of scene {shot.get('scene_index')}"
+    used = graphics[key]
+    then = shot["graphic"]
+    if used is None:
+        return [f"{label} has no current video now."]
+    if used.attempt.row.id == then.get("id"):
+        return []
+    return [
+        f"{label} changed since this video was made (now "
+        f"{_version_text(used.engine, used.attempt.row.attempt)}; this video used "
+        f"{_version_text(then.get('engine'), then.get('attempt'))})."
+    ]
 
 
 def _callout_reasons(recorded: dict[str, Any], gate: CalloutGate, *, wanted: bool) -> list[str]:
@@ -712,6 +795,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
     gate = await _music_gate(session, project)
     callouts = await _callout_gate(session, project)
     switched = await shot_voice_sources.clip_shots(session, project)
+    graphics = await _graphic_videos(session, project)
     blocked = plans.blocked_reason or takes.blocked_reason
     plan: story_render_plan.RenderPlan | None = None
     if blocked is None and callouts.blocked_reason is not None:
@@ -741,6 +825,7 @@ async def state(session: AsyncSession, project: Project) -> StoryRendersState:
             (project, gate.source, gate.blocked_reason, mix),
             callouts,
             switched,
+            graphics,
         )
         entries.append(
             RenderEntry(

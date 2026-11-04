@@ -129,8 +129,9 @@ class Shot:
     scene_index: int
     shot_id: str
     frames: int
-    take_id: int
-    take_number: int
+    # None for a graphic shot (EXG-007), which has `graphic_id` instead.
+    take_id: int | None
+    take_number: int | None
     path: str
     source_frames: int
     duck: tuple[tuple[float, float], ...]
@@ -139,6 +140,7 @@ class Shot:
     # clip's own sound is the voice) for a presenter shot, None for any other shot.
     voice: str | None = None
     voice_window: VoiceWindow | None = None
+    graphic_id: int | None = None
 
     @property
     def label(self) -> str:
@@ -531,13 +533,21 @@ def parse_timeline(recorded: object) -> Timeline:
         duck, bed_duck = _windows(entry.get("duck")), _windows(entry.get("bed_duck"))
         voice_of_shot, window = entry.get("voice"), _parse_voice_window(entry.get("voice_window"))
         scene_id, shot_id, path = entry.get("scene_id"), entry.get("shot_id"), entry.get("path")
+        # A graphic shot (EXG-007) has the id of its graphic in place of a take; any other shot
+        # needs its take.
+        graphic = entry.get("graphic")
+        graphic_id = _whole(graphic.get("id")) if isinstance(graphic, dict) else None
+        if graphic is not None and graphic_id is None:
+            raise RenderFailed(_CHANGED_MESSAGE)
+        if graphic_id is not None and (take_id is not None or number is not None):
+            raise RenderFailed(_CHANGED_MESSAGE)
         if (
             frames is None
             or frames < 1
-            or take_id is None
+            or (take_id is None and graphic_id is None)
             or source_frames is None
             or source_frames < 1
-            or number is None
+            or (number is None and graphic_id is None)
             or index is None
             or duck is None
             or bed_duck is None
@@ -561,6 +571,7 @@ def parse_timeline(recorded: object) -> Timeline:
                 bed_duck,
                 voice_of_shot,
                 window,
+                graphic_id,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -864,6 +875,7 @@ class RenderStoryHandler(JobHandler):
                     "scene_id": shot.scene_id,
                     "shot_id": shot.shot_id,
                     "take_id": shot.take_id,
+                    **({"graphic_id": shot.graphic_id} if shot.graphic_id is not None else {}),
                     "sound": sound.label,
                     "loudness_lufs": _tenth(sound.loudness_lufs),
                     "gain_db": _tenth(sound.gain_db),
@@ -977,7 +989,15 @@ async def probe_shot(storage: Storage, shot: Shot) -> Source:
         raise RenderFailed(
             f"The clip of shot {shot.label} could not be read. Regenerate it, or use another take."
         )
-    if probe.frame_count < shot.source_frames:
+    # A graphic is drawn at the shot's frames plus one spare, so at the story's rounding it may be
+    # one frame short: the render repeats its last frame, as the plan allows (D-9).
+    short_by = shot.source_frames - probe.frame_count
+    if shot.graphic_id is not None and short_by > 1:
+        raise RenderFailed(
+            f"The graphic of shot {shot.label} has {probe.frame_count} frames; the shot "
+            f"needs {shot.source_frames}. Make the graphics again."
+        )
+    if shot.graphic_id is None and short_by > 0:
         raise RenderFailed(
             f"The clip of shot {shot.label} has {probe.frame_count} frames; the shot "
             f"needs {shot.source_frames}. Regenerate it, or use another take."
@@ -1326,6 +1346,8 @@ def _sound_label(shot: Shot, audio: render_commands.ClipAudio | None) -> str:
         return "dropped (the take is the voice)"
     if shot.voice == story_render_plan.VOICE_CLIP:
         return "clip voice"
+    if shot.graphic_id is not None:
+        return "none (a graphic)"
     return "clip" if audio is not None else "none in the clip"
 
 

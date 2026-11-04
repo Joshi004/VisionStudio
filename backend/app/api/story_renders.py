@@ -53,14 +53,25 @@ class RenderWarningOut(BaseModel):
     message: str
 
 
+class RenderGraphicOut(BaseModel):
+    """The graphic a render used for a graphic shot (EXG-007): which attempt of which version."""
+
+    id: int
+    engine: Literal["generated_component", "remotion_blocks"]
+    attempt: int
+
+
 class RenderTakeOut(BaseModel):
-    """The take a render used for one shot."""
+    """The take a render used for one shot, or the graphic it used for a graphic shot (which has
+    no take).
+    """
 
     scene_id: str
     scene_index: int
     shot_id: str
-    take_id: int
-    take_number: int
+    take_id: int | None
+    take_number: int | None
+    graphic: RenderGraphicOut | None
     frames: int
     # The loudness measured over the part of the clip the shot uses, and the gain applied.
     sound: str | None
@@ -186,6 +197,11 @@ def _takes_out(entry: RenderEntry) -> list[RenderTakeOut]:
                 shot_id=shot["shot_id"],
                 take_id=shot["take_id"],
                 take_number=shot["take_number"],
+                graphic=(
+                    RenderGraphicOut.model_validate(shot["graphic"])
+                    if isinstance(shot.get("graphic"), dict)
+                    else None
+                ),
                 frames=shot["frames"],
                 sound=level.get("sound"),
                 loudness_lufs=level.get("loudness_lufs"),

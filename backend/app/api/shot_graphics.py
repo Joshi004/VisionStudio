@@ -12,6 +12,8 @@ explainer, both versions of each shot (EXG-005).
   theme), which asks no model.
 - `POST .../{scene_id}/{shot_id}/{engine}/ask-again` makes a new attempt of one version, with the
   same brief and a new model call.
+- `PUT .../{scene_id}/{shot_id}/choice` sets the version the video uses for one shot, or `null`
+  for Automatic (EXG-007). Each shot of the `GET` says which version is `used` and why.
 
 The rows and the jobs are made by `app/services/shot_graphics.py`. The answers never return ORM
 objects.
@@ -110,6 +112,20 @@ class ShotVoiceOut(BaseModel):
     offset_s: float
 
 
+UsedBecause = Literal["chosen", "default", "component_failed"]
+
+
+class ShotGraphicUsedOut(BaseModel):
+    """The video the story render uses for a shot (§3.8)."""
+
+    engine: EngineKey
+    attempt_id: int
+    attempt: int
+    # `chosen`: the owner's choice. `default`: the generated component. `component_failed`: the
+    # blocks, because the component failed outright.
+    because: UsedBecause
+
+
 class ShotGraphicShotOut(BaseModel):
     id: str
     description: str
@@ -131,6 +147,10 @@ class ShotGraphicShotOut(BaseModel):
     # cannot be worked out now.
     resolved: GraphicResolvedOut | None
     voice: ShotVoiceOut | None
+    # The version the owner chose for the shot's current brief, or None (Automatic).
+    choice: EngineKey | None
+    # The video the render uses, or None when the shot has none yet.
+    used: ShotGraphicUsedOut | None
     # The generated component first, then the building blocks.
     engines: list[ShotGraphicEngineOut]
 
@@ -161,6 +181,15 @@ class ShotGraphicsRun(BaseModel):
 
 class ShotGraphicAskRun(BaseModel):
     job_id: int
+
+
+class ShotGraphicChoiceIn(BaseModel):
+    # None is Automatic: the rule picks the version.
+    engine: EngineKey | None
+
+
+class ShotGraphicChoiceOut(BaseModel):
+    engine: EngineKey | None
 
 
 # --- Mapping ---------------------------------------------------------------------------------
@@ -244,6 +273,17 @@ def _shot_out(entry: shot_graphics.ShotEntry, project: Project) -> ShotGraphicSh
             if voice_url is not None
             else None
         ),
+        choice=cast(EngineKey | None, entry.choice),
+        used=(
+            ShotGraphicUsedOut(
+                engine=cast(EngineKey, entry.used.engine),
+                attempt_id=entry.used.attempt.row.id,
+                attempt=entry.used.attempt.row.attempt,
+                because=cast(UsedBecause, entry.used.because),
+            )
+            if entry.used is not None
+            else None
+        ),
         engines=[_engine_out(engine, project) for engine in entry.engines],
     )
 
@@ -325,3 +365,27 @@ async def ask_shot_graphic_again(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
     return ShotGraphicAskRun(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/graphics/{scene_id}/{shot_id}/choice",
+    response_model=ShotGraphicChoiceOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def set_shot_graphic_choice(
+    project_id: int,
+    scene_id: DiscoveryId,
+    shot_id: DiscoveryId,
+    body: ShotGraphicChoiceIn,
+    session: SessionDep,
+) -> ShotGraphicChoiceOut:
+    """Chooses the version the video uses for a shot, or `null` for the rule (the generated
+    component, and the blocks only when it failed outright). A version needs a current video.
+    A new brief puts the shot back on the rule.
+    """
+    project = await load_project(session, project_id)
+    try:
+        engine = await shot_graphics.set_choice(session, project, scene_id, shot_id, body.engine)
+    except shot_graphics.ShotGraphicsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return ShotGraphicChoiceOut(engine=cast(EngineKey | None, engine))

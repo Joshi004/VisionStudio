@@ -147,8 +147,8 @@ STEPS: Final[tuple[Step, ...]] = (
     Step("graphic_briefs", "Write the graphic briefs", ("shot_plans",)),
     # EXG-005: both versions of each graphic shot, a generated component and a block scene,
     # drawn to an exact clip. It needs the briefs and the video's theme. Skipped as complete for
-    # any project that is not a continuous explainer with graphics on. Nothing after it waits for
-    # it yet; the render will (EXG-007).
+    # any project that is not a continuous explainer with graphics on. The music placement and
+    # the render wait for it (EXG-007): a graphic shot is a clip of the timeline.
     Step("graphics", "Make the graphics", ("graphic_briefs", "graphic_theme")),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.
@@ -180,8 +180,13 @@ STEPS: Final[tuple[Step, ...]] = (
     # MUSIC-011: the exact place of every selected music take on the render's own timeline. It
     # needs the takes of the music and of the shots. Skipped as complete when music is off.
     # The render waits for it (MUSIC-012): it mixes the placed music in.
-    Step("music_placement", "Place the music", ("music_generation", "shot_generation")),
-    Step("render", "Render the video", ("shot_generation", "music_placement")),
+    # EXG-007: both also wait for the graphics, whose videos are shots of the timeline.
+    Step(
+        "music_placement",
+        "Place the music",
+        ("music_generation", "shot_generation", "graphics"),
+    ),
+    Step("render", "Render the video", ("shot_generation", "music_placement", "graphics")),
 )
 
 STEP_KEYS: Final = tuple(step.key for step in STEPS)

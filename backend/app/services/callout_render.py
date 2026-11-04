@@ -560,9 +560,14 @@ def resolve(
     width: int,
     height: int,
     measure: Measure,
+    graphics: Sequence[tuple[int, int]] = (),
 ) -> Resolution:
     """The callout track of a render, and its warnings. `shots` and `dialogue` are
     `(start_ms, end_ms)` spans on the story's timeline, and `total_ms` is the length of the video.
+    `graphics` are the spans of the graphic shots (EXG-007), on which no callout is on screen: one
+    that starts inside one is left out, and one that would run into one ends `CUT_BEFORE_NEXT_MS`
+    before it, or is left out when it would then show for less than `MIN_VISIBLE_MS`. Without
+    graphics, nothing changes.
     """
     style = style_for(width, height)
     by_ref = {(unit.scene_id, unit.unit_id): _Words(unit) for unit in units}
@@ -580,6 +585,26 @@ def resolve(
             continue
         candidates.append(placed)
     candidates.sort(key=lambda item: item.start_ms)
+
+    on_graphic: list[str] = []
+    if graphics:
+        clear: list[_Placed] = []
+        for placed in candidates:
+            if any(start <= placed.start_ms < end for start, end in graphics):
+                on_graphic.append(_label(placed.callout))
+                continue
+            next_graphic = min(
+                (start for start, _end in graphics if start > placed.start_ms), default=None
+            )
+            if next_graphic is not None:
+                cut = next_graphic - CUT_BEFORE_NEXT_MS
+                if placed.natural_end_ms > cut:
+                    if cut - placed.start_ms < MIN_VISIBLE_MS:
+                        on_graphic.append(_label(placed.callout))
+                        continue
+                    placed.natural_end_ms = cut
+            clear.append(placed)
+        candidates = clear
 
     kept: list[_Placed] = []
     for placed in candidates:
@@ -627,14 +652,20 @@ def resolve(
                 f"show where their line starts: {_named(guessed)}.",
             }
         )
-    if lost:
-        warnings.append(
-            {
-                "code": CODE_DROPPED,
-                "message": "These callouts are left out because they would overlap another "
-                f"callout, or have no place in the video: {_named(lost)}.",
-            }
-        )
+    if lost or on_graphic:
+        # One warning, so a render's warnings keep one entry for the code.
+        sentences: list[str] = []
+        if lost:
+            sentences.append(
+                "These callouts are left out because they would overlap another "
+                f"callout, or have no place in the video: {_named(lost)}."
+            )
+        if on_graphic:
+            sentences.append(
+                "These callouts are left out because they fall on a graphic shot: "
+                f"{_named(on_graphic)}."
+            )
+        warnings.append({"code": CODE_DROPPED, "message": " ".join(sentences)})
     return Resolution(CalloutTrack(style, tuple(entries)), warnings)
 
 

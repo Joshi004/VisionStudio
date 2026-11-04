@@ -36,9 +36,11 @@ is repaired by a **new attempt** (`queue_repair`): a row with `repair_of` set an
 repair mode that is given the code and the render error. A shot that has moved on (a new brief,
 theme or size) is not repaired: the next Make starts from what is current.
 
-**The video of a shot** is, for now (EXG-007 adds the owner's choice), the newest component
-attempt with a current video, or the newest block attempt with a current video when the component
-failed outright. A shot is **done** when it has one.
+**The video of a shot** (EXG-007, §3.8) is, in this order: the newest current video of the version
+the owner chose (`shot_graphic_choice`, which counts only while it names the shot's current
+brief), else the newest component attempt with a current video, else the newest block attempt
+with a current video when the component failed outright. Otherwise the shot has none. A shot is
+**done** when it has one. The owner may also choose Automatic, which deletes the row.
 """
 
 from __future__ import annotations
@@ -48,11 +50,11 @@ import json
 from dataclasses import dataclass
 from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import Job, Project, ShotGraphic, ShotGraphicBrief
+from app.db.models import Job, Project, ShotGraphic, ShotGraphicBrief, ShotGraphicChoice
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
@@ -104,6 +106,12 @@ NO_TIMELINE_MESSAGE: Final = (
 BEING_MADE_MESSAGE: Final = "The graphics of this shot are already being made."
 ENGINE_BUSY_MESSAGE: Final = "This version is already being made."
 STOPPED_MESSAGE: Final = "It stopped before a video was made."
+NO_VIDEO_TO_CHOOSE_MESSAGE: Final = "This version has no current video to use."
+
+# Why a version is the one the video uses (`UsedVideo.because`).
+USED_CHOSEN: Final = "chosen"
+USED_DEFAULT: Final = "default"
+USED_COMPONENT_FAILED: Final = "component_failed"
 
 
 class ShotGraphicsError(ValueError):
@@ -219,6 +227,15 @@ class EngineEntry:
 
 
 @dataclass(frozen=True)
+class UsedVideo:
+    """The attempt whose video the story render uses for a shot (§3.8), and why."""
+
+    engine: str
+    attempt: AttemptEntry
+    because: str
+
+
+@dataclass(frozen=True)
 class ShotEntry:
     """One graphic shot of a scene's newest plan and where its graphics stand."""
 
@@ -240,6 +257,10 @@ class ShotEntry:
     engines: list[EngineEntry]
     # The shot has the video the rule picks and it is current.
     done: bool
+    # The version the owner chose for the shot's current brief, or None (Automatic).
+    choice: str | None
+    # The video the render uses, or None when the shot has none.
+    used: UsedVideo | None
     last_error: str | None
     # Why nothing can be made for this shot now (a missing theme or brief, ...), or None.
     refusal: str | None
@@ -335,6 +356,22 @@ def _engine(
         failed_outright=outright,
         last_error=newest.error if newest is not None and best is None else None,
     )
+
+
+def _used(engines: list[EngineEntry], choice: str | None) -> UsedVideo | None:
+    """The video of a shot (§3.8): the owner's choice if that version has a current video, else
+    the generated component's, else the blocks' when the component failed outright.
+    """
+    component, blocks = engines
+    by_key = {component.key: component, blocks.key: blocks}
+    chosen = by_key[choice].best if choice in by_key else None
+    if choice is not None and chosen is not None:
+        return UsedVideo(choice, chosen, USED_CHOSEN)
+    if component.best is not None:
+        return UsedVideo(component.key, component.best, USED_DEFAULT)
+    if component.failed_outright and blocks.best is not None:
+        return UsedVideo(blocks.key, blocks.best, USED_COMPONENT_FAILED)
+    return None
 
 
 def _span_of(entry: shot_plans.SceneEntry, shot_id: str) -> scene_timeline.ShotSpan | None:
@@ -450,6 +487,19 @@ async def _rows_by_shot(
     return grouped
 
 
+async def _choices(
+    session: AsyncSession, project_id: int
+) -> dict[tuple[str, str], ShotGraphicChoice]:
+    statement = (
+        select(ShotGraphicChoice)
+        .where(ShotGraphicChoice.project_id == project_id)
+        .execution_options(populate_existing=True)
+    )
+    return {
+        (row.scene_id, row.shot_id): row for row in (await session.execute(statement)).scalars()
+    }
+
+
 async def _jobs_of(session: AsyncSession, rows: list[ShotGraphic]) -> dict[int, Job]:
     ids = {
         job_id
@@ -480,6 +530,7 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
     }
     clocks = await take_timings.scene_clocks(session, project)
     grouped = await _rows_by_shot(session, project.id)
+    choices = await _choices(session, project.id)
     jobs = await _jobs_of(session, [row for rows in grouped.values() for row in rows])
 
     scenes: list[SceneEntry] = []
@@ -508,9 +559,23 @@ async def _build(session: AsyncSession, project: Project) -> ShotGraphicsState:
                 )
                 for key in ENGINES
             ]
+            picked = choices.get((scene_id, shot["id"]))
+            choice = (
+                picked.engine
+                if picked is not None and brief is not None and picked.brief_id == brief.id
+                else None
+            )
             shots.append(
                 _shot_entry(
-                    shot, brief, brief_shot.status, theme_state, prepared, problem, engines, theme
+                    shot,
+                    brief,
+                    brief_shot.status,
+                    theme_state,
+                    prepared,
+                    problem,
+                    engines,
+                    theme,
+                    choice,
                 )
             )
         scenes.append(SceneEntry(item=scene.item, shots=shots, blocked_reason=scene.blocked_reason))
@@ -532,9 +597,10 @@ def _shot_entry(
     problem: str | None,
     engines: list[EngineEntry],
     theme: Any,
+    choice: str | None,
 ) -> ShotEntry:
-    component, blocks = engines
-    done = component.best is not None or (component.failed_outright and blocks.best is not None)
+    used = _used(engines, choice)
+    done = used is not None
     working = any(e.status in ("writing", "rendering") for e in engines)
     refusal = _refusal(theme_state, brief, brief_status, problem)
     reasons: list[str] = []
@@ -570,6 +636,8 @@ def _shot_entry(
         voice_offset_s=prepared.voice_offset_s if prepared is not None else 0.0,
         engines=engines,
         done=done,
+        choice=choice,
+        used=used,
         last_error="; ".join(errors) if errors else None,
         refusal=refusal,
         can_run=blocked is None,
@@ -865,3 +933,51 @@ async def ask_again(
         raise ShotGraphicsError(ENGINE_BUSY_MESSAGE)
     await session.commit()
     return job
+
+
+async def set_choice(
+    session: AsyncSession, project: Project, scene_id: str, shot_id: str, engine: str | None
+) -> str | None:
+    """The owner's choice of the version a graphic shot uses (§3.8). `None` is Automatic: the
+    row is deleted and the shot is back on the rule. A version needs a current video to be chosen.
+    The row names the shot's current brief, so a new brief puts the shot back on the rule.
+    Commits. Raises ShotGraphicsError when it cannot be set.
+    """
+    if engine is not None and engine not in ENGINES:
+        raise ShotGraphicsError(f"'{engine}' is not one of the versions of a graphic.")
+    shot = _find(await _build(session, project), scene_id, shot_id)
+    existing = (
+        await session.execute(
+            select(ShotGraphicChoice).where(
+                ShotGraphicChoice.project_id == project.id,
+                ShotGraphicChoice.scene_id == scene_id,
+                ShotGraphicChoice.shot_id == shot_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if engine is None:
+        if existing is not None:
+            await session.execute(
+                delete(ShotGraphicChoice).where(ShotGraphicChoice.id == existing.id)
+            )
+        await session.commit()
+        return None
+    if shot.brief is None:
+        raise ShotGraphicsError(BRIEF_MISSING_MESSAGE)
+    if next(e for e in shot.engines if e.key == engine).best is None:
+        raise ShotGraphicsError(NO_VIDEO_TO_CHOOSE_MESSAGE)
+    if existing is None:
+        session.add(
+            ShotGraphicChoice(
+                project_id=project.id,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                brief_id=shot.brief.id,
+                engine=engine,
+            )
+        )
+    else:
+        existing.brief_id = shot.brief.id
+        existing.engine = engine
+    await session.commit()
+    return engine

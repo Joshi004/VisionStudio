@@ -35,6 +35,11 @@ const STATUS: Record<
   out_of_date: { label: "Out of date", color: "yellow" },
 };
 
+const GRAPHIC_ENGINE = {
+  generated_component: "generated component",
+  remotion_blocks: "building blocks",
+} as const;
+
 /** "9.50 s, 228 frames, 1280x720, 2.1 MB, with sound". */
 function renderText(render: StoryRender): string {
   const parts: string[] = [];
@@ -114,8 +119,12 @@ function RenderRow({ render }: { render: StoryRender }) {
       ))}
       <Stack gap={0} ml="md">
         {render.takes.map((take) => (
-          <Text key={take.take_id} size="xs" c="dimmed">
-            Scene {take.scene_index}, {take.shot_id}: take {take.take_number},{" "}
+          <Text key={`${take.scene_id}/${take.shot_id}`} size="xs" c="dimmed">
+            Scene {take.scene_index}, {take.shot_id}:{" "}
+            {take.graphic !== null
+              ? `graphic (${GRAPHIC_ENGINE[take.graphic.engine]}, attempt ${take.graphic.attempt})`
+              : `take ${take.take_number}`}
+            ,{" "}
             {take.frames} frames, {levelText(take.loudness_lufs, take.gain_db)}
           </Text>
         ))}

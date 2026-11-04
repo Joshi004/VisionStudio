@@ -7,6 +7,7 @@ import {
   List,
   Loader,
   Paper,
+  SegmentedControl,
   SimpleGrid,
   Stack,
   Text,
@@ -18,6 +19,7 @@ import { useRunGraphicBrief } from "../../api/graphicBriefs";
 import {
   useAskGraphicAgain,
   useMakeShotGraphics,
+  useSetGraphicChoice,
   useShotGraphics,
   type ShotGraphic,
   type ShotGraphicAttempt,
@@ -66,6 +68,7 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
   const make = useMakeShotGraphics(projectId);
   const askAgain = useAskGraphicAgain(projectId);
   const writeBrief = useRunGraphicBrief(projectId);
+  const setChoice = useSetGraphicChoice(projectId);
 
   return (
     <Stack gap="sm">
@@ -99,6 +102,11 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
               {describeError(writeBrief.error)}
             </Alert>
           )}
+          {setChoice.isError && (
+            <Alert color="red" title="Could not choose the version">
+              {describeError(setChoice.error)}
+            </Alert>
+          )}
           {data?.blocked_reason && (
             <Text size="sm" c="dimmed">
               {data.blocked_reason}
@@ -117,12 +125,17 @@ export function GraphicsPanel({ projectId }: GraphicsPanelProps) {
         <SceneGraphics
           key={scene.id}
           scene={scene}
-          busy={make.isPending || askAgain.isPending || writeBrief.isPending}
+          busy={
+            make.isPending || askAgain.isPending || writeBrief.isPending || setChoice.isPending
+          }
           onMake={(shot) => make.mutate({ sceneId: scene.id, shotId: shot.id })}
           onAskAgain={(shot, engine) =>
             askAgain.mutate({ sceneId: scene.id, shotId: shot.id, engine })
           }
           onWriteBrief={(shot) => writeBrief.mutate({ sceneId: scene.id, shotId: shot.id })}
+          onChoose={(shot, engine) =>
+            setChoice.mutate({ sceneId: scene.id, shotId: shot.id, engine })
+          }
         />
       ))}
     </Stack>
@@ -135,9 +148,17 @@ type SceneGraphicsProps = {
   onMake: (shot: ShotGraphic) => void;
   onAskAgain: (shot: ShotGraphic, engine: ShotGraphicEngine["key"]) => void;
   onWriteBrief: (shot: ShotGraphic) => void;
+  onChoose: (shot: ShotGraphic, engine: ShotGraphicEngine["key"] | null) => void;
 };
 
-function SceneGraphics({ scene, busy, onMake, onAskAgain, onWriteBrief }: SceneGraphicsProps) {
+function SceneGraphics({
+  scene,
+  busy,
+  onMake,
+  onAskAgain,
+  onWriteBrief,
+  onChoose,
+}: SceneGraphicsProps) {
   return (
     <Stack gap="xs">
       <Text fw={600}>{scene.index !== null ? `Scene ${scene.index}: ${scene.title}` : scene.title}</Text>
@@ -149,10 +170,27 @@ function SceneGraphics({ scene, busy, onMake, onAskAgain, onWriteBrief }: SceneG
           onMake={onMake}
           onAskAgain={onAskAgain}
           onWriteBrief={onWriteBrief}
+          onChoose={onChoose}
         />
       ))}
     </Stack>
   );
+}
+
+const AUTOMATIC = "automatic";
+
+/** Which version the video uses for a shot, and why, in one sentence. */
+function usedText(shot: ShotGraphic): string {
+  const used = shot.used;
+  if (used === null) {
+    return "No version is used yet: the video needs a current generated component, or the blocks once the component has failed.";
+  }
+  const name = shot.engines.find((engine) => engine.key === used.engine)?.label ?? used.engine;
+  if (used.because === "chosen") return `Used in the video: ${name} (your choice)`;
+  if (used.because === "component_failed") {
+    return `Used in the video: ${name} (the generated component failed)`;
+  }
+  return `Used in the video: ${name}`;
 }
 
 /** The attempt a version shows: the one chosen, else the newest that has a video, else the newest. */
@@ -173,9 +211,17 @@ type ShotGraphicsProps = {
   onMake: (shot: ShotGraphic) => void;
   onAskAgain: (shot: ShotGraphic, engine: ShotGraphicEngine["key"]) => void;
   onWriteBrief: (shot: ShotGraphic) => void;
+  onChoose: (shot: ShotGraphic, engine: ShotGraphicEngine["key"] | null) => void;
 };
 
-function ShotGraphics({ shot, busy, onMake, onAskAgain, onWriteBrief }: ShotGraphicsProps) {
+function ShotGraphics({
+  shot,
+  busy,
+  onMake,
+  onAskAgain,
+  onWriteBrief,
+  onChoose,
+}: ShotGraphicsProps) {
   const [chosen, setChosen] = useState<Partial<Record<ShotGraphicEngine["key"], number>>>({});
   const [showSafeArea, setShowSafeArea] = useState(false);
   const [showCaptionArea, setShowCaptionArea] = useState(false);
@@ -291,6 +337,28 @@ function ShotGraphics({ shot, busy, onMake, onAskAgain, onWriteBrief }: ShotGrap
           />
         )}
         {shot.voice !== null && <VoiceAudio url={shot.voice.url} register={sync.registerAudio} />}
+
+        <Group gap="sm" align="center">
+          <Text size="sm" fw={600}>
+            {usedText(shot)}
+          </Text>
+          <SegmentedControl
+            size="xs"
+            value={shot.choice ?? AUTOMATIC}
+            disabled={busy}
+            onChange={(value) =>
+              onChoose(shot, value === AUTOMATIC ? null : (value as ShotGraphicEngine["key"]))
+            }
+            data={[
+              { value: AUTOMATIC, label: "Automatic" },
+              ...shot.engines.map((engine) => ({
+                value: engine.key,
+                label: engine.label,
+                disabled: engine.status !== "ready" && shot.choice !== engine.key,
+              })),
+            ]}
+          />
+        </Group>
 
         <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
           {shown.map(({ engine, attempt }) => (

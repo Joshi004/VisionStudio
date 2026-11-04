@@ -122,3 +122,40 @@ export function useAskGraphicAgain(projectId: number) {
       ]),
   });
 }
+
+/**
+ * Chooses the version the video uses for one shot. `null` is Automatic: the generated component,
+ * and the building blocks only when it failed outright. A new brief puts the shot back on it.
+ */
+export function useSetGraphicChoice(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      sceneId: string;
+      shotId: string;
+      engine: ShotGraphicEngineKey | null;
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/choice",
+        {
+          params: {
+            path: { project_id: projectId, scene_id: input.sceneId, shot_id: input.shotId },
+          },
+          body: { engine: input.engine },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not choose the version (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: shotGraphicsKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
