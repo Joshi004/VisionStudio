@@ -124,6 +124,9 @@ async def start_run(
                 raise DiscoveryError(str(exc)) from exc
             if fixed is not None:
                 job_input["fixed_content"] = fixed
+            elif kind == "environments" and project.presenter_staging:
+                # A studio designed from the script is designed for the staging.
+                job_input["presenter_staging"] = project.presenter_staging
     cast_kind = cast_kind_of(kind)
     if cast_kind is not None:
         # The library items the user put in the project's cast (PHASE-048). The model is shown

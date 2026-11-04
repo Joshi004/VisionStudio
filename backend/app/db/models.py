@@ -85,6 +85,13 @@ class Project(Base):
     # explainer (at most 500 characters). NULL means the Story Bible's narration style, or the
     # default. Can be changed at any time.
     presenter_delivery: Mapped[str | None] = mapped_column(default=None)
+    # The owner's text for how an explainer's presenter is placed and moves on camera (at most
+    # 500 characters). NULL means the presenter stands. Can be changed at any time.
+    presenter_staging: Mapped[str | None] = mapped_column(default=None)
+    # The owner's text for what an explainer's presenter wears (at most 300 characters). It is
+    # resolved into one named look for every scene. NULL means the presenter's default outfit.
+    # Can be changed at any time.
+    presenter_outfit: Mapped[str | None] = mapped_column(default=None)
     # EXG-001. Whether a continuous explainer gets graphic shots (EG-1). Chosen when the project
     # is created and never changed; only an explainer with a continuous voice can have it on.
     graphics: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))

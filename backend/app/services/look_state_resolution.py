@@ -30,6 +30,7 @@ twice (`services/look_state_resolution_writer.py`).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Any, Final, cast
@@ -56,6 +57,7 @@ from app.services import (
     story_bible,
 )
 from app.services import look_state_resolution_writer as writer
+from app.services.project_kinds import KIND_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -98,6 +100,9 @@ class _Loaded:
     characters: dict[str, _Subject]
     environments: dict[str, _Subject]
     blocked_reason: str | None
+    # What an explainer's presenter wears in every scene, when the owner wrote it; None for a
+    # story.
+    presenter_outfit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -234,7 +239,20 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         characters=characters,
         environments=environments,
         blocked_reason=_blocked_reason(story, bible, scenes, entries),
+        presenter_outfit=project.presenter_outfit if project.kind == KIND_EXPLAINER else None,
     )
+
+
+def _with_outfit(definition: dict[str, Any], outfit: str | None) -> dict[str, Any]:
+    """The definition with every character of the scene asking for `outfit` as their look. An
+    explainer's scene has one character, the presenter. Unchanged when `outfit` is None.
+    """
+    if outfit is None:
+        return definition
+    looks = {**definition["character_looks"]}
+    for character_id in definition["characters"]:
+        looks[character_id] = outfit
+    return {**definition, "character_looks": looks}
 
 
 def _scene_inputs(loaded: _Loaded) -> list[dict[str, Any]]:
@@ -244,11 +262,17 @@ def _scene_inputs(loaded: _Loaded) -> list[dict[str, Any]]:
             "scene_id": entry.item["id"],
             "index": entry.item["index"],
             "title": entry.item["title"],
-            "definition": entry.definition,
+            "definition": _with_outfit(entry.definition, loaded.presenter_outfit),
         }
         for entry in loaded.scene_entries
         if entry.definition is not None
     ]
+
+
+def _outfit_sha256(outfit: str | None) -> str | None:
+    if outfit is None:
+        return None
+    return hashlib.sha256(outfit.encode("utf-8")).hexdigest()
 
 
 async def _catalog(
@@ -359,7 +383,13 @@ def _inputs(
                     "name": subject.name,
                 }
             )
-    return {"story_sha256": story_bible.story_sha256(story), "artifacts": artifacts}
+    inputs: dict[str, Any] = {
+        "story_sha256": story_bible.story_sha256(story),
+        "artifacts": artifacts,
+    }
+    if loaded.presenter_outfit is not None:
+        inputs["presenter_outfit"] = {"sha256": _outfit_sha256(loaded.presenter_outfit)}
+    return inputs
 
 
 async def start_run(session: AsyncSession, project: Project) -> Job:
@@ -604,6 +634,13 @@ def _out_of_date_reasons(
         what = "character" if is_character else "environment"
         if subject is None or subject.library_id != artifact.get("id"):
             reasons.append(f"{name} is now linked to a different {what}, or not linked.")
+
+    recorded_outfit = inputs.get("presenter_outfit")
+    recorded_outfit_sha = (
+        recorded_outfit.get("sha256") if isinstance(recorded_outfit, dict) else None
+    )
+    if recorded_outfit_sha != _outfit_sha256(loaded.presenter_outfit):
+        reasons.append("The presenter outfit changed since the looks were resolved.")
     return reasons
 
 

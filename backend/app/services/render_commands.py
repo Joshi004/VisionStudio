@@ -709,14 +709,14 @@ def final_encode_args(
     finished H.264 and AAC video. The picture is the first input and the pre-master the second.
 
     `captions` is `(ASS file, fonts folder)` for an explainer with captions: the picture then
-    goes through the `subtitles` filter. Without it the commands are exactly what they were
-    before captions, so a story is rendered as it always was.
+    goes through the `subtitles` filter as its own `-vf` graph. It is kept apart from the
+    sound's `-filter_complex` graph on purpose: in one graph with the sound's `asetpts`, the
+    sound's timestamps run backwards and the track comes out much shorter than the video.
+    Without it the commands are exactly what they were before captions, so a story is
+    rendered as it always was.
     """
     graph = "[1:a:0]" + ",".join(master_filters(norm)) + "[out]"
-    picture = "0:v:0"
-    if captions is not None:
-        graph = f"[0:v:0]{subtitles_filter(*captions)}[v];{graph}"
-        picture = "[v]"
+    picture_filter = ["-vf", subtitles_filter(*captions)] if captions is not None else []
     return [
         *_BASE,
         "-f",
@@ -732,7 +732,8 @@ def final_encode_args(
         "-filter_complex",
         graph,
         "-map",
-        picture,
+        "0:v:0",
+        *picture_filter,
         "-map",
         "[out]",
         "-c:v",

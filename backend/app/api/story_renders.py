@@ -42,12 +42,19 @@ _INVALID = {
 }
 
 Status = Literal["current", "out_of_date"]
-WarningCode = Literal["take_out_of_date", "take_without_sound", "caption_timing_estimated"]
+WarningCode = Literal[
+    "take_out_of_date",
+    "take_without_sound",
+    "caption_timing_estimated",
+    "callout_at_unit_start",
+    "callout_dropped",
+]
 
 
 class RenderWarningOut(BaseModel):
     code: WarningCode
-    # The shot the warning is about. None for a warning about the whole render (the captions).
+    # The shot the warning is about. None for a warning about the whole render (the captions and
+    # the callouts).
     scene_id: str | None = None
     shot_id: str | None = None
     message: str
@@ -173,8 +180,8 @@ def _job_out(job: Job | None) -> DiscoveryJobOut | None:
 def _warning_out(warning: dict[str, Any]) -> RenderWarningOut:
     return RenderWarningOut(
         code=warning["code"],
-        scene_id=warning["scene_id"],
-        shot_id=warning["shot_id"],
+        scene_id=warning.get("scene_id"),
+        shot_id=warning.get("shot_id"),
         message=warning["message"],
     )
 

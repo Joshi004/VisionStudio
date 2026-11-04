@@ -18,7 +18,12 @@ import { useLibraryCharacters } from "../../api/characterLab";
 import { useLibraryEnvironments } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
-import { PROJECT_KINDS, isProjectKind } from "./projectKinds";
+import {
+  OUTFIT_MAX_CHARS,
+  PROJECT_KINDS,
+  STAGING_MAX_CHARS,
+  isProjectKind,
+} from "./projectKinds";
 import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
 import type { SpeechMode } from "./speechModes";
@@ -129,6 +134,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [callouts, setCallouts] = useState(true);
   const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
   const [delivery, setDelivery] = useState("");
+  const [staging, setStaging] = useState("");
+  const [outfit, setOutfit] = useState("");
   const [graphics, setGraphics] = useState(true);
   const [name, setName] = useState("");
 
@@ -154,6 +161,8 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         voice_track: explainer ? voiceTrack : undefined,
         presenter_delivery:
           explainer && voiceTrack === "continuous" && delivery.trim() !== "" ? delivery : undefined,
+        presenter_staging: explainer && staging.trim() !== "" ? staging : undefined,
+        presenter_outfit: explainer && outfit.trim() !== "" ? outfit : undefined,
         // Only a continuous explainer can have graphics; any other project leaves it out.
         graphics: explainer && voiceTrack === "continuous" ? graphics : undefined,
       },
@@ -272,6 +281,26 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
               setId={setId}
               onPresenter={setPresenterId}
               onSet={setSetId}
+            />
+            <Textarea
+              label="Presenter staging (optional)"
+              description="How the presenter is placed and moves on camera, for example: seated at a desk, hands on the desk, little movement. Left empty, the presenter stands. You can change it later in the project settings."
+              value={staging}
+              onChange={(event) => setStaging(event.currentTarget.value)}
+              maxLength={STAGING_MAX_CHARS}
+              autosize
+              minRows={2}
+              maxRows={6}
+            />
+            <Textarea
+              label="Presenter outfit (optional)"
+              description="What the presenter wears in this video, for example: a navy blazer over a white shirt. New pictures of the presenter in this outfit are made for the project; the character in the Character Lab keeps its own outfit. Left empty, the presenter wears their usual outfit."
+              value={outfit}
+              onChange={(event) => setOutfit(event.currentTarget.value)}
+              maxLength={OUTFIT_MAX_CHARS}
+              autosize
+              minRows={2}
+              maxRows={4}
             />
             <Radio.Group
               label="6. Voice"

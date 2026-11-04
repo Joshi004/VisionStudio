@@ -16,7 +16,7 @@ import {
 
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
-import { projectKindLabel } from "./projectKinds";
+import { OUTFIT_MAX_CHARS, STAGING_MAX_CHARS, projectKindLabel } from "./projectKinds";
 import { speechModeLabel } from "./speechModes";
 import { DELIVERY_MAX_CHARS, voiceTrackLabel } from "./voiceTracks";
 import { changedFields, initialDraft, type Draft, type NUMBER_FIELDS } from "./settingsDraft";
@@ -115,6 +115,52 @@ export function ProjectSettingsForm({
                 The speech mode is fixed after creation.
               </Text>
             </Group>
+          </Paper>
+        )}
+
+        {project.kind === "explainer" && (
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="xs">
+              <Title order={4}>Presenter staging</Title>
+              <Textarea
+                aria-label="Presenter staging"
+                description="How the presenter is placed and moves on camera, for example: seated at a desk, hands on the desk, little movement. Left empty, the presenter stands."
+                value={draft.presenter_staging}
+                onChange={(event) => edit("presenter_staging", event.currentTarget.value)}
+                maxLength={STAGING_MAX_CHARS}
+                autosize
+                minRows={2}
+                maxRows={6}
+              />
+              <Text size="xs" c="dimmed">
+                Every presenter shot is defined with this text, so changing it makes those shots
+                out of date. A studio designed from the script uses it only when it is designed:
+                design the studio again to change it.
+              </Text>
+            </Stack>
+          </Paper>
+        )}
+
+        {project.kind === "explainer" && (
+          <Paper withBorder p="md" radius="md">
+            <Stack gap="xs">
+              <Title order={4}>Presenter outfit</Title>
+              <Textarea
+                aria-label="Presenter outfit"
+                description="What the presenter wears in this video, for example: a navy blazer over a white shirt. Left empty, the presenter wears their usual outfit from the Character Lab."
+                value={draft.presenter_outfit}
+                onChange={(event) => edit("presenter_outfit", event.currentTarget.value)}
+                maxLength={OUTFIT_MAX_CHARS}
+                autosize
+                minRows={2}
+                maxRows={4}
+              />
+              <Text size="xs" c="dimmed">
+                The outfit becomes one named look of the presenter, with its own pictures, used in
+                every scene. Changing it makes the resolved looks out of date, and with them the
+                presenter shots.
+              </Text>
+            </Stack>
           </Paper>
         )}
 

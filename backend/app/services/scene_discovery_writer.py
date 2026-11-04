@@ -137,11 +137,11 @@ Answer with one JSON object only, in exactly this form: {{"scenes": [{{"id": "..
 # speaks from the same studio, so the place and the time never change.
 _EXPLAINER_NOTE: Final = """EXPLAINER SCRIPT
 The text is not a story: it is a script that one presenter explains, on camera and as a \
-voice-over. The presenter always stands in the same studio, so a change of place or time does not \
-start a scene, and the rules above about places and times do not apply. Instead, a scene is one \
-section of the explanation: it starts when the script moves on to a new topic, a new step, a new \
-example or a new section (a heading, "First", "Next", "Now let's look at"). The opening and the \
-closing of the script are sections of their own when they stand apart. Keep a section together \
+voice-over. The presenter always speaks from the same studio, so a change of place or time does \
+not start a scene, and the rules above about places and times do not apply. Instead, a scene is \
+one section of the explanation: it starts when the script moves on to a new topic, a new step, a \
+new example or a new section (a heading, "First", "Next", "Now let's look at"). The opening and \
+the closing of the script are sections of their own when they stand apart. Keep a section together \
 as long as it explains one idea: do not cut one explanation into several scenes. The other rules, \
 including covering the whole script in order and copying "starts_with" exactly, stay as they \
 are. The "description" says what the section explains."""

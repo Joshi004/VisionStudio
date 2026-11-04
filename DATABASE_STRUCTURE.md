@@ -618,6 +618,8 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `callouts` | BOOLEAN | NOT NULL | `1` | EXPLAINER-007. Whether an explainer's render draws callouts. The same rules as `captions` |
 | `voice_track` | TEXT | NOT NULL | `'lines'` | `lines` \| `continuous` — how an explainer's speech is made (FLOW-002). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. `lines`: each line is its own speech (what every project did until now). `continuous`: one voice take per scene, the picture cut on top of it. A new explainer defaults to `continuous`; a story, and every project made before this column, is `lines` |
 | `presenter_delivery` | TEXT | NULL | — | FLOW-002. The owner's text that steers the voice of every take of a `continuous` explainer, at most 500 characters. NULL means the Story Bible's `storytelling_style.narration`, or a fixed default. Set only on a continuous explainer. `PATCH /api/projects/{id}` may change it at any time for one (a blank text clears it; any other project gets 422) |
+| `presenter_staging` | TEXT | NULL | — | Migration `0081`. The owner's text for how an explainer's presenter is placed and moves on camera (for example "seated at a desk, still"), at most 500 characters, trimmed; a blank text is stored as NULL. NULL means the presenter stands. Set only on an explainer (any other project gets 422). `PATCH /api/projects/{id}` may change it at any time. It is sent to the definition of every explainer shot as `PRESENTER STAGING`, and each definition records its SHA-256 in `inputs.presenter_staging.sha256`; a presenter shot whose recorded hash differs from the current text is out of date (B-roll is not). A studio designed from the script (no set chosen) is designed with it, but is not made out of date when it changes |
+| `presenter_outfit` | TEXT | NULL | — | Migration `0082`. The owner's text for what an explainer's presenter wears (for example "a navy blazer over a white shirt"), at most 300 characters (the longest named-look description), trimmed; a blank text is stored as NULL. NULL means the presenter's default outfit. Set only on an explainer (any other project gets 422). `PATCH /api/projects/{id}` may change it at any time. The look resolution uses it as the presenter's look request in every scene, in place of what the scene definitions asked for, so it resolves to one named look (with its own pictures) shared by every scene. The resolution records its SHA-256 in `inputs.presenter_outfit.sha256` and is out of date when the text changes |
 | `graphics` | BOOLEAN | NOT NULL | `0` | EXG-001. Whether a continuous explainer gets graphic shots (charts, diagrams and text cards drawn by code). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. Only an explainer with `voice_track = continuous` can have it on (`validate_project`). A new continuous explainer defaults to on; every other project, and every project made before this column, is off. Off, the project gets exactly the instructions, jobs and FFmpeg commands it got before |
 
 ```sql
@@ -644,7 +646,9 @@ CREATE TABLE project (
     voice_track        TEXT NOT NULL DEFAULT 'lines'
         CHECK (voice_track IN ('lines', 'continuous')),
     presenter_delivery TEXT,
-    graphics           BOOLEAN NOT NULL DEFAULT 0
+    graphics           BOOLEAN NOT NULL DEFAULT 0,
+    presenter_staging  TEXT,
+    presenter_outfit   TEXT
 );
 ```
 

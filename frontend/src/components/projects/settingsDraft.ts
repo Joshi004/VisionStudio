@@ -19,6 +19,10 @@ export type Draft = {
   callouts: boolean;
   /** The text that steers a continuous explainer's voice (FLOW-002). Empty means none. */
   presenter_delivery: string;
+  /** How an explainer's presenter is placed and moves on camera. Empty means none. */
+  presenter_staging: string;
+  /** What an explainer's presenter wears. Empty means their usual outfit. */
+  presenter_outfit: string;
 };
 
 export const NUMBER_FIELDS = ["gen_width", "gen_height", "out_width", "out_height", "fps"] as const;
@@ -36,6 +40,8 @@ export function initialDraft(project: ProjectDetail): Draft {
     captions: project.captions,
     callouts: project.callouts,
     presenter_delivery: project.presenter_delivery ?? "",
+    presenter_staging: project.presenter_staging ?? "",
+    presenter_outfit: project.presenter_outfit ?? "",
   };
 }
 
@@ -66,6 +72,16 @@ export function changedFields(project: ProjectDetail, draft: Draft): ProjectUpda
   if (delivery !== saved.presenter_delivery.trim()) {
     // An emptied box clears the text, so the Story Bible's style or the default is used.
     changes.presenter_delivery = delivery === "" ? null : delivery;
+  }
+  const staging = draft.presenter_staging.trim();
+  if (staging !== saved.presenter_staging.trim()) {
+    // An emptied box clears the text, so the presenter stands.
+    changes.presenter_staging = staging === "" ? null : staging;
+  }
+  const outfit = draft.presenter_outfit.trim();
+  if (outfit !== saved.presenter_outfit.trim()) {
+    // An emptied box clears the text, so the presenter wears their usual outfit.
+    changes.presenter_outfit = outfit === "" ? null : outfit;
   }
   for (const field of NUMBER_FIELDS) {
     if (draft[field] !== saved[field]) {

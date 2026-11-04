@@ -231,11 +231,11 @@ type): {_ANSWER_FORM}"""
 # An explainer (EXPLAINER-004): the presenter is visible only in a shot that carries their line.
 _EXPLAINER_NOTE: Final = """This is an explainer with one presenter. When SPEECH lists a line of \
 dialogue, the shot shows the presenter speaking it to the camera: the presenter is the only \
-entry in "characters", looks straight into the lens, stands in the set and is framed from the \
-chest up or closer, and the camera is steady. When SPEECH lists only narration, or nothing, the \
-shot is B-roll that illustrates the words: "characters" is an empty list, the picture does not \
-show the presenter or the set, and it holds no written words, labels, captions, logos, charts or \
-diagrams. Describe B-roll as something a camera could film, in the style of the StoryBible."""
+entry in "characters", looks straight into the lens, is placed in the set as the presenter \
+staging rule below says, and the camera is steady. When SPEECH lists only narration, or nothing, \
+the shot is B-roll that illustrates the words: "characters" is an empty list, the picture does \
+not show the presenter or the set, and it holds no written words, labels, captions, logos, charts \
+or diagrams. Describe B-roll as something a camera could film, in the style of the StoryBible."""
 
 
 # A continuous explainer (FLOW-005): the shots are cut on top of one voice recording, so a
@@ -244,12 +244,26 @@ _CONTINUOUS_NOTE: Final = """This is an explainer with one presenter, and the sh
 top of one continuous voice recording, so the words of a shot may begin or end in the middle of \
 a sentence. When SPEECH lists words of the presenter (kind "dialogue"), the shot is a presenter \
 shot: it shows the presenter speaking those words to the camera. The presenter is the only entry \
-in "characters", looks straight into the lens, stands in the set and is framed from the chest up \
-or closer, and the camera is steady. Do not describe the thought as starting or finishing in \
+in "characters", looks straight into the lens, is placed in the set as the presenter staging rule \
+below says, and the camera is steady. Do not describe the thought as starting or finishing in \
 this shot. When SPEECH lists only narration, the shot is B-roll that illustrates the words: \
 "characters" is an empty list, the picture does not show the presenter or the set, and it holds \
 no written words, labels, captions, logos, charts or diagrams. Describe B-roll as something a \
 camera could film, in the style of the StoryBible."""
+
+# Part of every explainer's instructions, whether the project has a staging text or not, so the
+# instructions do not change from request to request.
+_STAGING_RULE: Final = """Presenter staging: when the user message holds PRESENTER STAGING, it \
+is the owner's choice of how the presenter is placed and moves on camera (for example seated at a \
+desk and still). Follow it in every presenter shot: write the presenter's "pose", the "action" \
+and the "continuity_start" and "continuity_end" so that they agree with it, the same way in every \
+presenter shot. When it asks for little or no movement, the presenter only speaks, with small \
+natural movements of the face and head, and does not stand up, walk or change position. It never \
+changes the other rules: the presenter is still the only one on camera and looks into the lens, \
+the camera stays steady, and B-roll still never shows the presenter. Frame a presenter shot from \
+the chest up or closer; when PRESENTER STAGING needs more of the set to be seen (such as a desk or \
+a chair), the shot may be "medium_close_up" or "medium", never wider. Without PRESENTER STAGING, \
+the presenter stands in the set and is framed from the chest up or closer."""
 
 
 def instructions(explainer: bool = False, continuous: bool = False) -> str:
@@ -261,7 +275,7 @@ def instructions(explainer: bool = False, continuous: bool = False) -> str:
     note = _CONTINUOUS_NOTE if continuous else _EXPLAINER_NOTE
     marker = "\n\n" + length_rule(LIMITS)
     head, tail = _INSTRUCTIONS.split(marker, 1)
-    return f"{head}\n\n{note}{marker}{tail}"
+    return f"{head}\n\n{note}\n\n{_STAGING_RULE}{marker}{tail}"
 
 
 def build_request(
@@ -281,6 +295,7 @@ def build_request(
     staging: dict[str, Any] | None = None,
     explainer: bool = False,
     continuous: bool = False,
+    presenter_staging: str | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
@@ -301,6 +316,8 @@ def build_request(
 
     `explainer` adds the explainer note to the instructions (EXPLAINER-004). `continuous` (a
     continuous explainer's cut-based shot, FLOW-005) makes it the note of the cut-based shots.
+    `presenter_staging` is the explainer owner's text for how the presenter is placed and moves;
+    it adds `PRESENTER STAGING` as a data block.
     """
     parts = [
         "STORY BIBLE (JSON):\n" + json.dumps(bible_content, ensure_ascii=False, indent=2),
@@ -316,6 +333,8 @@ def build_request(
     ]
     if staging is not None:
         parts += staging_blocks(staging)
+    if explainer and presenter_staging:
+        parts.append("PRESENTER STAGING (plain text from the owner):\n" + presenter_staging)
     if feedback is not None:
         parts += user_feedback.blocks(feedback, "PREVIOUS SPECIFICATION")
     return {

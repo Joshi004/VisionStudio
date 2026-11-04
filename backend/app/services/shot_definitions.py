@@ -205,6 +205,9 @@ class _Loaded:
     blocked_reason: str | None
     # An explainer project (EXPLAINER-004): its shots are the presenter's or B-roll.
     explainer: bool = False
+    # The explainer owner's text for how the presenter is placed and moves; None when there is
+    # none, and for a story.
+    presenter_staging: str | None = None
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -242,6 +245,7 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         views={entry.discovery_id: entry for entry in views.entries},
         blocked_reason=_blocked_reason(project.script_text, bible, plans.blocked_reason),
         explainer=project.kind == KIND_EXPLAINER,
+        presenter_staging=project.presenter_staging if project.kind == KIND_EXPLAINER else None,
     )
 
 
@@ -635,6 +639,12 @@ def _staging_sha256(staging: dict[str, Any] | None) -> str | None:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _presenter_staging_sha256(text: str | None) -> str | None:
+    if text is None:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) -> dict[str, Any]:
     """Everything the model is shown about one shot, as the fields of a job's input (without
     the dedupe key): the scene and its definition, the shot with its neighbours, its events and
@@ -757,6 +767,13 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         },
         # What the shot was staged from; the shot is out of date when it changes.
         **({"staging": {"sha256": _staging_sha256(staging)}} if staging is not None else {}),
+        # The presenter staging an explainer's shot was defined with (None when there was none);
+        # a presenter shot is out of date when it changes.
+        **(
+            {"presenter_staging": {"sha256": _presenter_staging_sha256(loaded.presenter_staging)}}
+            if loaded.explainer
+            else {}
+        ),
         # Narrowed to what the shot uses by `save_shot_definition` (PHASE-039).
         "resolved": _resolved_record(resolved),
     }
@@ -787,6 +804,11 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         "explainer": loaded.explainer,
         # Only for a cut plan (FLOW-005), so every other job is exactly what it was.
         **({"continuous": True} if cut else {}),
+        **(
+            {"presenter_staging": loaded.presenter_staging}
+            if loaded.presenter_staging is not None
+            else {}
+        ),
         # Written onto the version the job makes (D-3).
         "inputs": inputs,
     }
@@ -1196,6 +1218,15 @@ def _out_of_date_reasons(
             reasons.append("The staging of this shot or the views of its place changed.")
     elif staging_sha256 is not None:
         reasons.append("This shot was defined before its scene was staged.")
+
+    # Only a presenter shot shows anyone in an explainer; B-roll does not depend on the staging.
+    if loaded.explainer and isinstance(row.content, dict) and row.content.get("characters"):
+        recorded_presenter = inputs.get("presenter_staging")
+        recorded_presenter_sha = (
+            recorded_presenter.get("sha256") if isinstance(recorded_presenter, dict) else None
+        )
+        if recorded_presenter_sha != _presenter_staging_sha256(loaded.presenter_staging):
+            reasons.append("The presenter staging changed since this shot was defined.")
 
     newest = loaded.resolution.version
     uses = inputs.get("uses")

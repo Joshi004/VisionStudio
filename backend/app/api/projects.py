@@ -61,6 +61,10 @@ class ProjectCreate(BaseModel):
     # Graphic shots (EXG-001). Left out, a continuous explainer gets them on and every other
     # project off. Asking for them on any other project is refused.
     graphics: StrictBool | None = None
+    # How an explainer's presenter is placed and moves on camera. Only for an explainer.
+    presenter_staging: StrictStr | None = None
+    # What an explainer's presenter wears. Only for an explainer.
+    presenter_outfit: StrictStr | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -89,6 +93,10 @@ class ProjectUpdate(BaseModel):
     callouts: StrictBool | None = None
     # The text that steers a continuous explainer's voice (FLOW-002). Null or blank clears it.
     presenter_delivery: StrictStr | None = None
+    # How an explainer's presenter is placed and moves on camera. Null or blank clears it.
+    presenter_staging: StrictStr | None = None
+    # What an explainer's presenter wears. Null or blank clears it.
+    presenter_outfit: StrictStr | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -136,6 +144,12 @@ class ProjectDetail(BaseModel):
     voice_track: VoiceTrack
     # The owner's voice text for a continuous explainer. Null when there is none.
     presenter_delivery: str | None
+    # The owner's text for how an explainer's presenter is placed and moves. Null when there is
+    # none: the presenter stands.
+    presenter_staging: str | None
+    # The owner's text for what an explainer's presenter wears. Null when there is none: the
+    # presenter wears their default outfit.
+    presenter_outfit: str | None
     # Whether a continuous explainer gets graphic shots (EXG-001). Off for every other project.
     graphics: bool
     story_length: StoryLengthOut
@@ -190,6 +204,8 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         callouts=project.callouts,
         voice_track=_voice_track(project),
         presenter_delivery=project.presenter_delivery,
+        presenter_staging=project.presenter_staging,
+        presenter_outfit=project.presenter_outfit,
         graphics=project.graphics,
         story_length=StoryLengthOut(
             word_count=length.word_count,
@@ -256,6 +272,8 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             body.voice_track,
             body.presenter_delivery,
             body.graphics,
+            presenter_staging=body.presenter_staging,
+            presenter_outfit=body.presenter_outfit,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

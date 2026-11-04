@@ -46,6 +46,13 @@ VOICE_CONTINUOUS: Final = "continuous"
 VOICE_TRACKS: Final = (VOICE_LINES, VOICE_CONTINUOUS)
 # The presenter delivery text is sent to the speech model as the take's instruction.
 DELIVERY_MAX_CHARS: Final = speech_synthesizer.INSTRUCTION_MAX_CHARS
+# How an explainer's presenter is placed and moves on camera, sent to the shot prompts.
+STAGING_MAX_CHARS: Final = 500
+STAGING_ONLY_MESSAGE: Final = "The presenter staging is only for an explainer."
+# What an explainer's presenter wears, resolved into one named look. The limit is the longest
+# description a named look keeps (`look_state_resolution_writer.DESCRIPTION_MAX_CHARS`).
+OUTFIT_MAX_CHARS: Final = 300
+OUTFIT_ONLY_MESSAGE: Final = "The presenter outfit is only for an explainer."
 # EXG-001: graphic shots exist only in an explainer with a continuous voice (EG-1).
 GRAPHICS_ONLY_MESSAGE: Final = "Graphics are only for an explainer with a continuous voice."
 
@@ -105,8 +112,12 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "captions": "Captions",
     "callouts": "Callouts",
     "presenter_delivery": "Presenter delivery",
+    "presenter_staging": "Presenter staging",
+    "presenter_outfit": "Presenter outfit",
 }
-_NULLABLE_FIELDS: Final = frozenset(("script_text", "presenter_delivery"))
+_NULLABLE_FIELDS: Final = frozenset(
+    ("script_text", "presenter_delivery", "presenter_staging", "presenter_outfit")
+)
 # The switches only an explainer has (EXPLAINER-007). They can be changed at any time.
 _EXPLAINER_SWITCHES: Final = frozenset(("captions", "callouts"))
 
@@ -182,6 +193,20 @@ def validate_project(project: Project) -> None:
             raise ProjectValidationError(
                 f"The presenter delivery must be at most {DELIVERY_MAX_CHARS} characters."
             )
+    if project.presenter_staging is not None:
+        if project.kind != KIND_EXPLAINER:
+            raise ProjectValidationError(STAGING_ONLY_MESSAGE)
+        if len(project.presenter_staging) > STAGING_MAX_CHARS:
+            raise ProjectValidationError(
+                f"The presenter staging must be at most {STAGING_MAX_CHARS} characters."
+            )
+    if project.presenter_outfit is not None:
+        if project.kind != KIND_EXPLAINER:
+            raise ProjectValidationError(OUTFIT_ONLY_MESSAGE)
+        if len(project.presenter_outfit) > OUTFIT_MAX_CHARS:
+            raise ProjectValidationError(
+                f"The presenter outfit must be at most {OUTFIT_MAX_CHARS} characters."
+            )
     if project.graphics and (
         project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
     ):
@@ -209,6 +234,13 @@ def _normalise_delivery(value: str | None) -> str | None:
     return value.strip()
 
 
+def _normalise_presenter_text(value: str | None) -> str | None:
+    """The staging or outfit text trimmed; a blank one is stored as NULL (none)."""
+    if value is None or not value.strip():
+        return None
+    return value.strip()
+
+
 async def create_project(
     session: AsyncSession,
     name: str,
@@ -222,6 +254,8 @@ async def create_project(
     voice_track: str | None = None,
     presenter_delivery: str | None = None,
     graphics: bool | None = None,
+    presenter_staging: str | None = None,
+    presenter_outfit: str | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
@@ -232,6 +266,8 @@ async def create_project(
     `voice_track` (FLOW-002) is `continuous` for an explainer unless it is sent as `lines`, and
     always `lines` for a story (a story that asks for `continuous` is refused).
     `presenter_delivery` is the owner's voice text for a continuous explainer; blank means none.
+    `presenter_staging` is the owner's text for how an explainer's presenter is placed and moves
+    on camera, and `presenter_outfit` what the presenter wears; blank means none.
 
     `graphics` (EXG-001) is on by default for a continuous explainer and off for every other
     project; asking for it on any other project is refused.
@@ -257,6 +293,12 @@ async def create_project(
         raise ProjectValidationError(
             "The presenter delivery is only for an explainer with a continuous voice."
         )
+    staging = _normalise_presenter_text(presenter_staging)
+    if staging is not None and kind != KIND_EXPLAINER:
+        raise ProjectValidationError(STAGING_ONLY_MESSAGE)
+    outfit = _normalise_presenter_text(presenter_outfit)
+    if outfit is not None and kind != KIND_EXPLAINER:
+        raise ProjectValidationError(OUTFIT_ONLY_MESSAGE)
     continuous_explainer = kind == KIND_EXPLAINER and voice_track == VOICE_CONTINUOUS
     if graphics and not continuous_explainer:
         raise ProjectValidationError(GRAPHICS_ONLY_MESSAGE)
@@ -292,6 +334,8 @@ async def create_project(
         callouts=callouts if kind == KIND_EXPLAINER else True,
         voice_track=voice_track,
         presenter_delivery=delivery,
+        presenter_staging=staging,
+        presenter_outfit=outfit,
         graphics=graphics,
     )
     validate_project(project)
@@ -360,6 +404,10 @@ async def update_project(
         raise ProjectValidationError(
             "The presenter delivery is only for an explainer with a continuous voice."
         )
+    if "presenter_staging" in changes and project.kind != KIND_EXPLAINER:
+        raise ProjectValidationError(STAGING_ONLY_MESSAGE)
+    if "presenter_outfit" in changes and project.kind != KIND_EXPLAINER:
+        raise ProjectValidationError(OUTFIT_ONLY_MESSAGE)
 
     try:
         for field, value in changes.items():
@@ -387,6 +435,14 @@ def _prepare_value(field: str, value: object) -> object:
         if value is not None and not isinstance(value, str):
             raise ProjectValidationError("The presenter delivery must be text.")
         return _normalise_delivery(value)
+    if field == "presenter_staging":
+        if value is not None and not isinstance(value, str):
+            raise ProjectValidationError("The presenter staging must be text.")
+        return _normalise_presenter_text(value)
+    if field == "presenter_outfit":
+        if value is not None and not isinstance(value, str):
+            raise ProjectValidationError("The presenter outfit must be text.")
+        return _normalise_presenter_text(value)
     if field == "music_enabled" and not isinstance(value, bool):
         raise ProjectValidationError("Music must be on or off.")
     if field == "ambience_enabled" and not isinstance(value, bool):

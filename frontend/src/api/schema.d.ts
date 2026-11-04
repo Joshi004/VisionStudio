@@ -11310,6 +11310,10 @@ export interface components {
             presenter_delivery?: string | null;
             /** Graphics */
             graphics?: boolean | null;
+            /** Presenter Staging */
+            presenter_staging?: string | null;
+            /** Presenter Outfit */
+            presenter_outfit?: string | null;
         };
         /**
          * ProjectDeleteIn
@@ -11399,6 +11403,10 @@ export interface components {
             voice_track: "lines" | "continuous";
             /** Presenter Delivery */
             presenter_delivery: string | null;
+            /** Presenter Staging */
+            presenter_staging: string | null;
+            /** Presenter Outfit */
+            presenter_outfit: string | null;
             /** Graphics */
             graphics: boolean;
             story_length: components["schemas"]["StoryLengthOut"];
@@ -11481,6 +11489,10 @@ export interface components {
             callouts?: boolean | null;
             /** Presenter Delivery */
             presenter_delivery?: string | null;
+            /** Presenter Staging */
+            presenter_staging?: string | null;
+            /** Presenter Outfit */
+            presenter_outfit?: string | null;
         };
         /**
          * ProjectUseOut
@@ -11892,7 +11904,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated";
+            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped";
             /** Scene Id */
             scene_id?: string | null;
             /** Shot Id */
