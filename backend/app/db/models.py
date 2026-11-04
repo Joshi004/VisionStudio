@@ -92,6 +92,13 @@ class Project(Base):
     # resolved into one named look for every scene. NULL means the presenter's default outfit.
     # Can be changed at any time.
     presenter_outfit: Mapped[str | None] = mapped_column(default=None)
+    # The saved outfit (a `character_named_look` of the presenter) the presenter wears in every
+    # scene, picked in the Character Lab's list. NULL means the typed `presenter_outfit` or the
+    # default outfit. Never set together with `presenter_outfit`. Can be changed at any time.
+    # `use_alter`: `character_named_look.origin_project_id` points back here, the intended cycle.
+    presenter_named_look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_named_look.id", ondelete="SET NULL", use_alter=True), default=None
+    )
     # EXG-001. Whether a continuous explainer gets graphic shots (EG-1). Chosen when the project
     # is created and never changed; only an explainer with a continuous voice can have it on.
     graphics: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
@@ -154,7 +161,7 @@ class Job(Base):
         # 0071, and the timing of a speech's words, since revision 0073, and the callout plan,
         # since revision 0074, and the two Audio video lab jobs, since revision 0075, and the six
         # Graphics lab jobs, since revision 0079, and the five explainer graphics jobs, since
-        # revision 0080.
+        # revision 0080, and the reading of a reference photo, since revision 0083.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -176,7 +183,7 @@ class Job(Base):
             "'render_lab_graphic', 'time_lab_graphic_words', "
             "'write_graphic_theme', 'write_shot_graphic_brief', "
             "'write_shot_graphic_component', 'write_shot_graphic_scene', "
-            "'render_shot_graphic')",
+            "'render_shot_graphic', 'describe_photo')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -2571,6 +2578,13 @@ class CharacterNamedLook(Base):
         ForeignKey("character_look.id", ondelete="SET NULL"), default=None
     )
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    # An outfit as the Character Lab shows it. `note` is a short text (at most 120 characters)
+    # that helps pick the outfit. `deleted_at` is set when the author deletes it: the row stays,
+    # so what points at it still reads and its slug is never reused, but it is no longer
+    # offered, resolved to or frozen into a new version. `updated_at` is the last edit.
+    note: Mapped[str | None] = mapped_column(default=None)
+    deleted_at: Mapped[datetime | None] = mapped_column(default=None)
+    updated_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class EnvironmentState(Base):

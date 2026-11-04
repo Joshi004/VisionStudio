@@ -14,9 +14,11 @@ import {
   Title,
 } from "@mantine/core";
 
+import { useProjectCast } from "../../api/projectCast";
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
-import { OUTFIT_MAX_CHARS, STAGING_MAX_CHARS, projectKindLabel } from "./projectKinds";
+import { PresenterOutfitField } from "./PresenterOutfitField";
+import { STAGING_MAX_CHARS, projectKindLabel } from "./projectKinds";
 import { speechModeLabel } from "./speechModes";
 import { DELIVERY_MAX_CHARS, voiceTrackLabel } from "./voiceTracks";
 import { changedFields, initialDraft, type Draft, type NUMBER_FIELDS } from "./settingsDraft";
@@ -43,6 +45,9 @@ export function ProjectSettingsForm({
   onSave,
 }: ProjectSettingsFormProps) {
   const [draft, setDraft] = useState<Draft>(() => initialDraft(project));
+  // The presenter's outfits are the ones of the character that was chosen at creation.
+  const cast = useProjectCast(project.id);
+  const presenterId = cast.data?.characters[0]?.library_id ?? null;
   const changes = changedFields(project, draft);
   const unchanged = Object.keys(changes).length === 0;
 
@@ -145,20 +150,28 @@ export function ProjectSettingsForm({
           <Paper withBorder p="md" radius="md">
             <Stack gap="xs">
               <Title order={4}>Presenter outfit</Title>
-              <Textarea
-                aria-label="Presenter outfit"
-                description="What the presenter wears in this video, for example: a navy blazer over a white shirt. Left empty, the presenter wears their usual outfit from the Character Lab."
-                value={draft.presenter_outfit}
-                onChange={(event) => edit("presenter_outfit", event.currentTarget.value)}
-                maxLength={OUTFIT_MAX_CHARS}
-                autosize
-                minRows={2}
-                maxRows={4}
+              <PresenterOutfitField
+                characterId={presenterId}
+                pickedId={draft.presenter_named_look_id}
+                text={draft.presenter_outfit}
+                deletedPick={
+                  project.presenter_named_look_deleted &&
+                  project.presenter_named_look_id !== null &&
+                  project.presenter_named_look_id !== undefined
+                    ? {
+                        id: project.presenter_named_look_id,
+                        name: project.presenter_named_look_name ?? "Saved outfit",
+                      }
+                    : null
+                }
+                onChange={(value) => {
+                  edit("presenter_named_look_id", value.pickedId);
+                  edit("presenter_outfit", value.text);
+                }}
               />
               <Text size="xs" c="dimmed">
-                The outfit becomes one named look of the presenter, with its own pictures, used in
-                every scene. Changing it makes the resolved looks out of date, and with them the
-                presenter shots.
+                The outfit is used in every scene. Changing it makes the resolved looks out of
+                date, and with them the presenter shots.
               </Text>
             </Stack>
           </Paper>

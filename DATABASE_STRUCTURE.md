@@ -274,6 +274,8 @@ Rules that go with it:
 - **AI output never overwrites a manual artifact.** An AI run writes a new version next to the manual one, and a person chooses to use it. Author text is only replaced by an explicit action of the user. (PHASE-037) A manual version of the story-structure and scene artifacts is a row like any other, with `source='manual'`, `job_id` NULL and the `inputs` a job would have recorded at the time of the save; a run over a newest manual row is refused until the user confirms it. (PHASE-038) The same holds for shot plans, shot definitions, reference manifests and compiled prompts, and a note from the user (`inputs.feedback`) is data given to the model, never a change to its instructions.
 - **Where a stage needs more than one row per run** (for example a set of discovered characters), the rows of one run share the run's `version` and `inputs`, or the set has a parent row that carries them. The stage's section says which.
 
+**Update (character outfits, 2026-11-04):** migration `0083`. **A character's named looks are managed as outfits in the Character Lab.** (1) **Three new columns on `character_named_look`** (Section 4.38): `note` (TEXT, at most 120 characters, helps pick the outfit), `deleted_at` (DATETIME, set when the author deletes it) and `updated_at` (DATETIME, the last edit). **An outfit can become the character's default** (`character_outfits.make_default`): its description is copied to `library_character.outfit` and its `look_id` becomes `library_character.current_look_id`, so the current look may now be a look whose `named_look_id` is set. The pictures that were the default are kept as a new `manual` outfit (`look_id` = the old current look) unless an outfit holds them already, and one manual version freezes the change; no pin moves. **A deleted outfit keeps its row**: what points at it (old resolutions, pinned character versions, which freeze their own copy of the pictures) still reads, its slug is never given to another outfit, and it is no longer offered, resolved to or frozen into a new version. A project that is already made is never changed by an edit or a delete. (2) **One new column on `project`**, `presenter_named_look_id` (Section 4.1; FK to `character_named_look.id`, `SET NULL`, NULL by default): the saved outfit an explainer's presenter wears in every scene. Only an explainer has it, and it is never set together with `presenter_outfit`. (3) **One new global setting**, `vision_llm_model` (Section 6; group `LLM`, default `deepseek-ai/DeepSeek-V4.1-Flash-1017`): the Bitdeer model that reads a reference photo. It always uses Bitdeer at `llm_base_url` with the same key, and its job counts in the `paid_api` pool. (4) **One new job type**, `describe_photo` (Section 5): a job of no project, `provider='llm'`, restart rule `never_rerun`, that returns text for a character's or an outfit's form.
+
 ---
 
 ## 3. Entity-relationship overview
@@ -573,6 +575,7 @@ The Character lab's own foreign keys (documented in PHASE-007; the tables are Se
 | `character_named_look` | `character_id` | `library_character.id` | No (`CASCADE`). PHASE-016 |
 | `character_named_look` | `origin_project_id` | `project.id` | Yes (the project whose resolution created it; `SET NULL`). PHASE-016 |
 | `character_named_look` | `job_id` | `job.id` | Yes (the `resolve_looks_states` job that created it; `SET NULL`). PHASE-016 |
+| `project` | `presenter_named_look_id` | `character_named_look.id` | Yes (the saved outfit of an explainer's presenter; `SET NULL`). Migration `0083` |
 | `character_named_look` | `look_id` | `character_look.id` | Yes (the look that holds its pictures; `SET NULL`; NULL until its five pictures exist, PHASE-017). PHASE-016 |
 | `environment_state` | `environment_id` | `library_environment.id` | No (`CASCADE`). PHASE-016 |
 | `environment_state` | `origin_project_id` | `project.id` | Yes (the project whose resolution created it; `SET NULL`). PHASE-016 |
@@ -620,6 +623,7 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `presenter_delivery` | TEXT | NULL | — | FLOW-002. The owner's text that steers the voice of every take of a `continuous` explainer, at most 500 characters. NULL means the Story Bible's `storytelling_style.narration`, or a fixed default. Set only on a continuous explainer. `PATCH /api/projects/{id}` may change it at any time for one (a blank text clears it; any other project gets 422) |
 | `presenter_staging` | TEXT | NULL | — | Migration `0081`. The owner's text for how an explainer's presenter is placed and moves on camera (for example "seated at a desk, still"), at most 500 characters, trimmed; a blank text is stored as NULL. NULL means the presenter stands. Set only on an explainer (any other project gets 422). `PATCH /api/projects/{id}` may change it at any time. It is sent to the definition of every explainer shot as `PRESENTER STAGING`, and each definition records its SHA-256 in `inputs.presenter_staging.sha256`; a presenter shot whose recorded hash differs from the current text is out of date (B-roll is not). A studio designed from the script (no set chosen) is designed with it, but is not made out of date when it changes |
 | `presenter_outfit` | TEXT | NULL | — | Migration `0082`. The owner's text for what an explainer's presenter wears (for example "a navy blazer over a white shirt"), at most 300 characters (the longest named-look description), trimmed; a blank text is stored as NULL. NULL means the presenter's default outfit. Set only on an explainer (any other project gets 422). `PATCH /api/projects/{id}` may change it at any time. The look resolution uses it as the presenter's look request in every scene, in place of what the scene definitions asked for, so it resolves to one named look (with its own pictures) shared by every scene. The resolution records its SHA-256 in `inputs.presenter_outfit.sha256` and is out of date when the text changes |
+| `presenter_named_look_id` | INTEGER, FK → `character_named_look.id` | NULL | — | Migration `0083`. The saved outfit (a named look of the presenter) an explainer's presenter wears in every scene, picked from the presenter's outfits in the Character Lab. NULL means the typed `presenter_outfit` or the default outfit. Never set together with `presenter_outfit` (422), and only on an explainer. `ON DELETE SET NULL` (the outfit's deletion in the lab only hides it, so this normally stays set). The look resolution uses it as the presenter's look in every scene, with no model matching, and records its id in `inputs.presenter_named_look`; the resolution is out of date when the pick changes |
 | `graphics` | BOOLEAN | NOT NULL | `0` | EXG-001. Whether a continuous explainer gets graphic shots (charts, diagrams and text cards drawn by code). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. Only an explainer with `voice_track = continuous` can have it on (`validate_project`). A new continuous explainer defaults to on; every other project, and every project made before this column, is off. Off, the project gets exactly the instructions, jobs and FFmpeg commands it got before |
 
 ```sql
@@ -648,7 +652,8 @@ CREATE TABLE project (
     presenter_delivery TEXT,
     graphics           BOOLEAN NOT NULL DEFAULT 0,
     presenter_staging  TEXT,
-    presenter_outfit   TEXT
+    presenter_outfit   TEXT,
+    presenter_named_look_id INTEGER REFERENCES character_named_look(id) ON DELETE SET NULL
 );
 ```
 
@@ -2043,6 +2048,9 @@ CREATE INDEX idx_scene_events_project_scene ON scene_events (project_id, scene_i
 | `job_id` | INTEGER, FK → `job.id` | NULL | — | The `resolve_looks_states` job that created it. `ON DELETE SET NULL` |
 | `look_id` | INTEGER, FK → `character_look.id` | NULL | — | The look that holds its pictures. NULL until its five pictures exist; set by PHASE-017 (`character_looks._finish_named_look`) to the newest attempt that finished. `ON DELETE SET NULL` |
 | `created_at` | DATETIME | NOT NULL | now | |
+| `note` | TEXT | NULL | — | Migration `0083`. A short text (at most 120 characters) that helps pick the outfit when a project is made. NULL when there is none |
+| `deleted_at` | DATETIME | NULL | — | Migration `0083`. Set when the author deletes the outfit. The row stays; the outfit is no longer listed, offered, resolved to or frozen into a new version of the character. Its slug stays taken. NULL for an outfit in use |
+| `updated_at` | DATETIME | NULL | — | Migration `0083`. When the author last edited the name, note or description. NULL until then |
 
 ```sql
 CREATE TABLE character_named_look (
@@ -2056,6 +2064,9 @@ CREATE TABLE character_named_look (
     job_id            INTEGER REFERENCES job(id) ON DELETE SET NULL,
     look_id           INTEGER REFERENCES character_look(id) ON DELETE SET NULL,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    note              TEXT,
+    deleted_at        DATETIME,
+    updated_at        DATETIME,
     CONSTRAINT uq_character_named_look_character_id UNIQUE (character_id, slug)
 );
 ```

@@ -59,6 +59,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_shot_graphic_component: "Graphic component",
   write_shot_graphic_scene: "Graphic block scene",
   render_shot_graphic: "Graphic render",
+  describe_photo: "Photo description",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
@@ -89,6 +90,7 @@ export function labPathFor(type: JobSummary["type"]): string {
       return "/lab/music";
     case "write_character_look_prompt":
     case "write_character_take_prompt":
+    case "describe_photo":
     case "time_lab_speech_words":
     case "render_av_test":
       return "/lab/characters";

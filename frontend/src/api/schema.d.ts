@@ -2522,6 +2522,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lab/characters/{character_id}/outfits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Outfits
+         * @description The character's outfits: its default outfit first, then every saved outfit that is not
+         *     deleted, oldest first. Each says which project made it, which projects use it, and where
+         *     its pictures stand.
+         */
+        get: operations["list_outfits_api_lab_characters__character_id__outfits_get"];
+        put?: never;
+        /**
+         * Create Outfit
+         * @description Saves a new outfit. Its pictures are made on request (`POST /lab/outfits/{id}/pictures`).
+         */
+        post: operations["create_outfit_api_lab_characters__character_id__outfits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/outfits/{outfit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Outfit
+         * @description Deletes an outfit from the lists. No project changes: its pictures and every version of
+         *     the character that froze them stay, so a story that used it keeps it.
+         */
+        delete: operations["delete_outfit_api_lab_outfits__outfit_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit Outfit
+         * @description Changes an outfit's name, note or description (a blank note clears it). No picture and no
+         *     project changes: a new description only makes the pictures out of date.
+         */
+        patch: operations["edit_outfit_api_lab_outfits__outfit_id__patch"];
+        trace?: never;
+    };
+    "/api/lab/outfits/{outfit_id}/pictures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make Outfit Pictures
+         * @description Makes the outfit's pictures (or makes them again from its description now): an edit of
+         *     the front picture of the character's current look, then the other four angles. The
+         *     pictures that exist stay until the new ones are ready.
+         */
+        post: operations["make_outfit_pictures_api_lab_outfits__outfit_id__pictures_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/outfits/{outfit_id}/make-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make Outfit Default
+         * @description Makes the outfit the character's default: its text becomes the profile outfit and its
+         *     pictures the current look. The pictures that were the default are kept as a saved outfit.
+         *     No project's pin moves. Answers with the character's outfits.
+         */
+        post: operations["make_outfit_default_api_lab_outfits__outfit_id__make_default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters/{character_id}/projects": {
         parameters: {
             query?: never;
@@ -2726,6 +2822,28 @@ export interface paths {
          * @description Starts the job that writes a short line to read aloud while auditioning a voice.
          */
         post: operations["start_audition_line_api_lab_characters__character_id__voice_audition_line_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/photos/{lab_image_id}/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe Photo
+         * @description Starts the job that reads a photo (one uploaded to the Image lab) with the vision model
+         *     and writes the text of a new character or of a new outfit. Each click is a paid call, so
+         *     none is merged into an earlier one. Follow the job; its `output.fields` holds the text.
+         */
+        post: operations["describe_photo_api_lab_photos__lab_image_id__describe_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8462,7 +8580,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo";
             /**
              * Status
              * @enum {string}
@@ -8541,7 +8659,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo";
             /**
              * Kind
              * @enum {string}
@@ -8580,7 +8698,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo";
             /**
              * Status
              * @enum {string}
@@ -10645,6 +10763,77 @@ export interface components {
             /** Discovery Id */
             discovery_id: string;
         };
+        /** OutfitIn */
+        OutfitIn: {
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Description */
+            description: string;
+        };
+        /**
+         * OutfitOut
+         * @description One outfit of a character. The first of the list is the character's default outfit: it
+         *     has no `id`, cannot be edited here or deleted, and its pictures are the current look's.
+         */
+        OutfitOut: {
+            /** Id */
+            id: number | null;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            /** Description */
+            description: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual" | "default";
+            /** Is Default */
+            is_default: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            made_for: components["schemas"]["OutfitProjectOut"] | null;
+            /** Used By */
+            used_by: components["schemas"]["OutfitProjectOut"][];
+            /**
+             * Pictures Status
+             * @enum {string}
+             */
+            pictures_status: "none" | "in_progress" | "ready" | "failed";
+            /** Pictures Out Of Date */
+            pictures_out_of_date: boolean;
+            look: components["schemas"]["LookOut"] | null;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /**
+             * Is Default Now
+             * @default false
+             */
+            is_default_now: boolean;
+        };
+        /** OutfitPatch */
+        OutfitPatch: {
+            /** Name */
+            name?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /** OutfitProjectOut */
+        OutfitProjectOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+        };
         /** OutsideWindowOut */
         OutsideWindowOut: {
             /** Window Start S */
@@ -10698,6 +10887,14 @@ export interface components {
              */
             fetched_at: string;
             diff: components["schemas"]["ContractDiffOut"];
+        };
+        /** PhotoDescribeIn */
+        PhotoDescribeIn: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "character" | "outfit";
         };
         /**
          * PictureImageOut
@@ -11256,7 +11453,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo";
             /** Running */
             running: number;
             /** Queued */
@@ -11314,6 +11511,8 @@ export interface components {
             presenter_staging?: string | null;
             /** Presenter Outfit */
             presenter_outfit?: string | null;
+            /** Presenter Named Look Id */
+            presenter_named_look_id?: number | null;
         };
         /**
          * ProjectDeleteIn
@@ -11407,6 +11606,12 @@ export interface components {
             presenter_staging: string | null;
             /** Presenter Outfit */
             presenter_outfit: string | null;
+            /** Presenter Named Look Id */
+            presenter_named_look_id: number | null;
+            /** Presenter Named Look Name */
+            presenter_named_look_name: string | null;
+            /** Presenter Named Look Deleted */
+            presenter_named_look_deleted: boolean;
             /** Graphics */
             graphics: boolean;
             story_length: components["schemas"]["StoryLengthOut"];
@@ -11493,6 +11698,8 @@ export interface components {
             presenter_staging?: string | null;
             /** Presenter Outfit */
             presenter_outfit?: string | null;
+            /** Presenter Named Look Id */
+            presenter_named_look_id?: number | null;
         };
         /**
          * ProjectUseOut
@@ -19477,7 +19684,7 @@ export interface operations {
                 /** @description Only jobs with one of these statuses (repeat it). */
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
                 /** @description Only jobs of one of these types (repeat it). */
-                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic")[] | null;
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo")[] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -21866,6 +22073,252 @@ export interface operations {
             };
         };
     };
+    list_outfits_api_lab_characters__character_id__outfits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_outfit_api_lab_characters__character_id__outfits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutfitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_outfit_api_lab_outfits__outfit_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_outfit_api_lab_outfits__outfit_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutfitPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    make_outfit_pictures_api_lab_outfits__outfit_id__pictures_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    make_outfit_default_api_lab_outfits__outfit_id__make_default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_character_projects_api_lab_characters__character_id__projects_get: {
         parameters: {
             query?: never;
@@ -22314,6 +22767,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    describe_photo_api_lab_photos__lab_image_id__describe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lab_image_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoDescribeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobSummary"];
+                };
+            };
+            /** @description No photo has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

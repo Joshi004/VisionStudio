@@ -23,6 +23,8 @@ export type Draft = {
   presenter_staging: string;
   /** What an explainer's presenter wears. Empty means their usual outfit. */
   presenter_outfit: string;
+  /** Or one of the presenter's saved outfits (a named look of the Character Lab). */
+  presenter_named_look_id: number | null;
 };
 
 export const NUMBER_FIELDS = ["gen_width", "gen_height", "out_width", "out_height", "fps"] as const;
@@ -42,6 +44,7 @@ export function initialDraft(project: ProjectDetail): Draft {
     presenter_delivery: project.presenter_delivery ?? "",
     presenter_staging: project.presenter_staging ?? "",
     presenter_outfit: project.presenter_outfit ?? "",
+    presenter_named_look_id: project.presenter_named_look_id ?? null,
   };
 }
 
@@ -82,6 +85,10 @@ export function changedFields(project: ProjectDetail, draft: Draft): ProjectUpda
   if (outfit !== saved.presenter_outfit.trim()) {
     // An emptied box clears the text, so the presenter wears their usual outfit.
     changes.presenter_outfit = outfit === "" ? null : outfit;
+  }
+  if (draft.presenter_named_look_id !== saved.presenter_named_look_id) {
+    // Cleared when the default or a described outfit is chosen instead.
+    changes.presenter_named_look_id = draft.presenter_named_look_id;
   }
   for (const field of NUMBER_FIELDS) {
     if (draft[field] !== saved[field]) {

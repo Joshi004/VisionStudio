@@ -550,7 +550,11 @@ def owner_name(job: Job, project_name: str | None) -> str:
         return project_name
     if job.type == "lab_voice":
         return VOICE_LAB_NAME
-    if job.type in ("write_character_look_prompt", "write_character_take_prompt"):
+    if job.type in (
+        "write_character_look_prompt",
+        "write_character_take_prompt",
+        "describe_photo",
+    ):
         return CHARACTER_LAB_NAME
     if job.type in ("lab_music", "write_lab_music_prompt"):
         return MUSIC_LAB_NAME

@@ -42,7 +42,7 @@ import {
   type TakeFormState,
 } from "./characterLabView";
 import { DEFAULT_AV_FORM, type AvFormState } from "./avLabView";
-import { NamedLooks } from "./NamedLooks";
+import { Outfits } from "./Outfits";
 import { TakeGallery } from "./TakeGallery";
 import { UsedByProjects } from "./UsedByProjects";
 import { VersionHistory } from "./VersionHistory";
@@ -312,7 +312,7 @@ export function CharacterPage({ characterId, onBack, onEdit }: CharacterPageProp
 
               <DefinitionSection definition={data.definition} />
 
-              <NamedLooks characterId={data.id} />
+              <Outfits characterId={data.id} />
 
               <UsedByProjects characterId={data.id} name={data.name} />
 

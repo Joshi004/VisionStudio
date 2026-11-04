@@ -23,7 +23,7 @@ from typing import Final
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Project
+from app.db.models import CharacterNamedLook, Project, ProjectCastCharacter
 from app.providers import speech_synthesizer
 from app.services import review_points
 from app.services.project_kinds import KIND_EXPLAINER, KIND_STORY, KINDS
@@ -53,6 +53,12 @@ STAGING_ONLY_MESSAGE: Final = "The presenter staging is only for an explainer."
 # description a named look keeps (`look_state_resolution_writer.DESCRIPTION_MAX_CHARS`).
 OUTFIT_MAX_CHARS: Final = 300
 OUTFIT_ONLY_MESSAGE: Final = "The presenter outfit is only for an explainer."
+# A saved outfit of the presenter (a named look of the Character Lab), picked instead of typing.
+OUTFIT_PICK_ONLY_MESSAGE: Final = "A saved presenter outfit is only for an explainer."
+OUTFIT_BOTH_MESSAGE: Final = (
+    "Choose a saved outfit or describe one, not both: send only one of the two."
+)
+OUTFIT_NOT_THE_PRESENTER_S: Final = "Choose one of the presenter's saved outfits."
 # EXG-001: graphic shots exist only in an explainer with a continuous voice (EG-1).
 GRAPHICS_ONLY_MESSAGE: Final = "Graphics are only for an explainer with a continuous voice."
 
@@ -114,9 +120,16 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "presenter_delivery": "Presenter delivery",
     "presenter_staging": "Presenter staging",
     "presenter_outfit": "Presenter outfit",
+    "presenter_named_look_id": "Presenter saved outfit",
 }
 _NULLABLE_FIELDS: Final = frozenset(
-    ("script_text", "presenter_delivery", "presenter_staging", "presenter_outfit")
+    (
+        "script_text",
+        "presenter_delivery",
+        "presenter_staging",
+        "presenter_outfit",
+        "presenter_named_look_id",
+    )
 )
 # The switches only an explainer has (EXPLAINER-007). They can be changed at any time.
 _EXPLAINER_SWITCHES: Final = frozenset(("captions", "callouts"))
@@ -207,6 +220,11 @@ def validate_project(project: Project) -> None:
             raise ProjectValidationError(
                 f"The presenter outfit must be at most {OUTFIT_MAX_CHARS} characters."
             )
+    if project.presenter_named_look_id is not None:
+        if project.kind != KIND_EXPLAINER:
+            raise ProjectValidationError(OUTFIT_PICK_ONLY_MESSAGE)
+        if project.presenter_outfit is not None:
+            raise ProjectValidationError(OUTFIT_BOTH_MESSAGE)
     if project.graphics and (
         project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
     ):
@@ -256,6 +274,7 @@ async def create_project(
     graphics: bool | None = None,
     presenter_staging: str | None = None,
     presenter_outfit: str | None = None,
+    presenter_named_look_id: int | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
@@ -268,6 +287,8 @@ async def create_project(
     `presenter_delivery` is the owner's voice text for a continuous explainer; blank means none.
     `presenter_staging` is the owner's text for how an explainer's presenter is placed and moves
     on camera, and `presenter_outfit` what the presenter wears; blank means none.
+    `presenter_named_look_id` is instead one of the presenter's saved outfits (a named look of
+    the Character Lab): it cannot be sent together with `presenter_outfit`.
 
     `graphics` (EXG-001) is on by default for a continuous explainer and off for every other
     project; asking for it on any other project is refused.
@@ -299,6 +320,10 @@ async def create_project(
     outfit = _normalise_presenter_text(presenter_outfit)
     if outfit is not None and kind != KIND_EXPLAINER:
         raise ProjectValidationError(OUTFIT_ONLY_MESSAGE)
+    if presenter_named_look_id is not None and kind != KIND_EXPLAINER:
+        raise ProjectValidationError(OUTFIT_PICK_ONLY_MESSAGE)
+    if presenter_named_look_id is not None and outfit is not None:
+        raise ProjectValidationError(OUTFIT_BOTH_MESSAGE)
     continuous_explainer = kind == KIND_EXPLAINER and voice_track == VOICE_CONTINUOUS
     if graphics and not continuous_explainer:
         raise ProjectValidationError(GRAPHICS_ONLY_MESSAGE)
@@ -309,6 +334,8 @@ async def create_project(
         if presenter_character_id is None:
             raise ProjectValidationError("An explainer needs a presenter from the Character Lab.")
         await _check_explainer_cast(session, presenter_character_id, set_environment_id)
+        if presenter_named_look_id is not None:
+            await _check_presenter_outfit(session, presenter_character_id, presenter_named_look_id)
     elif presenter_character_id is not None or set_environment_id is not None:
         raise ProjectValidationError("Only an explainer has a presenter or a set.")
     if speech_mode not in SPEECH_MODES:
@@ -336,6 +363,7 @@ async def create_project(
         presenter_delivery=delivery,
         presenter_staging=staging,
         presenter_outfit=outfit,
+        presenter_named_look_id=presenter_named_look_id,
         graphics=graphics,
     )
     validate_project(project)
@@ -364,6 +392,35 @@ async def _check_explainer_cast(
             await explainer.check_set(session, set_environment_id)
     except explainer.ExplainerError as exc:
         raise ProjectValidationError(str(exc)) from exc
+
+
+async def _check_presenter_outfit(
+    session: AsyncSession, presenter_character_id: int, outfit_id: int
+) -> None:
+    """Checks that `outfit_id` is a saved outfit (not deleted) of the presenter. Raises
+    ProjectValidationError.
+    """
+    record = await session.get(CharacterNamedLook, outfit_id)
+    if (
+        record is None
+        or record.deleted_at is not None
+        or record.character_id != presenter_character_id
+    ):
+        raise ProjectValidationError(OUTFIT_NOT_THE_PRESENTER_S)
+
+
+async def _check_picked_outfit(session: AsyncSession, project: Project, outfit_id: int) -> None:
+    """The same check for a project that exists: its presenter is the character of its cast."""
+    presenter_id = (
+        await session.execute(
+            select(ProjectCastCharacter.character_id).where(
+                ProjectCastCharacter.project_id == project.id
+            )
+        )
+    ).scalar_one_or_none()
+    if presenter_id is None:
+        raise ProjectValidationError(OUTFIT_PICK_ONLY_MESSAGE)
+    await _check_presenter_outfit(session, presenter_id, outfit_id)
 
 
 async def get_project(session: AsyncSession, project_id: int) -> Project | None:
@@ -408,6 +465,16 @@ async def update_project(
         raise ProjectValidationError(STAGING_ONLY_MESSAGE)
     if "presenter_outfit" in changes and project.kind != KIND_EXPLAINER:
         raise ProjectValidationError(OUTFIT_ONLY_MESSAGE)
+    picked = changes.get("presenter_named_look_id")
+    if picked is not None:
+        if project.kind != KIND_EXPLAINER:
+            raise ProjectValidationError(OUTFIT_PICK_ONLY_MESSAGE)
+        # Only a new pick is checked: a project keeps an outfit that was deleted after it
+        # chose it.
+        if picked != project.presenter_named_look_id:
+            if isinstance(picked, bool) or not isinstance(picked, int):
+                raise ProjectValidationError("The saved outfit must be a number.")
+            await _check_picked_outfit(session, project, picked)
 
     try:
         for field, value in changes.items():
@@ -443,6 +510,10 @@ def _prepare_value(field: str, value: object) -> object:
         if value is not None and not isinstance(value, str):
             raise ProjectValidationError("The presenter outfit must be text.")
         return _normalise_presenter_text(value)
+    if field == "presenter_named_look_id":
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ProjectValidationError("The saved outfit must be a number.")
+        return value
     if field == "music_enabled" and not isinstance(value, bool):
         raise ProjectValidationError("Music must be on or off.")
     if field == "ambience_enabled" and not isinstance(value, bool):

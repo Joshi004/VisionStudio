@@ -429,6 +429,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
     ),
     SettingSpec(
+        key="vision_llm_model",
+        group=GROUP_LLM,
+        label="Photo analysis model (Bitdeer)",
+        help=(
+            "Bitdeer model that reads a reference photo and fills in a character's or an "
+            "outfit's description. It must accept images. It always uses Bitdeer at the LLM "
+            "URL above, with the same key, and counts with the other paid calls."
+        ),
+        value_type="string",
+        default="deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        pattern=TextPattern(
+            regex=r"[A-Za-z0-9._/:-]{1,200}",
+            message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
+        ),
+    ),
+    SettingSpec(
         key="image_mode",
         group=GROUP_IMAGE,
         label="Image mode",

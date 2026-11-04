@@ -92,8 +92,20 @@ def with_correction(body: dict[str, Any], problem: str) -> dict[str, Any]:
         "answer again with that fixed, every required field present and every length limit kept."
     )
     for message in reversed(messages):
-        if message.get("role") == "user" and isinstance(message.get("content"), str):
-            message["content"] += note
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = content + note
+            break
+        if isinstance(content, list):
+            # A message with a picture: the note goes on the last text part.
+            parts = [dict(part) for part in content]
+            for part in reversed(parts):
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    part["text"] += note
+                    message["content"] = parts
+                    break
             break
     return {**body, "messages": messages}
 

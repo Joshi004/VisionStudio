@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
-from app.db.models import Project
+from app.db.models import CharacterNamedLook, Project
 from app.db.session import SessionDep
 from app.services import projects as projects_service
 from app.services import review_points as review_points_service
@@ -65,6 +65,8 @@ class ProjectCreate(BaseModel):
     presenter_staging: StrictStr | None = None
     # What an explainer's presenter wears. Only for an explainer.
     presenter_outfit: StrictStr | None = None
+    # Or one of the presenter's saved outfits (Character Lab). Not together with the text.
+    presenter_named_look_id: StrictInt | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -97,6 +99,8 @@ class ProjectUpdate(BaseModel):
     presenter_staging: StrictStr | None = None
     # What an explainer's presenter wears. Null or blank clears it.
     presenter_outfit: StrictStr | None = None
+    # One of the presenter's saved outfits. Null clears it. Not together with the text.
+    presenter_named_look_id: StrictInt | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -150,6 +154,12 @@ class ProjectDetail(BaseModel):
     # The owner's text for what an explainer's presenter wears. Null when there is none: the
     # presenter wears their default outfit.
     presenter_outfit: str | None
+    # The saved outfit of the presenter (a Character Lab outfit) in place of the text, or None.
+    presenter_named_look_id: int | None
+    # That outfit's name and whether it was deleted since (a deleted one still applies to this
+    # project), or None.
+    presenter_named_look_name: str | None
+    presenter_named_look_deleted: bool
     # Whether a continuous explainer gets graphic shots (EXG-001). Off for every other project.
     graphics: bool
     story_length: StoryLengthOut
@@ -184,6 +194,11 @@ def _review_points(project: Project) -> list[ReviewPointKey]:
 async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
     policy = await story_length_service.read_story_length_policy(session)
     length = story_length_service.story_length(project.script_text, policy)
+    picked = (
+        await session.get(CharacterNamedLook, project.presenter_named_look_id)
+        if project.presenter_named_look_id is not None
+        else None
+    )
     return ProjectDetail(
         id=project.id,
         name=project.name,
@@ -206,6 +221,9 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         presenter_delivery=project.presenter_delivery,
         presenter_staging=project.presenter_staging,
         presenter_outfit=project.presenter_outfit,
+        presenter_named_look_id=project.presenter_named_look_id,
+        presenter_named_look_name=picked.name if picked is not None else None,
+        presenter_named_look_deleted=picked is not None and picked.deleted_at is not None,
         graphics=project.graphics,
         story_length=StoryLengthOut(
             word_count=length.word_count,
@@ -274,6 +292,7 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             body.graphics,
             presenter_staging=body.presenter_staging,
             presenter_outfit=body.presenter_outfit,
+            presenter_named_look_id=body.presenter_named_look_id,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

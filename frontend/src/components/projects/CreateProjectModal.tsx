@@ -18,12 +18,8 @@ import { useLibraryCharacters } from "../../api/characterLab";
 import { useLibraryEnvironments } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
-import {
-  OUTFIT_MAX_CHARS,
-  PROJECT_KINDS,
-  STAGING_MAX_CHARS,
-  isProjectKind,
-} from "./projectKinds";
+import { PresenterOutfitField } from "./PresenterOutfitField";
+import { PROJECT_KINDS, STAGING_MAX_CHARS, isProjectKind } from "./projectKinds";
 import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
 import type { SpeechMode } from "./speechModes";
@@ -136,6 +132,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [delivery, setDelivery] = useState("");
   const [staging, setStaging] = useState("");
   const [outfit, setOutfit] = useState("");
+  const [outfitId, setOutfitId] = useState<number | null>(null);
   const [graphics, setGraphics] = useState(true);
   const [name, setName] = useState("");
 
@@ -162,7 +159,9 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         presenter_delivery:
           explainer && voiceTrack === "continuous" && delivery.trim() !== "" ? delivery : undefined,
         presenter_staging: explainer && staging.trim() !== "" ? staging : undefined,
-        presenter_outfit: explainer && outfit.trim() !== "" ? outfit : undefined,
+        presenter_outfit:
+          explainer && outfitId === null && outfit.trim() !== "" ? outfit : undefined,
+        presenter_named_look_id: explainer && outfitId !== null ? outfitId : undefined,
         // Only a continuous explainer can have graphics; any other project leaves it out.
         graphics: explainer && voiceTrack === "continuous" ? graphics : undefined,
       },
@@ -279,7 +278,11 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
             <PresenterFields
               presenterId={presenterId}
               setId={setId}
-              onPresenter={setPresenterId}
+              onPresenter={(value) => {
+                setPresenterId(value);
+                // The saved outfits belong to the presenter, so a pick does not carry over.
+                setOutfitId(null);
+              }}
               onSet={setSetId}
             />
             <Textarea
@@ -292,15 +295,15 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
               minRows={2}
               maxRows={6}
             />
-            <Textarea
-              label="Presenter outfit (optional)"
-              description="What the presenter wears in this video, for example: a navy blazer over a white shirt. New pictures of the presenter in this outfit are made for the project; the character in the Character Lab keeps its own outfit. Left empty, the presenter wears their usual outfit."
-              value={outfit}
-              onChange={(event) => setOutfit(event.currentTarget.value)}
-              maxLength={OUTFIT_MAX_CHARS}
-              autosize
-              minRows={2}
-              maxRows={4}
+            <PresenterOutfitField
+              key={presenterId ?? "none"}
+              characterId={presenterId === null ? null : Number(presenterId)}
+              pickedId={outfitId}
+              text={outfit}
+              onChange={(value) => {
+                setOutfitId(value.pickedId);
+                setOutfit(value.text);
+              }}
             />
             <Radio.Group
               label="6. Voice"

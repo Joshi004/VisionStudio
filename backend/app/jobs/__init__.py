@@ -58,6 +58,7 @@ def register_handlers() -> None:
     from app.jobs.define_environment import DefineEnvironmentHandler
     from app.jobs.define_scene import DefineSceneHandler
     from app.jobs.define_shot import DefineShotHandler
+    from app.jobs.describe_photo import DescribePhotoHandler
     from app.jobs.design_voice import DesignVoiceHandler
     from app.jobs.discover_characters import DiscoverCharactersHandler
     from app.jobs.discover_environments import DiscoverEnvironmentsHandler
@@ -116,6 +117,7 @@ def register_handlers() -> None:
     handlers.register(GenerateLabImageHandler())
     handlers.register(WriteCharacterLookPromptHandler())
     handlers.register(WriteCharacterTakePromptHandler())
+    handlers.register(DescribePhotoHandler())
     handlers.register(WriteStoryBibleHandler())
     handlers.register(DiscoverCharactersHandler())
     handlers.register(DiscoverEnvironmentsHandler())
