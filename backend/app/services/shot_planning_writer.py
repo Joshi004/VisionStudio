@@ -137,6 +137,11 @@ neighbours or given a shot of its own.
 DURATION POLICY. Choose every "target_duration" from that list: code moves any other length to \
 the nearest one on it, which can make a shot a little shorter or longer than you planned.
 - Do not invent events, characters or places the scene does not have.
+- An event that says someone speaks, explains, asks, argues or keeps talking (a voice on a \
+phone that goes on, a guest asking something) but has no speech unit has no recorded words, and \
+the video model would make up words for it. Show it from a listener, or as a reaction, an object \
+or a place: the description says who listens or reacts and never has that person talking on \
+screen. A shot with no speech unit shows nobody talking.
 
 If the user message also holds STAGING, the scene was staged: it says where each character \
 stands, which side of the screen they are on and what is behind them, and which two characters \

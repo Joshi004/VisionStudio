@@ -190,11 +190,18 @@ same place, the same people and no jump.
 characters (write "silence" when there is none). "sound_events" lists the distinct sounds that \
 happen in this shot, each at most {SOUND_EVENT_MAX_CHARS} characters, at most {MAX_SOUND_EVENTS}, \
 and may be empty. Do not include spoken words, narration or music here: the speech is supplied \
-separately, and music is added to the whole film later.
+separately, and music is added to the whole film later. Write no voice of any kind in "ambient" \
+or "sound_events" (no conversation, chatter, murmur, whisper, laughter, shouting or phone voice, \
+even far away or muffled): the video model makes up words for a voice it has no line for. A \
+voice with no line of speech is written as the sound of its source (a door slams, cutlery clinks, \
+a phone's speaker crackles faintly) or left out.
 - Do not write the shot's id, its duration or its dialogue: they are filled in for you.
 - When SPEECH lists a line of dialogue, the shot must make sense of it: its speaker is shown \
 speaking, or is stated to be unseen. Narration is heard over the shot and is not spoken by \
-anyone in it.
+anyone in it. Only the speakers of the lines in SPEECH talk in this shot: everyone else who is \
+visible listens with the mouth closed. When SPEECH lists no line, nobody in the shot talks, \
+explains, asks, answers or whispers, in any field: a moment where the story has someone speak \
+but gives no line is shown through a listener or as a silent reaction, with no words.
 - When the SHOT has "rapid_exchange" set to true, it is a quick back-and-forth between two \
 characters inside one shot, and the video cuts between them as each speaks. Both speakers are \
 VISIBLE, so both get an entry in "characters". "composition" is the opening two-shot that shows \
