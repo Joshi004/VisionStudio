@@ -97,6 +97,9 @@ class SceneRenderStateOut(BaseModel):
     placeholders: int
     # The music placement version the next render would use, or None when it has no music.
     music_placement_version: int | None
+    # The next render's music is placed provisionally, on the planned times of missing clips
+    # (SCN-011), so `music_placement_version` is None.
+    music_provisional: bool
     # Why the next render has no music although the project wants it, or None.
     no_music_reason: str | None
     # The newest render job of this scene, whatever its status.
@@ -153,6 +156,7 @@ def _scene_out(scene: SceneRenderState, fps: int) -> SceneRenderStateOut:
         ),
         placeholders=scene.placeholders,
         music_placement_version=scene.music_placement_version,
+        music_provisional=scene.music_provisional,
         no_music_reason=scene.no_music_reason,
         job=job_out(scene.job),
         renders=[_render_out(entry) for entry in scene.renders],

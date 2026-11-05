@@ -12,9 +12,12 @@ the scene's first frame is frame 0.
 - **A shot with no clip yet** (no selected take, a missing file, a graphic with no video) gets a
   placeholder of its planned length, and a line of dialogue whose shots are all placeholders is
   played from its recorded speech, so the timing can be judged.
-- **Music** is used only when the project has a current music placement (the full one;
-  `render_music.gate`). It is cut to the scene's window with short fades. Without one the scene
-  render has no music, and says why (`SceneRenderState.no_music_reason`).
+- **Music** is the current final placement when there is one (`render_music.gate`). Without it,
+  a **provisional placement** is worked out when the render is started (SCN-011,
+  `render_music.scene_gate`): the story's timing with a placeholder for every missing clip, no
+  model call, and nothing stored but what it was made from (`timeline.music.provisional`). It is
+  cut to the scene's window with short fades. Without either the scene render has no music, and
+  says why (`SceneRenderState.no_music_reason`).
 - **A scene render is stored only when it succeeds** (`save_scene_render`, called by the job in
   the transaction that finishes it) and renders never replace each other: they are numbered from
   1 for each scene. All of them are kept.
@@ -36,7 +39,9 @@ from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     caption_plan,
+    music_placement,
     provenance,
+    render_music,
     shot_graphics,
     shot_plans,
     shot_takes,
@@ -92,8 +97,11 @@ class SceneRenderState:
     planned_frames: int | None
     # How many shots the next render would show as a placeholder.
     placeholders: int
-    # The music placement version the next render would use, or None when it has no music.
+    # The music placement version the next render would use, or None when it has no music or
+    # its music is provisional.
     music_placement_version: int | None
+    # The next render's music is placed provisionally, on the planned times of missing clips.
+    music_provisional: bool
     # Why the next render has no music although the project wants it, or None.
     no_music_reason: str | None
     # The newest scene render job of this scene, whatever its status.
@@ -121,14 +129,17 @@ class _Context:
     takes: shot_takes.ShotTakesState
     speech: dict[tuple[str, str], speech_synthesis.UnitEntry]
     mix: story_render_plan.MixSettings
-    music: Any  # `render_music.MusicGate`
+    music: render_music.SceneMusicGate
     callouts: story_renders.CalloutGate
     switched: set[tuple[str, str]]
     graphics: dict[tuple[str, str], shot_graphics.UsedVideo | None]
     sources: list[story_render_plan.SceneSource]
 
 
-async def _context(session: AsyncSession, project: Project) -> _Context:
+async def _context(session: AsyncSession, project: Project, *, place: bool) -> _Context:
+    """What one read gathers once. `place` is True only when a render is being started: the
+    provisional music is placed then (it measures sounds); a read only checks that it can be.
+    """
     plans = await shot_plans.state(session, project)
     takes = await shot_takes.state(session, project)
     speech = story_renders.speech_by_unit(await speech_synthesis.state(session, project))
@@ -150,7 +161,7 @@ async def _context(session: AsyncSession, project: Project) -> _Context:
         takes=takes,
         speech=speech,
         mix=await story_renders.mix_settings(session),
-        music=await story_renders.music_gate(session, project),
+        music=await render_music.scene_gate(session, project, place=place),
         callouts=await story_renders.callout_gate(session, project),
         switched=await shot_voice_sources.clip_shots(session, project),
         graphics=await story_renders.graphic_videos(session, project),
@@ -165,6 +176,8 @@ class _ScenePlan:
     # The music placement version in the plan, or None.
     music_version: int | None
     no_music_reason: str | None
+    # The plan's music is, or in a read would be, provisional.
+    music_provisional: bool = False
 
 
 def _plan_scene(context: _Context, scene: story_render_plan.SceneSource) -> _ScenePlan:
@@ -198,11 +211,18 @@ def _plan_scene(context: _Context, scene: story_render_plan.SceneSource) -> _Sce
     no_music_reason: str | None = context.music.blocked_reason
     try:
         plan = build(source)
+        # A scene that starts at an unknown place gets no music at all (the plan says so).
+        has_music = not any(
+            warning["code"] == story_render_plan.SCENE_START_UNKNOWN for warning in plan.warnings
+        )
         return _ScenePlan(
             plan,
             None,
-            source.placement_version if source is not None else None,
+            source.placement_version
+            if source is not None and not context.music.provisional
+            else None,
             no_music_reason,
+            context.music.provisional and has_music,
         )
     except story_render_plan.RenderPlanError as exc:
         if source is None:
@@ -216,6 +236,40 @@ def _plan_scene(context: _Context, scene: story_render_plan.SceneSource) -> _Sce
 
 
 # --- Out of date ----------------------------------------------------------------------------
+
+
+def _music_reasons(recorded: dict[str, Any], context: _Context) -> list[str]:
+    """Why the music of a scene render, or its mix settings, no longer match. A render made with
+    a provisional placement (SCN-011) is out of date when the final placement has been made since,
+    when music cannot be placed now, or when what it was placed from has changed. Any other render
+    is judged as the full render's is.
+    """
+    music = context.music
+    used = recorded.get("music") if isinstance(recorded.get("music"), dict) else None
+    then = used.get("provisional") if used is not None else None
+    if not isinstance(used, dict) or not isinstance(then, dict):
+        return story_renders.music_reasons(
+            recorded,
+            context.project,
+            music.final.source,
+            music.final.blocked_reason,
+            context.mix,
+        )
+    reasons: list[str] = []
+    if music.final_current:
+        reasons.append("The final music placement was made since this video was made.")
+    elif not context.project.music_enabled:
+        reasons.append("Music has been switched off since this video was made.")
+    elif music.provisional_inputs is None:
+        reasons.append(
+            music.blocked_reason or "The music of this video is no longer part of the story."
+        )
+    else:
+        reasons.extend(music_placement.input_differences(then, music.provisional_inputs))
+    if used.get("ambience") != context.project.ambience_enabled:
+        reasons.append("The ambience switch has changed since this video was made.")
+    reasons.extend(story_renders.mix_constant_reasons(recorded, with_music=True, mix=context.mix))
+    return reasons
 
 
 def _scene_reasons(
@@ -305,15 +359,7 @@ def _scene_reasons(
         elif made.audio.id != unit.get("audio_id"):
             reasons.append(f"{unit_label} was made again since this video was made.")
 
-    reasons.extend(
-        story_renders.music_reasons(
-            recorded,
-            context.project,
-            context.music.source,
-            context.music.blocked_reason,
-            context.mix,
-        )
-    )
+    reasons.extend(_music_reasons(recorded, context))
     if isinstance(recorded.get("captions"), dict) != story_renders.captions_wanted(context.project):
         reasons.append("The captions setting has changed since this video was made.")
     reasons.extend(
@@ -360,7 +406,7 @@ async def state(session: AsyncSession, project: Project) -> SceneRendersState:
     """For every scene: whether it can be rendered now, what the render would warn about, its
     newest render job and every finished render. Worked out on every read; nothing is stored.
     """
-    context = await _context(session, project)
+    context = await _context(session, project, place=False)
     rows = await _all_renders(session, project.id)
     jobs = await _jobs(session, project.id)
     jobs_by_id = {job.id: job for job in jobs}
@@ -421,6 +467,7 @@ async def state(session: AsyncSession, project: Project) -> SceneRendersState:
                     else 0
                 ),
                 music_placement_version=planned.music_version,
+                music_provisional=planned.music_provisional,
                 no_music_reason=planned.no_music_reason,
                 job=job,
                 renders=renders,
@@ -437,7 +484,7 @@ async def start_render(session: AsyncSession, project: Project, scene_id: str) -
     render of this scene is already waiting or running, that job is returned. Raises
     SceneRendersError.
     """
-    context = await _context(session, project)
+    context = await _context(session, project, place=True)
     source = next((item for item in context.sources if item.scene_id == scene_id), None)
     if source is None:
         known = any(entry.item["id"] == scene_id for entry in context.plans.entries)

@@ -166,28 +166,6 @@ async def latest_job(session: AsyncSession, project_id: int) -> Job | None:
 # --- What a preview job renders ------------------------------------------------------------
 
 
-def _choices_for(
-    first: music_placer.PlacementResult, stored: dict[str, Any] | None
-) -> dict[str, str | None]:
-    """The answers to the placer's questions, taken from the newest placement's own choices:
-    the same question (by id) with the same picked moment (by description). `None` for a question
-    that has no such answer.
-    """
-    picked = {
-        str(entry["id"]): entry.get("picked")
-        for entry in (stored or {}).get("choices") or []
-        if isinstance(entry, dict) and "id" in entry
-    }
-    answers: dict[str, str | None] = {}
-    for question in first.pending:
-        wanted = picked.get(question["id"])
-        answers[question["id"]] = next(
-            (c["id"] for c in question["candidates"] if wanted and c["description"] == wanted),
-            None,
-        )
-    return answers
-
-
 async def _source_with_take(
     session: AsyncSession,
     project: Project,
@@ -200,7 +178,8 @@ async def _source_with_take(
     final = first
     if first.pending:
         final = music_placer.place(
-            gathered.data, _choices_for(first, newest.content if newest is not None else None)
+            gathered.data,
+            music_placement.reuse_choices(first, newest.content if newest is not None else None),
         )
     mixes = await render_music.cue_mix(session, gathered.inputs)
     source = story_render_plan.MusicSource(

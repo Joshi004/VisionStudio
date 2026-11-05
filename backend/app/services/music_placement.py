@@ -91,9 +91,12 @@ def _item_block(item: music_takes.ItemView) -> str | None:
     return None
 
 
-def _timeline_hash(sources: story_renders.RenderSources) -> str:
+def _timeline_hash(sources: story_renders.RenderSources, *, with_takes: bool = True) -> str:
     """A fingerprint of what decides the seconds of the placement: the shots with their frames
-    and selected takes, the narration with its audio, and every speech unit's span.
+    and selected takes, the narration with its audio, and every speech unit's span. Without
+    `with_takes` (a provisional placement, SCN-011) the selected takes are left out, so a clip
+    that arrives later does not change it: the seconds do not depend on it. A line of dialogue
+    played for placeholders (`stand_in`) is left out: it is a dialogue unit, counted below.
     """
     assert sources.plan is not None
     timeline = sources.plan.timeline
@@ -106,13 +109,14 @@ def _timeline_hash(sources: story_renders.RenderSources) -> str:
                 shot["shot_id"],
                 shot["start_frame"],
                 shot["frames"],
-                shot["take_id"],
+                *([shot["take_id"]] if with_takes else []),
             ]
             for shot in timeline["shots"]
         ],
         "narration": [
             [item["scene_id"], item["unit_id"], item["audio_id"], item["start_ms"], item["seconds"]]
             for item in timeline["narration"]
+            if not item.get("stand_in")
         ],
         "units": [
             [
@@ -155,10 +159,19 @@ def _inputs(
     items: list[music_takes.ItemView],
     sources: story_renders.RenderSources,
     values: dict[str, int],
+    *,
+    provisional: bool = False,
 ) -> dict[str, Any]:
     rows = {
         item.cue_view.row.id: item.cue_view.row for item in items if item.cue_view.row is not None
     }
+    # A provisional placement (SCN-011) is made on the story's timing alone: `timing_sha256`
+    # stands in for `timeline_sha256`, and `provisional` marks it.
+    timeline_keys: dict[str, Any] = (
+        {"timing_sha256": _timeline_hash(sources, with_takes=False), "provisional": True}
+        if provisional
+        else {"timeline_sha256": _timeline_hash(sources)}
+    )
     return {
         "plan": {"id": plan.id, "version": plan.version},
         "cues": [
@@ -174,7 +187,7 @@ def _inputs(
             for item in items
             if item.selection is not None
         ],
-        "timeline_sha256": _timeline_hash(sources),
+        **timeline_keys,
         "settings": values,
         "analysis_version": audio_analysis.ANALYSIS_VERSION,
         "placer_version": music_placer.PLACER_VERSION,
@@ -199,7 +212,13 @@ async def _collect(
     session: AsyncSession,
     project: Project,
     override: dict[str, music_takes.TakeView] | None = None,
+    *,
+    provisional: bool = False,
 ) -> _Collected:
+    """What a placement is made from. With `provisional` (SCN-011) the timeline is the story's
+    timing with placeholders for the clips that are missing, so music can be placed before every
+    clip exists; every other check is the same.
+    """
     if not project.music_enabled:
         return _blocked(MUSIC_OFF_MESSAGE)
     takes = await music_takes.state(session, project)
@@ -213,12 +232,23 @@ async def _collect(
         reason = _item_block(item)
         if reason is not None:
             return _blocked(reason, plan)
-    sources = await story_renders.next_render_sources(session, project)
+    sources = (
+        await story_renders.timing_sources(session, project)
+        if provisional
+        else await story_renders.next_render_sources(session, project)
+    )
     if sources.blocked_reason is not None or sources.plan is None:
         return _blocked(sources.blocked_reason or "The story cannot be rendered yet.", plan)
     loaded = await music_cues.load(session, project)
     values = await _setting_values(session)
-    return _Collected(plan, items, sources, loaded, _inputs(plan, items, sources, values), None)
+    return _Collected(
+        plan,
+        items,
+        sources,
+        loaded,
+        _inputs(plan, items, sources, values, provisional=provisional),
+        None,
+    )
 
 
 # --- Gathering (measures the sounds) -------------------------------------------------------
@@ -304,7 +334,11 @@ async def _speech(
     if sources.plan.timeline.get("voice") is not None:
         return await _voice_speech(session, sources, layout, unmeasured)
     speech: list[music_placer.Speech] = []
-    narration = sorted(sources.plan.timeline["narration"], key=lambda item: item["start_ms"])
+    # A line of dialogue played for placeholders (SCN-003, SCN-011) is a dialogue unit, added below.
+    narration = sorted(
+        (item for item in sources.plan.timeline["narration"] if not item.get("stand_in")),
+        key=lambda item: item["start_ms"],
+    )
     for position, entry in enumerate(narration):
         start = entry["start_ms"] / 1000
         end = start + float(entry["seconds"])
@@ -550,13 +584,16 @@ async def gather(
     session: AsyncSession,
     project: Project,
     override: dict[str, music_takes.TakeView] | None = None,
+    *,
+    provisional: bool = False,
 ) -> Gathered:
     """Everything `music_placer.place` needs, with the sounds measured. Raises
     `MusicPlacementError` when music cannot be placed now. `override` is a take for an item
     (by item id) to use instead of the selected one: the preview of a take that is not selected
-    yet. A placement is never saved from it.
+    yet. A placement is never saved from it. With `provisional` (SCN-011) the story's timing is
+    used with placeholders for missing clips, which have no sound to find a moment in.
     """
-    collected = await _collect(session, project, override)
+    collected = await _collect(session, project, override, provisional=provisional)
     if collected.blocked_reason is not None:
         raise MusicPlacementError(collected.blocked_reason)
     plan = collected.plan
@@ -753,7 +790,13 @@ async def save_placement(
 
 def _out_of_date_reasons(row: MusicPlacement, current: dict[str, Any]) -> list[str]:
     """Why a stored placement no longer matches what it would be made from, one sentence each."""
-    saved = row.inputs if isinstance(row.inputs, dict) else {}
+    return input_differences(row.inputs if isinstance(row.inputs, dict) else {}, current)
+
+
+def input_differences(saved: dict[str, Any], current: dict[str, Any]) -> list[str]:
+    """Why a placement made from `saved` no longer matches `current`, one sentence each. Both are
+    `inputs` of the same kind: a final placement's, or a provisional one's (SCN-011).
+    """
     reasons: list[str] = []
     if saved.get("plan") != current["plan"]:
         reasons.append("The music plan was written again since the music was placed.")
@@ -761,10 +804,15 @@ def _out_of_date_reasons(row: MusicPlacement, current: dict[str, Any]) -> list[s
         reasons.append("A cue was detailed again since the music was placed.")
     if saved.get("takes") != current["takes"]:
         reasons.append("A take was selected again since the music was placed.")
-    if saved.get("timeline_sha256") != current["timeline_sha256"]:
+    if saved.get("timeline_sha256") != current.get("timeline_sha256"):
         reasons.append(
             "The story's timeline changed since the music was placed (a shot take, the "
             "narration or a shot plan is different)."
+        )
+    if saved.get("timing_sha256") != current.get("timing_sha256"):
+        reasons.append(
+            "The story's timing changed since the music was placed (a shot plan or the "
+            "narration is different)."
         )
     if saved.get("settings") != current["settings"]:
         reasons.append("A placement setting has changed since the music was placed.")
@@ -847,3 +895,73 @@ async def start_run(session: AsyncSession, project: Project) -> Job:
         input={"plan_id": plan.id, "plan_version": plan.version},
     )
     return job
+
+
+# --- The provisional placement (SCN-011) ---------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ProvisionalCheck:
+    """Whether music can be placed now on the story's timing alone (nothing is measured)."""
+
+    # What a provisional placement would be made from, or None when it cannot be made.
+    inputs: dict[str, Any] | None
+    # Why it cannot be made, in plain words, or None.
+    blocked_reason: str | None
+
+
+@dataclass(frozen=True)
+class Provisional:
+    """A placement made before every clip exists. It is never saved."""
+
+    content: dict[str, Any]
+    inputs: dict[str, Any]
+
+
+def reuse_choices(
+    first: music_placer.PlacementResult, stored: dict[str, Any] | None
+) -> dict[str, str | None]:
+    """The answers to the placer's questions, taken from a stored placement's own choices: the
+    same question (by id) with the same picked moment (by description). `None` for a question
+    that has no such answer, so the code's own pick is used. No model is asked.
+    """
+    picked = {
+        str(entry["id"]): entry.get("picked")
+        for entry in (stored or {}).get("choices") or []
+        if isinstance(entry, dict) and "id" in entry
+    }
+    answers: dict[str, str | None] = {}
+    for question in first.pending:
+        wanted = picked.get(question["id"])
+        answers[question["id"]] = next(
+            (c["id"] for c in question["candidates"] if wanted and c["description"] == wanted),
+            None,
+        )
+    return answers
+
+
+@memoized_state
+async def provisional_check(session: AsyncSession, project: Project) -> ProvisionalCheck:
+    """Whether a provisional placement can be made now, and what it would be made from. Worked
+    out on every read and measures nothing. Music off, or a plan with no cue that needs a
+    recording, give neither inputs nor a reason.
+    """
+    collected = await _collect(session, project, provisional=True)
+    return ProvisionalCheck(collected.inputs, collected.blocked_reason)
+
+
+async def place_provisional(session: AsyncSession, project: Project) -> Provisional:
+    """Places the music on the story's timing, with a placeholder for every missing clip: a
+    moment that would be placed on a sound in a missing clip is placed on its planned second.
+    The newest placement's choices are reused and no model is asked. Raises
+    `MusicPlacementError` when music cannot be placed now. Nothing is saved.
+    """
+    gathered = await gather(session, project, provisional=True)
+    first = music_placer.place(gathered.data)
+    final = first
+    if first.pending:
+        newest = await latest(session, project.id)
+        final = music_placer.place(
+            gathered.data, reuse_choices(first, newest.content if newest is not None else None)
+        )
+    return Provisional(content=final.content, inputs=gathered.inputs)

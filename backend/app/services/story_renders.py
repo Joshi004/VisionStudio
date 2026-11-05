@@ -631,13 +631,23 @@ def music_reasons(
         if used.get("ambience") != source.ambience:
             reasons.append("The ambience switch has changed since this video was made.")
 
+    reasons.extend(mix_constant_reasons(recorded, with_music=used is not None, mix=mix))
+    return reasons
+
+
+def mix_constant_reasons(
+    recorded: dict[str, Any], *, with_music: bool, mix: story_render_plan.MixSettings
+) -> list[str]:
+    """Whether a mix or loudness setting has changed since a render was made. `with_music` is
+    whether the render had music (its mix settings only matter then).
+    """
     # A video made before the final loudness (timeline version 1) has no recorded settings.
     constants = recorded.get("constants") if isinstance(recorded.get("constants"), dict) else {}
     now = story_render_plan.constants(mix)
-    keys = _MASTER_CONSTANTS if used is None else (*_MIX_CONSTANTS, *_MASTER_CONSTANTS)
+    keys = (*_MIX_CONSTANTS, *_MASTER_CONSTANTS) if with_music else _MASTER_CONSTANTS
     if any(key in constants and constants[key] != now[key] for key in keys):
-        reasons.append("A mix or loudness setting has changed since this video was made.")
-    return reasons
+        return ["A mix or loudness setting has changed since this video was made."]
+    return []
 
 
 def _render_reasons(
@@ -897,6 +907,28 @@ async def next_render_sources(session: AsyncSession, project: Project) -> Render
     # ... nor on the captions, which are drawn over the finished picture.
     plan, blocked = _plan_of(project, scenes, story_render_plan.MixSettings(), captions=False)
     return RenderSources(scenes, plan, blocked, takes)
+
+
+async def timing_sources(session: AsyncSession, project: Project) -> RenderSources:
+    """The same as `next_render_sources`, but the timeline lets shots with no clip (or a clip
+    that is too short) stand as placeholders of their planned length, so the story's timing is
+    known before every clip exists (the provisional music placement, SCN-011). Every second of
+    it is the one the full render will have. Reads only.
+    """
+    plans = await shot_plans.state(session, project)
+    takes = await shot_takes.state(session, project)
+    blocked = plans.blocked_reason or takes.blocked_reason
+    if blocked is not None:
+        return RenderSources([], None, blocked, takes)
+    speech = speech_by_unit(await speech_synthesis.state(session, project))
+    scenes = await scene_sources(session, project, plans, takes, speech)
+    try:
+        plan = story_render_plan.build_timing_plan(
+            scenes, fps=project.fps, width=project.out_width, height=project.out_height
+        )
+    except story_render_plan.RenderPlanError as exc:
+        return RenderSources(scenes, None, str(exc), takes)
+    return RenderSources(scenes, plan, None, takes)
 
 
 # --- Starting a render ----------------------------------------------------------------------

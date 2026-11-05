@@ -141,6 +141,10 @@ PLACEHOLDER_NO_CLIP: Final = "No clip yet"
 PLACEHOLDER_CLIP_FILE_MISSING: Final = "Clip file missing"
 PLACEHOLDER_NO_GRAPHIC: Final = "No graphic yet"
 PLACEHOLDER_GRAPHIC_FILE_MISSING: Final = "Graphic file missing"
+# Only in the timing timeline of a provisional music placement (SCN-011): a clip that is shorter
+# than its shot counts as missing there, so the placement can still be made.
+PLACEHOLDER_CLIP_TOO_SHORT: Final = "Clip too short"
+PLACEHOLDER_GRAPHIC_TOO_SHORT: Final = "Graphic too short"
 
 # A music sound cut by the edge of a scene render fades over this long (a starting value, not yet
 # tuned by ear).
@@ -289,6 +293,10 @@ class MusicSource:
     cue_mix: dict[str, tuple[str, bool]]
     # Whether beds and point sounds are in the render (the project's ambience switch).
     ambience: bool = True
+    # Set only for a provisional placement (SCN-011), made before every clip existed: what it was
+    # made from (`music_placement.provisional_inputs`). It is written into `timeline.music` so
+    # a scene render can tell later whether it is out of date.
+    provisional: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -639,6 +647,8 @@ def _music_timeline(
         "sounds": sounds,
         "left_out": left_out,
     }
+    if music.provisional is not None:
+        timeline["provisional"] = music.provisional
     return timeline, bed_spans
 
 
@@ -808,6 +818,31 @@ def build_plan(
     )
 
 
+def build_timing_plan(
+    scenes: list[SceneSource], *, fps: int, width: int, height: int
+) -> RenderPlan:
+    """Where every shot, line and cut of the whole story sits, for a music placement made before
+    every clip exists (SCN-011). It is the full builder with placeholders, and a clip that is
+    shorter than its shot counts as missing too, so no clip can stop it. Shot lengths come from
+    the shot plans, so every second is the one the full render will have. No music, captions
+    or callouts. It is never rendered.
+    """
+    return _build(
+        scenes,
+        fps=fps,
+        width=width,
+        height=height,
+        mix=None,
+        music=None,
+        captions=None,
+        callouts=None,
+        measure=None,
+        placeholders=True,
+        first_frame=0,
+        short_clips_as_placeholders=True,
+    )
+
+
 def _build(
     scenes: list[SceneSource],
     *,
@@ -821,6 +856,7 @@ def _build(
     measure: callout_render.Measure | None,
     placeholders: bool,
     first_frame: int,
+    short_clips_as_placeholders: bool = False,
 ) -> RenderPlan:
     """What `build_plan` and `build_scene_plan` share. With `placeholders` (a scene render), a shot
     without a clip or graphic gets a placeholder instead of refusing the plan, and a line of
@@ -882,6 +918,17 @@ def _build(
             if frames < 1:
                 raise RenderPlanError(f"The shot {label} lasts less than one frame.")
             needed = source_frames_needed(frames, fps)
+            if short_clips_as_placeholders and shot.shot_id not in stand_ins:
+                # One source frame short is allowed, as below.
+                available = graphic.frame_count if shot.is_graphic and graphic else None
+                if not shot.is_graphic and take is not None:
+                    available = take.frame_count
+                if available is None or available < needed - 1:
+                    stand_ins[shot.shot_id] = (
+                        PLACEHOLDER_GRAPHIC_TOO_SHORT
+                        if shot.is_graphic
+                        else PLACEHOLDER_CLIP_TOO_SHORT
+                    )
             if shot.shot_id in stand_ins:
                 if shot.is_graphic:
                     graphic_spans.append((start_ms, end_ms))

@@ -44,7 +44,13 @@ function renderText(render: SceneRender): string {
       `${render.placeholders} ${render.placeholders === 1 ? "placeholder" : "placeholders"}`,
     );
   }
-  parts.push(render.music !== null ? "with music" : "no music");
+  parts.push(
+    render.music === null
+      ? "no music"
+      : render.music.provisional
+        ? "with provisional music"
+        : "with music",
+  );
   return parts.join(", ");
 }
 
@@ -62,9 +68,11 @@ function nextRenderText(scene: SceneRenderState): string | null {
     );
   }
   parts.push(
-    scene.music_placement_version === null
-      ? "without music"
-      : `with the music of placement version ${scene.music_placement_version}`,
+    scene.music_provisional
+      ? "with the story's music, placed for now on the planned times of missing clips"
+      : scene.music_placement_version === null
+        ? "without music"
+        : `with the music of placement version ${scene.music_placement_version}`,
   );
   return `${parts.join(", ")}.`;
 }

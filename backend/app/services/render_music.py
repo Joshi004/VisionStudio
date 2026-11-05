@@ -93,3 +93,62 @@ async def gate(session: AsyncSession, project: Project) -> MusicGate:
         )
     mixes = await cue_mix(session, state.latest.inputs)
     return MusicGate(source_of(state.latest, mixes, ambience=project.ambience_enabled), None)
+
+
+@dataclass(frozen=True)
+class SceneMusicGate:
+    """What the next render of a scene does about music (SCN-011): the final placement when there
+    is a current one, else a provisional placement made on the story's timing, else no music.
+    """
+
+    # The music to use, or None. With `provisional` and no source (a read that did not place
+    # anything) the next render would place the music then.
+    source: story_render_plan.MusicSource | None
+    # Why the render has no music although the project wants it, or None.
+    blocked_reason: str | None
+    # The music is, or would be, a provisional placement.
+    provisional: bool
+    # What a provisional placement is made from now (`music_placement.input_differences` compares
+    # it with what a render recorded), or None when none can be made.
+    provisional_inputs: dict[str, Any] | None
+    # A current final placement exists: it is what `source` is.
+    final_current: bool
+    # The refusal and the source of the full render's own gate, for the reasons of a render that
+    # was made with a final placement.
+    final: MusicGate
+
+
+async def scene_gate(session: AsyncSession, project: Project, *, place: bool) -> SceneMusicGate:
+    """The music of the next render of a scene. A current final placement is used as the full
+    render uses it. Without one, the music is placed provisionally: the story's timing with a
+    placeholder for every clip that is missing, the newest placement's choices and no model call.
+    With `place` False nothing is measured or placed (a read): the answer only says whether the
+    render would have music, and why not.
+    """
+    final = await gate(session, project)
+    if final.source is not None:
+        return SceneMusicGate(final.source, None, False, None, True, final)
+    if final.blocked_reason is None:
+        # Music is off, or the plan has nothing that needs a recording.
+        return SceneMusicGate(None, None, False, None, False, final)
+    check = await music_placement.provisional_check(session, project)
+    if check.blocked_reason is not None:
+        return SceneMusicGate(None, check.blocked_reason, False, None, False, final)
+    if check.inputs is None:
+        return SceneMusicGate(None, None, False, None, False, final)
+    if not place:
+        return SceneMusicGate(None, None, True, check.inputs, False, final)
+    try:
+        made = await music_placement.place_provisional(session, project)
+    except music_placement.MusicPlacementError as exc:
+        return SceneMusicGate(None, str(exc), False, None, False, final)
+    mixes = await cue_mix(session, made.inputs)
+    source = story_render_plan.MusicSource(
+        placement_id=0,
+        placement_version=0,
+        content=made.content,
+        cue_mix=mixes,
+        ambience=project.ambience_enabled,
+        provisional=made.inputs,
+    )
+    return SceneMusicGate(source, None, True, made.inputs, False, final)

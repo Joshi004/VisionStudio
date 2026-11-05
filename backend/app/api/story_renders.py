@@ -107,6 +107,9 @@ class RenderMusicOut(BaseModel):
     left_out: int
     # The layers that were made: `bed`, `score`, `sounds`.
     lanes: list[str]
+    # The music was placed before every clip existed (a scene render, SCN-011), so
+    # `placement_version` is 0.
+    provisional: bool = False
 
 
 class RenderMasterOut(BaseModel):
@@ -234,6 +237,15 @@ def narration_out(row: StoryRender | SceneRender) -> RenderNarrationOut | None:
     )
 
 
+def _provisional_music(row: StoryRender | SceneRender) -> bool:
+    """Whether the render's music was placed before every clip existed (SCN-011): the frozen
+    timeline carries what it was placed from.
+    """
+    timeline = row.inputs if isinstance(row.inputs, dict) else {}
+    music = timeline.get("music")
+    return isinstance(music, dict) and isinstance(music.get("provisional"), dict)
+
+
 def music_out(row: StoryRender | SceneRender) -> RenderMusicOut | None:
     music = (row.levels or {}).get("music")
     if not isinstance(music, dict):
@@ -245,6 +257,7 @@ def music_out(row: StoryRender | SceneRender) -> RenderMusicOut | None:
         sounds=music["sounds"],
         left_out=music.get("left_out", 0),
         lanes=list(lanes) if isinstance(lanes, dict) else [],
+        provisional=_provisional_music(row),
     )
 
 

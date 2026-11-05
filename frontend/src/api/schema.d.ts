@@ -12351,6 +12351,11 @@ export interface components {
             left_out: number;
             /** Lanes */
             lanes: string[];
+            /**
+             * Provisional
+             * @default false
+             */
+            provisional: boolean;
         };
         /** RenderNarrationOut */
         RenderNarrationOut: {
@@ -13268,6 +13273,8 @@ export interface components {
             placeholders: number;
             /** Music Placement Version */
             music_placement_version: number | null;
+            /** Music Provisional */
+            music_provisional: boolean;
             /** No Music Reason */
             no_music_reason: string | null;
             job: components["schemas"]["DiscoveryJobOut"] | null;
