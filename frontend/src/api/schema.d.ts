@@ -5132,6 +5132,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/story-pipeline/scene-review/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer Scene Review
+         * @description Answers the review one scene waits at (SCN-010). The run goes on for the other scenes.
+         *     The targets in `rejected` are made again and the scene waits at the same review point once
+         *     more; with none, the scene is approved and goes on. 422 when the scene is not waiting.
+         */
+        post: operations["answer_scene_review_api_projects__project_id__story_pipeline_scene_review__scene_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/activity": {
         parameters: {
             query?: never;
@@ -11145,6 +11167,35 @@ export interface components {
             /** Rejected */
             rejected?: components["schemas"]["RejectedTarget"][];
         };
+        /**
+         * PipelineLaneOut
+         * @description Where one scene stands in the scene lanes of a run (SCN-010).
+         */
+        PipelineLaneOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "waiting" | "going" | "review" | "problem" | "done";
+            /** Step */
+            step: string | null;
+            /** Step Label */
+            step_label: string | null;
+            /** Review */
+            review: string | null;
+            /** Review Label */
+            review_label: string | null;
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+        };
         /** PipelineProblemOut */
         PipelineProblemOut: {
             /** Step */
@@ -11225,6 +11276,8 @@ export interface components {
             remake_from: string | null;
             /** Jobs Made */
             jobs_made: number;
+            /** Lanes */
+            lanes: components["schemas"]["PipelineLaneOut"][];
         };
         /** PipelineRunStartedOut */
         PipelineRunStartedOut: {
@@ -13227,6 +13280,28 @@ export interface components {
             fps: number;
             /** Scenes */
             scenes: components["schemas"]["SceneRenderStateOut"][];
+        };
+        /** SceneReviewBody */
+        SceneReviewBody: {
+            /** Rejected */
+            rejected?: components["schemas"]["RejectedTarget"][];
+        };
+        /**
+         * SceneReviewOut
+         * @description What one scene waits for the user to review (SCN-010): the review point held scene by
+         *     scene, and the targets of that scene in its steps.
+         */
+        SceneReviewOut: {
+            scene: components["schemas"]["PipelineSceneOut"];
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots";
+            /** Label */
+            label: string;
+            /** Steps */
+            steps: components["schemas"]["ReviewStepOut"][];
         };
         /** SceneRunIn */
         SceneRunIn: {
@@ -15528,6 +15603,8 @@ export interface components {
             /** Review Points */
             review_points: components["schemas"]["ReviewPointOut"][];
             review: components["schemas"]["ReviewOut"] | null;
+            /** Scene Reviews */
+            scene_reviews: components["schemas"]["SceneReviewOut"][];
             run: components["schemas"]["PipelineRunOut"] | null;
             /** Can Start */
             can_start: boolean;
@@ -28169,6 +28246,51 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["PipelineContinueBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunStartedOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run cannot start now (no story, or another job is waiting or running), an unknown step was named, or there is no paused run. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    answer_scene_review_api_projects__project_id__story_pipeline_scene_review__scene_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SceneReviewBody"] | null;
             };
         };
         responses: {

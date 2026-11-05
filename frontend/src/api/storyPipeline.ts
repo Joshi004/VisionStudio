@@ -26,6 +26,8 @@ export type ReviewPointKey = ReviewPoint["key"];
 export type PipelineReview = components["schemas"]["ReviewOut"];
 export type RejectedTarget = components["schemas"]["RejectedTarget"];
 export type PipelineScene = components["schemas"]["PipelineSceneOut"];
+export type PipelineLane = components["schemas"]["PipelineLaneOut"];
+export type SceneReview = components["schemas"]["SceneReviewOut"];
 
 /**
  * The scenes a run would be limited to and the step it would make again in them (SCN-004).
@@ -97,6 +99,7 @@ function runSignature(run: PipelineRun | null | undefined): string | null {
     ...run.steps.map(
       (step) => `${step.status}:${step.done}/${step.total}/${step.left_alone}`,
     ),
+    ...run.lanes.map((lane) => `${lane.status}:${lane.done}`),
     run.jobs_made,
   ].join("|");
 }
@@ -273,6 +276,46 @@ export function useContinueStoryPipeline(projectId: number) {
           detailMessage(
             error,
             `Could not continue the pipeline (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: storyPipelineKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/**
+ * Answers the review one scene waits at (SCN-010). `rejected` lists the targets of the scene to
+ * make again: the scene then waits at the same review point once more. With none the scene is
+ * approved and goes on. The run goes on for the other scenes meanwhile.
+ */
+export function useAnswerSceneReview(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (answer: {
+      sceneId: string;
+      rejected: RejectedTarget[];
+    }) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/story-pipeline/scene-review/{scene_id}",
+        {
+          params: {
+            path: { project_id: projectId, scene_id: answer.sceneId },
+          },
+          body: { rejected: answer.rejected },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not answer the review (HTTP ${response.status}).`,
           ),
           response.status,
         );

@@ -16,6 +16,11 @@ type ReviewPointPanelProps = {
   review: PipelineReview;
   isPending: boolean;
   onContinue: (rejected: RejectedTarget[]) => void;
+  /**
+   * The scene this review is for (SCN-010). A review point held scene by scene shows each scene
+   * its own review: the run goes on for the other scenes while this one waits.
+   */
+  sceneLabel?: string;
 };
 
 /** One answer per target: the step and the target make its key. */
@@ -40,6 +45,7 @@ export function ReviewPointPanel({
   review,
   isPending,
   onContinue,
+  sceneLabel,
 }: ReviewPointPanelProps) {
   const [rejected, setRejected] = useState<Record<string, boolean>>({});
   const { openPanel } = useProjectPanels();
@@ -64,15 +70,24 @@ export function ReviewPointPanel({
   }
 
   return (
-    <Alert color="blue" title={`Review: ${review.label.toLowerCase()}`}>
+    <Alert
+      color={sceneLabel === undefined ? "blue" : "yellow"}
+      title={
+        sceneLabel === undefined
+          ? `Review: ${review.label.toLowerCase()}`
+          : `Review of ${sceneLabel}: ${review.label.toLowerCase()}`
+      }
+    >
       <Stack gap="xs">
         <Text size="sm">
-          The run has made this stage and is waiting for you. Look at it in the
-          panels below and change anything you like: edits follow the usual
-          out-of-date rules, and the run reads their result when it continues.
-          Reject what you want made again; the run then waits here once more.
-          Rejecting something you wrote, or chose from the library, allows it to
-          be replaced.
+          {sceneLabel === undefined
+            ? "The run has made this stage and is waiting for you."
+            : "The run has made this stage for this scene and the scene is waiting for you. The other scenes go on."}{" "}
+          Look at it in the panels below and change anything you like: edits
+          follow the usual out-of-date rules, and the run reads their result
+          when it continues. Reject what you want made again; the run then waits
+          here once more. Rejecting something you wrote, or chose from the
+          library, allows it to be replaced.
         </Text>
 
         {review.steps.map((step) => (
@@ -130,7 +145,9 @@ export function ReviewPointPanel({
             loading={isPending}
           >
             {rejectedTargets.length === 0
-              ? "Continue"
+              ? sceneLabel === undefined
+                ? "Continue"
+                : "Approve this scene"
               : `Remake ${rejectedTargets.length} rejected and review again`}
           </Button>
         </Group>

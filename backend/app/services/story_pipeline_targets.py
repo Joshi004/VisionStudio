@@ -87,6 +87,7 @@ from app.services.story_pipeline import (
     in_run_scenes,
     in_scope,
     is_story_wide,
+    target_scenes,
 )
 
 _logger = logging.getLogger(__name__)
@@ -1328,8 +1329,9 @@ async def _evaluate_environment_views(
                 last_error=last_error,
                 ref=(entry.discovery_id, step),
                 stale=entry.status == "out_of_date" or any(item.reasons for item in entry.views),
-                # A scene run looks at the places its scenes are set in (SCN-004).
-                scenes=tuple(need.scene_id for need in entry.needs),
+                # A scene run looks at the places its scenes are set in (SCN-004). In the lanes
+                # the place waits for every scene set there, staged or not (SCN-010).
+                scenes=tuple(entry.scene_ids or [need.scene_id for need in entry.needs]),
             )
         )
     return StepView(targets)
@@ -2396,24 +2398,30 @@ async def _call_render(session: AsyncSession, project: Project, options: RunOpti
     return await story_renders.start_render(session, project)
 
 
-# --- The render of each scene of a scene run (SCN-004) ---------------------------------------
+# --- The render of each scene: the end of its lane (SCN-004, SCN-010) ------------------------
 
 
 async def _evaluate_scene_render(
     session: AsyncSession, project: Project, options: RunOptions
 ) -> StepView:
-    # A run of the whole story has no scene to render: the step has one target that is already
-    # done, so the run reports it as skipped (SCN-010 gives the lanes of a full run theirs).
-    if not options.scenes:
-        return StepView([Target(PROJECT_KEY, "", True)])
     state = await scene_renders.state(session, project)
     targets: list[Target] = []
+    warnings: list[str] = []
     for scene in state.scenes:
-        if scene.scene_id not in options.scenes:
+        if options.scenes and scene.scene_id not in options.scenes:
             continue
         active = _active(scene.job)
         newest = scene.renders[0] if scene.renders else None
         done = newest is not None and newest.status == scene_renders.STATUS_CURRENT and not active
+        if not options.scenes and not done and not active and not scene.can_render:
+            # In a run of the whole story the scene render is a convenience at the end of the
+            # lane: a scene that cannot be rendered must not stop the run from finishing (the
+            # full video does not need it). It is a warning, not a problem.
+            done = True
+            warnings.append(
+                f"Scene {scene.index}: {scene.title}: no scene render was made: "
+                f"{scene.blocked_reason or 'it cannot be rendered'}"
+            )
         targets.append(
             Target(
                 f"scene:{scene.scene_id}",
@@ -2423,13 +2431,14 @@ async def _evaluate_scene_render(
                 block=None if done or active or scene.can_render else scene.blocked_reason,
                 last_error=_failure(scene.job),
                 ref=(scene.scene_id,),
-                # A scene with no render yet is made one by the run, as one that is out of date.
-                stale=not done,
+                # In a scene run a scene with no render yet is made one, as one that is out of
+                # date. In a run of the whole story only a render that exists can be out of date.
+                stale=not done if options.scenes else newest is not None and not done,
                 group=scene.scene_id,
                 existing=newest is not None,
             )
         )
-    return StepView(targets)
+    return StepView(targets, warnings=warnings)
 
 
 async def _start_scene_render(
@@ -2589,9 +2598,11 @@ async def review_targets(
     project: Project,
     point_key: str,
     options: RunOptions | None = None,
+    scene_id: str | None = None,
 ) -> list[ReviewStep]:
     """The done targets of every step of a review point, read through the adapters. Read-only.
-    An unknown point has none.
+    An unknown point has none. With `scene_id` (SCN-010) only the targets of that scene: a review
+    point held scene by scene shows each scene its own targets.
     """
     point = review_points.POINTS_BY_KEY.get(point_key)
     if point is None:
@@ -2604,7 +2615,13 @@ async def review_targets(
             ReviewStep(
                 key,
                 STEP_LABELS[key],
-                [t for t in view.targets if t.done and in_run_scenes(t, options.scenes)],
+                [
+                    t
+                    for t in view.targets
+                    if t.done
+                    and in_run_scenes(t, options.scenes)
+                    and (scene_id is None or scene_id in target_scenes(t))
+                ],
             )
         )
     return steps

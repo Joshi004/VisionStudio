@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Final, cast
 
@@ -93,6 +94,9 @@ class _Evaluation:
     paused_after: str | None
     # The review point whose steps are all complete now, when the run must wait for the user.
     paused_review: str | None = None
+    # A scene passed a review point, or an answer was applied (SCN-010): the steps after it may
+    # be ready now, so the run looks again at once.
+    settled: bool = False
 
 
 @dataclass
@@ -112,20 +116,39 @@ def _needs_are_ready(
     complete: set[str],
     options: pipeline.RunOptions,
     output: dict[str, Any],
+    scene_ids: Sequence[str] = (),
 ) -> bool:
-    """Whether the steps `step` needs are complete and, for a step of a review point the user
-    has not passed yet, not held back by one (PHASE-041). A step waits for the review of the
-    steps it needs, but not for the steps of its own review point.
+    """Whether the steps `step` has to wait for as whole steps are complete and, for a step of a
+    review point the user has not passed yet, not held back by one (PHASE-041). A step waits for
+    the review of the steps it needs, but not for the steps of its own review point.
+
+    A lane step (SCN-010) has to wait only for its story-wide needs and the needs it names as
+    `whole` (`hard_needs`): the others are waited for scene by scene. A review point that is held
+    scene by scene holds those steps until every scene has passed it.
     """
     own = review_rules.point_of(step.key)
     own_steps = set(own.steps) if own is not None else set()
-    held = {
-        key
-        for point in review_rules.REVIEW_POINTS
-        if point.key in options.review_points and point.key not in output["reviewed"]
-        for key in point.steps
-    } - own_steps
-    return all(key in complete and key not in held for key in step.needs)
+    held: set[str] = set()
+    for point in review_rules.REVIEW_POINTS:
+        if point.key not in options.review_points:
+            continue
+        if point.per_scene:
+            if not pipeline.all_scenes_passed(point.key, scene_ids, output):
+                held.update(point.steps)
+        elif point.key not in output["reviewed"]:
+            held.update(point.steps)
+    held -= own_steps
+    return all(key in complete and key not in held for key in pipeline.hard_needs(step))
+
+
+async def _run_scenes(
+    session: AsyncSession, project: Project, options: pipeline.RunOptions
+) -> list[str]:
+    """The ids of the scenes the run is about, in story order: the run's own choice, or every
+    scene of the newest list of scenes (SCN-010).
+    """
+    items = await pipeline.scene_items(session, project.id)
+    return [item["id"] for item in items if not options.scenes or item["id"] in options.scenes]
 
 
 def _review_stop(
@@ -143,6 +166,7 @@ def _review_stop(
     point = review_rules.point_of(step_key)
     if (
         point is None
+        or point.per_scene  # held scene by scene, never for the whole run (SCN-010)
         or point.key not in options.review_points
         or point.key in output["reviewed"]
         or not all(key in complete for key in point.steps)
@@ -177,7 +201,13 @@ def _stop_reason(
 
 
 def _phase_of(output: dict[str, Any], going: list[_Going], options: pipeline.RunOptions) -> str:
-    running = [(item.step.label, item.plan.done, item.plan.total) for item in going]
+    # A lane step that only waits for its scenes' upstream ("pending") has nothing going on: it is
+    # not named.
+    running = [
+        (item.step.label, item.plan.done, item.plan.total)
+        for item in going
+        if output["steps"][item.step.key]["status"] != "pending"
+    ]
     return pipeline.phase_of(output, running, options)
 
 
@@ -344,28 +374,59 @@ class StoryPipelineHandler(JobHandler):
         """
         output = pipeline.read_output(run.output)
         options = pipeline.RunOptions.from_input(run.input)
+        # What the user answered to the reviews of single scenes since the last look (SCN-010).
+        answers = run.input.get("scene_answers") if isinstance(run.input, dict) else None
+        settled = pipeline.apply_scene_answers(output, answers)
+        scene_ids = await _run_scenes(session, project, options)
         complete = pipeline.complete_keys(output)
         recheck: bool = output["recheck"]
         going: list[_Going] = []
         paused_after: str | None = None
         paused_review: str | None = None
+        # What is still open in each step of the scene lanes, scene by scene. A step that was not
+        # reached is missing, and is open for everything.
+        opens: dict[str, pipeline.Open] = {}
 
         for step in pipeline.STEPS:
             if options.scenes and step.key in pipeline.SCENE_RUN_SKIPS:
                 # A run of some scenes makes no music and no full video (SCN-004).
                 output["steps"][step.key]["status"] = "skipped"
                 complete.add(step.key)
+                opens[step.key] = pipeline.CLOSED
                 continue
             was_complete = step.key in complete
+            if was_complete and not recheck:
+                opens[step.key] = pipeline.CLOSED
+                continue
+            # SCN-010: a lane step is looked at for the scenes whose upstream is done. What is
+            # open upstream, and the scenes a review holds back, are not ready for it yet.
+            lane = pipeline.is_lane_step(step)
+            upstream = pipeline.CLOSED
+            if lane:
+                upstream = pipeline.union_open(
+                    [opens.get(key, pipeline.EVERYTHING) for key in pipeline.lane_needs(step)]
+                ) | pipeline.Open(pipeline.held_scenes(step, options, scene_ids, output))
             if was_complete:
-                if not recheck:
-                    continue
-                if not all(key in complete for key in step.needs):
+                if upstream.everything or not all(
+                    key in complete for key in pipeline.hard_needs(step)
+                ):
                     # Something it needs is being made again: it is looked at once that is done.
                     complete.discard(step.key)
                     output["steps"][step.key]["status"] = "pending"
+                    opens[step.key] = pipeline.EVERYTHING
                     continue
-            elif not _needs_are_ready(step, complete, options, output):
+            elif upstream.everything or not _needs_are_ready(
+                step, complete, options, output, scene_ids
+            ):
+                opens[step.key] = pipeline.EVERYTHING
+                continue
+            if lane and scene_ids and set(scene_ids) <= upstream.scenes:
+                # Every scene is still open upstream: nothing in this step can be started or
+                # reported yet, so its stage is not read (it can be an expensive read).
+                complete.discard(step.key)
+                if output["steps"][step.key]["status"] in pipeline.COMPLETE_STATUSES:
+                    output["steps"][step.key]["status"] = "pending"
+                opens[step.key] = upstream
                 continue
             view = await ADAPTERS[step.key].evaluate(session, project, options)
             # Work this run has made in a step this one needs (scope `out_of_date` only).
@@ -379,13 +440,22 @@ class StoryPipelineHandler(JobHandler):
                 made_upstream,
                 output["rejected"].get(step.key, ()),
                 remake=step.key == options.remake_from,
+                upstream=upstream if lane else None,
             )
             pipeline.add_warnings(output, plan.warnings)
-            if plan.complete and was_complete:
+            # A lane step is complete only when no scene is open upstream either: its stage
+            # lists no targets for a scene whose upstream is not done yet.
+            step_done = plan.complete and not upstream.is_open
+            opens[step.key] = (
+                pipeline.CLOSED
+                if step_done
+                else (upstream | plan.unfinished if lane else pipeline.EVERYTHING)
+            )
+            if step_done and was_complete:
                 # Still complete after the Continue: only its counts are brought up to date.
                 kept = cast(pipeline.StepStatus, output["steps"][step.key]["status"])
                 pipeline.record_progress(output, step.key, plan, status=kept)
-            elif plan.complete:
+            elif step_done:
                 # "Skipped": it was complete when the run got to it, so the run started nothing.
                 status = "skipped" if pipeline.made_no_jobs(output, step.key) else "done"
                 pipeline.record_progress(output, step.key, plan, status=status)
@@ -403,15 +473,34 @@ class StoryPipelineHandler(JobHandler):
                     break
             else:
                 complete.discard(step.key)
-                pipeline.record_progress(output, step.key, plan, status="running")
+                # A lane step that only waits for its scenes' upstream has not started: it is
+                # "pending", not "running", until the run has made something in it.
+                idle = (
+                    not (plan.waiting or plan.creates or plan.problems or plan.done)
+                    and pipeline.made_no_jobs(output, step.key)
+                    and not output["rejected"].get(step.key)
+                )
+                running: pipeline.StepStatus = "pending" if lane and idle else "running"
+                pipeline.record_progress(output, step.key, plan, status=running)
                 going.append(_Going(step, plan))
         else:
             output["recheck"] = False  # every step was looked at
 
+        # SCN-010: the scenes that reached a review point of their own, and where each stands.
+        settled = pipeline.settle_scene_reviews(options, scene_ids, opens, output) or settled
+        busy = {scene_id for item in going for scene_id in item.plan.busy}
+        stuck = {
+            scene_id
+            for item in going
+            for problem in item.plan.problems
+            for scene_id in problem.scenes
+        }
+        output["lanes"] = pipeline.lane_summary(scene_ids, opens, busy, stuck, output)
+
         finished = len(complete) == len(pipeline.STEPS)
         if finished:
             output["problems"] = []
-        return _Evaluation(output, going, finished, paused_after, paused_review)
+        return _Evaluation(output, going, finished, paused_after, paused_review, settled)
 
     @staticmethod
     async def _apply(
@@ -422,7 +511,8 @@ class StoryPipelineHandler(JobHandler):
         """
         output = result.output
         options = pipeline.RunOptions.from_input(run.input)
-        outcome = _Outcome(finished=result.finished)
+        # A scene that passed a review point lets the steps after it be looked at at once.
+        outcome = _Outcome(finished=result.finished, again=result.settled)
         made: list[int] = []
         problems: list[pipeline.Problem] = []
         # Targets with work in progress, or about to get some, in every step.
@@ -476,6 +566,8 @@ class StoryPipelineHandler(JobHandler):
             outcome.made = len(made)
             outcome.deferred = wanted - started_count
             output["problems"] = [problem.as_json() for problem in problems]
+            # A scene that waits for the user's review (SCN-010) is not a run that is stuck.
+            in_progress += len(output["scene_review_at"])
             # Other targets (and other steps) go on first: the run stops only when nothing is
             # left that could still succeed.
             if in_progress == 0:

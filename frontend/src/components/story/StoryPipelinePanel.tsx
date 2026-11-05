@@ -22,6 +22,7 @@ import { useCancelJob } from "../../api/jobs";
 import { isJobActive } from "../../api/polling";
 import {
   storyPipelineKey,
+  useAnswerSceneReview,
   useContinueStoryPipeline,
   useStartStoryPipeline,
   useStoryPipeline,
@@ -34,6 +35,7 @@ import { useScenes } from "../../api/scenes";
 import { useStaleness } from "../../api/staleness";
 import { formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { PipelineLaneList } from "./PipelineLaneList";
 import { ReviewPointPanel } from "./ReviewPointPanel";
 
 type StoryPipelinePanelProps = {
@@ -94,6 +96,7 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
   const sceneList = useScenes(projectId).data?.latest?.scenes ?? [];
   const start = useStartStoryPipeline(projectId);
   const resume = useContinueStoryPipeline(projectId);
+  const answerScene = useAnswerSceneReview(projectId);
   const stop = useCancelJob();
   const project = useProject(projectId);
   const saveProject = useUpdateProject(projectId);
@@ -385,9 +388,12 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
             <Text size="xs" c="dimmed">
               Saved with this project. None is on by default. A review point
               stops the run once, after its whole stage is made, so you can look
-              at it, edit it, or reject what you want made again. Whatever you
-              change goes through the usual out-of-date rules. A run keeps the
-              review points it started with.
+              at it, edit it, or reject what you want made again. The points
+              about single scenes (scene definition and events, staging,
+              shot planning, generated shots) stop one scene at a time: the
+              other scenes go on. Whatever you change goes through the usual
+              out-of-date rules. A run keeps the review points it started
+              with.
             </Text>
             {data.review_points.map((point) => (
               <Checkbox
@@ -480,6 +486,23 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
               />
             )}
 
+            {(data?.scene_reviews ?? []).map((item) => (
+              <ReviewPointPanel
+                key={`${item.scene.id}/${item.key}`}
+                review={item}
+                sceneLabel={`${item.scene.index !== null ? `scene ${item.scene.index}: ` : ""}${item.scene.title}`}
+                isPending={answerScene.isPending}
+                onContinue={(rejected) =>
+                  answerScene.mutate({ sceneId: item.scene.id, rejected })
+                }
+              />
+            ))}
+            {answerScene.isError && (
+              <Text size="xs" c="red.8">
+                {describeError(answerScene.error)}
+              </Text>
+            )}
+
             {pausedLabel !== null && (
               <Alert color="blue" title={`Paused after ${pausedLabel.toLowerCase()}`}>
                 <Stack gap="xs" align="flex-start">
@@ -523,6 +546,8 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                 {text}
               </Text>
             ))}
+
+            <PipelineLaneList lanes={run.lanes} />
 
             <Stack gap={2}>
               {run.steps.map((step) => {

@@ -20,6 +20,12 @@ one click (PHASE-030).
   the optional body `rejected` (`{step, target}` pairs): those targets are made again and the
   run waits at the same review point once more.
 
+- In a run of several scenes (SCN-010) each scene goes through the per-scene steps on its own, and
+  `run.lanes` says where each one stands. The review points of per-scene steps (`scenes`,
+  `staging`, `shot_plans`, `shots`) hold one scene at a time: `scene_reviews` lists the scenes
+  that wait, and `POST .../scene-review/{scene_id}` approves one or rejects some of its targets
+  (`rejected`, as for `continue`). The other scenes go on meanwhile.
+
 The review points are the project's own setting (`PATCH /api/projects/{id}`); a run copies them
 when it starts. `GET` lists them and, while a run waits at one, what there is to review.
 
@@ -33,7 +39,7 @@ import logging
 from datetime import datetime
 from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,6 +121,27 @@ class PipelineSceneOut(BaseModel):
     title: str
 
 
+LaneStatus = Literal["waiting", "going", "review", "problem", "done"]
+
+
+class PipelineLaneOut(BaseModel):
+    """Where one scene stands in the scene lanes of a run (SCN-010)."""
+
+    scene_id: str
+    index: int | None
+    title: str
+    status: LaneStatus
+    # The first lane step still open for the scene, or None when the scene is done.
+    step: str | None
+    step_label: str | None
+    # The review point the scene waits at, while its status is `review`.
+    review: str | None
+    review_label: str | None
+    # How many of the lane steps are complete for the scene, of how many.
+    done: int
+    total: int
+
+
 class PipelineRunOut(BaseModel):
     job_id: int
     status: JobStatus
@@ -143,6 +170,9 @@ class PipelineRunOut(BaseModel):
     remake_from: str | None
     # How many jobs the run has made so far (a stage that does its work in the run adds none).
     jobs_made: int
+    # Where every scene of the run stands in the scene lanes, in story order (SCN-010). Empty
+    # before the run has a list of scenes.
+    lanes: list[PipelineLaneOut]
 
 
 class PipelineConfirmationOut(BaseModel):
@@ -183,12 +213,26 @@ class ReviewOut(BaseModel):
     steps: list[ReviewStepOut]
 
 
+class SceneReviewOut(BaseModel):
+    """What one scene waits for the user to review (SCN-010): the review point held scene by
+    scene, and the targets of that scene in its steps.
+    """
+
+    scene: PipelineSceneOut
+    key: review_points.ReviewPointKey
+    label: str
+    steps: list[ReviewStepOut]
+
+
 class StoryPipelineOut(BaseModel):
     steps: list[PipelineStepOut]
     # The review points a project can enable, in the order of the pipeline.
     review_points: list[ReviewPointOut]
     # What there is to review, while the newest run waits at a review point. None otherwise.
     review: ReviewOut | None
+    # The scenes of the newest run that wait at a review point of their own, in story order
+    # (SCN-010). The run goes on for the other scenes.
+    scene_reviews: list[SceneReviewOut]
     # The newest run, whatever its status. None when the project never had one.
     run: PipelineRunOut | None
     can_start: bool
@@ -234,6 +278,11 @@ class RejectedTarget(BaseModel):
 
 class PipelineContinueBody(BaseModel):
     # Targets the user rejected at a review point: they are made again. None: all approved.
+    rejected: list[RejectedTarget] = Field(default_factory=list, max_length=_MAX_REJECTED)
+
+
+class SceneReviewBody(BaseModel):
+    # Targets of the scene the user rejected: they are made again. None: the scene is approved.
     rejected: list[RejectedTarget] = Field(default_factory=list, max_length=_MAX_REJECTED)
 
 
@@ -285,21 +334,7 @@ async def _review_out(
     if point is None:
         return None
     steps = await story_pipeline_targets.review_targets(session, project, point.key, options)
-    return ReviewOut(
-        key=point.key,
-        label=point.label,
-        steps=[
-            ReviewStepOut(
-                key=item.step_key,
-                label=item.step_label,
-                targets=[
-                    ReviewTargetOut(key=target.key, label=target.label or item.step_label)
-                    for target in item.targets
-                ],
-            )
-            for item in steps
-        ],
-    )
+    return ReviewOut(key=point.key, label=point.label, steps=_review_step_outs(steps))
 
 
 def _run_out(job: Job, scenes: list[dict[str, Any]]) -> PipelineRunOut:
@@ -336,7 +371,98 @@ def _run_out(job: Job, scenes: list[dict[str, Any]]) -> PipelineRunOut:
         scenes=_scenes_out(scenes, options.scenes),
         remake_from=options.remake_from,
         jobs_made=len(output["job_ids"]),
+        lanes=_lanes_out(output["lanes"], scenes),
     )
+
+
+def _lanes_out(rows: list[dict[str, Any]], scenes: list[dict[str, Any]]) -> list[PipelineLaneOut]:
+    """The stored lane rows of a run, named with their scene (SCN-010)."""
+    by_id = {item["id"]: item for item in scenes}
+    lanes: list[PipelineLaneOut] = []
+    for row in rows:
+        scene_id = row.get("scene")
+        item = by_id.get(scene_id) if isinstance(scene_id, str) else None
+        if item is None:
+            continue
+        step = row.get("step") if row.get("step") in story_pipeline.STEP_LABELS else None
+        review = row.get("review") if row.get("review") in review_points.POINTS_BY_KEY else None
+        status_text = row.get("status")
+        lanes.append(
+            PipelineLaneOut(
+                scene_id=item["id"],
+                index=item["index"] if isinstance(item.get("index"), int) else None,
+                title=str(item.get("title") or item["id"]),
+                status=cast(
+                    LaneStatus,
+                    status_text
+                    if status_text in ("waiting", "going", "review", "problem", "done")
+                    else "waiting",
+                ),
+                step=step,
+                step_label=story_pipeline.STEP_LABELS[step] if step is not None else None,
+                review=review,
+                review_label=review_points.POINTS_BY_KEY[review].label if review else None,
+                done=_count(row.get("done")),
+                total=_count(row.get("total")),
+            )
+        )
+    return lanes
+
+
+def _review_step_outs(steps: list[story_pipeline_targets.ReviewStep]) -> list[ReviewStepOut]:
+    return [
+        ReviewStepOut(
+            key=item.step_key,
+            label=item.step_label,
+            targets=[
+                ReviewTargetOut(key=target.key, label=target.label or item.step_label)
+                for target in item.targets
+            ],
+        )
+        for item in steps
+    ]
+
+
+async def _scene_reviews_out(
+    session: AsyncSession,
+    project: Project,
+    run: Job | None,
+    scenes: list[dict[str, Any]],
+) -> list[SceneReviewOut]:
+    """The scenes that wait at a review point of their own, each with its own targets, in story
+    order (SCN-010). Each point is read once for all its scenes.
+    """
+    if run is None or run.status not in store.ACTIVE_STATUSES:
+        return []
+    waiting: dict[str, str] = story_pipeline.read_output(run.output)["scene_review_at"]
+    options = story_pipeline.RunOptions.from_input(run.input)
+    read: dict[str, list[story_pipeline_targets.ReviewStep]] = {}
+    reviews: list[SceneReviewOut] = []
+    for item in scenes:
+        point = review_points.POINTS_BY_KEY.get(waiting.get(item["id"], ""))
+        if point is None:
+            continue
+        if point.key not in read:
+            read[point.key] = await story_pipeline_targets.review_targets(
+                session, project, point.key, options
+            )
+        mine = [
+            story_pipeline_targets.ReviewStep(
+                step.step_key,
+                step.step_label,
+                [t for t in step.targets if item["id"] in story_pipeline.target_scenes(t)],
+            )
+            for step in read[point.key]
+        ]
+        reviews.append(
+            SceneReviewOut(
+                scene=_scenes_out([item], frozenset({item["id"]}))[0],
+                key=point.key,
+                label=point.label,
+                steps=_review_step_outs(mine),
+            )
+        )
+    return reviews
 
 
 def _count(value: Any) -> int:
@@ -393,15 +519,13 @@ async def get_story_pipeline(
         if run is not None
         else story_pipeline.RunOptions()
     )
+    scene_items = await story_pipeline.scene_items(session, project.id) if run is not None else []
     return StoryPipelineOut(
         steps=_steps_out(),
         review_points=_review_points_out(),
         review=await _review_out(session, project, review_at, run_options),
-        run=(
-            _run_out(run, await story_pipeline.scene_items(session, project.id))
-            if run is not None
-            else None
-        ),
+        scene_reviews=await _scene_reviews_out(session, project, run, scene_items),
+        run=_run_out(run, scene_items) if run is not None else None,
         can_start=blocked is None,
         start_block=blocked,
         confirmations=[_confirmation_out(item) for item in pending],
@@ -546,8 +670,54 @@ async def continue_story_pipeline(
     return PipelineRunStartedOut(job_id=job.id)
 
 
+@router.post(
+    "/projects/{project_id}/story-pipeline/scene-review/{scene_id}",
+    response_model=PipelineRunStartedOut,
+    responses={**_NOT_FOUND, **_NOT_ALLOWED},
+)
+async def answer_scene_review(
+    project_id: int,
+    scene_id: Annotated[str, Path(max_length=64)],
+    session: SessionDep,
+    body: SceneReviewBody | None = None,
+) -> PipelineRunStartedOut:
+    """Answers the review one scene waits at (SCN-010). The run goes on for the other scenes.
+    The targets in `rejected` are made again and the scene waits at the same review point once
+    more; with none, the scene is approved and goes on. 422 when the scene is not waiting.
+    """
+    project = await load_project(session, project_id)
+    run = await story_pipeline.active_run(session, project.id)
+    review_at = (
+        story_pipeline.read_output(run.output)["scene_review_at"].get(scene_id)
+        if run is not None
+        else None
+    )
+    if run is None or review_at is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "This scene is not waiting for a review."
+        )
+    rejected = await _check_rejected(
+        session,
+        project,
+        body.rejected if body is not None else [],
+        point_key=review_at,
+        scene_id=scene_id,
+    )
+    try:
+        job = await story_pipeline.answer_scene_review(session, project, scene_id, rejected)
+    except story_pipeline.StoryPipelineError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return PipelineRunStartedOut(job_id=job.id)
+
+
 async def _check_rejected(
-    session: AsyncSession, project: Project, rejected: list[RejectedTarget]
+    session: AsyncSession,
+    project: Project,
+    rejected: list[RejectedTarget],
+    *,
+    point_key: str | None = None,
+    scene_id: str | None = None,
 ) -> dict[str, list[str]]:
     """The rejected targets by step, each checked against what the review point lists. 422 for
     one that is not there, naming it.
@@ -559,7 +729,9 @@ async def _check_rejected(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "There is no run going on for this project."
         )
-    review_at = _review_at_of(run)
+    # A scene waiting at its own review point (SCN-010) names the point and the scene; the run's
+    # own review point is the one the whole run waits at.
+    review_at = point_key if point_key is not None else _review_at_of(run)
     if review_at is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -568,7 +740,11 @@ async def _check_rejected(
     listed = {
         item.step_key: item
         for item in await story_pipeline_targets.review_targets(
-            session, project, review_at, story_pipeline.RunOptions.from_input(run.input)
+            session,
+            project,
+            review_at,
+            story_pipeline.RunOptions.from_input(run.input),
+            scene_id,
         )
     }
     found: dict[str, list[str]] = {}

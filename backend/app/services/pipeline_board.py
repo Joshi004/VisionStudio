@@ -70,10 +70,6 @@ CALLOUT_PLAN_STEP: Final = "callout_plan"
 # (EXG-002, EXG-004, EXG-005).
 GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs", "graphics")
 
-# The step that is only for a run of some scenes (SCN-004). The board reads the project as a
-# whole, so it is off here: the run's own list shows how far it got.
-SCENE_RENDER_STEP: Final = "scene_render"
-
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -289,7 +285,6 @@ async def build(session: AsyncSession, project: Project) -> Board:
             or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
             or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))
-            or step.key == SCENE_RENDER_STEP
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (
