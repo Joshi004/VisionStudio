@@ -68,6 +68,12 @@ cut; "after_state", how they are at the start of what comes after it; "problem",
 line up; "editable_shots", the shots you may change; and "frozen", the edges you must not \
 change, each as a shot id and an "edge" that is "start" or "end".
 
+When the cut's "before" is "previous_scene", the cut is from the LAST SHOT of the scene before, \
+given as "previous_shot" with the "time" and "environment_state" of both scenes, into the \
+first shot of this scene, which continues straight from it. That shot is already filmed as it \
+is: never change it, and make the first shot start exactly where it ends (who is in frame, \
+where they are, what they hold, their pose and state, the light).
+
 Rules:
 - Decide which of the editable shots to change, and how. Change as little as is needed for the \
 two states to follow each other at the cut: the same pose, position, state of mind and \

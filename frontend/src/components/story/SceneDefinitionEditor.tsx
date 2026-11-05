@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Button,
+  Checkbox,
   Group,
   MultiSelect,
   Select,
@@ -48,6 +49,7 @@ function toDraft(definition: SceneDefinition): Draft {
     dramatic_goal: definition.dramatic_goal,
     continuity_start: { ...definition.continuity_start },
     continuity_end: { ...definition.continuity_end },
+    continues_previous: definition.continues_previous ?? false,
   };
 }
 
@@ -215,6 +217,12 @@ export function SceneDefinitionEditor({
           </Button>
         </Group>
       )}
+      <Checkbox
+        label="Continues straight from the previous scene"
+        description="The same moment and place, with no jump in time. The first cut of this scene is then checked against the last shot of the scene before it."
+        checked={draft.continues_previous ?? false}
+        onChange={(event) => change({ continues_previous: event.currentTarget.checked })}
+      />
       <TextInput
         label="Time of day"
         value={draft.time.time_of_day}

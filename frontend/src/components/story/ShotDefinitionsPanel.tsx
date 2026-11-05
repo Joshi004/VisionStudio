@@ -78,6 +78,7 @@ const CONTINUITY_STATUS: Record<
 
 /** A boundary's side as a person reads it: a shot's id, or the scene's start or end. */
 function boundaryName(side: string): string {
+  if (side === "previous_scene") return "the end of the scene before";
   if (side === "scene_start") return "the scene's start";
   if (side === "scene_end") return "the scene's end";
   return `shot ${side}`;
@@ -278,6 +279,8 @@ type SceneRowProps = {
   onToggle: () => void;
   /** The scene's continuity; undefined until the continuity state has loaded. */
   continuity: SceneContinuity | undefined;
+  /** "Scene 3: The cellar" of the scene this one continues straight from, or null. */
+  previousSceneLabel: string | null;
   characterNames: Record<string, string>;
   projectBlocked: boolean;
   busy: boolean;
@@ -412,6 +415,7 @@ function SceneRow({
   opened,
   onToggle,
   continuity,
+  previousSceneLabel,
   characterNames,
   projectBlocked,
   busy,
@@ -484,6 +488,20 @@ function SceneRow({
               {reason}
             </Text>
           )}
+          {previousSceneLabel !== null && (
+            <Text size="xs" c="dimmed">
+              Continues straight from {previousSceneLabel}: its first cut is
+              checked against that scene's last shot.
+            </Text>
+          )}
+          {(continuity?.look_mismatches ?? []).map((item) => (
+            <Text key={item.character_id} size="xs" c="orange">
+              {characterNames[item.character_id] ?? item.character_id} wears a
+              different look than at the end of the scene before (
+              {item.previous_look}, now {item.look}). Define this scene again
+              with a note, or change the look.
+            </Text>
+          ))}
           {continuity !== undefined && total > 0 && (
             <ContinuityLine
               continuity={continuity}
@@ -505,7 +523,12 @@ function SceneRow({
         </Button>
       }
     >
-      {mismatches.filter((item) => item.before === "scene_start").map(cutRow)}
+      {mismatches
+        .filter(
+          (item) =>
+            item.before === "scene_start" || item.before === "previous_scene",
+        )
+        .map(cutRow)}
       {scene.shots.map((entry) => (
         <Stack key={entry.shot.id} gap="sm">
           <ShotRow
@@ -573,6 +596,11 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
   const continuityByScene = new Map(
     (continuity?.entries ?? []).map((scene) => [scene.id, scene]),
   );
+  // "Scene 3: The cellar" for the scene a scene continues straight from.
+  const previousLabel = (sceneId: string | null | undefined): string | null => {
+    const previous = sceneId ? continuityByScene.get(sceneId) : undefined;
+    return previous ? `Scene ${previous.index}: ${previous.title}` : null;
+  };
   const busy =
     defineAll.isPending ||
     defineScene.isPending ||
@@ -729,6 +757,9 @@ export function ShotDefinitionsPanel({ projectId }: ShotDefinitionsPanelProps) {
               )
             }
             continuity={continuityByScene.get(scene.id)}
+            previousSceneLabel={previousLabel(
+              continuityByScene.get(scene.id)?.previous_scene_id,
+            )}
             characterNames={characterNames}
             projectBlocked={projectBlocked}
             busy={busy}

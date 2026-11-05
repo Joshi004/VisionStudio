@@ -93,6 +93,7 @@ _ANSWER_FORM: Final = json.dumps(
         "dramatic_goal": "Shows that the two can no longer share the house.",
         "continuity_start": {"an id from characters": "angry, hands clenched"},
         "continuity_end": {"an id from characters": "calm, tired, holding a bag"},
+        "continues_previous": False,
     }
 )
 
@@ -147,6 +148,10 @@ does for the story.
 the character's id (it must be in "characters") and the value says how they are (state of mind \
 and body, what they are doing) at the start and at the end of the scene, at most \
 {CONTINUITY_MAX_CHARS} characters each. You may leave out a character who has nothing to track.
+- "continues_previous": true only when this scene picks up exactly where PREVIOUS SCENE ends: \
+the same moment (no jump in time), the same place or a place inside it, and the same people \
+carrying on. Write false for the first scene, and after any jump in time or place. When in \
+doubt, write false.
 - This is the scene's context, not its events. Do not list what happens beat by beat, do not \
 write shots, camera instructions, durations or dialogue.
 
@@ -403,6 +408,13 @@ def check_definition(
 
     inner_places = _inner_places(answer, environment_id, environment_ids, warnings)
 
+    # SCN-012. A missing or null value is false.
+    continues_previous = answer.get("continues_previous")
+    if continues_previous is None:
+        continues_previous = False
+    if not isinstance(continues_previous, bool):
+        raise ValueError('The "continues_previous" was not true or false.')
+
     return {
         "id": scene_id,
         "story_context": {
@@ -448,4 +460,7 @@ def check_definition(
         "continuity_end": _character_map(
             answer, "continuity_end", characters, CONTINUITY_MAX_CHARS, warnings
         ),
+        # SCN-012. Left out when false, like `inner_places`, so a definition stored before this
+        # field existed is exactly what "accept as is" gives back.
+        **({"continues_previous": True} if continues_previous else {}),
     }

@@ -6426,8 +6426,9 @@ export interface components {
         };
         /**
          * ContinuityMismatchOut
-         * @description A cut that does not line up. `before` and `after` are a shot id, `scene_start` or
-         *     `scene_end`. The problem belongs to the cut, not to either shot.
+         * @description A cut that does not line up. `before` and `after` are a shot id, `scene_start`,
+         *     `scene_end` or `previous_scene` (the last shot of the scene before, for a scene that
+         *     continues straight from it). The problem belongs to the cut, not to either shot.
          */
         ContinuityMismatchOut: {
             /** Id */
@@ -9467,6 +9468,19 @@ export interface components {
         LookFromPictureIn: {
             /** Image Id */
             image_id: number;
+        };
+        /**
+         * LookMismatchOut
+         * @description SCN-012: a character seen on both sides of a scene boundary whose resolved look is not the
+         *     same. A look is its id, or `default`.
+         */
+        LookMismatchOut: {
+            /** Character Id */
+            character_id: string;
+            /** Previous Look */
+            previous_look: string;
+            /** Look */
+            look: string;
         };
         /** LookOut */
         LookOut: {
@@ -12746,6 +12760,10 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Previous Scene Id */
+            previous_scene_id: string | null;
+            /** Look Mismatches */
+            look_mismatches: components["schemas"]["LookMismatchOut"][];
         };
         /**
          * SceneCoverageOut
@@ -12827,6 +12845,11 @@ export interface components {
             continuity_end: {
                 [key: string]: string;
             };
+            /**
+             * Continues Previous
+             * @default false
+             */
+            continues_previous: boolean;
         };
         /** SceneDefinitionOut */
         SceneDefinitionOut: {
@@ -12865,6 +12888,11 @@ export interface components {
             continuity_end: {
                 [key: string]: string;
             };
+            /**
+             * Continues Previous
+             * @default false
+             */
+            continues_previous: boolean;
         };
         /** SceneDefinitionRunAllOut */
         SceneDefinitionRunAllOut: {

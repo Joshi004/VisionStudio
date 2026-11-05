@@ -97,6 +97,9 @@ class SceneDefinitionOut(BaseModel):
     dramatic_goal: str
     continuity_start: dict[str, str]
     continuity_end: dict[str, str]
+    # SCN-012: this scene picks up the moment the scene before it ends. False for a definition
+    # written before this field existed.
+    continues_previous: bool = False
 
 
 # --- The stage's state ----------------------------------------------------------------------
@@ -213,6 +216,7 @@ class SceneDefinitionIn(BaseModel):
     dramatic_goal: str = _Text
     continuity_start: dict[str, str] = Field(max_length=200)
     continuity_end: dict[str, str] = Field(max_length=200)
+    continues_previous: bool = False
 
 
 def _entry_out(entry: SceneEntry) -> SceneDefinitionEntryOut:

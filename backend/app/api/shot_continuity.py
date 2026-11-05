@@ -58,9 +58,20 @@ class ShotContinuityFlagOut(BaseModel):
     redefined_round: int | None
 
 
+class LookMismatchOut(BaseModel):
+    """SCN-012: a character seen on both sides of a scene boundary whose resolved look is not the
+    same. A look is its id, or `default`.
+    """
+
+    character_id: str
+    previous_look: str
+    look: str
+
+
 class ContinuityMismatchOut(BaseModel):
-    """A cut that does not line up. `before` and `after` are a shot id, `scene_start` or
-    `scene_end`. The problem belongs to the cut, not to either shot.
+    """A cut that does not line up. `before` and `after` are a shot id, `scene_start`,
+    `scene_end` or `previous_scene` (the last shot of the scene before, for a scene that
+    continues straight from it). The problem belongs to the cut, not to either shot.
     """
 
     id: str
@@ -105,6 +116,11 @@ class SceneContinuityOut(BaseModel):
     shots: list[ShotContinuityFlagOut]
     can_run: bool
     blocked_reason: str | None
+    # SCN-012: the scene this one continues straight from, whose last shot its first cut is
+    # judged against; None for any other scene.
+    previous_scene_id: str | None
+    # SCN-012: characters seen in both scenes whose resolved look differs. Not repaired by code.
+    look_mismatches: list[LookMismatchOut]
 
 
 class ShotContinuityOut(BaseModel):
@@ -192,6 +208,8 @@ def _scene_out(scene: shot_continuity.SceneContinuity) -> SceneContinuityOut:
         ],
         can_run=scene.can_run,
         blocked_reason=scene.blocked_reason,
+        previous_scene_id=scene.previous_scene_id,
+        look_mismatches=[LookMismatchOut(**item) for item in scene.look_mismatches],
     )
 
 

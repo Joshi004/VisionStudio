@@ -27,6 +27,15 @@ check's `round` is how many waves came before it; waves stop when the round reac
 **Fix this cut** button) repairs one cut at round 0, which starts the count again, and the
 automatic waves follow it. A definition or a check the user asks for starts the count again.
 
+**Scene boundaries (SCN-012).** A scene whose definition says it continues straight from the scene
+before it, in the same place (`shot_continuity_writer.follows_directly`), has its first cut judged
+against the last shot of that scene: the boundary `b0` is `previous_scene` and its repair changes
+only this scene's first shot. The check records that shot as the artifact `previous_shot_definition`
+(a new definition of it makes the check out of date), waits until nothing runs for the scene before
+(`_previous_reason`), and is queued by that scene's check when it has settled
+(`queue_following_check`). Code also reports the characters seen in both scenes whose resolved
+look differs (`look_mismatches`); no repair changes a look.
+
 **Off the critical path.** Nothing waits for this stage and nothing else reads its status yet.
 
 `state` is what the story workspace shows. **Out of date is worked out on every read** and never
@@ -38,7 +47,7 @@ were found, each with its repair job.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 from sqlalchemy import func, select
@@ -49,6 +58,7 @@ from app.db.models import Job, Project, ShotContinuityCheck
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    look_state_resolution,
     provenance,
     scene_definitions,
     shot_continuity_writer,
@@ -75,10 +85,18 @@ MANUAL_CUT_MESSAGE: Final = (
 # How many of a project's newest check jobs are read to find each scene's newest one.
 _JOB_LOOKBACK: Final = 500
 
+_PREVIOUS_MISSING: Final = (
+    "This scene continues straight from the scene before it, whose last shot is not defined."
+)
+
 STORY_BIBLE_KIND: Final = "story_bible"
 SCENE_DEFINITION_KIND: Final = "scene_definition"
 SHOT_PLAN_KIND: Final = "shot_plan"
 SHOT_DEFINITION_KIND: Final = "shot_definition"
+# SCN-012: the last shot of the scene before, when this scene continues straight from it. It is
+# recorded on a check as an artifact of its own, so a new definition of that shot makes the check
+# out of date.
+PREVIOUS_SHOT_KIND: Final = "previous_shot_definition"
 
 # `not_checked`: no check covers the shots as they are now (or the shots are not all defined).
 # `checking`: the check is running. `reconciling`: cuts are being repaired for continuity.
@@ -122,6 +140,22 @@ class CutMismatch:
 
 
 @dataclass(frozen=True)
+class PreviousCut:
+    """SCN-012: a scene that continues straight from the scene before it (`follows_directly`),
+    and what its first cut is judged against.
+    """
+
+    # The scene before, and its definition.
+    scene_id: str
+    title: str
+    definition: dict[str, Any]
+    # The definition of the scene that follows it.
+    scene_definition: dict[str, Any]
+    # The last shot of the scene before (made by H3), or None when it has none.
+    shot: shot_definitions.ShotEntry | None
+
+
+@dataclass(frozen=True)
 class SceneContinuity:
     """One scene of the newest list of scenes and where its continuity stands."""
 
@@ -141,6 +175,11 @@ class SceneContinuity:
     # Whether Check continuity may be pressed, and the reason when it may not.
     can_run: bool
     blocked_reason: str | None
+    # SCN-012: the scene this one continues straight from, or None.
+    previous_scene_id: str | None = None
+    # SCN-012: characters seen in both scenes whose resolved look differs, as `{character_id,
+    # previous_look, look}`. Code reports them; no repair changes a look.
+    look_mismatches: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -199,11 +238,53 @@ def _not_ready_reason(
     return None
 
 
-def _covers(row: ShotContinuityCheck, entry: shot_definitions.SceneEntry) -> bool:
-    """Whether this check read exactly the shot plan and the shot definitions the scene has now."""
+def _previous_reason(previous: PreviousCut | None, busy: bool) -> str | None:
+    """SCN-012: why a scene that continues straight from another cannot be checked now, or
+    None. Its first cut is judged against the last shot of the scene before, so that shot must
+    be defined and current and nothing may be running for that scene (a repair there can still
+    change it). `busy` is whether a check or a repair is running for the scene before.
+    """
+    if previous is None:
+        return None
+    shot = previous.shot
+    lead = "This scene continues straight from the scene before it, so its start is checked"
+    if shot is None or shot.status == "not_defined":
+        return f"{lead} against that scene's last shot, which is not defined yet."
+    if _is_active(shot.job):
+        return f"{lead} against that scene's last shot, which is being defined."
+    if shot.status == "out_of_date":
+        return f"{lead} against that scene's last shot, which is out of date."
+    if busy:
+        return f"{lead} after the scene before is checked: its continuity is still being worked on."
+    return None
+
+
+def _covers(
+    row: ShotContinuityCheck,
+    entry: shot_definitions.SceneEntry,
+    previous: PreviousCut | None = None,
+) -> bool:
+    """Whether this check read exactly the shot plan and the shot definitions the scene has now,
+    and (SCN-012) the last shot of the scene before when this scene continues straight from it.
+    """
     if entry.plan is None or not provenance.same_id(row.shot_plan_id, entry.plan):
         return False
     artifacts = row.inputs.get("artifacts") if isinstance(row.inputs, dict) else None
+    recorded_previous = next(
+        (
+            artifact
+            for artifact in artifacts or []
+            if isinstance(artifact, dict) and artifact.get("kind") == PREVIOUS_SHOT_KIND
+        ),
+        None,
+    )
+    if previous is None:
+        if recorded_previous is not None:
+            return False
+    elif not provenance.same_row(
+        recorded_previous, previous.shot.row if previous.shot is not None else None
+    ):
+        return False
     recorded = {
         artifact.get("shot_id"): artifact
         for artifact in artifacts or []
@@ -327,6 +408,50 @@ def _shot_flags(entry: shot_definitions.SceneEntry) -> list[ShotFlag]:
     return flags
 
 
+async def _previous_cuts(
+    session: AsyncSession,
+    project: Project,
+    definitions: shot_definitions.ShotDefinitionsState,
+) -> dict[str, PreviousCut]:
+    """SCN-012: the scenes that continue straight from the scene before them, by scene id
+    (`shot_continuity_writer.follows_directly`). The first scene never does, and a scene whose
+    definition or shot plan does not exist yet does not either.
+    """
+    scenes = (await scene_definitions.state(session, project)).entries
+    contents = {scene.item["id"]: scene.definition for scene in scenes}
+    cuts: dict[str, PreviousCut] = {}
+    for earlier, entry in zip(definitions.entries, definitions.entries[1:], strict=False):
+        previous_definition = contents.get(earlier.item["id"])
+        definition = contents.get(entry.item["id"])
+        if (
+            previous_definition is None
+            or definition is None
+            or earlier.plan is None
+            or entry.plan is None
+        ):
+            continue
+        if not shot_continuity_writer.follows_directly(
+            previous_definition,
+            definition,
+            earlier.plan.content["shots"],
+            entry.plan.content["shots"],
+        ):
+            continue
+        cuts[entry.item["id"]] = PreviousCut(
+            scene_id=earlier.item["id"],
+            title=earlier.item["title"],
+            definition=previous_definition,
+            scene_definition=definition,
+            shot=earlier.shots[-1] if earlier.shots else None,
+        )
+    return cuts
+
+
+def _scene_busy(scene_id: str, jobs: dict[str, Job], repairs: dict[str, dict[str, Job]]) -> bool:
+    """Whether a check or a repair is waiting or running for a scene."""
+    return _is_active(jobs.get(scene_id)) or _repair_active(repairs.get(scene_id, {}))
+
+
 def _manual_shots(entry: shot_definitions.SceneEntry) -> set[str]:
     """The ids of the shots whose newest definition the user wrote."""
     return {shot.shot["id"] for shot in entry.shots if shot.needs_confirmation}
@@ -372,17 +497,23 @@ def _scene_state(
     job: Job | None,
     repairs: dict[str, Job],
     max_rounds: int,
+    previous: PreviousCut | None = None,
+    previous_busy: bool = False,
+    look_mismatches: list[dict[str, Any]] | None = None,
 ) -> SceneContinuity:
     check_active = _is_active(job)
     reconciling = _active_repair_round(repairs)
     reason = _not_ready_reason(entry, check_active, reconciling is not None)
+    # SCN-012: what is still missing from the scene before only stops a new check from being
+    # started. It does not change what a check that covers the shots says (`_covers` does).
+    start_reason = reason if reason is not None else _previous_reason(previous, previous_busy)
 
     status: Status
     if check_active:
         status = "checking"
     elif reconciling is not None:
         status = "reconciling"
-    elif reason is not None or row is None or not _covers(row, entry):
+    elif reason is not None or row is None or not _covers(row, entry, previous):
         status = "not_checked"
     else:
         status = "consistent" if row.content["mismatch_count"] == 0 else "mismatches"
@@ -392,7 +523,7 @@ def _scene_state(
         row.content["boundaries"]
         if row is not None
         and status in ("consistent", "mismatches", "reconciling")
-        and _covers(row, entry)
+        and _covers(row, entry, previous)
         else None
     )
     mismatches = (
@@ -411,8 +542,10 @@ def _scene_state(
         mismatches=mismatches,
         round_limit_reached=status == "mismatches" and row is not None and row.round >= max_rounds,
         shots=_shot_flags(entry),
-        can_run=reason is None,
-        blocked_reason=reason,
+        can_run=start_reason is None,
+        blocked_reason=start_reason,
+        previous_scene_id=previous.scene_id if previous is not None else None,
+        look_mismatches=look_mismatches or [],
     )
 
 
@@ -428,6 +561,8 @@ async def state(session: AsyncSession, project: Project) -> ShotContinuityState:
     max_rounds = await settings_service.get_int(
         session, settings_service.SHOT_CONTINUITY_MAX_ROUNDS_KEY
     )
+    cuts = await _previous_cuts(session, project, definitions)
+    resolved = await _resolved_by_scene(session, project.id) if cuts else {}
     return ShotContinuityState(
         scenes_version=definitions.scenes_version,
         max_rounds=max_rounds,
@@ -438,10 +573,39 @@ async def state(session: AsyncSession, project: Project) -> ShotContinuityState:
                 jobs.get(entry.item["id"]),
                 repairs.get(entry.item["id"], {}),
                 max_rounds,
+                cuts.get(entry.item["id"]),
+                _scene_busy(cuts[entry.item["id"]].scene_id, jobs, repairs)
+                if entry.item["id"] in cuts
+                else False,
+                _looks_across(cuts.get(entry.item["id"]), entry.item["id"], resolved),
             )
             for entry in definitions.entries
         ],
         blocked_reason=definitions.blocked_reason,
+    )
+
+
+async def _resolved_by_scene(session: AsyncSession, project_id: int) -> dict[str, dict[str, Any]]:
+    """What the newest look and state resolution says for each scene, by scene id. Empty when
+    the project has none.
+    """
+    row = await look_state_resolution.latest(session, project_id)
+    if row is None:
+        return {}
+    return {scene["scene_id"]: scene for scene in row.content["scenes"]}
+
+
+def _looks_across(
+    previous: PreviousCut | None, scene_id: str, resolved: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The characters seen on both sides of a scene boundary whose resolved look differs."""
+    if previous is None:
+        return []
+    return shot_continuity_writer.look_mismatches(
+        previous.definition,
+        previous.scene_definition,
+        resolved.get(previous.scene_id),
+        resolved.get(scene_id),
     )
 
 
@@ -453,10 +617,14 @@ async def _queue_check(
     project: Project,
     entry: shot_definitions.SceneEntry,
     round_: int,
+    previous: PreviousCut | None = None,
 ) -> tuple[Job, bool]:
     """Queues the check of this scene and returns `(job, created)`. `created` is False when the
     scene already has a check waiting or running, which is returned instead. The scene must be
     ready (`_not_ready_reason`). Raises ShotContinuityError.
+
+    With `previous` (SCN-012: the scene continues straight from the scene before) its first cut
+    is judged against the last shot of that scene, whose definition is recorded on the check.
     """
     scene_id = entry.item["id"]
     bible = await story_bible.latest(session, project.id)
@@ -480,8 +648,26 @@ async def _queue_check(
     shot_contents: list[dict[str, Any]] = [content for content in contents if content is not None]
     # No cut is judged across a graphic shot (EXG-003): it has no definition and is no neighbour.
     breaks = shot_continuity_writer.breaks_after(plan.content["shots"])
+    previous_side: dict[str, Any] | None = None
+    character_ids: list[str] = list(scene_definition.row.content["characters"])
+    if previous is not None:
+        previous_shot = previous.shot
+        if previous_shot is None or previous_shot.row is None or previous_shot.content is None:
+            raise ShotContinuityError(_previous_reason(previous, False) or _PREVIOUS_MISSING)
+        previous_side = {
+            "scene_id": previous.scene_id,
+            "title": previous.title,
+            "definition": previous.definition,
+            "shot": previous_shot.content,
+        }
+        # The model is told who is in the last shot of the scene before too.
+        character_ids += [
+            item["id"]
+            for item in previous_shot.content["characters"]
+            if item["id"] not in character_ids
+        ]
     boundary_list = shot_continuity_writer.boundaries(
-        scene_definition.row.content, shot_contents, breaks
+        scene_definition.row.content, shot_contents, breaks, previous_side
     )
     characters = [
         {
@@ -490,7 +676,7 @@ async def _queue_check(
             if (scene_definitions.CHARACTER_DEFINITION_KIND, character_id) in current
             else character_id,
         }
-        for character_id in scene_definition.row.content["characters"]
+        for character_id in character_ids
     ]
     inputs = {
         "project_id": project.id,
@@ -513,6 +699,19 @@ async def _queue_check(
                 }
                 for shot in entry.shots
                 if shot.row is not None
+            ),
+            *(
+                [
+                    {
+                        "kind": PREVIOUS_SHOT_KIND,
+                        "id": previous.shot.row.id,
+                        "version": previous.shot.row.version,
+                        "scene_id": previous.scene_id,
+                        "shot_id": previous.shot.shot["id"],
+                    }
+                ]
+                if previous is not None and previous.shot is not None and previous.shot.row
+                else []
             ),
         ],
     }
@@ -564,10 +763,32 @@ async def start_scene(session: AsyncSession, project: Project, scene_id: str) ->
         return job
     repairs = (await _newest_repairs(session, project.id)).get(scene_id, {})
     reason = _not_ready_reason(entry, False, _repair_active(repairs))
+    previous, previous_busy = await _previous_of(session, project, definitions, scene_id)
+    reason = reason or _previous_reason(previous, previous_busy)
     if reason is not None:
         raise ShotContinuityError(reason)
-    job, _created = await _queue_check(session, project, entry, 0)
+    job, _created = await _queue_check(session, project, entry, 0, previous)
     return job
+
+
+async def _previous_of(
+    session: AsyncSession,
+    project: Project,
+    definitions: shot_definitions.ShotDefinitionsState,
+    scene_id: str,
+) -> tuple[PreviousCut | None, bool]:
+    """SCN-012: the cut a scene continues straight from, and whether a check or a repair is
+    running for the scene before it. `(None, False)` for a scene that follows no other.
+    """
+    cut = (await _previous_cuts(session, project, definitions)).get(scene_id)
+    if cut is None:
+        return None, False
+    busy = _scene_busy(
+        cut.scene_id,
+        await _newest_jobs(session, project.id),
+        await _newest_repairs(session, project.id),
+    )
+    return cut, busy
 
 
 async def start_all(session: AsyncSession, project: Project) -> StartResult:
@@ -580,6 +801,10 @@ async def start_all(session: AsyncSession, project: Project) -> StartResult:
         raise ShotContinuityError(definitions.blocked_reason)
     current = await state(session, project)
     status_of = {scene.item["id"]: scene.status for scene in current.entries}
+    cuts = await _previous_cuts(session, project, definitions)
+    jobs = await _newest_jobs(session, project.id)
+    repairs = await _newest_repairs(session, project.id)
+    queued_now: set[str] = set()
     result = StartResult(job_ids=[], skipped=[])
     for entry in definitions.entries:
         scene_id = entry.item["id"]
@@ -592,11 +817,17 @@ async def start_all(session: AsyncSession, project: Project) -> StartResult:
             status_of.get(scene_id) == "checking",
             status_of.get(scene_id) == "reconciling",
         )
+        previous = cuts.get(scene_id)
+        if reason is None and previous is not None:
+            # A check queued a moment ago for the scene before also holds this one back.
+            busy = previous.scene_id in queued_now or _scene_busy(previous.scene_id, jobs, repairs)
+            reason = _previous_reason(previous, busy)
         if reason is not None:
             result.skipped.append(Skipped(scene_id, title, reason))
             continue
-        job, created = await _queue_check(session, project, entry, 0)
+        job, created = await _queue_check(session, project, entry, 0, previous)
         if created:
+            queued_now.add(scene_id)
             result.job_ids.append(job.id)
         else:
             result.skipped.append(Skipped(scene_id, title, "Already being checked."))
@@ -623,12 +854,15 @@ async def queue_check_if_ready(session: AsyncSession, project_id: int, scene_id:
     repairs = (await _newest_repairs(session, project_id)).get(scene_id, {})
     if _not_ready_reason(entry, _is_active(job), _repair_active(repairs)) is not None:
         return None
+    previous, previous_busy = await _previous_of(session, project, definitions, scene_id)
+    if _previous_reason(previous, previous_busy) is not None:
+        return None
     row = (await _newest_rows(session, project_id)).get(scene_id)
-    if row is not None and _covers(row, entry):
+    if row is not None and _covers(row, entry, previous):
         return None
     try:
         queued, created = await _queue_check(
-            session, project, entry, _round_of_definitions(entry, row)
+            session, project, entry, _round_of_definitions(entry, row), previous
         )
     except ShotContinuityError as exc:
         _logger.info(
@@ -639,6 +873,28 @@ async def queue_check_if_ready(session: AsyncSession, project_id: int, scene_id:
         )
         return None
     return queued if created else None
+
+
+async def queue_following_check(
+    session: AsyncSession, project_id: int, scene_id: str
+) -> Job | None:
+    """SCN-012: queues the check of the scene that continues straight from this one, once this
+    scene's continuity has settled (its check found nothing, or no more repairs will be made);
+    commits. Returns the job, or None when the next scene does not follow this one, or cannot be
+    checked yet (`queue_check_if_ready` says so: it waits while anything runs for this scene).
+    """
+    project = await session.get(Project, project_id)
+    if project is None:
+        return None
+    definitions = await shot_definitions.state(session, project)
+    ids = [entry.item["id"] for entry in definitions.entries]
+    if scene_id not in ids or ids.index(scene_id) + 1 >= len(ids):
+        return None
+    next_id = ids[ids.index(scene_id) + 1]
+    cut = (await _previous_cuts(session, project, definitions)).get(next_id)
+    if cut is None or cut.scene_id != scene_id:
+        return None
+    return await queue_check_if_ready(session, project_id, next_id)
 
 
 # --- Repairing cuts -----------------------------------------------------------------------
@@ -739,6 +995,14 @@ async def _queue_repair(
                 "problem": boundary["problem"],
                 "editable_shots": edit.editable,
                 "frozen": edit.frozen,
+                # SCN-012: for the cut into a scene that continues straight from the scene
+                # before, the last shot of that scene and the time and the place's condition on
+                # both sides. Read-only: only the first shot of this scene may change.
+                **{
+                    key: boundary[key]
+                    for key in ("previous_shot", "time", "environment_state")
+                    if key in boundary
+                },
             },
             "shots": shots,
             "characters": common["characters"],
@@ -779,10 +1043,11 @@ async def queue_repairs(session: AsyncSession, project_id: int, check_id: int) -
     definitions = await shot_definitions.state(session, project)
     entry = next((e for e in definitions.entries if e.item["id"] == check.scene_id), None)
     repairs = (await _newest_repairs(session, project_id)).get(check.scene_id, {})
+    previous = (await _previous_cuts(session, project, definitions)).get(check.scene_id)
     if (
         entry is None
         or _not_ready_reason(entry, False, _repair_active(repairs)) is not None
-        or not _covers(check, entry)
+        or not _covers(check, entry, previous)
     ):
         return []
 
@@ -833,7 +1098,8 @@ async def start_cut_repair(
     if reason is not None:
         raise ShotContinuityError(reason)
     check = (await _newest_rows(session, project.id)).get(scene_id)
-    if check is None or not _covers(check, entry):
+    previous = (await _previous_cuts(session, project, definitions)).get(scene_id)
+    if check is None or not _covers(check, entry, previous):
         raise ShotContinuityError("Check the continuity of this scene first.")
     boundary = next(
         (item for item in check.content["boundaries"] if item["id"] == boundary_id), None

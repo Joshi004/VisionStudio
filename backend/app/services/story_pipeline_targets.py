@@ -2011,6 +2011,16 @@ async def _evaluate_shot_continuity(
                 )
         elif entry.status == "not_checked" and not entry.can_run:
             block = entry.blocked_reason
+        # SCN-012: a scene that continues straight from the scene before it is checked against
+        # that scene's last shot, so it waits for that scene's check (and its repairs) to end.
+        waits_for = (f"scene:{entry.previous_scene_id}",) if entry.previous_scene_id else ()
+        if entry.look_mismatches:
+            who = ", ".join(item["character_id"] for item in entry.look_mismatches)
+            warnings.append(
+                f"{label}: the look of {who} is not the same as at the end of the scene before "
+                "it, which this scene continues straight from. Define the scene again with a "
+                "note, or change the look."
+            )
         targets.append(
             Target(
                 f"scene:{scene_id}",
@@ -2020,6 +2030,7 @@ async def _evaluate_shot_continuity(
                 block=block,
                 settling=settling,
                 last_error=_failure(entry.job),
+                waits_for=waits_for,
                 ref=(scene_id,),
                 # A check was made for shots that have changed since.
                 stale=entry.status == "not_checked" and entry.row is not None,

@@ -255,6 +255,26 @@ class CheckShotContinuityHandler(JobHandler):
                 read.scene_id,
                 [job.id for job in queued],
             )
+            return
+
+        # Nothing is left to repair here, so the scene that continues straight from this one
+        # (SCN-012) can be checked against its last shot. Also a separate step.
+        try:
+            async with SessionLocal() as session:
+                following = await shot_continuity.queue_following_check(
+                    session, project_id, read.scene_id
+                )
+        except Exception:
+            _logger.exception("job %d: the next scene's continuity could not be queued", job_id)
+            return
+        if following is not None:
+            dispatcher.nudge()
+            _logger.info(
+                "job %d: continuity of the scene that follows '%s' queued, job %d",
+                job_id,
+                read.scene_id,
+                following.id,
+            )
 
     # --- Small helpers ------------------------------------------------------------------
 

@@ -104,6 +104,9 @@ export function SceneDefinitionView({
       innerPlaces.map((place) => `${place.environment_id} (${place.relation})`).join(", "),
     ]);
   }
+  if (definition.continues_previous === true) {
+    placeRows.push(["Follows", "Continues straight from the previous scene"]);
+  }
   placeRows.push(
     ["Time of day", definition.time.time_of_day],
     ["Lighting", definition.time.lighting_state],

@@ -387,6 +387,14 @@ class RepairShotCutHandler(JobHandler):
         try:
             async with SessionLocal() as session:
                 check = await shot_continuity.queue_check_if_ready(session, project_id, scene_id)
+            if check is None:
+                # Nothing more will be repaired here (a repair that failed or changed nothing),
+                # so the scene that continues straight from this one can go on (SCN-012). It
+                # waits by itself while anything still runs for this scene.
+                async with SessionLocal() as session:
+                    check = await shot_continuity.queue_following_check(
+                        session, project_id, scene_id
+                    )
         except Exception:
             _logger.exception("job %d: the continuity check could not be queued", job_id)
             return
