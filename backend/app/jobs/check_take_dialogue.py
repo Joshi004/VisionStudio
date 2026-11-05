@@ -256,16 +256,28 @@ class CheckTakeDialogueHandler(JobHandler):
             threshold = await settings_service.get_int(
                 session, settings_service.DIALOGUE_MATCH_THRESHOLD_KEY
             )
-            result = dialogue_check.compare(lines, spoken, threshold)
-            take.dialogue_check = result.to_json(
-                lines, spoken, threshold=threshold, checked_at=utcnow()
+            # SCN-009: a shot with no lines is checked for silence, not for words.
+            result = (
+                dialogue_check.compare(lines, spoken, threshold)
+                if lines
+                else dialogue_check.compare_silent(spoken)
             )
+            stored = result.to_json(lines, spoken, threshold=threshold, checked_at=utcnow())
+            # A report on an older silent take is shown, but never blocks the take and is never
+            # retried (`kind` None): the owner decides.
+            report_only = recorded.get(shot_takes.REPORT_ONLY_KEY) is True
+            if report_only:
+                stored["report_only"] = True
+                stored["kind"] = None
+            take.dialogue_check = stored
             output: dict[str, Any] = {
                 "take_id": take.id,
                 "take_number": take.take_number,
                 "processing_time": _processing_time(body),
                 "check": {
                     "passed": result.passed,
+                    "mode": result.mode,
+                    "report_only": report_only,
                     "outcome": result.outcome,
                     "rule": result.rule,
                     "similarity": result.similarity,
@@ -273,7 +285,9 @@ class CheckTakeDialogueHandler(JobHandler):
                     "problems": [problem.code for problem in result.problems],
                 },
             }
-            if result.passed:
+            if report_only:
+                pass  # a report never changes the selection and never starts a retry
+            elif result.passed:
                 # Only a clip that passed its technical check is ever sent here, but the
                 # selection rule is kept in one place and never trusts that. A take that
                 # already has a `selected_at` (made before this phase, or chosen by the user)
@@ -299,10 +313,12 @@ class CheckTakeDialogueHandler(JobHandler):
             await session.commit()
 
         _logger.info(
-            "job %d: dialogue of take %s checked: passed=%s outcome=%s similarity=%s%% "
+            "job %d: speech of take %s checked (%s%s): passed=%s outcome=%s similarity=%s%% "
             "(needed %s%%)",
             job.id,
             take_id,
+            result.mode,
+            ", report only" if report_only else "",
             result.passed,
             result.outcome,
             result.similarity,

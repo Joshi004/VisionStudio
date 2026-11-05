@@ -64,6 +64,13 @@ INTERJECTIONS: Final = frozenset(
     }
 )
 
+# Filler sounds a recogniser may write down for breath, a throat clear or room noise (SCN-009).
+# Heard alone in a silent shot, or outside a line, they are not counted as speech. This is not
+# `INTERJECTIONS`: that set holds real words such as "hey" and "wow".
+FILLERS: Final = frozenset(
+    {"ah", "eh", "er", "hm", "hmm", "hmmm", "huh", "mhm", "mm", "mmm", "uh", "um", "umm", "oh"}
+)
+
 # Pairs of words that a speaker runs together: either may be heard for the other.
 WEAK_FORM_PAIRS: Final = frozenset(
     frozenset(pair)

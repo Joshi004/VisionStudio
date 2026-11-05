@@ -325,6 +325,37 @@ export function useRescoreDialogue(projectId: number) {
   });
 }
 
+/**
+ * Queues a speech check for each selected silent take made before the check existed (SCN-009),
+ * in one scene or, with no scene, in the whole project. Each is a short GPU transcription. The
+ * result is a report: the take stays selected and nothing is made again.
+ */
+export function useCheckSilentSpeech(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sceneId: string | null) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/shot-takes/check-silent-speech",
+        {
+          params: { path: { project_id: projectId } },
+          body: { scene_id: sceneId },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not start the speech check (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
 export function useCheckShotTakes(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({

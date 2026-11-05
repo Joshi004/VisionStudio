@@ -11,6 +11,8 @@
   checks existed. It starts no generation.
 - `POST .../rescore-dialogue` ("Score dialogue again", SCN-001) judges every failed dialogue check
   again from its stored transcript, with no GPU work and no new job, and answers what changed.
+- `POST .../check-silent-speech` (SCN-009) queues a speech check for each selected silent take made
+  before the check existed, in one scene or the whole project. The result is a report only.
 - `POST .../run` ("Generate all") starts one job for every shot, in every scene, whose prompt is
   compiled and current and that has no current take and is not already being generated.
 - `POST .../{scene_id}/run` starts the jobs for the shots of one scene, and pushes the scene to the
@@ -95,7 +97,29 @@ ShotType = Literal[
     "graphic",
 ]
 ProblemKind = Literal["clip", "plan"]
-DialogueOutcome = Literal["matched", "close_match", "not_verifiable", "mismatch", "no_speech"]
+DialogueOutcome = Literal[
+    "matched",
+    "close_match",
+    "not_verifiable",
+    "mismatch",
+    "no_speech",
+    # SCN-009: words heard outside the time of the lines, and the two results of a shot with no
+    # dialogue (no words heard, or words heard).
+    "extra_speech",
+    "silent",
+    "speech_heard",
+]
+DialogueMode = Literal["dialogue", "silent"]
+_DIALOGUE_OUTCOMES = (
+    "matched",
+    "close_match",
+    "not_verifiable",
+    "mismatch",
+    "no_speech",
+    "extra_speech",
+    "silent",
+    "speech_heard",
+)
 VoiceSource = Literal["take", "clip"]
 
 
@@ -147,6 +171,12 @@ class TakeDialogueOut(BaseModel):
     # because nothing was heard on a line too slight to check.
     outcome: DialogueOutcome = "matched"
     rule: str | None = None
+    # SCN-009: `dialogue` (the words of the lines were compared) or `silent` (a shot with no
+    # dialogue, checked for words); the words heard outside every line's time (not fillers);
+    # and whether this is a report on an older take, which never changes the selection.
+    mode: DialogueMode = "dialogue"
+    extra_text: str = ""
+    report_only: bool = False
 
 
 AnchorUse = Literal["first_frame", "reference"]
@@ -203,6 +233,12 @@ class ShotTakeOut(BaseModel):
     anchor: TakeAnchorOut | None = None
     # The version of the shot prompt this take was made from, or None (PHASE-038).
     prompt_version: int | None = None
+    # SCN-009: the take's speech is judged (it has lines, or it is a silent take that is checked
+    # for words), so it waits for its check before it is selected.
+    checks_speech: bool = False
+    # SCN-009: the selected take of a shot with no dialogue, made before the speech check existed,
+    # that "Check silent takes for speech" can report on.
+    can_audit_speech: bool = False
 
 
 class TakeShotSkeletonOut(BaseModel):
@@ -262,6 +298,8 @@ class ShotTakesOut(BaseModel):
     max_retries: int
     # SCN-001: how many takes have a failed dialogue check that "Score dialogue again" can judge.
     rescorable_count: int = 0
+    # SCN-009: how many selected silent takes have no speech check (made before it existed).
+    silent_unchecked_count: int = 0
     # SCN-002: the scene pushed to the front of the GPU server's queue, or None.
     pushed_scene_id: str | None = None
 
@@ -305,6 +343,18 @@ class SelectedTakeOut(BaseModel):
 
 class ShotTakesCheckOut(BaseModel):
     job_id: int
+
+
+class CheckSilentSpeechIn(BaseModel):
+    """SCN-009: the scene to check, or none for the whole project."""
+
+    scene_id: DiscoveryId | None = None
+
+
+class CheckSilentSpeechOut(BaseModel):
+    """The speech checks queued for older silent takes. Each is a short GPU transcription."""
+
+    job_ids: list[int]
 
 
 class RescoredTakeOut(BaseModel):
@@ -365,7 +415,7 @@ def _dialogue_outcome(result: dict[str, Any], problems: list[Any]) -> DialogueOu
     `matched`, and a failure is told by its problem code.
     """
     stored = result.get("outcome")
-    if stored in ("matched", "close_match", "not_verifiable", "mismatch", "no_speech"):
+    if stored in _DIALOGUE_OUTCOMES:
         return cast(DialogueOutcome, stored)
     if result.get("passed") is True:
         return "matched"
@@ -394,6 +444,9 @@ def _dialogue_check_out(result: dict[str, Any] | None) -> TakeDialogueOut | None
         heard_text=str(result.get("heard_text", "")),
         checked_at=datetime.fromisoformat(checked_at) if isinstance(checked_at, str) else None,
         accepted=result.get("accepted_at") is not None,
+        mode="silent" if result.get("mode") == "silent" else "dialogue",
+        extra_text=str(result.get("extra_text", "")),
+        report_only=result.get("report_only") is True,
     )
 
 
@@ -448,6 +501,8 @@ def _take_out(entry: TakeEntry, frame_urls: dict[int, str]) -> ShotTakeOut:
         dialogue_job=_job_out(entry.dialogue_job),
         anchor=_anchor_out(entry, frame_urls),
         prompt_version=shot_takes.prompt_version_of(row),
+        checks_speech=entry.checks_speech,
+        can_audit_speech=entry.can_audit_speech,
     )
 
 
@@ -561,6 +616,7 @@ async def get_shot_takes(
         check_job=_job_out(result.check_job),
         max_retries=result.max_retries,
         rescorable_count=result.rescorable_count,
+        silent_unchecked_count=result.silent_unchecked_count,
         pushed_scene_id=project.pushed_scene_id,
     )
 
@@ -605,6 +661,31 @@ async def rescore_dialogue(project_id: int, session: SessionDep) -> RescoreDialo
             for scene_id, shot_id, number in report.selected
         ],
     )
+
+
+@router.post(
+    "/projects/{project_id}/shot-takes/check-silent-speech",
+    response_model=CheckSilentSpeechOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def check_silent_speech(
+    project_id: int, session: SessionDep, body: CheckSilentSpeechIn | None = None
+) -> CheckSilentSpeechOut:
+    """Queues a speech check for each selected take of a shot with no dialogue that was made
+    before the check existed, in one scene or in the whole project (SCN-009). Each is a short
+    GPU transcription and starts only from this call. The result is a report: the take stays
+    selected and no retry is queued. 422 when no take needs it.
+    """
+    project = await load_project(session, project_id)
+    try:
+        jobs = await shot_takes.start_silent_speech_check(
+            session, project, body.scene_id if body is not None else None
+        )
+    except shot_takes.ShotTakesError as exc:
+        raise _refused(exc) from exc
+    dispatcher.nudge()
+    return CheckSilentSpeechOut(job_ids=[job.id for job in jobs])
 
 
 @router.post(

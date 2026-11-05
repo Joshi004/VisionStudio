@@ -4818,6 +4818,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-takes/check-silent-speech": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Silent Speech
+         * @description Queues a speech check for each selected take of a shot with no dialogue that was made
+         *     before the check existed, in one scene or in the whole project (SCN-009). Each is a short
+         *     GPU transcription and starts only from this call. The result is a report: the take stays
+         *     selected and no retry is queued. 422 when no take needs it.
+         */
+        post: operations["check_silent_speech_api_projects__project_id__shot_takes_check_silent_speech_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-takes/run": {
         parameters: {
             query?: never;
@@ -6309,6 +6332,22 @@ export interface components {
             characters: components["schemas"]["CharacterOut"][];
             /** Next Before Id */
             next_before_id: number | null;
+        };
+        /**
+         * CheckSilentSpeechIn
+         * @description SCN-009: the scene to check, or none for the whole project.
+         */
+        CheckSilentSpeechIn: {
+            /** Scene Id */
+            scene_id?: string | null;
+        };
+        /**
+         * CheckSilentSpeechOut
+         * @description The speech checks queued for older silent takes. Each is a short GPU transcription.
+         */
+        CheckSilentSpeechOut: {
+            /** Job Ids */
+            job_ids: number[];
         };
         /** ChoiceOut */
         ChoiceOut: {
@@ -8615,6 +8654,23 @@ export interface components {
             name: string;
             /** Reason */
             reason: string;
+        };
+        /** InnerPlaceIn */
+        InnerPlaceIn: {
+            /** Environment Id */
+            environment_id: string;
+            /** Relation */
+            relation: string;
+        };
+        /**
+         * InnerPlaceOut
+         * @description A place inside the scene's main place (SCN-007).
+         */
+        InnerPlaceOut: {
+            /** Environment Id */
+            environment_id: string;
+            /** Relation */
+            relation: string;
         };
         /**
          * ItemOut
@@ -12679,23 +12735,6 @@ export interface components {
             /** Needs Confirmation */
             needs_confirmation: boolean;
         };
-        /** InnerPlaceIn */
-        InnerPlaceIn: {
-            /** Environment Id */
-            environment_id: string;
-            /** Relation */
-            relation: string;
-        };
-        /**
-         * InnerPlaceOut
-         * @description A place inside the scene's main place (SCN-007).
-         */
-        InnerPlaceOut: {
-            /** Environment Id */
-            environment_id: string;
-            /** Relation */
-            relation: string;
-        };
         /**
          * SceneDefinitionIn
          * @description An edited definition. The `id` is the scene's and is set by code. The rules (known
@@ -14034,6 +14073,37 @@ export interface components {
             theme_current: boolean;
         };
         /**
+         * ShotInnerPlaceOut
+         * @description The place inside the scene's main place that a shot is inside (SCN-007).
+         */
+        ShotInnerPlaceOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Relation */
+            relation: string;
+            /** Views */
+            views: components["schemas"]["ShotInnerViewOut"][];
+        };
+        /**
+         * ShotInnerViewOut
+         * @description A view of a place inside the scene's main place (SCN-007). It has no `allowed_for`:
+         *     nobody is staged inside such a place, so any of its views may stand behind the shot.
+         */
+        ShotInnerViewOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Side */
+            side: string;
+            /** Framing */
+            framing: string;
+            /** Description */
+            description: string;
+        };
+        /**
          * ShotOut
          * @description One shot skeleton. The events stay the source of truth: a shot only names them.
          */
@@ -14077,37 +14147,6 @@ export interface components {
             end_s?: number | null;
             /** Spoken Text */
             spoken_text?: string | null;
-        };
-        /**
-         * ShotInnerPlaceOut
-         * @description The place inside the scene's main place that a shot is inside (SCN-007).
-         */
-        ShotInnerPlaceOut: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Relation */
-            relation: string;
-            /** Views */
-            views: components["schemas"]["ShotInnerViewOut"][];
-        };
-        /**
-         * ShotInnerViewOut
-         * @description A view of a place inside the scene's main place (SCN-007). It has no `allowed_for`:
-         *     nobody is staged inside such a place, so any of its views may stand behind the shot.
-         */
-        ShotInnerViewOut: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Side */
-            side: string;
-            /** Framing */
-            framing: string;
-            /** Description */
-            description: string;
         };
         /** ShotPlacementOut */
         ShotPlacementOut: {
@@ -14638,6 +14677,16 @@ export interface components {
             anchor?: components["schemas"]["TakeAnchorOut"] | null;
             /** Prompt Version */
             prompt_version?: number | null;
+            /**
+             * Checks Speech
+             * @default false
+             */
+            checks_speech: boolean;
+            /**
+             * Can Audit Speech
+             * @default false
+             */
+            can_audit_speech: boolean;
         };
         /** ShotTakesCheckOut */
         ShotTakesCheckOut: {
@@ -14696,6 +14745,11 @@ export interface components {
              * @default 0
              */
             rescorable_count: number;
+            /**
+             * Silent Unchecked Count
+             * @default 0
+             */
+            silent_unchecked_count: number;
             /** Pushed Scene Id */
             pushed_scene_id?: string | null;
         };
@@ -15746,9 +15800,25 @@ export interface components {
              * @default matched
              * @enum {string}
              */
-            outcome: "matched" | "close_match" | "not_verifiable" | "mismatch" | "no_speech";
+            outcome: "matched" | "close_match" | "not_verifiable" | "mismatch" | "no_speech" | "extra_speech" | "silent" | "speech_heard";
             /** Rule */
             rule?: string | null;
+            /**
+             * Mode
+             * @default dialogue
+             * @enum {string}
+             */
+            mode: "dialogue" | "silent";
+            /**
+             * Extra Text
+             * @default
+             */
+            extra_text: string;
+            /**
+             * Report Only
+             * @default false
+             */
+            report_only: boolean;
         };
         /** TakeIn */
         TakeIn: {
@@ -27489,6 +27559,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_silent_speech_api_projects__project_id__shot_takes_check_silent_speech_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CheckSilentSpeechIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckSilentSpeechOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

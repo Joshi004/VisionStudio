@@ -35,6 +35,7 @@ import {
   useGenerateOneShot,
   useGenerateSceneShots,
   usePushScene,
+  useCheckSilentSpeech,
   useRescoreDialogue,
   useSelectTake,
   useSetVoiceSource,
@@ -112,7 +113,7 @@ function CheckBadge({ take }: { take: ShotTake }) {
  */
 function DialogueBadge({ take }: { take: ShotTake }) {
   if (
-    take.dialogue.length === 0 ||
+    (!take.checks_speech && take.dialogue_check === null) ||
     take.state === "generating" ||
     take.state === "failed" ||
     !take.validation?.passed
@@ -120,6 +121,9 @@ function DialogueBadge({ take }: { take: ShotTake }) {
     return null;
   }
   const check = take.dialogue_check;
+  if (check !== null && check.mode === "silent") {
+    return <SilentBadge check={check} />;
+  }
   if (check === null) {
     return take.state === "checking_dialogue" ? (
       <Badge variant="light" color="blue">
@@ -160,6 +164,21 @@ function DialogueBadge({ take }: { take: ShotTake }) {
       </Badge>
     );
   }
+  if (check.outcome === "extra_speech") {
+    return check.accepted ? (
+      <Badge variant="light" color="orange">
+        Extra speech, used anyway
+      </Badge>
+    ) : (
+      <Badge
+        variant="light"
+        color="red"
+        title="The lines were said, but more words were heard outside their time."
+      >
+        Extra speech
+      </Badge>
+    );
+  }
   return check.accepted ? (
     <Badge variant="light" color="orange">
       Dialogue {check.similarity}%, used anyway
@@ -167,6 +186,44 @@ function DialogueBadge({ take }: { take: ShotTake }) {
   ) : (
     <Badge variant="light" color="red">
       Dialogue did not match ({check.similarity}%)
+    </Badge>
+  );
+}
+
+/**
+ * The speech check of a shot with no dialogue (SCN-009): nothing should be heard. A result on an
+ * older take is a report only, and the take is still used.
+ */
+function SilentBadge({
+  check,
+}: {
+  check: NonNullable<ShotTake["dialogue_check"]>;
+}) {
+  if (check.passed) {
+    return (
+      <Badge variant="light" color="green">
+        No speech heard
+      </Badge>
+    );
+  }
+  if (check.report_only) {
+    return (
+      <Badge
+        variant="light"
+        color="orange"
+        title="Words were heard in this silent clip. It was made before the check existed, so it is still used. Listen to it, and regenerate it if you want."
+      >
+        Speech heard (older take, still used)
+      </Badge>
+    );
+  }
+  return check.accepted ? (
+    <Badge variant="light" color="orange">
+      Speech in a silent shot, used anyway
+    </Badge>
+  ) : (
+    <Badge variant="light" color="red">
+      Speech in a silent shot
     </Badge>
   );
 }
@@ -188,7 +245,7 @@ function canSelect(take: ShotTake): boolean {
   }
   const dialoguePending =
     take.validation.passed &&
-    take.dialogue.length > 0 &&
+    take.checks_speech &&
     take.dialogue_check === null;
   return !dialoguePending;
 }
@@ -306,8 +363,32 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
               : "nothing"}{" "}
             (needed {take.dialogue_check.threshold}%)
           </Text>
+          {take.dialogue_check.extra_text !== "" && (
+            <Text
+              size="xs"
+              c={take.dialogue_check.passed ? "dimmed" : "red"}
+              style={{ wordBreak: "break-word" }}
+            >
+              Outside the lines: &ldquo;{take.dialogue_check.extra_text}&rdquo;
+            </Text>
+          )}
         </Stack>
       )}
+      {take.dialogue.length === 0 &&
+        take.dialogue_check !== null &&
+        take.dialogue_check.mode === "silent" && (
+          <Text
+            size="xs"
+            c={take.dialogue_check.passed ? "dimmed" : "red"}
+            ml={8}
+            style={{ wordBreak: "break-word" }}
+          >
+            Nobody speaks in this shot. Heard:{" "}
+            {take.dialogue_check.heard_text
+              ? `\u201C${take.dialogue_check.heard_text}\u201D`
+              : "nothing"}
+          </Text>
+        )}
       {take.dialogue_check?.passed &&
         take.dialogue_check.outcome === "not_verifiable" && (
           <Text size="xs" c="orange" ml={8}>
@@ -703,6 +784,7 @@ function ShotRow({
             {shot.duration_seconds} s; the clip is trimmed to that when the
             video is put together.
             {heard !== null &&
+              heard.mode === "dialogue" &&
               (heard.passed
                 ? ` Its speech matched the dialogue by ${heard.similarity}%.`
                 : ` Its speech matched the dialogue by only ${heard.similarity}%; you chose to use it anyway.`)}
@@ -791,6 +873,8 @@ type SceneRowProps = {
   maxRetries: number;
   busy: boolean;
   onGenerateScene: () => void;
+  /** Queues a speech report for this scene's older silent takes (SCN-009). */
+  onCheckSilentSpeech: () => void;
   /** True when this scene is the one pushed to the front of the server's queue (SCN-002). */
   pushed: boolean;
   onPush: () => void;
@@ -817,6 +901,7 @@ function SceneRow({
   maxRetries,
   busy,
   onGenerateScene,
+  onCheckSilentSpeech,
   pushed,
   onPush,
   onStopPush,
@@ -832,6 +917,12 @@ function SceneRow({
   const generated = byStatus.generated ?? 0;
   const outOfDate = byStatus.out_of_date ?? 0;
   const failedCount = byStatus.failed ?? 0;
+  // The scene's older silent takes with no speech check (known once its shots are loaded).
+  const silentUnchecked = scene.shots.reduce(
+    (sum, entry) =>
+      sum + entry.takes.filter((take) => take.can_audit_speech).length,
+    0,
+  );
 
   return (
     <SceneSection
@@ -873,6 +964,17 @@ function SceneRow({
       }
       actions={
         <Group gap="xs" wrap="nowrap">
+          {silentUnchecked > 0 && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={busy}
+              onClick={onCheckSilentSpeech}
+              title="Listens for speech in this scene's silent clips that were made before the check existed. It is a report: no clip is changed or made again."
+            >
+              Check silent takes ({silentUnchecked})
+            </Button>
+          )}
           <Button
             size="compact-sm"
             variant="default"
@@ -955,6 +1057,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const setVoiceSource = useSetVoiceSource(projectId);
   const checkTakes = useCheckShotTakes(projectId);
   const rescoreDialogue = useRescoreDialogue(projectId);
+  const checkSilentSpeech = useCheckSilentSpeech(projectId);
   const pushScene = usePushScene(projectId);
   const stopPush = useStopPush(projectId);
   // The video of each scene (SCN-003).
@@ -977,6 +1080,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
     setVoiceSource.isPending ||
     checkTakes.isPending ||
     rescoreDialogue.isPending ||
+    checkSilentSpeech.isPending ||
     pushScene.isPending ||
     stopPush.isPending ||
     compilePrompt.isPending ||
@@ -987,6 +1091,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const checking = isJobActive(checkJob);
   const maxRetries = data?.max_retries ?? 0;
   const rescorable = data?.rescorable_count ?? 0;
+  const silentUnchecked = data?.silent_unchecked_count ?? 0;
   const rescored = rescoreDialogue.data;
   const pushedSceneId = data?.pushed_scene_id ?? null;
   // What the last push or stop did to the clips already waiting on the server.
@@ -1079,6 +1184,17 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
                 Score dialogue again ({rescorable})
               </Button>
             )}
+            {silentUnchecked > 0 && (
+              <Button
+                variant="default"
+                onClick={() => checkSilentSpeech.mutate(null)}
+                loading={checkSilentSpeech.isPending}
+                disabled={isLoading || isError || busy}
+                title="Listens for speech in the selected silent clips made before the check existed. Each is a short GPU transcription. It is a report: no clip is changed, unselected or made again."
+              >
+                Check silent takes for speech ({silentUnchecked})
+              </Button>
+            )}
             <Button
               onClick={() => generateAll.mutate()}
               loading={generateAll.isPending}
@@ -1110,6 +1226,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
           setVoiceSource,
           checkTakes,
           rescoreDialogue,
+          checkSilentSpeech,
           pushScene,
           stopPush,
           renderScene,
@@ -1169,9 +1286,9 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             }}
           >
             <Text size="sm">
-              {pushReport.changed}{" "}
-              {pushReport.changed === 1 ? "clip" : "clips"} waiting on the
-              server {pushReport.changed === 1 ? "was" : "were"} moved
+              {pushReport.changed} {pushReport.changed === 1 ? "clip" : "clips"}{" "}
+              waiting on the server {pushReport.changed === 1 ? "was" : "were"}{" "}
+              moved
               {pushReport.already_running > 0 &&
                 `, ${pushReport.already_running} had already started`}
               {pushReport.not_reached > 0 &&
@@ -1217,6 +1334,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             maxRetries={maxRetries}
             busy={busy}
             onGenerateScene={() => generateScene.mutate(scene.id)}
+            onCheckSilentSpeech={() => checkSilentSpeech.mutate(scene.id)}
             pushed={scene.id === pushedSceneId}
             onPush={() => {
               stopPush.reset();
