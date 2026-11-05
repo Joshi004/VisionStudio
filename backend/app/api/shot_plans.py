@@ -99,9 +99,23 @@ class ShotOut(BaseModel):
     spoken_text: str | None = None
 
 
+class GraphicSuggestionResultOut(BaseModel):
+    """What became of one graphic the owner suggested: it was followed when a graphic shot covers
+    some of its words, and `reason` is the planner's reason when it was not (None when it gave
+    none).
+    """
+
+    id: str
+    text: str
+    followed: bool
+    reason: str | None = None
+
+
 class ShotPlanContentOut(BaseModel):
     scene_id: str
     shots: list[ShotOut]
+    # Only a plan made for a scene with suggested graphics has them. Empty for every other plan.
+    graphic_suggestions: list[GraphicSuggestionResultOut] = []
 
 
 # --- The stage's state ----------------------------------------------------------------------

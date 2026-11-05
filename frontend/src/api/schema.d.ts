@@ -65,6 +65,27 @@ export interface paths {
         patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/graphic-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Graphic Suggestions
+         * @description Replaces the words of the story marked as a suggested graphic. Only for an explainer with
+         *     a continuous voice and graphics on. A suggestion is a hint: the shot planner may decline it.
+         */
+        put: operations["set_graphic_suggestions_api_projects__project_id__graphic_suggestions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/story-bible/run": {
         parameters: {
             query?: never;
@@ -8409,6 +8430,54 @@ export interface components {
             job: components["schemas"]["BriefJobOut"] | null;
             brief: components["schemas"]["BriefOut"] | null;
         };
+        /**
+         * GraphicSuggestionIn
+         * @description Words of the story the owner suggests a graphic for: `start` and `end` are character
+         *     positions in the story (`end` not included) and `text` is the story between them.
+         */
+        GraphicSuggestionIn: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+        };
+        /** GraphicSuggestionOut */
+        GraphicSuggestionOut: {
+            /** Id */
+            id: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+        };
+        /**
+         * GraphicSuggestionResultOut
+         * @description What became of one graphic the owner suggested: it was followed when a graphic shot covers
+         *     some of its words, and `reason` is the planner's reason when it was not (None when it gave
+         *     none).
+         */
+        GraphicSuggestionResultOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Followed */
+            followed: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * GraphicSuggestionsSet
+         * @description The whole list of suggestions. Sent again, it replaces the one before.
+         */
+        GraphicSuggestionsSet: {
+            /** Suggestions */
+            suggestions: components["schemas"]["GraphicSuggestionIn"][];
+        };
         /** GraphicTestCardCreate */
         GraphicTestCardCreate: {
             /** Orientation */
@@ -12203,6 +12272,8 @@ export interface components {
             presenter_named_look_deleted: boolean;
             /** Graphics */
             graphics: boolean;
+            /** Graphic Suggestions */
+            graphic_suggestions: components["schemas"]["GraphicSuggestionOut"][];
             story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
@@ -14603,6 +14674,11 @@ export interface components {
             scene_id: string;
             /** Shots */
             shots: components["schemas"]["ShotOut"][];
+            /**
+             * Graphic Suggestions
+             * @default []
+             */
+            graphic_suggestions: components["schemas"]["GraphicSuggestionResultOut"][];
         };
         /** ShotPlanEditIn */
         ShotPlanEditIn: {
@@ -17451,6 +17527,50 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProjectUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A value breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_graphic_suggestions_api_projects__project_id__graphic_suggestions_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicSuggestionsSet"];
             };
         };
         responses: {

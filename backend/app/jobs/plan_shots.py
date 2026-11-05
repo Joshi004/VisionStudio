@@ -134,6 +134,27 @@ def _is_take(value: Any) -> bool:
             and isinstance(span.get("last_word"), int)
             for span in value["spans"]
         )
+        and _is_suggestions(value.get("suggestions"))
+    )
+
+
+def _is_suggestions(value: Any) -> bool:
+    """Whether `value` is the take's optional list of suggested graphics, as `shot_plans` writes
+    it: absent, or `[{id, text, words}]` with the positions of the take's words.
+    """
+    return value is None or (
+        isinstance(value, list)
+        and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("id"), str)
+            and isinstance(entry.get("text"), str)
+            and isinstance(entry.get("words"), list)
+            and all(
+                isinstance(position, int) and not isinstance(position, bool)
+                for position in entry["words"]
+            )
+            for entry in value
+        )
     )
 
 

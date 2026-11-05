@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Button, Group, Paper, Stack, Text, Textarea, Title } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
 import { useUpdateProject, type ProjectDetail } from "../../api/projects";
+import { GraphicSuggestions } from "./GraphicSuggestions";
 import { countWords, estimateSeconds, formatDuration } from "./storyLength";
 
 type DraftProps = {
@@ -14,6 +15,8 @@ type DraftProps = {
   error: string | null;
   onEdit: () => void;
   onSave: (text: string) => void;
+  /** Told whether the draft differs from the saved story, whenever that changes. */
+  onUnsavedChange: (unsaved: boolean) => void;
 };
 
 /**
@@ -29,9 +32,14 @@ function StoryDraft({
   error,
   onEdit,
   onSave,
+  onUnsavedChange,
 }: DraftProps) {
   const [draft, setDraft] = useState(saved);
   const unchanged = draft === saved;
+
+  useEffect(() => {
+    onUnsavedChange(!unchanged);
+  }, [unchanged, onUnsavedChange]);
 
   const words = countWords(draft);
   const seconds = estimateSeconds(words, wordsPerMinute);
@@ -87,23 +95,56 @@ function StoryDraft({
 export function StoryEditor({ project }: { project: ProjectDetail }) {
   const update = useUpdateProject(project.id);
   const saved = project.script_text ?? "";
+  const [hasUnsavedStory, setHasUnsavedStory] = useState(false);
+  // How many suggested graphics the last save could no longer find in the changed story.
+  const [droppedSuggestions, setDroppedSuggestions] = useState(0);
+  // Only a continuous explainer with graphics on plans graphic shots from the owner's hints.
+  const suggestsGraphics = project.voice_track === "continuous" && project.graphics;
+
+  function save(text: string) {
+    const before = project.graphic_suggestions.length;
+    update.mutate(
+      { script_text: text },
+      {
+        onSuccess: (updated) =>
+          setDroppedSuggestions(Math.max(0, before - updated.graphic_suggestions.length)),
+      },
+    );
+  }
 
   return (
-    <Paper withBorder p="md" radius="md">
-      <Stack gap="sm">
-        <Title order={4}>Story</Title>
-        <StoryDraft
-          key={saved}
-          saved={saved}
-          wordsPerMinute={project.story_length.words_per_minute}
-          limitSeconds={project.story_length.limit_seconds}
-          isSaving={update.isPending}
-          isSaved={update.isSuccess}
-          error={update.isError ? describeError(update.error) : null}
-          onEdit={update.reset}
-          onSave={(text) => update.mutate({ script_text: text })}
-        />
-      </Stack>
-    </Paper>
+    <Stack gap="md">
+      <Paper withBorder p="md" radius="md">
+        <Stack gap="sm">
+          <Title order={4}>Story</Title>
+          <StoryDraft
+            key={saved}
+            saved={saved}
+            wordsPerMinute={project.story_length.words_per_minute}
+            limitSeconds={project.story_length.limit_seconds}
+            isSaving={update.isPending}
+            isSaved={update.isSuccess}
+            error={update.isError ? describeError(update.error) : null}
+            onEdit={() => {
+              update.reset();
+              setDroppedSuggestions(0);
+            }}
+            onSave={save}
+            onUnsavedChange={setHasUnsavedStory}
+          />
+          {droppedSuggestions > 0 && (
+            <Alert color="yellow" title="Some graphic suggestions were removed">
+              {droppedSuggestions === 1
+                ? "1 graphic suggestion"
+                : `${droppedSuggestions} graphic suggestions`}{" "}
+              no longer matched the changed story and were removed.
+            </Alert>
+          )}
+        </Stack>
+      </Paper>
+      {suggestsGraphics && (
+        <GraphicSuggestions project={project} hasUnsavedStory={hasUnsavedStory} />
+      )}
+    </Stack>
   );
 }

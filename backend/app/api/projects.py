@@ -15,12 +15,13 @@ from datetime import datetime
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
 from app.db.models import CharacterNamedLook, Project
 from app.db.session import SessionDep
+from app.services import graphic_suggestions as graphic_suggestions_service
 from app.services import projects as projects_service
 from app.services import review_points as review_points_service
 from app.services import story_length as story_length_service
@@ -113,6 +114,35 @@ class ProjectSummary(BaseModel):
     has_script: bool
 
 
+class GraphicSuggestionIn(BaseModel):
+    """Words of the story the owner suggests a graphic for: `start` and `end` are character
+    positions in the story (`end` not included) and `text` is the story between them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: StrictInt
+    end: StrictInt
+    text: StrictStr
+
+
+class GraphicSuggestionsSet(BaseModel):
+    """The whole list of suggestions. Sent again, it replaces the one before."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    suggestions: list[GraphicSuggestionIn] = Field(
+        max_length=graphic_suggestions_service.MAX_SUGGESTIONS
+    )
+
+
+class GraphicSuggestionOut(BaseModel):
+    id: str
+    start: int
+    end: int
+    text: str
+
+
 class StoryLengthOut(BaseModel):
     """The story's size and estimated length, and the pace and limit the estimate used."""
 
@@ -164,6 +194,8 @@ class ProjectDetail(BaseModel):
     presenter_named_look_deleted: bool
     # Whether a continuous explainer gets graphic shots (EXG-001). Off for every other project.
     graphics: bool
+    # The words of the story the owner suggests a graphic for, in story order. Empty when none.
+    graphic_suggestions: list[GraphicSuggestionOut]
     story_length: StoryLengthOut
 
 
@@ -196,6 +228,11 @@ def _review_points(project: Project) -> list[ReviewPointKey]:
     # Stored normalized, but read defensively: only known keys are ever returned.
     stored = project.review_points if isinstance(project.review_points, list) else []
     return cast(list[ReviewPointKey], review_points_service.normalize(stored))
+
+
+def _graphic_suggestions(project: Project) -> list[GraphicSuggestionOut]:
+    stored = project.graphic_suggestions if isinstance(project.graphic_suggestions, list) else []
+    return [GraphicSuggestionOut(**entry) for entry in stored]
 
 
 async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
@@ -232,6 +269,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         presenter_named_look_name=picked.name if picked is not None else None,
         presenter_named_look_deleted=picked is not None and picked.deleted_at is not None,
         graphics=project.graphics,
+        graphic_suggestions=_graphic_suggestions(project),
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,
@@ -326,6 +364,27 @@ async def update_project(
     try:
         project = await projects_service.update_project(
             session, project, body.model_dump(exclude_unset=True)
+        )
+    except projects_service.ProjectValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return await _detail(session, project)
+
+
+@router.put(
+    "/projects/{project_id}/graphic-suggestions",
+    response_model=ProjectDetail,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def set_graphic_suggestions(
+    project_id: int, body: GraphicSuggestionsSet, session: SessionDep
+) -> ProjectDetail:
+    """Replaces the words of the story marked as a suggested graphic. Only for an explainer with
+    a continuous voice and graphics on. A suggestion is a hint: the shot planner may decline it.
+    """
+    project = await load_project(session, project_id)
+    try:
+        project = await projects_service.set_graphic_suggestions(
+            session, project, [entry.model_dump() for entry in body.suggestions]
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

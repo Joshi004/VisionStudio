@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CharacterNamedLook, Project, ProjectCastCharacter
 from app.providers import speech_synthesizer
-from app.services import review_points
+from app.services import graphic_suggestions, review_points
 from app.services.project_kinds import KIND_EXPLAINER, KIND_STORY, KINDS
 
 LANDSCAPE = "landscape"
@@ -489,11 +489,40 @@ async def update_project(
     try:
         for field, value in changes.items():
             setattr(project, field, _prepare_value(field, value))
+        if "script_text" in changes and project.graphic_suggestions:
+            # The story changed: the marked words follow their text, or are dropped.
+            project.graphic_suggestions, _ = graphic_suggestions.reanchor(
+                project.script_text, project.graphic_suggestions
+            )
         validate_project(project)
     except ProjectValidationError:
         # Nothing has been flushed yet, so this discards the in-memory changes.
         await session.rollback()
         raise
+    await session.commit()
+    return project
+
+
+async def set_graphic_suggestions(
+    session: AsyncSession, project: Project, entries: list[dict[str, object]]
+) -> Project:
+    """Replaces the project's graphic suggestions with `entries` (`[{start, end, text}]`) and
+    commits. Only a continuous explainer with graphics on has them, and only once it has a
+    story. Raises ProjectValidationError; nothing is saved then.
+    """
+    if (
+        project.kind != KIND_EXPLAINER
+        or project.voice_track != VOICE_CONTINUOUS
+        or not project.graphics
+    ):
+        raise ProjectValidationError(graphic_suggestions.NOT_FOR_PROJECT_MESSAGE)
+    if project.script_text is None:
+        raise ProjectValidationError(graphic_suggestions.NO_STORY_MESSAGE)
+    try:
+        stored = graphic_suggestions.normalise(project.script_text, entries)
+    except graphic_suggestions.GraphicSuggestionError as exc:
+        raise ProjectValidationError(str(exc)) from exc
+    project.graphic_suggestions = stored or None
     await session.commit()
     return project
 

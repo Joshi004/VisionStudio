@@ -81,6 +81,8 @@ TAIL_S: Final = 0.3
 MAX_SHOT_S: Final = H3_MAX_FRAMES / H3_FPS
 
 CUT_PLAN_KEY: Final = "cut_plan"
+# The plan content's list of the owner's suggested graphics and what became of each.
+SUGGESTIONS_KEY: Final = "graphic_suggestions"
 _TIME_DECIMALS: Final = 3
 _SHOWN_DECIMALS: Final = 2
 # Characters that may follow the mark that ends a sentence ("said it.\"").
@@ -132,6 +134,14 @@ _GRAPHICS_ANSWER_FORM: Final = json.dumps(
     }
 )
 
+# The same form for a scene with suggested graphics: it also lists the suggestions not followed.
+_SUGGESTIONS_ANSWER_FORM: Final = json.dumps(
+    {
+        **json.loads(_GRAPHICS_ANSWER_FORM),
+        "declined_suggestions": [{"id": "g1", "reason": "Why no graphic fits those words."}],
+    }
+)
+
 _GRAPHIC_TYPE_TEXT: Final = (
     ', or "graphic" for a chart, diagram or text card drawn by code, timed to the words: for '
     "numbers, comparisons, changes over time, the steps of a process, a short list, or one key "
@@ -151,10 +161,26 @@ _GRAPHIC_RULES: Final = (
 )
 _GRAPHIC_LENGTH_TEXT: Final = ' A graphic shot lasts at least "shortest_graphic_seconds".'
 
+# The owner's suggestions (they are a hint, never an order). Only a scene with marked words gets
+# this rule and the answer form that goes with it, so every other request is as it was.
+REASON_MAX_CHARS: Final = 200
+_SUGGESTION_RULES: Final = (
+    '- Some words of the TAKE have a "graphic_suggestion", an id such as "g1". The owner would '
+    'like a "graphic" shot over the words that share an id. It is a wish, not an order: plan a '
+    "graphic shot that covers those words, starting on or just before the first of them, unless "
+    "a rule above makes that impossible (the shortest and the longest shot, a scene that would "
+    "have only graphic shots, opening and closing on the presenter) or the words hold nothing a "
+    "chart, diagram or text card could show.\n"
+    '- List each suggestion you did not follow in "declined_suggestions": its "id" and a "reason" '
+    f"of one plain sentence of at most {REASON_MAX_CHARS} characters. Leave the list empty when "
+    "you followed them all.\n"
+)
 
-def _body(graphics: bool) -> str:
+
+def _body(graphics: bool, suggestions: bool = False) -> str:
     """The system message. With `graphics` False it is exactly what it was before graphic shots
-    existed; with it True the `graphic` type and its rules are added.
+    existed; with it True the `graphic` type and its rules are added. With `suggestions` (only
+    with `graphics`) the rule for the owner's suggested graphics and its answer form are added.
     """
     graphic_type = _GRAPHIC_TYPE_TEXT if graphics else ""
     graphic_broll = _GRAPHIC_BROLL_TEXT if graphics else ""
@@ -164,6 +190,10 @@ def _body(graphics: bool) -> str:
     graphic_length = _GRAPHIC_LENGTH_TEXT if graphics else ""
     graphic_rules = _GRAPHIC_RULES if graphics else ""
     answer_form = _GRAPHICS_ANSWER_FORM if graphics else _ANSWER_FORM
+    suggestion_rules = ""
+    if graphics and suggestions:
+        suggestion_rules = _SUGGESTION_RULES
+        answer_form = _SUGGESTIONS_ANSWER_FORM
     return f"""You are the shot planner of a studio that makes explainer videos. One presenter \
 speaks the whole script. You read ONE scene whose events are known and whose speech has already \
 been recorded as ONE continuous take, with the time of every word. You decide how the audience \
@@ -220,7 +250,8 @@ encouraged where it helps the viewer see what is being said.
 - Keep every shot between "shortest_shot_seconds" and "longest_shot_seconds" of the DURATION \
 POLICY, measured from the times in the TAKE. A presenter shot may not be longer either, because \
 the video model takes at most that much speech for one clip.{graphic_length}
-{graphic_rules}- Do not invent events, characters or places the scene does not have.
+{graphic_rules}{suggestion_rules}- Do not invent events, characters or places the scene does not \
+have.
 
 If the user message also holds STAGING, the scene was staged: plan shots that suit it, and never \
 plan a shot that shows a character listed under "off_screen".
@@ -235,12 +266,16 @@ the type): {answer_form}"""
 
 _BODY: Final = _body(False)
 _GRAPHICS_BODY: Final = _body(True)
+_SUGGESTIONS_BODY: Final = _body(True, True)
 
 
-def instructions(graphics: bool = False) -> str:
+def instructions(graphics: bool = False, suggestions: bool = False) -> str:
     """The system message of a continuous explainer's cut planning. `graphics` is the project's
-    setting: with it on, the planner may also plan graphic shots (EXG-003).
+    setting: with it on, the planner may also plan graphic shots (EXG-003). `suggestions` is
+    whether words of the scene are marked as a suggested graphic; it counts only with graphics.
     """
+    if graphics and suggestions:
+        return _SUGGESTIONS_BODY
     return _GRAPHICS_BODY if graphics else _BODY
 
 
@@ -314,21 +349,30 @@ def take_block(take: dict[str, Any], units: list[dict[str, Any]]) -> dict[str, A
 
     `take` is `{seconds, words: [{text, start, end}], spans: [{unit_id, first_word,
     last_word}]}` (positions from 0, as `services/take_timings` gives them); `units` are the
-    scene's speech units.
+    scene's speech units. A take may also hold `suggestions`, `[{id, text, words}]`: the words
+    the owner suggests a graphic for. Each of those words is shown with its `graphic_suggestion`.
     """
     kinds = {unit["id"]: unit["kind"] for unit in units}
     words = take["words"]
+    suggested = {
+        position: suggestion["id"]
+        for suggestion in take.get("suggestions", [])
+        for position in suggestion["words"]
+    }
 
     def shown(position: int) -> dict[str, Any]:
         word = words[position]
         before = float(words[position - 1]["end"]) if position > 0 else 0.0
-        return {
+        entry = {
             "n": position + 1,
             "text": word["text"],
             "start": round(float(word["start"]), _SHOWN_DECIMALS),
             "end": round(float(word["end"]), _SHOWN_DECIMALS),
             "pause_before": round(max(0.0, float(word["start"]) - before), _SHOWN_DECIMALS),
         }
+        if position in suggested:
+            entry["graphic_suggestion"] = suggested[position]
+        return entry
 
     sentences: list[dict[str, Any]] = [
         {
@@ -408,7 +452,10 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": instructions(graphics)},
+            {
+                "role": "system",
+                "content": instructions(graphics, bool(take.get("suggestions"))),
+            },
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
@@ -627,7 +674,7 @@ def check_answer(
         )
     shot_planning_writer._check_event_cover(event_spans, len(event_ids))
 
-    return {
+    content: dict[str, Any] = {
         "scene_id": scene_id,
         "shots": shots,
         CUT_PLAN_KEY: {
@@ -636,3 +683,54 @@ def check_answer(
             "tail_s": TAIL_S,
         },
     }
+    if graphics and take.get("suggestions"):
+        content[SUGGESTIONS_KEY] = suggestion_results(answer, take["suggestions"], shots)
+    return content
+
+
+def suggestion_results(
+    answer: dict[str, Any], suggestions: list[dict[str, Any]], shots: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """What became of each suggested graphic: `[{id, text, followed, reason}]`, in story order.
+
+    Code decides `followed`, never the model: a suggestion is followed when a graphic shot
+    covers at least one of its words. `reason` is the model's reason for a suggestion it did not
+    follow (cut to `REASON_MAX_CHARS`), or None when it followed it or gave none. An unknown id
+    or a reason that is not text in the answer is ignored, as it cannot make the plan wrong.
+    """
+    reasons: dict[str, str] = {}
+    declined = answer.get("declined_suggestions")
+    if isinstance(declined, list):
+        for entry in declined:
+            if not isinstance(entry, dict):
+                continue
+            suggestion_id, reason = entry.get("id"), entry.get("reason")
+            if isinstance(suggestion_id, str) and isinstance(reason, str) and reason.strip():
+                reasons.setdefault(suggestion_id, _short(reason.strip()))
+    graphic_ranges = [
+        (shot["start_word"] - 1, shot["last_word"] - 1) for shot in shots if shot["type"] == GRAPHIC
+    ]
+    results: list[dict[str, Any]] = []
+    for suggestion in suggestions:
+        followed = any(
+            first <= position <= last
+            for position in suggestion["words"]
+            for first, last in graphic_ranges
+        )
+        results.append(
+            {
+                "id": suggestion["id"],
+                "text": suggestion["text"],
+                "followed": followed,
+                "reason": None if followed else reasons.get(suggestion["id"]),
+            }
+        )
+    return results
+
+
+def _short(reason: str) -> str:
+    """The reason on one line, cut to `REASON_MAX_CHARS`."""
+    reason = " ".join(reason.split())
+    if len(reason) <= REASON_MAX_CHARS:
+        return reason
+    return reason[: REASON_MAX_CHARS - 1].rstrip() + "…"

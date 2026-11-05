@@ -125,6 +125,33 @@ export function useUpdateProject(projectId: number) {
   });
 }
 
+/** The words of the story the owner suggests a graphic for (positions are in code points). */
+export type GraphicSuggestion = components["schemas"]["GraphicSuggestionOut"];
+export type GraphicSuggestionInput = components["schemas"]["GraphicSuggestionIn"];
+
+/** Replaces the whole list of suggested graphics. The shot planner may decline a suggestion. */
+export function useSetGraphicSuggestions(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (suggestions: GraphicSuggestionInput[]) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/graphic-suggestions",
+        { params: { path: { project_id: projectId } }, body: { suggestions } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(error, `Could not save the suggestions (HTTP ${response.status}).`),
+          response.status,
+        );
+      }
+      return data;
+    },
+    // A suggestion changed makes the shot plan of its scene out of date, so every query of
+    // the project is loaded again.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: PROJECTS_KEY }),
+  });
+}
+
 /** The error for a failed upload, from the backend's `detail` or nginx's own answer. */
 export async function uploadError(response: Response): Promise<ApiError> {
   let body: unknown = null;

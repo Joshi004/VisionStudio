@@ -45,6 +45,7 @@ from app.services import (
     discovery,
     duration_policy,
     event_extraction_writer,
+    graphic_suggestions,
     h3_lengths,
     provenance,
     scene_definition_writer,
@@ -206,6 +207,9 @@ class _Loaded:
     # `clocks` holds the take's timed words by scene id. Empty for every other project.
     continuous: bool
     clocks: dict[str, take_timings.TakeClock]
+    # The words of the story the owner suggests a graphic for (`project.graphic_suggestions`).
+    # Empty unless the project has graphics on.
+    suggestions: list[dict[str, Any]]
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -245,7 +249,29 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         blocked_reason=policy_problem or audio.blocked_reason,
         continuous=word_timings.times_takes(project),
         clocks=await take_timings.scene_clocks(session, project),
+        suggestions=(
+            list(project.graphic_suggestions)
+            if project.graphics and isinstance(project.graphic_suggestions, list)
+            else []
+        ),
     )
+
+
+def _scene_suggestions(
+    loaded: _Loaded, item: dict[str, Any], words: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The graphic suggestions that cover words of this scene's take: `[{id, text, words}]`,
+    the positions (from 0) counted in `words`. Empty when there are none. They are placed with
+    the scene's position in the story, so they are left out when the story is no longer the one
+    the scenes were found in (the plan is out of date then, and says so).
+    """
+    story = loaded.story
+    if not loaded.suggestions or story is None:
+        return []
+    start, end = item["start"], item["end"]
+    if story[start:end] != item["text"]:
+        return []
+    return graphic_suggestions.take_suggestions(item["text"], start, words, loaded.suggestions)
 
 
 def _unit_problems(scene: speech_synthesis.SceneAudio) -> list[str]:
@@ -472,6 +498,10 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         assert clock.timing is not None and clock.audio.duration_s is not None
         units, infos = _take_units(scene, clock)
         take = _take_input(clock)
+        marked = _scene_suggestions(loaded, item, take["words"])
+        if marked:
+            # Only a scene with marked words has the key, so every other job is as it was.
+            take["suggestions"] = marked
         audio_artifacts.append(
             {
                 "kind": SPEECH_TAKE_KIND,
@@ -507,11 +537,17 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
                 }
             )
 
+    suggestions_hash = graphic_suggestions.fingerprint(
+        take["suggestions"] if take is not None and "suggestions" in take else []
+    )
     inputs = {
         "project_id": project.id,
         "scene_id": item["id"],
         "story_sha256": story_bible.story_sha256(story),
         "scene_text_sha256": event_extraction_writer.scene_text_sha256(item["text"]),
+        # Only a scene with marked words has this key. A plan without it is current when the
+        # scene has none (see `_suggestion_reasons`).
+        **({"graphic_suggestions_sha256": suggestions_hash} if suggestions_hash else {}),
         "artifacts": [
             {"kind": STORY_BIBLE_KIND, "id": bible.id, "version": bible.version},
             {
@@ -882,6 +918,21 @@ def _take_reasons(row: ShotPlan, clock: take_timings.TakeClock | None) -> list[s
     return []
 
 
+def _suggestion_reasons(
+    row: ShotPlan, loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock | None
+) -> list[str]:
+    """Why a cut plan no longer fits the graphic suggestions of its scene. A plan made before
+    suggestions existed records none, which is the same as a scene with none. A take that is not
+    ready has no words to place them on, so it gives no reason here.
+    """
+    if not isinstance(row.inputs, dict) or clock is None or not clock.words:
+        return []
+    now = graphic_suggestions.fingerprint(_scene_suggestions(loaded, item, clock.words))
+    if row.inputs.get("graphic_suggestions_sha256") == now:
+        return []
+    return ["The graphic suggestions for this scene changed since these shots were planned."]
+
+
 def _out_of_date_reasons(
     row: ShotPlan,
     loaded: _Loaded,
@@ -936,7 +987,9 @@ def _out_of_date_reasons(
     # line are told by their own generation request.
     if loaded.continuous:
         # The shots start on the words of the take, so a take made or timed again is a change.
-        reasons.extend(_take_reasons(row, loaded.clocks.get(scene.scene.item["id"])))
+        clock = loaded.clocks.get(scene.scene.item["id"])
+        reasons.extend(_take_reasons(row, clock))
+        reasons.extend(_suggestion_reasons(row, loaded, scene.scene.item, clock))
     else:
         now = {item.unit["id"]: item for item in scene.units}
         reasons.extend(_audio_reasons(row, loaded.policy, now))

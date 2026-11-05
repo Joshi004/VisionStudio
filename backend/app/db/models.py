@@ -78,6 +78,10 @@ class Project(Base):
     # read for an explainer, at render time, so they can be changed at any time.
     caption_mode: Mapped[str] = mapped_column(default="burned", server_default=text("'burned'"))
     callouts: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # The words of the story the owner suggests a graphic for: `[{id, start, end, text}]`, with
+    # `start` and `end` character positions in `script_text`. Only for a continuous explainer
+    # with graphics on. NULL means none. See `services/graphic_suggestions`.
+    graphic_suggestions: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # FLOW-002. Chosen when the project is created and never changed: `lines` (each line is its
     # own speech) or `continuous` (one voice take per scene, the picture cut on top of it). Only
     # an explainer can be `continuous`; a story is always `lines`.
