@@ -16,15 +16,20 @@ import {
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import {
+  captionFileUrl,
   useRenderStory,
   useStoryRenders,
   type StoryRender,
+  type StoryRenders,
 } from "../../api/storyRenders";
 import { formatBytes, formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { SceneRenderList } from "./SceneRenderList";
 
 type StoryRenderPanelProps = {
   projectId: number;
+  /** Only an explainer has captions, so only it is told to render again for caption files. */
+  isExplainer: boolean;
 };
 
 const STATUS: Record<
@@ -34,6 +39,11 @@ const STATUS: Record<
   current: { label: "Current", color: "green" },
   out_of_date: { label: "Out of date", color: "yellow" },
 };
+
+const GRAPHIC_ENGINE = {
+  generated_component: "generated component",
+  remotion_blocks: "building blocks",
+} as const;
 
 /** "9.50 s, 228 frames, 1280x720, 2.1 MB, with sound". */
 function renderText(render: StoryRender): string {
@@ -83,8 +93,97 @@ function masterText(master: NonNullable<StoryRender["master"]>): string {
   return `${reached} (target ${master.target_lufs} LUFS, ceiling ${master.true_peak_db} dBTP)`;
 }
 
+/**
+ * The scenes of the newest render that differ from their newest scene render (SCN-013), and the
+ * scenes that have no scene render at all (on one line). Music is not compared: a scene
+ * render's music is cut to its window and may be provisional.
+ */
+function ChangedScenes({ scenes }: { scenes: StoryRenders["changed_scenes"] }) {
+  const different = scenes.filter((scene) => scene.has_scene_render);
+  const missing = scenes.filter((scene) => !scene.has_scene_render);
+  if (scenes.length === 0) {
+    return null;
+  }
+  return (
+    <Stack gap={2}>
+      {different.length > 0 && (
+        <Text size="xs" fw={500}>
+          Scenes that differ from their scene renders
+        </Text>
+      )}
+      {different.map((scene) => (
+        <Text key={scene.scene_id} size="xs" c="yellow.8">
+          Scene {scene.scene_index}: {scene.title}. {scene.reasons.join(" ")}
+        </Text>
+      ))}
+      {missing.length > 0 && (
+        <Text size="xs" c="dimmed">
+          No scene render: scene {missing.map((scene) => scene.scene_index).join(", ")}.
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
+/**
+ * The caption files of one render (CAP-002, CAP-003). A render with a caption track offers the
+ * YouTube file and a plain SRT file, with a warning when the captions are also in the picture. An explainer's render with no
+ * track (made before captions were always kept) is told to render again. A story has none.
+ */
+function CaptionFiles({
+  render,
+  projectId,
+  isExplainer,
+}: {
+  render: StoryRender;
+  projectId: number;
+  isExplainer: boolean;
+}) {
+  if (!render.caption_file_available) {
+    return isExplainer ? (
+      <Text size="xs" c="dimmed">
+        Render again to get caption files.
+      </Text>
+    ) : null;
+  }
+  return (
+    <Stack gap={2}>
+      <Group gap="xs">
+        <Anchor
+          href={captionFileUrl(projectId, render.render_number, "ytt")}
+          download
+          size="xs"
+        >
+          Download YouTube captions (YTT)
+        </Anchor>
+        <Anchor
+          href={captionFileUrl(projectId, render.render_number, "srt")}
+          download
+          size="xs"
+        >
+          Download subtitles (SRT)
+        </Anchor>
+      </Group>
+      {render.captions_burned && (
+        <Text size="xs" c="yellow.8">
+          This video already has captions in the picture. If you upload this
+          file too, viewers who turn captions on will see them twice.
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
 /** One render in the list: its status, why it is out of date, and what it was made from. */
-function RenderRow({ render }: { render: StoryRender }) {
+function RenderRow({
+  render,
+  projectId,
+  isExplainer,
+}: {
+  render: StoryRender;
+  projectId: number;
+  isExplainer: boolean;
+}) {
   const status = STATUS[render.status];
   return (
     <Stack gap={4}>
@@ -107,6 +206,11 @@ function RenderRow({ render }: { render: StoryRender }) {
           {text}
         </Text>
       ))}
+      <CaptionFiles
+        render={render}
+        projectId={projectId}
+        isExplainer={isExplainer}
+      />
       {render.warnings.map((warning) => (
         <Text key={`${warning.shot_id}/${warning.code}`} size="xs" c="yellow.8">
           {warning.message}
@@ -114,8 +218,12 @@ function RenderRow({ render }: { render: StoryRender }) {
       ))}
       <Stack gap={0} ml="md">
         {render.takes.map((take) => (
-          <Text key={take.take_id} size="xs" c="dimmed">
-            Scene {take.scene_index}, {take.shot_id}: take {take.take_number},{" "}
+          <Text key={`${take.scene_id}/${take.shot_id}`} size="xs" c="dimmed">
+            Scene {take.scene_index}, {take.shot_id}:{" "}
+            {take.graphic !== null
+              ? `graphic (${GRAPHIC_ENGINE[take.graphic.engine]}, attempt ${take.graphic.attempt})`
+              : `take ${take.take_number}`}
+            ,{" "}
             {take.frames} frames, {levelText(take.loudness_lufs, take.gain_db)}
           </Text>
         ))}
@@ -154,7 +262,10 @@ function RenderRow({ render }: { render: StoryRender }) {
  * timeline with the narration, and joined into one video. Nothing starts by itself: the owner
  * presses Render. The newest render is played here; the older ones are kept in the list.
  */
-export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
+export function StoryRenderPanel({
+  projectId,
+  isExplainer,
+}: StoryRenderPanelProps) {
   const { data, isLoading, isError, error } = useStoryRenders(projectId);
   const render = useRenderStory(projectId);
   const [showAll, setShowAll] = useState(false);
@@ -175,7 +286,8 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
               timeline, puts the narration on top (the clips&apos; own sound is
               lowered under it), mixes in the placed music and ambience, brings
               the finished sound to the target loudness, and joins everything
-              into one video. Nothing starts by itself. Subtitles come later.
+              into one video. Nothing starts by itself. An explainer&apos;s caption
+              files can be downloaded from each render.
             </Text>
           </Stack>
           <Button
@@ -260,11 +372,17 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
                 {text}
               </Text>
             ))}
+            <CaptionFiles
+              render={newest}
+              projectId={projectId}
+              isExplainer={isExplainer}
+            />
             {newest.master?.notes.map((note) => (
               <Text key={note} size="xs" c="yellow.8">
                 {note}
               </Text>
             ))}
+            <ChangedScenes scenes={data?.changed_scenes ?? []} />
           </Stack>
         )}
 
@@ -285,12 +403,19 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
             <Collapse expanded={showAll}>
               <Stack gap="sm" pt={4}>
                 {renders.map((item) => (
-                  <RenderRow key={item.id} render={item} />
+                  <RenderRow
+                    key={item.id}
+                    render={item}
+                    projectId={projectId}
+                    isExplainer={isExplainer}
+                  />
                 ))}
               </Stack>
             </Collapse>
           </Stack>
         )}
+
+        <SceneRenderList projectId={projectId} />
       </Stack>
     </Paper>
   );

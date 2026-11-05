@@ -389,13 +389,22 @@ async def _catalog(
 
     if resolved.environment is None:
         raise ShotReferencesError("The environment of this scene was not resolved.")
-    environment_id = resolved.environment.subject_id
+    # SCN-007: a shot inside a place within the scene's main place is made from that place's
+    # own pictures, in its default state: the scene's state is the main place's.
+    inner_id = content.get("place")
+    if isinstance(inner_id, str) and inner_id:
+        environment_id = inner_id
+        state_slug = None
+        state_text = None
+    else:
+        environment_id = resolved.environment.subject_id
+        state_item = resolved.environment
+        state_slug = state_item.id if state_item.how != "default" else None
+        state_text = state_item.description
     environment = ctx.current.get((ENVIRONMENT_KIND, environment_id))
     if environment is None:
         raise ShotReferencesError(f"The environment '{environment_id}' is not linked and defined.")
-    state_item = resolved.environment
-    state_slug = state_item.id if state_item.how != "default" else None
-    pictures = await _environment_pictures(session, environment, state_slug, state_item.description)
+    pictures = await _environment_pictures(session, environment, state_slug, state_text)
     raw.append((environment_id, environment.name, "environment", pictures))
     artifacts.append(_artifact(ENVIRONMENT_KIND, environment_id, environment, state_slug, pictures))
 

@@ -29,6 +29,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   compile_shot_prompt: "Shot prompt",
   generate_shot: "Shot clip",
   render_story: "Story video",
+  render_scene: "Scene video",
   check_shot_takes: "Take check",
   story_pipeline: "Story pipeline",
   check_take_dialogue: "Dialogue check",
@@ -48,6 +49,19 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_callout_plan: "Callout plan",
   time_lab_speech_words: "Time test speech words",
   render_av_test: "Render audio video test",
+  write_lab_graphic_brief: "Graphics lab brief",
+  write_lab_graphic_template_spec: "Graphics lab template spec",
+  write_lab_graphic_block_scene: "Graphics lab block scene",
+  write_lab_graphic_component: "Graphics lab component",
+  render_lab_graphic: "Graphics lab render",
+  time_lab_graphic_words: "Graphics lab word timing",
+  write_graphic_theme: "Graphics theme",
+  write_shot_graphic_brief: "Graphic brief",
+  write_shot_graphic_component: "Graphic component",
+  write_shot_graphic_scene: "Graphic block scene",
+  render_shot_graphic: "Graphic render",
+  describe_photo: "Photo description",
+  write_thumbnail_concepts: "Thumbnail ideas",
 };
 
 export function jobTypeLabel(type: JobSummary["type"]): string {
@@ -78,9 +92,17 @@ export function labPathFor(type: JobSummary["type"]): string {
       return "/lab/music";
     case "write_character_look_prompt":
     case "write_character_take_prompt":
+    case "describe_photo":
     case "time_lab_speech_words":
     case "render_av_test":
       return "/lab/characters";
+    case "write_lab_graphic_brief":
+    case "write_lab_graphic_template_spec":
+    case "write_lab_graphic_block_scene":
+    case "write_lab_graphic_component":
+    case "render_lab_graphic":
+    case "time_lab_graphic_words":
+      return "/lab/graphics";
     case "write_environment_prompt":
       return "/lab/environments";
     default:
@@ -228,6 +250,32 @@ export function elapsedText(job: Timed, now: number): string {
   }
   const verb = job.status === "cancelled" ? "cancelled after" : "took";
   return `${verb} ${formatElapsed((finished - created) / 1000)}`;
+}
+
+const QUEUE_STATE_LABELS: Record<string, string> = {
+  scheduling: "being scheduled",
+  model_limit: "model at its limit",
+  gpu_limit: "all GPUs busy",
+  priority: "behind more urgent work",
+  slurm_pending: "waiting for the cluster",
+  model_loading: "model loading",
+};
+
+/**
+ * The GPU server's priority for a job and why it holds the job back: "Priority 3 · all GPUs
+ * busy". Empty when the job has no priority on the server and no reason to show.
+ */
+export function priorityText(
+  job: Pick<JobSummary, "server_priority" | "queue_state">,
+): string {
+  const parts: string[] = [];
+  if (job.server_priority != null) {
+    parts.push(`Priority ${job.server_priority}`);
+  }
+  if (job.queue_state != null) {
+    parts.push(QUEUE_STATE_LABELS[job.queue_state] ?? job.queue_state);
+  }
+  return parts.join(" · ");
 }
 
 /** Only a job that has not finished shows its phase: for the others it repeats the status. */

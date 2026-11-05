@@ -109,6 +109,7 @@ GROUP_DURATION = "Shot duration"
 GROUP_SPEECH = "Speech"
 GROUP_STORY = "Story"
 GROUP_MUSIC = "Music"
+GROUP_GRAPHICS = "Graphics lab"
 GROUP_LIMITS = "Job limits"
 GROUP_MODEL_LIMITS = "Remote server limits per model"
 
@@ -189,6 +190,20 @@ WORD_TIMING_MATCH_THRESHOLD_KEY = "word_timing_match_threshold"
 # them and records the values it was checked with.
 CALLOUT_MIN_GAP_MS_KEY = "callout_min_gap_ms"
 CALLOUTS_PER_MINUTE_MAX_KEY = "callouts_per_minute_max"
+
+# The pace that gives the words of a Graphics lab line their times when the run has no voice
+# (GFX-003).
+GRAPHICS_WPM_KEY = "graphics_words_per_minute"
+
+# Where the motion service (Remotion and headless Chrome, GFX-005) is, and how many of its renders
+# the app asks for at once.
+MOTION_URL_KEY = "motion_service_url"
+GRAPHICS_MAX_RENDERS_KEY = "graphics_max_parallel_renders"
+
+# How many times the model is asked to repair one generated component of an explainer graphic when
+# its browser check or its render fails, counted over a chain of attempts (EXG-006). A count, not a
+# length, so it is not part of the order below.
+GRAPHICS_COMPONENT_REPAIRS_KEY = "graphics_component_repairs"
 
 # How many rounds of defining shots again a scene gets when its shots do not line up at a cut
 # (PHASE-023). Also a count, not a length, so it is not part of the order below.
@@ -408,6 +423,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
         ),
         value_type="string",
         default="zai-org/GLM-5.3-Flash",
+        pattern=TextPattern(
+            regex=r"[A-Za-z0-9._/:-]{1,200}",
+            message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
+        ),
+    ),
+    SettingSpec(
+        key="vision_llm_model",
+        group=GROUP_LLM,
+        label="Photo analysis model (Bitdeer)",
+        help=(
+            "Bitdeer model that reads a reference photo and fills in a character's or an "
+            "outfit's description. It must accept images. It always uses Bitdeer at the LLM "
+            "URL above, with the same key, and counts with the other paid calls."
+        ),
+        value_type="string",
+        default="deepseek-ai/DeepSeek-V4.1-Flash-1017",
         pattern=TextPattern(
             regex=r"[A-Za-z0-9._/:-]{1,200}",
             message="Use letters, numbers and these characters only: . _ / : - (up to 200).",
@@ -931,6 +962,69 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=-1,
         min_value=-3,
         max_value=0,
+    ),
+    SettingSpec(
+        key=GRAPHICS_WPM_KEY,
+        group=GROUP_GRAPHICS,
+        label="Graphics lab: speech pace without a voice (words per minute)",
+        help=(
+            "A Graphics lab run with no voice has no real speech, so each word of its line is "
+            "given a time from this pace: the speech lasts its number of words divided by this "
+            "pace, shared out by the length of each word. The beats of the graphic and its "
+            "length follow these times. 160 is near the pace of the presenter voices; it is a "
+            "starting value, not a measurement. It applies to the next brief that is asked "
+            "for; a run keeps the timing it was made with."
+        ),
+        value_type="integer",
+        default=160,
+        min_value=60,
+        max_value=300,
+    ),
+    SettingSpec(
+        key=MOTION_URL_KEY,
+        group=GROUP_GRAPHICS,
+        label="Graphics lab: motion service URL",
+        help=(
+            "Address of the motion service, the container that draws the Remotion videos of the "
+            "Graphics lab. The default is the container that Docker Compose starts next to the "
+            "backend. Change it only to point at a motion service run some other way."
+        ),
+        value_type="string",
+        default="http://motion:8090",
+        is_url=True,
+    ),
+    SettingSpec(
+        key=GRAPHICS_MAX_RENDERS_KEY,
+        group=GROUP_GRAPHICS,
+        label="Graphics lab: maximum parallel renders",
+        help=(
+            "How many Graphics lab videos are rendered at the same time, all engines together. "
+            "Each render uses the motion service's CPU and memory, and several at once do not "
+            "finish sooner, so 1 is the default. It applies the next time the app looks for "
+            "work, and running renders are not stopped."
+        ),
+        value_type="integer",
+        default=1,
+        min_value=1,
+        max_value=4,
+    ),
+    SettingSpec(
+        key=GRAPHICS_COMPONENT_REPAIRS_KEY,
+        group=GROUP_GRAPHICS,
+        label="Explainer graphics: repairs of a generated component",
+        help=(
+            "How many times the language model is asked to repair a generated component of an "
+            "explainer's graphic shot when its check in the browser or its render fails. Each "
+            "repair is a paid call that sends the code and the error. The repairs are counted over "
+            "one chain of attempts, started by one press of Make the graphics or Ask again. When "
+            "they are used up, the component has failed outright and the video uses the building "
+            "blocks instead. 0 means no repair. A motion service that cannot be reached spends no "
+            "repair. It applies to the next job that starts; running jobs are not changed."
+        ),
+        value_type="integer",
+        default=2,
+        min_value=0,
+        max_value=3,
     ),
     SettingSpec(
         key="max_parallel_gpu_jobs",

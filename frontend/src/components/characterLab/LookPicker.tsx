@@ -191,7 +191,14 @@ function EarlierLookTile({
  * four angles are made from it by themselves. Any angle can be made again. An earlier ready look
  * can be made the current one again; the character then has a new version.
  */
-export function LookPicker({ character }: { character: LibraryCharacter }) {
+export function LookPicker({
+  character,
+  photoImageId = null,
+}: {
+  character: LibraryCharacter;
+  /** A photo already in the Image lab (the one a new character was filled in from). */
+  photoImageId?: number | null;
+}) {
   const looks = useCharacterLooks(character.id);
   const start = useStartLook();
   const upload = useLabUpload();
@@ -386,6 +393,18 @@ export function LookPicker({ character }: { character: LibraryCharacter }) {
               </Button>
             )}
           </FileButton>
+          {photoImageId !== null && (
+            <Button
+              variant="default"
+              loading={startFromPicture.isPending}
+              disabled={busy || start.isPending || pictureBusy}
+              onClick={() =>
+                startFromPicture.mutate({ characterId: character.id, imageId: photoImageId })
+              }
+            >
+              Use this photo for the look
+            </Button>
+          )}
         </Group>
         <Text size="xs" c="dimmed">
           One call to the language model and four pictures of a few minutes each, then four more

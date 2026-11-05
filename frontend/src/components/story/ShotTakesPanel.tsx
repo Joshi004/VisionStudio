@@ -17,6 +17,11 @@ import {
 
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
+import {
+  useRenderScene,
+  useSceneRenders,
+  type SceneRenderState,
+} from "../../api/sceneRenders";
 import { shotsNotLoaded } from "../../api/sceneQuery";
 import {
   useCompileOnePrompt,
@@ -29,9 +34,14 @@ import {
   useGenerateAllShots,
   useGenerateOneShot,
   useGenerateSceneShots,
+  usePushScene,
+  useCheckSilentSpeech,
+  useRescoreDialogue,
   useSelectTake,
   useSetVoiceSource,
   useShotTakes,
+  useStopPush,
+  type PushScene,
   type SceneShotTakes,
   type ShotTake,
   type ShotTakesEntry,
@@ -39,6 +49,7 @@ import {
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { FeedbackModal } from "./FeedbackModal";
 import { PromptHoverCard } from "./PromptHoverCard";
+import { SceneRenderStatus, SceneVideo } from "./SceneRenderList";
 import { SceneSection } from "./SceneSection";
 import { ShotPromptEditor } from "./ShotPromptEditor";
 import { ShotPromptReview } from "./ShotPromptReview";
@@ -56,6 +67,16 @@ const STATUS: Record<
   out_of_date: { label: "Out of date", color: "yellow" },
   failed: { label: "Failed checks", color: "red" },
   unchecked: { label: "Not checked", color: "orange" },
+};
+
+/** What kind of difference "Score dialogue again" forgave, by the matching step. */
+const RULE_LABEL: Record<string, string> = {
+  exact: "same words",
+  numbers: "numbers",
+  spelling: "UK and US spelling",
+  homophones: "words that sound alike",
+  short_line: "one close word on a short line",
+  not_verifiable: "nothing heard on a very short line",
 };
 
 /** The technical check of a take, as a badge. */
@@ -92,7 +113,7 @@ function CheckBadge({ take }: { take: ShotTake }) {
  */
 function DialogueBadge({ take }: { take: ShotTake }) {
   if (
-    take.dialogue.length === 0 ||
+    (!take.checks_speech && take.dialogue_check === null) ||
     take.state === "generating" ||
     take.state === "failed" ||
     !take.validation?.passed
@@ -100,6 +121,9 @@ function DialogueBadge({ take }: { take: ShotTake }) {
     return null;
   }
   const check = take.dialogue_check;
+  if (check !== null && check.mode === "silent") {
+    return <SilentBadge check={check} />;
+  }
   if (check === null) {
     return take.state === "checking_dialogue" ? (
       <Badge variant="light" color="blue">
@@ -111,10 +135,47 @@ function DialogueBadge({ take }: { take: ShotTake }) {
       </Badge>
     );
   }
+  if (check.passed && check.outcome === "not_verifiable") {
+    return (
+      <Badge
+        variant="light"
+        color="orange"
+        title="Nothing was heard, but the line is too short for the check to tell whether it was said, so the take is not failed."
+      >
+        Speech not verifiable
+      </Badge>
+    );
+  }
+  if (check.passed && check.outcome === "close_match") {
+    return (
+      <Badge
+        variant="light"
+        color="green"
+        title="One word differs from the line but sounds or is spelled almost the same, on a short line."
+      >
+        Dialogue close match
+      </Badge>
+    );
+  }
   if (check.passed) {
     return (
       <Badge variant="light" color="green">
         Dialogue matched ({check.similarity}%)
+      </Badge>
+    );
+  }
+  if (check.outcome === "extra_speech") {
+    return check.accepted ? (
+      <Badge variant="light" color="orange">
+        Extra speech, used anyway
+      </Badge>
+    ) : (
+      <Badge
+        variant="light"
+        color="red"
+        title="The lines were said, but more words were heard outside their time."
+      >
+        Extra speech
       </Badge>
     );
   }
@@ -125,6 +186,44 @@ function DialogueBadge({ take }: { take: ShotTake }) {
   ) : (
     <Badge variant="light" color="red">
       Dialogue did not match ({check.similarity}%)
+    </Badge>
+  );
+}
+
+/**
+ * The speech check of a shot with no dialogue (SCN-009): nothing should be heard. A result on an
+ * older take is a report only, and the take is still used.
+ */
+function SilentBadge({
+  check,
+}: {
+  check: NonNullable<ShotTake["dialogue_check"]>;
+}) {
+  if (check.passed) {
+    return (
+      <Badge variant="light" color="green">
+        No speech heard
+      </Badge>
+    );
+  }
+  if (check.report_only) {
+    return (
+      <Badge
+        variant="light"
+        color="orange"
+        title="Words were heard in this silent clip. It was made before the check existed, so it is still used. Listen to it, and regenerate it if you want."
+      >
+        Speech heard (older take, still used)
+      </Badge>
+    );
+  }
+  return check.accepted ? (
+    <Badge variant="light" color="orange">
+      Speech in a silent shot, used anyway
+    </Badge>
+  ) : (
+    <Badge variant="light" color="red">
+      Speech in a silent shot
     </Badge>
   );
 }
@@ -146,7 +245,7 @@ function canSelect(take: ShotTake): boolean {
   }
   const dialoguePending =
     take.validation.passed &&
-    take.dialogue.length > 0 &&
+    take.checks_speech &&
     take.dialogue_check === null;
   return !dialoguePending;
 }
@@ -264,8 +363,39 @@ function TakeRow({ take, busy, onSelect }: TakeRowProps) {
               : "nothing"}{" "}
             (needed {take.dialogue_check.threshold}%)
           </Text>
+          {take.dialogue_check.extra_text !== "" && (
+            <Text
+              size="xs"
+              c={take.dialogue_check.passed ? "dimmed" : "red"}
+              style={{ wordBreak: "break-word" }}
+            >
+              Outside the lines: &ldquo;{take.dialogue_check.extra_text}&rdquo;
+            </Text>
+          )}
         </Stack>
       )}
+      {take.dialogue.length === 0 &&
+        take.dialogue_check !== null &&
+        take.dialogue_check.mode === "silent" && (
+          <Text
+            size="xs"
+            c={take.dialogue_check.passed ? "dimmed" : "red"}
+            ml={8}
+            style={{ wordBreak: "break-word" }}
+          >
+            Nobody speaks in this shot. Heard:{" "}
+            {take.dialogue_check.heard_text
+              ? `\u201C${take.dialogue_check.heard_text}\u201D`
+              : "nothing"}
+          </Text>
+        )}
+      {take.dialogue_check?.passed &&
+        take.dialogue_check.outcome === "not_verifiable" && (
+          <Text size="xs" c="orange" ml={8}>
+            Nothing was heard, but this line is too short for the check to tell
+            whether it was said, so the take was not failed. Listen to it.
+          </Text>
+        )}
       {take.anchor != null && (
         <Text size="xs" c="dimmed" ml={8}>
           Continues shot {take.anchor.from_shot_id}: starts from{" "}
@@ -349,6 +479,11 @@ function failureLines(
     lines.push({
       text: "Another take cannot fix this. Plan this scene's shots again.",
       key: "plan",
+    });
+  } else if (entry.needs_review) {
+    lines.push({
+      text: "Two takes in a row heard the same words, so no more takes are made by themselves.",
+      key: "needs-review",
     });
   } else if (newest.retry_attempt >= maxRetries) {
     lines.push({
@@ -489,6 +624,15 @@ function ShotRow({
             {hasTakes && (
               <Badge variant="light" color="gray">
                 {takes.length} {takes.length === 1 ? "take" : "takes"}
+              </Badge>
+            )}
+            {entry.needs_review && (
+              <Badge
+                variant="light"
+                color="red"
+                title="Two takes in a row heard the same words, so the check may be wrong rather than the clip"
+              >
+                Needs your review
               </Badge>
             )}
             {job && job.status !== "succeeded" && <JobStatusBadge job={job} />}
@@ -640,6 +784,7 @@ function ShotRow({
             {shot.duration_seconds} s; the clip is trimmed to that when the
             video is put together.
             {heard !== null &&
+              heard.mode === "dialogue" &&
               (heard.passed
                 ? ` Its speech matched the dialogue by ${heard.similarity}%.`
                 : ` Its speech matched the dialogue by only ${heard.similarity}%; you chose to use it anyway.`)}
@@ -721,12 +866,23 @@ function ShotRow({
 }
 
 type SceneRowProps = {
+  projectId: number;
   scene: SceneShotTakes;
   opened: boolean;
   onToggle: () => void;
   maxRetries: number;
   busy: boolean;
   onGenerateScene: () => void;
+  /** Queues a speech report for this scene's older silent takes (SCN-009). */
+  onCheckSilentSpeech: () => void;
+  /** True when this scene is the one pushed to the front of the server's queue (SCN-002). */
+  pushed: boolean;
+  onPush: () => void;
+  onStopPush: () => void;
+  /** Where this scene's video stands (SCN-003), or undefined while it is loading. */
+  sceneRender: SceneRenderState | undefined;
+  onRenderScene: () => void;
+  renderStarting: boolean;
   onGenerateShot: (shotId: string) => void;
   promptsOf: (shotId: string) => ShotPromptTools;
   onSelect: (shotId: string, takeId: number) => void;
@@ -738,12 +894,20 @@ type SceneRowProps = {
  * summary, so they show while the scene is closed and its shots are not loaded.
  */
 function SceneRow({
+  projectId,
   scene,
   opened,
   onToggle,
   maxRetries,
   busy,
   onGenerateScene,
+  onCheckSilentSpeech,
+  pushed,
+  onPush,
+  onStopPush,
+  sceneRender,
+  onRenderScene,
+  renderStarting,
   onGenerateShot,
   promptsOf,
   onSelect,
@@ -753,16 +917,31 @@ function SceneRow({
   const generated = byStatus.generated ?? 0;
   const outOfDate = byStatus.out_of_date ?? 0;
   const failedCount = byStatus.failed ?? 0;
+  // The scene's older silent takes with no speech check (known once its shots are loaded).
+  const silentUnchecked = scene.shots.reduce(
+    (sum, entry) =>
+      sum + entry.takes.filter((take) => take.can_audit_speech).length,
+    0,
+  );
 
   return (
     <SceneSection
       index={scene.index}
+      runScene={{ projectId, sceneId: scene.id }}
       title={scene.title}
       opened={opened}
       onToggle={onToggle}
       loading={shotsNotLoaded(scene)}
       badges={
         <>
+          {pushed && (
+            <Badge variant="light" color="grape">
+              Pushed to front
+            </Badge>
+          )}
+          {sceneRender !== undefined && (
+            <SceneRenderStatus scene={sceneRender} />
+          )}
           <Badge variant="light" color="gray">
             {generated} of {total} generated
           </Badge>
@@ -784,16 +963,59 @@ function SceneRow({
         </>
       }
       actions={
-        <Button
-          size="compact-sm"
-          variant="default"
-          disabled={busy || todo === 0}
-          onClick={onGenerateScene}
-        >
-          Generate scene
-        </Button>
+        <Group gap="xs" wrap="nowrap">
+          {silentUnchecked > 0 && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={busy}
+              onClick={onCheckSilentSpeech}
+              title="Listens for speech in this scene's silent clips that were made before the check existed. It is a report: no clip is changed or made again."
+            >
+              Check silent takes ({silentUnchecked})
+            </Button>
+          )}
+          <Button
+            size="compact-sm"
+            variant="default"
+            disabled={busy}
+            onClick={pushed ? onStopPush : onPush}
+            title={
+              pushed
+                ? "Puts this scene's clips back in their place in story order on the server's queue."
+                : "Sends this scene's clips to the front of the server's queue, and moves up the ones already waiting there. It starts no clip."
+            }
+          >
+            {pushed ? "Stop pushing" : "Push to front"}
+          </Button>
+          <Button
+            size="compact-sm"
+            variant="default"
+            loading={renderStarting || isJobActive(sceneRender?.job)}
+            disabled={
+              busy || sceneRender === undefined || !sceneRender.can_render
+            }
+            onClick={onRenderScene}
+            title={
+              sceneRender?.blocked_reason ??
+              "Renders this scene on its own, with a placeholder for every shot that has no clip yet. It uses no GPU time."
+            }
+          >
+            Render scene
+          </Button>
+          <Button
+            size="compact-sm"
+            variant="default"
+            disabled={busy || todo === 0}
+            onClick={onGenerateScene}
+            title="Generates the clips of this scene and pushes the scene to the front of the server's queue."
+          >
+            Generate scene
+          </Button>
+        </Group>
       }
     >
+      {sceneRender !== undefined && <SceneVideo scene={sceneRender} />}
       {scene.shots.map((entry) => (
         <ShotRow
           key={entry.shot.id}
@@ -834,6 +1056,16 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const selectTake = useSelectTake(projectId);
   const setVoiceSource = useSetVoiceSource(projectId);
   const checkTakes = useCheckShotTakes(projectId);
+  const rescoreDialogue = useRescoreDialogue(projectId);
+  const checkSilentSpeech = useCheckSilentSpeech(projectId);
+  const pushScene = usePushScene(projectId);
+  const stopPush = useStopPush(projectId);
+  // The video of each scene (SCN-003).
+  const sceneRenders = useSceneRenders(projectId).data;
+  const renderScene = useRenderScene(projectId);
+  const sceneRenderOf = new Map(
+    (sceneRenders?.scenes ?? []).map((item) => [item.scene_id, item] as const),
+  );
   // The prompts the clips are made from, which can be edited or rewritten from here.
   const shotPrompts = useShotPrompts(projectId, openSceneId).data;
   const compilePrompt = useCompileOnePrompt(projectId);
@@ -847,6 +1079,10 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
     selectTake.isPending ||
     setVoiceSource.isPending ||
     checkTakes.isPending ||
+    rescoreDialogue.isPending ||
+    checkSilentSpeech.isPending ||
+    pushScene.isPending ||
+    stopPush.isPending ||
     compilePrompt.isPending ||
     savePrompt.isPending;
   const projectBlocked = (data?.blocked_reason ?? null) !== null;
@@ -854,6 +1090,14 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
   const checkJob = data?.check_job ?? null;
   const checking = isJobActive(checkJob);
   const maxRetries = data?.max_retries ?? 0;
+  const rescorable = data?.rescorable_count ?? 0;
+  const silentUnchecked = data?.silent_unchecked_count ?? 0;
+  const rescored = rescoreDialogue.data;
+  const pushedSceneId = data?.pushed_scene_id ?? null;
+  // What the last push or stop did to the clips already waiting on the server.
+  const pushReport: PushScene | undefined = stopPush.isSuccess
+    ? stopPush.data
+    : pushScene.data;
   // What "Generate all" would do: the shots that may be generated and have no good clip.
   const allCount = entries.reduce((sum, scene) => sum + scene.summary.todo, 0);
   // The shots the last press could not do, with why.
@@ -906,10 +1150,10 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             <Text size="sm" c="dimmed">
               Sends each shot&apos;s prompt, pictures and dialogue speech to the
               video model and keeps the clip as a take of the shot. Shots run
-              side by side when the remote server has room. Each press adds a take,
-              and the take that finished or was selected last is the one used.
-              Each clip gets a technical check (it decodes, has sound, and has
-              the size and number of frames asked for), and for a shot with
+              side by side when the remote server has room. Each press adds a
+              take, and the take that finished or was selected last is the one
+              used. Each clip gets a technical check (it decodes, has sound, and
+              has the size and number of frames asked for), and for a shot with
               dialogue the speech in the clip is transcribed and must match the
               lines. A clip that fails either check is generated again by itself
               with another seed, up to the limit in Settings. You can still use
@@ -927,6 +1171,28 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
                 title="Checks the clips that have not been fully checked (technical check, and for dialogue the speech). It starts no clip generation."
               >
                 Check takes ({unchecked} not checked)
+              </Button>
+            )}
+            {rescorable > 0 && (
+              <Button
+                variant="default"
+                onClick={() => rescoreDialogue.mutate()}
+                loading={rescoreDialogue.isPending}
+                disabled={isLoading || isError || busy}
+                title="Judges the failed dialogue checks again from the words already heard, with the current matching rules. It transcribes nothing and starts no clip."
+              >
+                Score dialogue again ({rescorable})
+              </Button>
+            )}
+            {silentUnchecked > 0 && (
+              <Button
+                variant="default"
+                onClick={() => checkSilentSpeech.mutate(null)}
+                loading={checkSilentSpeech.isPending}
+                disabled={isLoading || isError || busy}
+                title="Listens for speech in the selected silent clips made before the check existed. Each is a short GPU transcription. It is a report: no clip is changed, unselected or made again."
+              >
+                Check silent takes for speech ({silentUnchecked})
               </Button>
             )}
             <Button
@@ -959,6 +1225,11 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
           selectTake,
           setVoiceSource,
           checkTakes,
+          rescoreDialogue,
+          checkSilentSpeech,
+          pushScene,
+          stopPush,
+          renderScene,
         ].map(
           (mutation, position) =>
             mutation.isError && (
@@ -970,6 +1241,61 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
                 {describeError(mutation.error)}
               </Alert>
             ),
+        )}
+        {rescored !== undefined && (
+          <Alert
+            color="blue"
+            title="Dialogue scored again"
+            withCloseButton
+            onClose={() => rescoreDialogue.reset()}
+          >
+            <Stack gap={2}>
+              <Text size="sm">
+                {rescored.rescored} failed{" "}
+                {rescored.rescored === 1 ? "check was" : "checks were"} judged
+                again from the words already heard: {rescored.still_failing}{" "}
+                still {rescored.still_failing === 1 ? "fails" : "fail"}.
+              </Text>
+              {Object.entries(rescored.now_passing_by_rule).map(
+                ([rule, count]) => (
+                  <Text key={rule} size="sm">
+                    {count} now pass{count === 1 ? "es" : ""} (
+                    {RULE_LABEL[rule] ?? rule}).
+                  </Text>
+                ),
+              )}
+              {rescored.selected.map((item) => (
+                <Text key={`${item.scene_id}/${item.shot_id}`} size="sm">
+                  Selected take {item.take_number} of {item.shot_id} in{" "}
+                  {item.scene_id}.
+                </Text>
+              ))}
+            </Stack>
+          </Alert>
+        )}
+        {pushReport !== undefined && (
+          <Alert
+            color="blue"
+            title={
+              stopPush.isSuccess ? "Push ended" : "Scene pushed to the front"
+            }
+            withCloseButton
+            onClose={() => {
+              pushScene.reset();
+              stopPush.reset();
+            }}
+          >
+            <Text size="sm">
+              {pushReport.changed} {pushReport.changed === 1 ? "clip" : "clips"}{" "}
+              waiting on the server {pushReport.changed === 1 ? "was" : "were"}{" "}
+              moved
+              {pushReport.already_running > 0 &&
+                `, ${pushReport.already_running} had already started`}
+              {pushReport.not_reached > 0 &&
+                `, ${pushReport.not_reached} could not be reached and keep their old place`}
+              . Clips not sent yet are sent in their new place.
+            </Text>
+          </Alert>
         )}
         {compilePrompt.isError && (
           <Alert color="red" title="Could not write the prompt again">
@@ -997,6 +1323,7 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
         {entries.map((scene) => (
           <SceneRow
             key={scene.id}
+            projectId={projectId}
             scene={scene}
             opened={scene.id === openSceneId}
             onToggle={() =>
@@ -1007,6 +1334,21 @@ export function ShotTakesPanel({ projectId }: ShotTakesPanelProps) {
             maxRetries={maxRetries}
             busy={busy}
             onGenerateScene={() => generateScene.mutate(scene.id)}
+            onCheckSilentSpeech={() => checkSilentSpeech.mutate(scene.id)}
+            pushed={scene.id === pushedSceneId}
+            onPush={() => {
+              stopPush.reset();
+              pushScene.mutate(scene.id);
+            }}
+            onStopPush={() => {
+              pushScene.reset();
+              stopPush.mutate();
+            }}
+            sceneRender={sceneRenderOf.get(scene.id)}
+            onRenderScene={() => renderScene.mutate(scene.id)}
+            renderStarting={
+              renderScene.isPending && renderScene.variables === scene.id
+            }
             onGenerateShot={(shotId) =>
               generateOne.mutate({ sceneId: scene.id, shotId })
             }

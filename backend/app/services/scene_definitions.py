@@ -713,6 +713,11 @@ async def save_definition(
     """
     chosen: list[tuple[str, str]] = [
         (ENVIRONMENT_DEFINITION_KIND, definition["environment_id"]),
+        # SCN-007: a place inside the main place is used by the scene too.
+        *(
+            (ENVIRONMENT_DEFINITION_KIND, place["environment_id"])
+            for place in definition.get("inner_places", [])
+        ),
         *((CHARACTER_DEFINITION_KIND, character) for character in definition["characters"]),
     ]
     recorded = [

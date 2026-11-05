@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import settings as settings_service
 from app.core.urls import docker_mapped, join_url
 from app.providers import llm, qwen38
+from app.services import gpu_priority
 
 LLM_URL_KEY: Final = "llm_base_url"
 GPU_URL_KEY: Final = "gpu_api_base_url"
@@ -33,6 +34,9 @@ GPU_URL_KEY: Final = "gpu_api_base_url"
 STORY_MODEL_KEY: Final = "llm_model"
 DESCRIPTION_MODEL_KEY: Final = "description_llm_model"
 IMAGE_PROMPT_MODEL_KEY: Final = "image_prompt_llm_model"
+# The model that reads a photo (`describe_photo`). It is always Bitdeer, so it has no provider
+# setting and is not one of `MODEL_KEYS`: its calls count in the same paid pool as the story's.
+VISION_MODEL_KEY: Final = "vision_llm_model"
 
 _PROVIDER_KEY_OF_MODEL_KEY: Final[dict[str, str]] = {
     STORY_MODEL_KEY: settings_service.LLM_PROVIDER_KEY,
@@ -64,6 +68,12 @@ async def provider_of(session: AsyncSession, model_key: str) -> str:
 
 async def resolve(session: AsyncSession, model_key: str) -> LlmTarget:
     """The provider, address and model for the role whose model setting is `model_key`."""
+    if model_key == VISION_MODEL_KEY:
+        return LlmTarget(
+            provider=settings_service.PROVIDER_BITDEER,
+            base_url=await settings_service.get_str(session, LLM_URL_KEY),
+            model=await settings_service.get_str(session, model_key),
+        )
     provider = await provider_of(session, model_key)
     if provider == settings_service.PROVIDER_QWEN38:
         return LlmTarget(
@@ -96,7 +106,10 @@ async def complete(
     Raises `llm.LlmCallError`, with the same kinds for both providers.
     """
     if target.is_qwen38:
-        return await qwen38.complete(target.base_url, body, timeout_s=timeout_s)
+        # A call to the model is short work that lets a scene's lane move on (SCN-002).
+        return await qwen38.complete(
+            target.base_url, body, timeout_s=timeout_s, priority=gpu_priority.SHORT_WORK
+        )
     return await llm.complete(
         target.base_url, body, timeout_s=timeout_s, idle_timeout_s=idle_timeout_s
     )

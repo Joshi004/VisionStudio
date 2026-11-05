@@ -1,0 +1,893 @@
+"""`/api/lab/graphics`: the Graphics lab. One line of an explainer script, made into the same
+graphic by four engines and compared (GFX-002).
+
+`POST .../runs` makes a run from a line, an orientation and, optionally, a saved voice. No model
+is called: the run has no brief yet, and its four engines say they are not built yet. With a
+voice, the speech of the line starts at once and its words are timed when it is stored (GFX-004);
+the brief cannot be written until that timing is stored. The engines are added by the later
+phases of `Graphics_lab_implementation_phases.md`.
+
+`GET .../runs` lists the runs, newest first. `GET .../runs/{id}` reads one with its brief job and,
+for each engine, every render made for it (newest first).
+
+`PATCH .../renders/{id}` records what a person decided after watching a render: a verdict and a
+note.
+
+The director call (GFX-003) is three clicks, each a paid call that starts only from the click:
+`POST .../runs/{id}/brief` writes the brief of a run, `POST .../runs/{id}/make-all` writes it and
+then starts every engine that is built, and `POST .../runs/{id}/ask-again` makes a new run with
+the same line and writes its brief. A run's `brief` is what the director decided, and `resolved`
+is what code worked out from it (§4.3 and §4.4 of `Graphics_lab_implementation_phases.md`).
+
+The comparison view (GFX-011) adds two clicks on one engine: `POST .../runs/{id}/engines/{engine}/
+ask-again` asks the model again for that engine (a paid call, a new attempt), and `POST
+.../renders/{id}/render-again` renders the same input again with no model call and compares the
+frames of the two videos.
+
+The **test card** (GFX-005) proves the motion service and the render job: `POST .../test-cards`
+renders a card of a chosen orientation and length, and `GET .../test-cards/newest` answers the
+newest one and the video of the newest that succeeded. It belongs to no run and costs nothing;
+only the newest video is kept.
+
+The trial batch (GFX-012) is three routes: `GET .../trials` (the excerpts, the cost and the sets),
+`POST .../trials` (a paid action: ten runs, each started with Make all) and `GET .../trials/{set}`
+(the summary of one set).
+
+A run is deleted through the shared lab-sample delete (`DELETE /api/lab/samples/graphic_run/{id}`,
+`api/deletion.py`), which refuses while any of its jobs is still running and removes the videos.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated, Any, Final, Literal
+
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+
+from app.api.errors import ErrorResponse
+from app.api.jobs import JobSummary, job_summary
+from app.db.models import Job
+from app.db.session import SessionDep
+from app.jobs import store
+from app.jobs.store import JobRow
+from app.services import graphics_engines, graphics_lab, graphics_trial
+from app.services.graphics_engines import EngineKey
+from app.services.storage import media_url
+
+router = APIRouter()
+
+# SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
+_MAX_ID: Final = 2**63 - 1
+
+# The widest line the request may carry. The form's own limit (`graphics_lab.LINE_MAX_CHARS`) is
+# checked by the service, so the user gets its message; this only stops a huge body.
+_REQUEST_LINE_MAX: Final = 2000
+
+_INVALID = {422: {"model": ErrorResponse, "description": "The form breaks a rule."}}
+_NOT_FOUND = {404: {"model": ErrorResponse, "description": "No run or render has this id."}}
+_CONFLICT = {409: {"model": ErrorResponse, "description": "The run's state does not allow it."}}
+
+Orientation = Literal["landscape", "portrait"]
+RunStateOut = Literal[
+    "new", "making_voice", "voice_failed", "writing_brief", "brief_ready", "brief_failed"
+]
+VoiceStageOut = Literal["speaking", "timing", "ready", "failed"]
+Verdict = Literal["good", "usable", "bad"]
+BriefKind = Literal["kpi", "comparison", "trend", "process", "list", "statement", "concept"]
+DerivedOp = Literal["pct_change", "difference", "ratio", "sum"]
+
+
+class GraphicFactOut(BaseModel):
+    """A number the line says."""
+
+    id: str
+    label: str
+    # As the line says it: 12 for "12 billion dollars", with `scale` "billion".
+    value: float
+    unit: str
+    scale: str
+    said_as: str
+
+
+class GraphicDerivedOut(BaseModel):
+    """A value code works out from facts."""
+
+    id: str
+    label: str
+    op: DerivedOp
+    of: list[str]
+
+
+class GraphicBeatOut(BaseModel):
+    id: str
+    phrase: str
+    shows: str
+    refs: list[str]
+
+
+class GraphicBriefThemeOut(BaseModel):
+    palette: str
+    accent: str | None
+    background: str
+    motion: str
+    mood: str
+
+
+class GraphicBriefOut(BaseModel):
+    """What the director decided (§4.3)."""
+
+    kind: BriefKind
+    intent: str
+    visual_brief: str
+    facts: list[GraphicFactOut]
+    derived: list[GraphicDerivedOut]
+    beats: list[GraphicBeatOut]
+    theme: GraphicBriefThemeOut
+
+
+class GraphicResolvedValueOut(BaseModel):
+    label: str
+    # The full value, with the scale applied.
+    value: float
+    unit: str
+    # The text that appears on screen, written by code.
+    display: str
+
+
+class GraphicResolvedBeatOut(BaseModel):
+    frame: int
+    shows: str
+
+
+class GraphicResolvedThemeOut(BaseModel):
+    background: str
+    surface: str
+    text: str
+    muted: str
+    accent: str
+    positive: str
+    negative: str
+    number: str
+    background_style: str
+    motion: str
+
+
+class GraphicBoxOut(BaseModel):
+    left: int
+    top: int
+    right: int
+    bottom: int
+
+
+class GraphicZoneOut(BaseModel):
+    top: int
+    bottom: int
+
+
+class GraphicResolvedOut(BaseModel):
+    """What code worked out from the brief, and what every engine is checked against (§4.4)."""
+
+    width: int
+    height: int
+    fps: int
+    frames: int
+    # `estimated` or `parakeet`.
+    timing_source: str
+    facts: dict[str, GraphicResolvedValueOut]
+    derived: dict[str, GraphicResolvedValueOut]
+    beats: dict[str, GraphicResolvedBeatOut]
+    theme: GraphicResolvedThemeOut
+    fonts: dict[str, str]
+    safe_area: GraphicBoxOut
+    caption_zone: GraphicZoneOut
+    # What code changed in the brief (for example a replaced accent colour).
+    notes: list[str]
+
+
+class GraphicRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # 1 to 300 characters after trimming, and landscape or portrait. The service checks both and
+    # answers with a message the page can show.
+    line_text: StrictStr = Field(max_length=_REQUEST_LINE_MAX)
+    orientation: StrictStr = Field(max_length=20)
+    # A saved voice of the Voice lab that speaks the line. Left out: no voice, and the times of
+    # the words are estimated.
+    voice_id: StrictInt | None = Field(default=None, ge=1, le=_MAX_ID)
+
+
+class GraphicTestCardCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The service checks both and answers with a sentence the page can show.
+    orientation: StrictStr = Field(max_length=20)
+    frames: StrictInt = Field(ge=-_MAX_ID, le=_MAX_ID)
+
+
+class GraphicTestCardResultOut(BaseModel):
+    """A test card that was rendered and whose video is still stored."""
+
+    job_id: int
+    orientation: Orientation
+    width: int
+    height: int
+    frames: int
+    # The video, from /media.
+    url: str
+    size_bytes: int
+    # What was measured (§4.7): the render time, the checks, the versions of Remotion and Chrome.
+    metrics: Any
+    # A sentence for each check that failed. Empty when every check passed.
+    warnings: list[str]
+
+
+class GraphicTestCardOut(BaseModel):
+    # The newest test card job, whatever it is doing or how it ended. None before the first.
+    job: JobSummary | None
+    orientation: Orientation | None
+    frames: int | None
+    # The newest test card that succeeded and still has its video. None before the first.
+    result: GraphicTestCardResultOut | None
+
+
+class GraphicRenderUpdate(BaseModel):
+    """Only the fields that are sent are changed; `null` clears one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Verdict | None = None
+    note: StrictStr | None = None
+
+
+class GraphicCallOut(BaseModel):
+    """What the model call that wrote a render's input cost (every attempt of the job added up)."""
+
+    seconds: float
+    attempts: int
+    # None when the model did not report the count.
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    reasoning_tokens: int | None
+
+
+class GraphicRenderOut(BaseModel):
+    id: int
+    created_at: datetime
+    run_id: int
+    engine: EngineKey
+    # The renders of one engine of a run are numbered from 1.
+    attempt: int
+    # What the engine draws from (the template spec, the block scene or the component code), and
+    # the model call that wrote it. None until then.
+    input: Any | None
+    input_job: JobSummary | None
+    # The time, attempts and tokens of that call. None while it has none, and for a render made by
+    # Render again, which asks no model.
+    input_call: GraphicCallOut | None
+    # The render this one repeats with the same input and no model call, if it does.
+    repeat_of: int | None
+    render_job: JobSummary | None
+    # The finished video, from /media. None until the render job has stored it.
+    url: str | None
+    metrics: Any | None
+    warnings: Any | None
+    verdict: Verdict | None
+    note: str | None
+    last_error: str | None
+
+
+class GraphicEngineOut(BaseModel):
+    key: EngineKey
+    label: str
+    # False until the engine's own phase has built it: its card then says "not built yet".
+    built: bool
+    # False while the engine can be started (`built`) but its renderer does not exist yet (the two
+    # template engines have a spec before they have a renderer): the card then shows the input
+    # and says that the renderer is not built yet.
+    renderer_built: bool
+    # True for an engine that is no longer started (EXG-008): its card shows older attempts only.
+    retired: bool
+    # Every render made for this engine, newest first.
+    renders: list[GraphicRenderOut]
+
+
+class GraphicRunSummaryOut(BaseModel):
+    id: int
+    created_at: datetime
+    line_text: str
+    orientation: Orientation
+    # Worked out on every read from the brief and the job that writes it.
+    state: RunStateOut
+
+
+class GraphicVoiceOut(BaseModel):
+    """The voice of a run (GFX-004): the speech and where the timing of its words stands."""
+
+    # The saved voice, by id and name (the name is None when the voice was deleted).
+    voice_id: int | None
+    voice_name: str | None
+    speech_run_id: int
+    # The speech alone, from /media. None until it is stored.
+    speech_url: str | None
+    speech_job: JobSummary | None
+    timing_job: JobSummary | None
+    state: VoiceStageOut
+    # Why the voice failed. None otherwise.
+    error: str | None
+    # `parakeet`, or `estimated` when too few words matched. None until the timing is stored.
+    timing_source: str | None
+    match_percent: float | None
+    threshold: int | None
+    # A sentence about the timing, set when it was estimated.
+    note: str | None
+
+
+class GraphicRunOut(GraphicRunSummaryOut):
+    # The size and frame rate of every video of the run.
+    width: int
+    height: int
+    fps: int
+    # The saved voice and the speech made with it (GFX-004). None for a run without a voice.
+    voice_id: int | None
+    speech_run_id: int | None
+    voice: GraphicVoiceOut | None
+    # The words of the line with their times (GFX-004).
+    timing: Any | None
+    # What the director decided (GFX-003), what code worked out from it, and the job that wrote it.
+    brief: GraphicBriefOut | None
+    resolved: GraphicResolvedOut | None
+    brief_job: JobSummary | None
+    last_error: str | None
+    # The four engines in the order of the design, each with its renders.
+    engines: list[GraphicEngineOut]
+
+
+def _unprocessable(message: str) -> HTTPException:
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, message)
+
+
+def _job_out(job: Job | None) -> JobSummary | None:
+    if job is None:
+        return None
+    return job_summary(JobRow(job=job, project_name=store.owner_name(job, None)))
+
+
+def render_out(row: graphics_lab.RenderRow) -> GraphicRenderOut:
+    render = row.render
+    call = graphics_lab.input_call_of(row.input_job)
+    return GraphicRenderOut(
+        id=render.id,
+        created_at=render.created_at,
+        run_id=render.run_id,
+        engine=render.engine,  # type: ignore[arg-type]  # the database CHECK holds the four keys
+        attempt=render.attempt,
+        input=render.input,
+        input_job=_job_out(row.input_job),
+        input_call=(
+            GraphicCallOut(
+                seconds=call.seconds,
+                attempts=call.attempts,
+                prompt_tokens=call.prompt_tokens,
+                completion_tokens=call.completion_tokens,
+                reasoning_tokens=call.reasoning_tokens,
+            )
+            if call is not None
+            else None
+        ),
+        repeat_of=render.repeat_of,
+        render_job=_job_out(row.render_job),
+        url=media_url(render.media_path) if render.media_path is not None else None,
+        metrics=render.metrics,
+        warnings=render.warnings,
+        verdict=render.verdict,  # type: ignore[arg-type]  # the database CHECK holds the three
+        note=render.note,
+        last_error=render.last_error,
+    )
+
+
+def run_summary_out(row: graphics_lab.RunRow) -> GraphicRunSummaryOut:
+    run = row.run
+    return GraphicRunSummaryOut(
+        id=run.id,
+        created_at=run.created_at,
+        line_text=run.line_text,
+        orientation=run.orientation,  # type: ignore[arg-type]  # the database CHECK holds two
+        state=row.state,
+    )
+
+
+def voice_out(row: graphics_lab.RunRow) -> GraphicVoiceOut | None:
+    """The run's voice, or None for a run without one."""
+    status = row.voice_status
+    run = row.run
+    if status is None or run.speech_run_id is None:
+        return None
+    timing = run.timing if isinstance(run.timing, dict) else {}
+    match_percent = timing.get("match_percent")
+    threshold = timing.get("threshold")
+    return GraphicVoiceOut(
+        voice_id=run.voice_id,
+        voice_name=row.voice.name if row.voice is not None else None,
+        speech_run_id=run.speech_run_id,
+        speech_url=media_url(row.speech.path) if row.speech and row.speech.path else None,
+        speech_job=_job_out(row.speech_job),
+        timing_job=_job_out(row.timing_job),
+        state=status.stage,
+        error=status.error,
+        timing_source=timing.get("source"),
+        match_percent=float(match_percent) if isinstance(match_percent, int | float) else None,
+        threshold=int(threshold) if isinstance(threshold, int) else None,
+        note=timing.get("note"),
+    )
+
+
+def run_out(row: graphics_lab.RunRow) -> GraphicRunOut:
+    run = row.run
+    width, height = graphics_lab.size_of(run)
+    by_engine: dict[str, list[GraphicRenderOut]] = {key: [] for key in graphics_engines.ENGINES}
+    for render_row in row.renders:
+        by_engine[render_row.render.engine].append(render_out(render_row))
+    return GraphicRunOut(
+        **run_summary_out(row).model_dump(),
+        width=width,
+        height=height,
+        fps=graphics_lab.FPS,
+        voice_id=run.voice_id,
+        speech_run_id=run.speech_run_id,
+        voice=voice_out(row),
+        timing=run.timing,
+        brief=run.brief,
+        resolved=run.resolved,
+        brief_job=_job_out(row.brief_job),
+        last_error=run.last_error,
+        engines=[
+            GraphicEngineOut(
+                key=engine.key,
+                label=engine.label,
+                built=engine.built,
+                renderer_built=engine.renderer_built,
+                retired=engine.retired,
+                renders=by_engine[engine.key],
+            )
+            for engine in graphics_engines.ENGINES.values()
+        ],
+    )
+
+
+@router.post(
+    "/lab/graphics/runs",
+    response_model=GraphicRunOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_INVALID,
+)
+async def create_run(body: GraphicRunCreate, session: SessionDep) -> GraphicRunOut:
+    """Makes a run from a line (1 to 300 characters), an orientation and, optionally, a saved
+    voice. No model is called. With a voice, its speech starts now (a GPU job).
+    """
+    try:
+        row = await graphics_lab.create_run(
+            session, body.line_text, body.orientation, body.voice_id
+        )
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return run_out(row)
+
+
+@router.get("/lab/graphics/runs", response_model=list[GraphicRunSummaryOut])
+async def list_runs(
+    session: SessionDep,
+    before_id: Annotated[int | None, Query(ge=1, le=_MAX_ID)] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[GraphicRunSummaryOut]:
+    """The newest runs first. Pass the last id you have as `before_id` for the next page."""
+    rows = await graphics_lab.list_runs(session, before_id, limit)
+    return [run_summary_out(row) for row in rows]
+
+
+@router.get(
+    "/lab/graphics/runs/{run_id}",
+    response_model=GraphicRunOut,
+    responses=_NOT_FOUND,
+)
+async def get_run(run_id: int, session: SessionDep) -> GraphicRunOut:
+    """One run with its brief and, for each of the four engines, its renders."""
+    row = await graphics_lab.get_run(session, run_id) if 1 <= run_id <= _MAX_ID else None
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
+    return run_out(row)
+
+
+@router.patch(
+    "/lab/graphics/renders/{render_id}",
+    response_model=GraphicRenderOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def update_render(
+    render_id: int, body: GraphicRenderUpdate, session: SessionDep
+) -> GraphicRenderOut:
+    """Records the verdict and/or the note of a render. Only the fields in the body are changed."""
+    changes = {key: getattr(body, key) for key in body.model_fields_set}
+    try:
+        row = (
+            await graphics_lab.update_render(session, render_id, changes)
+            if 1 <= render_id <= _MAX_ID
+            else None
+        )
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Render {render_id} does not exist.")
+    return render_out(row)
+
+
+async def _brief_click(session: SessionDep, run_id: int, action: Any) -> GraphicRunOut:
+    """Runs one of the director clicks and answers the run: 404, 409 and 422 as the service says."""
+    try:
+        row = await action(session, run_id) if 1 <= run_id <= _MAX_ID else None
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
+    return run_out(row)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/brief",
+    response_model=GraphicRunOut,
+    responses={**_NOT_FOUND, **_CONFLICT, **_INVALID},
+)
+async def write_brief(run_id: int, session: SessionDep) -> GraphicRunOut:
+    """Starts the paid call that writes the run's brief. Refused (409) while it is being written
+    or is written, and (422) for a line whose speech is longer than 15 s, before any call.
+    """
+    return await _brief_click(session, run_id, graphics_lab.start_brief)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/make-all",
+    response_model=GraphicRunOut,
+    responses={**_NOT_FOUND, **_CONFLICT, **_INVALID},
+)
+async def make_all(run_id: int, session: SessionDep) -> GraphicRunOut:
+    """Writes the brief, then starts every engine that is built and not retired. With the brief
+    already written, it only starts those engines that have no render. An engine that is not
+    built, and the retired template engines (EXG-008), are skipped.
+    """
+    return await _brief_click(session, run_id, graphics_lab.make_all)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/ask-again",
+    response_model=GraphicRunOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_NOT_FOUND, **_CONFLICT, **_INVALID},
+)
+async def ask_again(run_id: int, session: SessionDep) -> GraphicRunOut:
+    """Makes a new run with the same line and orientation, and starts its brief. The run this
+    was asked on is not changed. The answer is the new run.
+    """
+    return await _brief_click(session, run_id, graphics_lab.ask_again)
+
+
+@router.post(
+    "/lab/graphics/runs/{run_id}/engines/{engine}/ask-again",
+    response_model=GraphicRunOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_NOT_FOUND, **_CONFLICT},
+)
+async def ask_engine_again(run_id: int, engine: EngineKey, session: SessionDep) -> GraphicRunOut:
+    """A paid call: asks the model again for one engine of the run, with the same brief, and adds
+    a new render (the next attempt) beside the earlier ones. 409 while the engine is still
+    working, when it is not built or is retired (the template engines, EXG-008), or when the
+    brief is not written. The answer is the run.
+    """
+    try:
+        row = (
+            await graphics_lab.ask_engine_again(session, run_id, engine)
+            if 1 <= run_id <= _MAX_ID
+            else None
+        )
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Run {run_id} does not exist.")
+    return run_out(row)
+
+
+@router.post(
+    "/lab/graphics/renders/{render_id}/render-again",
+    response_model=GraphicRunOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_NOT_FOUND, **_CONFLICT},
+)
+async def render_again(render_id: int, session: SessionDep) -> GraphicRunOut:
+    """Free, no model: renders the same input again as a new attempt (`repeat_of` names this
+    render) and compares the frames of the two videos (`metrics.repeat`). 409 when the render has
+    no video yet, its engine is still working or its engine is retired (EXG-008). The answer is
+    the run.
+    """
+    try:
+        row = (
+            await graphics_lab.render_again(session, render_id)
+            if 1 <= render_id <= _MAX_ID
+            else None
+        )
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Render {render_id} does not exist.")
+    return run_out(row)
+
+
+def test_card_out(newest: Job | None, stored: Job | None) -> GraphicTestCardOut:
+    """The newest test card job and the video of the newest one that succeeded."""
+    recorded = newest.input if newest is not None and isinstance(newest.input, dict) else {}
+    result: GraphicTestCardResultOut | None = None
+    if stored is not None and isinstance(stored.output, dict):
+        output = stored.output
+        result = GraphicTestCardResultOut(
+            job_id=stored.id,
+            orientation=output["orientation"],
+            width=output["width"],
+            height=output["height"],
+            frames=output["frames"],
+            url=media_url(output["path"]),
+            size_bytes=output["size_bytes"],
+            metrics=output.get("metrics"),
+            warnings=output.get("warnings") or [],
+        )
+    return GraphicTestCardOut(
+        job=_job_out(newest),
+        orientation=recorded.get("orientation"),
+        frames=recorded.get("frames"),
+        result=result,
+    )
+
+
+@router.post(
+    "/lab/graphics/test-cards",
+    response_model=GraphicTestCardOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_CONFLICT, **_INVALID},
+)
+async def render_test_card(body: GraphicTestCardCreate, session: SessionDep) -> GraphicTestCardOut:
+    """Renders the test card at an orientation and a length (72 to 360 frames) in the motion
+    service. Refused (409) while another test card is being rendered. Nothing is paid for.
+    """
+    try:
+        await graphics_lab.start_test_card(session, body.orientation, body.frames)
+    except graphics_lab.GraphicsLabConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    newest, stored = await graphics_lab.newest_test_card(session)
+    return test_card_out(newest, stored)
+
+
+@router.get("/lab/graphics/test-cards/newest", response_model=GraphicTestCardOut)
+async def get_newest_test_card(session: SessionDep) -> GraphicTestCardOut:
+    """The newest test card job and the video of the newest one that succeeded."""
+    newest, stored = await graphics_lab.newest_test_card(session)
+    return test_card_out(newest, stored)
+
+
+# --- The trial batch (GFX-012) ----------------------------------------------------------------
+
+TrialOrientation = Literal["own", "landscape", "portrait"]
+OutcomeKindOut = Literal["video", "no_fit", "failed", "working", "not_started"]
+
+
+class GraphicTrialExcerptOut(BaseModel):
+    """One line of Appendix A, with the orientation it runs in when the trial uses each excerpt's
+    own.
+    """
+
+    key: str
+    domain: str
+    text: str
+    orientation: Orientation
+    tests: str
+
+
+class GraphicTrialCostOut(BaseModel):
+    """What a trial will do, shown and confirmed before it starts."""
+
+    runs: int
+    # The paid model calls when every one is answered at once, and the most there can be with
+    # every retry.
+    paid_calls: int
+    most_paid_calls: int
+    # Speeches made on the GPU server, each timed by Parakeet. Zero without a voice.
+    speeches: int
+
+
+class GraphicTrialSetOut(BaseModel):
+    set_no: int
+    created_at: datetime
+    runs: int
+
+
+class GraphicTrialOverviewOut(BaseModel):
+    excerpts: list[GraphicTrialExcerptOut]
+    cost: GraphicTrialCostOut
+    cost_with_voice: GraphicTrialCostOut
+    # The trial sets made so far, newest first.
+    sets: list[GraphicTrialSetOut]
+
+
+class GraphicTrialCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # A saved voice of the Voice lab for every excerpt, or none.
+    voice_id: StrictInt | None = Field(default=None, ge=1, le=_MAX_ID)
+    # `own`: each excerpt's own orientation. Otherwise one orientation for all ten.
+    orientation: TrialOrientation = "own"
+
+
+class GraphicTrialStartedOut(BaseModel):
+    set_no: int
+    run_ids: list[int]
+
+
+class GraphicTrialOutcomeOut(BaseModel):
+    """What became of one engine on one run: its newest render that is not a Render again."""
+
+    kind: OutcomeKindOut
+    render_id: int | None
+    attempt: int | None
+    verdict: Verdict | None
+
+
+class GraphicTrialEngineOut(BaseModel):
+    """The counts of one engine over the set (§4.9). The three `of videos` counts are out of
+    `videos`; the repeat counts are over every Render again of the set.
+    """
+
+    key: EngineKey
+    label: str
+    runs: int
+    videos: int
+    no_fit: int
+    failed: int
+    working: int
+    not_started: int
+    checks_passed: int
+    no_layout_warning: int
+    numbers_traced: int
+    median_render_s: float | None
+    median_tokens: int | None
+    repeats_identical: int
+    repeats_differing: int
+    repeats_not_compared: int
+    verdict_good: int
+    verdict_usable: int
+    verdict_bad: int
+    verdict_none: int
+
+
+class GraphicTrialRunOut(BaseModel):
+    run_id: int
+    case: str
+    domain: str
+    line_text: str
+    orientation: Orientation
+    state: RunStateOut
+    last_error: str | None
+    outcomes: dict[str, GraphicTrialOutcomeOut]
+
+
+class GraphicTrialSummaryOut(BaseModel):
+    set_no: int
+    created_at: datetime
+    with_voice: bool
+    # True while a voice, a brief or a render of the set is still going, so the page polls.
+    active: bool
+    engines: list[GraphicTrialEngineOut]
+    runs: list[GraphicTrialRunOut]
+
+
+def _trial_set_out(item: graphics_trial.TrialSet) -> GraphicTrialSetOut:
+    return GraphicTrialSetOut(set_no=item.set_no, created_at=item.created_at, runs=item.runs)
+
+
+def _trial_cost_out(cost: graphics_trial.TrialCost) -> GraphicTrialCostOut:
+    return GraphicTrialCostOut(
+        runs=cost.runs,
+        paid_calls=cost.paid_calls,
+        most_paid_calls=cost.most_paid_calls,
+        speeches=cost.speeches,
+    )
+
+
+def trial_summary_out(summary: graphics_trial.TrialSummary) -> GraphicTrialSummaryOut:
+    return GraphicTrialSummaryOut(
+        set_no=summary.set_no,
+        created_at=summary.created_at,
+        with_voice=summary.with_voice,
+        active=summary.active,
+        engines=[
+            GraphicTrialEngineOut(**vars(engine))  # the fields are the same, by name
+            for engine in summary.engines
+        ],
+        runs=[
+            GraphicTrialRunOut(
+                run_id=run.run_id,
+                case=run.case,
+                domain=run.domain,
+                line_text=run.line_text,
+                orientation=run.orientation,  # type: ignore[arg-type]  # the CHECK holds two
+                state=run.state,  # type: ignore[arg-type]  # `run_state` returns one of these
+                last_error=run.last_error,
+                outcomes={
+                    key: GraphicTrialOutcomeOut(
+                        kind=outcome.kind,
+                        render_id=outcome.render_id,
+                        attempt=outcome.attempt,
+                        verdict=outcome.verdict,  # type: ignore[arg-type]  # the CHECK holds three
+                    )
+                    for key, outcome in run.outcomes.items()
+                },
+            )
+            for run in summary.runs
+        ],
+    )
+
+
+@router.get("/lab/graphics/trials", response_model=GraphicTrialOverviewOut)
+async def get_trials(session: SessionDep) -> GraphicTrialOverviewOut:
+    """The excerpts of Appendix A, what a trial costs (with and without a voice) and the trial
+    sets made so far, newest first. Nothing is started.
+    """
+    return GraphicTrialOverviewOut(
+        excerpts=[
+            GraphicTrialExcerptOut(
+                key=excerpt.key,
+                domain=excerpt.domain,
+                text=excerpt.text,
+                orientation=excerpt.orientation,
+                tests=excerpt.tests,
+            )
+            for excerpt in graphics_trial.EXCERPTS
+        ],
+        cost=_trial_cost_out(graphics_trial.trial_cost(with_voice=False)),
+        cost_with_voice=_trial_cost_out(graphics_trial.trial_cost(with_voice=True)),
+        sets=[_trial_set_out(item) for item in await graphics_trial.list_sets(session)],
+    )
+
+
+@router.post(
+    "/lab/graphics/trials",
+    response_model=GraphicTrialStartedOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_CONFLICT, **_INVALID},
+)
+async def start_trial(body: GraphicTrialCreate, session: SessionDep) -> GraphicTrialStartedOut:
+    """A paid action: makes one run for each of the ten excerpts and starts **Make all** on each
+    (with a voice, as soon as each voice is timed). The call counts are shown by `GET .../trials`
+    and confirmed on the page first. 409 while the newest set is still being made.
+    """
+    try:
+        set_no, run_ids = await graphics_trial.start_trial(session, body.voice_id, body.orientation)
+    except graphics_trial.GraphicsTrialConflictError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except graphics_lab.GraphicsLabInputError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return GraphicTrialStartedOut(set_no=set_no, run_ids=run_ids)
+
+
+@router.get(
+    "/lab/graphics/trials/{set_no}",
+    response_model=GraphicTrialSummaryOut,
+    responses={404: {"model": ErrorResponse, "description": "No trial set has this number."}},
+)
+async def get_trial_summary(set_no: int, session: SessionDep) -> GraphicTrialSummaryOut:
+    """The summary of one trial set: the counts and medians of each engine, and each run's
+    outcome on each engine.
+    """
+    summary = await graphics_trial.summarize(session, set_no) if 1 <= set_no <= _MAX_ID else None
+    if summary is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Trial set {set_no} does not exist.")
+    return trial_summary_out(summary)

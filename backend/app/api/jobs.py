@@ -77,6 +77,20 @@ JobType = Literal[
     "write_callout_plan",
     "time_lab_speech_words",
     "render_av_test",
+    "write_lab_graphic_brief",
+    "write_lab_graphic_template_spec",
+    "write_lab_graphic_block_scene",
+    "write_lab_graphic_component",
+    "render_lab_graphic",
+    "time_lab_graphic_words",
+    "write_graphic_theme",
+    "write_shot_graphic_brief",
+    "write_shot_graphic_component",
+    "write_shot_graphic_scene",
+    "render_shot_graphic",
+    "describe_photo",
+    "render_scene",
+    "write_thumbnail_concepts",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 JobProvider = Literal["gpu", "llm", "image", "local"]
@@ -146,6 +160,12 @@ class JobSummary(BaseModel):
     upload: UploadProgressOut | None = None
     download: DownloadProgressOut | None = None
     connection: JobConnectionOut | None = None
+    # SCN-002. The GPU server's priority for the job, from 1 (most urgent) to 10 (what the server
+    # uses when none is sent). None for a job that is not on the server or sent none.
+    server_priority: int | None = None
+    # Why the server holds the job back (`gpu_server.QUEUE_STATES`), only while the server has
+    # it queued and said so at the last check.
+    queue_state: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -205,9 +225,29 @@ def _live(
     return upload, download, connection
 
 
+def _server_view(job: Job) -> tuple[int | None, str | None]:
+    """The server's priority for a job and why it is queued: what the server last said about
+    the job (`output.remote`), else the priority in the request that was sent (`input.body`).
+    """
+    output = job.output if isinstance(job.output, dict) else {}
+    remote = output.get("remote")
+    remote = remote if isinstance(remote, dict) else {}
+    priority = remote.get("priority")
+    if isinstance(priority, bool) or not isinstance(priority, int):
+        recorded = job.input if isinstance(job.input, dict) else {}
+        body = recorded.get("body")
+        priority = body.get("priority") if isinstance(body, dict) else None
+    if isinstance(priority, bool) or not isinstance(priority, int):
+        priority = None
+    state = remote.get("queue_state")
+    queue_state = state if job.status in ("queued", "running") and isinstance(state, str) else None
+    return priority, queue_state
+
+
 def job_summary(row: JobRow) -> JobSummary:
     job = row.job
     upload, download, connection = _live(job)
+    server_priority, queue_state = _server_view(job)
     return JobSummary(
         id=job.id,
         project_id=job.project_id,
@@ -228,6 +268,8 @@ def job_summary(row: JobRow) -> JobSummary:
         upload=upload,
         download=download,
         connection=connection,
+        server_priority=server_priority,
+        queue_state=queue_state,
     )
 
 

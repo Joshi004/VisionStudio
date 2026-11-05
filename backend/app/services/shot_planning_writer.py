@@ -39,9 +39,10 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Collection
 from typing import Any, Final
 
-from app.services import discovery_writer, user_feedback
+from app.services import discovery_writer, scene_timeline, user_feedback
 from app.services.projects import SPEECH_BOTH, SPEECH_EXPLAINER, SPEECH_NO_NARRATION
 from app.services.text_limits import fit_text, length_rule
 
@@ -58,6 +59,10 @@ MAX_SHOTS: Final = 80
 # who take turns. Three is the most audios the video model takes as references.
 EXCHANGE_MIN_LINES: Final = 2
 EXCHANGE_MAX_LINES: Final = 3
+# SCN-008: a line is short enough to be put in a rapid exchange when its recording lasts at most
+# this long, and a run of such lines carries at most this much speech in all.
+SHORT_LINE_MAX_S: Final = 2.0
+EXCHANGE_SPEECH_MAX_S: Final = 8.0
 DESCRIPTION_MAX_CHARS: Final = 300
 # Durations are kept to a tenth of a second.
 _DURATION_DECIMALS: Final = 1
@@ -106,10 +111,13 @@ a shot that continues the previous one starts exactly where that one ends, so us
 - "rapid_exchange": true or false. True only for a quick back-and-forth between two characters \
 inside ONE shot, where the video then cuts between them as each speaks. It needs "speech_unit_ids" \
 to list two or three lines of dialogue (no narration) from exactly two different speakers who \
-take turns (A then B, or A then B then A), and "continues_previous" must be false. Use false for \
-almost every shot, including a shot with a single line. Most dialogue is better as a sequence of \
-short dialogue shots; use a rapid exchange only where the scene needs the lines to answer each \
-other without a pause.
+take turns (A then B, or A then B then A), and "continues_previous" must be false. Use it for a \
+run of two or three SHORT lines (each recording about {SHORT_LINE_MAX_S:g} seconds or less, \
+{EXCHANGE_SPEECH_MAX_S:g} seconds or less in all) that the same two characters say to each other \
+in turn: one clip that cuts between them flows better than a separate short clip for each line. \
+Give a line a shot of its own when it is long, when it is important and needs time to land, when \
+its speaker is off screen or only heard, or when a reaction without words must be seen between \
+the lines. Use false for every other shot.
 - "description": one plain sentence in English, at most {DESCRIPTION_MAX_CHARS} characters, of \
 what the audience sees. Give no camera movement, lens or framing detail beyond what the sentence \
 needs; a later step decides those.
@@ -124,11 +132,12 @@ consecutive, and together they should last at least as long as the unit's measur
 - Every event must be shown by at least one shot, and the shots must follow the story's order. \
 The first shot starts at the first event and the last shot ends at the last event.
 - Every speech unit must be heard in at least one shot. A unit of dialogue goes in exactly one \
-shot. Prefer one line of dialogue per shot.
+shot. Prefer one line of dialogue per shot, except in a rapid exchange.
 - A shot that carries dialogue must last at least as long as that line's measured length, plus a \
-little time for the face to settle.
-- A very short line of speech still gets a shot of about the shortest duration in the DURATION \
-POLICY: the video does not have to be as short as the speech.
+little time for the face to settle. A rapid exchange must last as long as all its lines together, \
+plus that time.
+- A very short line of speech that is not part of a rapid exchange still gets a shot of about the \
+shortest duration in the DURATION POLICY: the video does not have to be as short as the speech.
 - A "pause" event has no recording. You decide how long it lasts: it is the target_duration of \
 the shot that shows it. You also decide whether a very short event is combined with its \
 neighbours or given a shot of its own.
@@ -137,6 +146,11 @@ neighbours or given a shot of its own.
 DURATION POLICY. Choose every "target_duration" from that list: code moves any other length to \
 the nearest one on it, which can make a shot a little shorter or longer than you planned.
 - Do not invent events, characters or places the scene does not have.
+- An event that says someone speaks, explains, asks, argues or keeps talking (a voice on a \
+phone that goes on, a guest asking something) but has no speech unit has no recorded words, and \
+the video model would make up words for it. Show it from a listener, or as a reaction, an object \
+or a place: the description says who listens or reacts and never has that person talking on \
+screen. A shot with no speech unit shows nobody talking.
 
 If the user message also holds STAGING, the scene was staged: it says where each character \
 stands, which side of the screen they are on and what is behind them, and which two characters \
@@ -145,7 +159,9 @@ cut between a shot of each speaker, each with their own background, or shown tog
 shot of the group. Never plan a shot that needs two characters on the same side of the screen \
 or on the same background. Do not describe the staging in the shots' descriptions. When it \
 has an "off_screen" list, those characters are only heard in the scene: never plan a shot that \
-shows them.
+shows them. When it has a "presence" list, those characters arrive or leave during the scene: \
+never plan a shot that shows one of them before the event they arrive after, or after the event \
+they leave after.
 
 If the user message also holds PREVIOUS SHOTS and TIMELINE PROBLEMS, an earlier plan of this \
 same scene was checked by code and had the problems listed. Plan the whole scene again so that \
@@ -160,6 +176,38 @@ has a "message" with the numbers. Keep what was fine, and still follow every rul
 _ANSWER_TAIL: Final = f"""\
 Answer with one JSON object only, in exactly this form (the values here are only examples of \
 the type): {_ANSWER_FORM}"""
+
+# SCN-007: a scene with places inside its main place (a car in a garage). Only such a scene gets
+# the note, the `place` of a shot and the INNER PLACES block, so every other request is exactly
+# what it was.
+_INNER_PLACES_NOTE: Final = """The scene also has INNER PLACES: places inside the scene's main \
+place (a car parked in the garage, a lift in the lobby), each with "relation", how it stands in \
+the main place. A shot also has "place": the id of the inner place when the shot happens INSIDE \
+it (the camera is in the car, in the lift), and null for a shot of the main place, including a \
+shot of the car seen from outside. A shot has one place, so a shot never goes in and out. Use \
+"place" only for a shot that is really inside; most shots are null. A shot with \
+"continues_previous" true has the same "place" as the shot before it. Do not change the \
+description's wording because of "place": the description still says what the audience sees."""
+
+_PLACE_ANSWER_FORM: Final = json.dumps(
+    {
+        "shots": [
+            {
+                "source_event_ids": ["an id from EVENTS"],
+                "speech_unit_ids": ["an id from SPEECH UNITS, or none"],
+                "type": "one of the allowed types",
+                "target_duration": 2.5,
+                "continues_previous": False,
+                "rapid_exchange": False,
+                "place": "an id from INNER PLACES, or null",
+                "description": "A woman waits in the car, listening.",
+            }
+        ]
+    }
+)
+_PLACE_ANSWER_TAIL: Final = f"""\
+Answer with one JSON object only, in exactly this form (the values here are only examples of \
+the type): {_PLACE_ANSWER_FORM}"""
 
 # A project with no narration (PHASE-049): no narrator carries the story, so the shots must.
 _NO_NARRATION_NOTE: Final = """This story has no narrator. Nothing explains the story in words, so \
@@ -181,14 +229,17 @@ picture that makes sense without the presenter and that needs no one's speech to
 could draw."""
 
 
-def instructions(speech_mode: str = SPEECH_BOTH) -> str:
+def instructions(speech_mode: str = SPEECH_BOTH, inner_places: bool = False) -> str:
     """The system message for a project's speech mode. For every mode except `no_narration` and
-    `explainer` it is what every project used before PHASE-049.
+    `explainer` it is what every project used before PHASE-049. `inner_places` (SCN-007) adds
+    the note and the `place` of a shot, for a scene that has places inside its main place.
     """
     note = {SPEECH_NO_NARRATION: _NO_NARRATION_NOTE, SPEECH_EXPLAINER: _EXPLAINER_NOTE}.get(
         speech_mode
     )
     note = f"\n\n{note}" if note else ""
+    if inner_places:
+        return f"{_BODY}{note}\n\n{_INNER_PLACES_NOTE}\n\n{_PLACE_ANSWER_TAIL}"
     return f"{_BODY}{note}\n\n{_ANSWER_TAIL}"
 
 
@@ -209,9 +260,13 @@ def build_request(
     feedback: user_feedback.Feedback | None = None,
     speech_mode: str = SPEECH_BOTH,
     staging: dict[str, Any] | None = None,
+    inner_places: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
+
+    `inner_places` (SCN-007) is the scene's places inside its main place, each `{id, name,
+    description, relation}`, or None: it adds `INNER PLACES` and the `place` of a shot.
 
     `speech_mode` is the project's (`both`, `no_dialogue` or `no_narration`); only
     `no_narration` adds to the instructions.
@@ -254,6 +309,10 @@ def build_request(
     ]
     if staging is not None:
         parts.append("STAGING (JSON):\n" + json.dumps(staging, ensure_ascii=False, indent=2))
+    if inner_places:
+        parts.append(
+            "INNER PLACES (JSON):\n" + json.dumps(inner_places, ensure_ascii=False, indent=2)
+        )
     if replan is not None:
         parts.append(
             "PREVIOUS SHOTS (JSON):\n"
@@ -268,7 +327,7 @@ def build_request(
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": instructions(speech_mode)},
+            {"role": "system", "content": instructions(speech_mode, bool(inner_places))},
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
@@ -320,6 +379,40 @@ def _rapid_exchange(shot: dict[str, Any]) -> bool:
     False; `_check_exchanges` judges the shots that say True.
     """
     return shot.get("rapid_exchange") is True
+
+
+def _place(
+    shot: dict[str, Any],
+    position: int,
+    inner_place_ids: Collection[str] | None,
+    main_place_id: str | None,
+) -> str | None:
+    """SCN-007: the inner place a shot happens inside, or None for the main place. A scene with
+    no inner place has no shot with a place, so the field is ignored there. An empty value, null
+    and the main place's own id mean the main place. Raises ValueError for any other id.
+    """
+    if not inner_place_ids:
+        return None
+    value = shot.get("place")
+    if value is None or (isinstance(value, str) and value.strip() in ("", main_place_id)):
+        return None
+    if not isinstance(value, str) or value.strip() not in inner_place_ids:
+        raise ValueError(
+            f'The "place" of shot {position} was not one of the scene\'s inner places: '
+            f"{', '.join(sorted(inner_place_ids))}."
+        )
+    return value.strip()
+
+
+def _check_places(shots: list[dict[str, Any]]) -> None:
+    """A shot that carries straight on from the shot before it is in the same place."""
+    for position, shot in enumerate(shots[1:], start=2):
+        if shot["continues_previous"] and shot.get("place") != shots[position - 2].get("place"):
+            raise ValueError(
+                f"Shot {position} continues the shot before it, but they are not in the same "
+                'place ("place" differs). Use a normal cut when the shot goes in or out of an '
+                "inner place."
+            )
 
 
 def _ids(shot: dict[str, Any], key: str, position: int, known: set[str], *, what: str) -> list[str]:
@@ -499,6 +592,8 @@ def check_shots(
     units: list[dict[str, Any]],
     warnings: list[str] | None = None,
     speech_mode: str = SPEECH_BOTH,
+    inner_place_ids: Collection[str] | None = None,
+    main_place_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """The answer's shots checked and cleaned, without their ids. Raises ValueError, with a
     message fit for the user, for the first problem found. With `warnings` (a model's answer),
@@ -508,6 +603,9 @@ def check_shots(
     order (each has `id`, `event_id`, `kind` and, for dialogue, `speaker_id`). Only the fields
     of a shot are kept, in a fixed order. For an explainer (`speech_mode` is `explainer`) the
     presenter's dialogue shots are checked as well.
+
+    `inner_place_ids` (SCN-007) are the ids of the scene's places inside its main place
+    (`main_place_id`): a shot may name one as its `place`, which is kept only when set.
     """
     if not isinstance(answer, dict):
         raise ValueError("The shots were not a JSON object.")
@@ -540,6 +638,7 @@ def check_shots(
             entry, "speech_unit_ids", position, known_units, what="a speech unit"
         )
         spans.append(_event_span(source_event_ids, order, position))
+        place = _place(entry, position, inner_place_ids, main_place_id)
         shots.append(
             {
                 "source_event_ids": source_event_ids,
@@ -548,6 +647,9 @@ def check_shots(
                 "target_duration": _duration(entry, position),
                 "continues_previous": _continues_previous(entry, position),
                 "rapid_exchange": _rapid_exchange(entry),
+                # Written only when the shot is inside an inner place, so every other plan is
+                # stored exactly as before (SCN-007).
+                **({"place": place} if place is not None else {}),
                 "description": _description(entry, position, warnings),
             }
         )
@@ -555,6 +657,7 @@ def check_shots(
     _check_event_cover(spans, len(event_ids))
     _check_speech_placement(shots, units, event_ids)
     _check_exchanges(shots, units)
+    _check_places(shots)
     if speech_mode == SPEECH_EXPLAINER:
         _check_explainer_shots(shots, units)
     return shots
@@ -567,19 +670,231 @@ def check_answer(
     units: list[dict[str, Any]],
     warnings: list[str] | None = None,
     speech_mode: str = SPEECH_BOTH,
+    inner_place_ids: Collection[str] | None = None,
+    main_place_id: str | None = None,
 ) -> dict[str, Any]:
     """Runs `check_shots` and returns the content that is stored: `{scene_id, shots}`, each
     shot `{id, scene_id, source_event_ids, speech_unit_ids, type, target_duration,
-    continues_previous, rapid_exchange, description}` with the id (`shot_1`, `shot_2`, ...) and
-    the scene id set here, never read from the model. Raises ValueError, with a message fit for
-    the user, for the first problem found.
+    continues_previous, rapid_exchange, [place], description}` with the id (`shot_1`, `shot_2`,
+    ...) and the scene id set here, never read from the model. Raises ValueError, with a
+    message fit for the user, for the first problem found.
     """
-    checked = check_shots(answer, events, units, warnings, speech_mode)
+    checked = check_shots(
+        answer, events, units, warnings, speech_mode, inner_place_ids, main_place_id
+    )
     shots = [
         {"id": f"shot_{position}", "scene_id": scene_id, **shot}
         for position, shot in enumerate(checked, start=1)
     ]
     return {"scene_id": scene_id, "shots": shots}
+
+
+# --- Merging runs of short lines into rapid exchanges (SCN-008) ----------------------------
+
+
+def _staged_speakers(staging: dict[str, Any]) -> set[str]:
+    """The characters who may speak in a rapid exchange: placed in the scene, not only heard
+    (`off_screen`), and with no arrival or leaving (`presence`), so they are in the place for
+    the whole scene.
+    """
+    placed = {item["id"] for item in staging.get("characters") or []}
+    heard_only = {
+        item["id"] if isinstance(item, dict) else item for item in staging.get("off_screen") or []
+    }
+    coming_and_going = {
+        item["character_id"] for item in staging.get("presence") or [] if isinstance(item, dict)
+    }
+    return placed - heard_only - coming_and_going
+
+
+def _short_line_speaker(
+    shot: dict[str, Any],
+    following: dict[str, Any] | None,
+    units: dict[str, dict[str, Any]],
+    seconds: dict[str, float],
+    speakers: set[str],
+) -> str | None:
+    """The speaker of a shot that may be merged into an exchange, or None when it may not: a
+    plain dialogue shot (no cut-in, no exchange, no continuity) with exactly one short line from
+    a speaker who is on screen, and not followed by a shot that carries straight on from it.
+    """
+    if shot["type"] != "dialogue" or shot["rapid_exchange"] or shot["continues_previous"]:
+        return None
+    if following is not None and following["continues_previous"]:
+        return None
+    if len(shot["speech_unit_ids"]) != 1:
+        return None
+    unit_id = shot["speech_unit_ids"][0]
+    unit = units[unit_id]
+    length = seconds.get(unit_id)
+    if unit["kind"] != "dialogue" or length is None or length > SHORT_LINE_MAX_S:
+        return None
+    speaker = unit.get("speaker_id")
+    return speaker if speaker in speakers else None
+
+
+def _chunk_sizes(count: int) -> list[int]:
+    """How a run of `count` (2 or more) short lines is cut into exchanges of 2 or 3 lines, with
+    no lone line: 2, 3, 2+2, 3+2, 3+3, 3+2+2, ...
+    """
+    sizes: list[int] = []
+    left = count
+    while left:
+        size = left if left <= EXCHANGE_MAX_LINES else 2 if left == 4 else 3
+        sizes.append(size)
+        left -= size
+    return sizes
+
+
+def _merged_shot(
+    chunk: list[dict[str, Any]],
+    seconds: dict[str, float],
+    target_min_seconds: float,
+    settle_seconds: float,
+    warnings: list[str] | None,
+) -> dict[str, Any]:
+    """One rapid-exchange shot standing for the shots of `chunk`. The model's words are kept:
+    the description is the descriptions joined. Its id is set by the caller.
+    """
+    events: list[str] = []
+    for shot in chunk:
+        events += [item for item in shot["source_event_ids"] if item not in events]
+    speech = sum(seconds[shot["speech_unit_ids"][0]] for shot in chunk)
+    length = max(float(target_min_seconds), speech + settle_seconds)
+    place = chunk[0].get("place")
+    description = _one_line(" ".join(shot["description"] for shot in chunk))
+    return {
+        "source_event_ids": events,
+        "speech_unit_ids": [shot["speech_unit_ids"][0] for shot in chunk],
+        "type": "dialogue",
+        "target_duration": round(length, _DURATION_DECIMALS),
+        "continues_previous": False,
+        "rapid_exchange": True,
+        **({"place": place} if place is not None else {}),
+        "description": fit_text(
+            description, "shots[].description", DESCRIPTION_MAX_CHARS, warnings
+        ),
+    }
+
+
+def merge_exchanges(
+    content: dict[str, Any],
+    units: list[dict[str, Any]],
+    unit_seconds: dict[str, float],
+    staging: dict[str, Any] | None,
+    target_min_seconds: float,
+    events: list[dict[str, Any]],
+    warnings: list[str] | None = None,
+) -> tuple[dict[str, Any], int]:
+    """SCN-008 (4B): `content` (as `check_answer` returns it) with runs of short lines between
+    the same two people turned into rapid exchanges. Returns `(content, exchanges made)`.
+
+    A run is shots in a row that each carry one dialogue line of at most `SHORT_LINE_MAX_S`
+    seconds, from two speakers taking turns, who are placed in the scene and neither only heard
+    nor arriving or leaving, in the same place. A run is cut into exchanges of two or three
+    lines (`_chunk_sizes`), and a group of lines with more than `EXCHANGE_SPEECH_MAX_S` seconds
+    of speech is left as it is. `unit_seconds` is each unit's recorded length, `events` the
+    scene's stored events, `target_min_seconds` the shortest planned shot. Nothing is
+    merged with no `staging` (who is on screen is then unknown). The merged plan is checked like
+    an answer; if that fails, `content` is returned as it came with 0, so a merge never loses or
+    reorders an event.
+
+    Only a model's answer is merged: a plan a person saved is never changed.
+    """
+    if staging is None:
+        return content, 0
+    speakers = _staged_speakers(staging)
+    by_id = {unit["id"]: unit for unit in units}
+    shots = content["shots"]
+
+    # Group the shots into runs of candidate positions.
+    groups: list[list[int]] = []
+    run: list[int] = []
+    run_speakers: list[str] = []
+
+    def close_run() -> None:
+        if len(run) >= EXCHANGE_MIN_LINES:
+            groups.append(list(run))
+        run.clear()
+        run_speakers.clear()
+
+    for position, shot in enumerate(shots):
+        following = shots[position + 1] if position + 1 < len(shots) else None
+        speaker = _short_line_speaker(shot, following, by_id, unit_seconds, speakers)
+        if speaker is None:
+            close_run()
+            continue
+        fits_run = (
+            bool(run)
+            and shot.get("place") == shots[run[0]].get("place")
+            and speaker != run_speakers[-1]
+            and (len(set(run_speakers)) < 2 or speaker in run_speakers)
+        )
+        if not fits_run:
+            close_run()
+        run.append(position)
+        run_speakers.append(speaker)
+    close_run()
+
+    # Cut each run into exchanges of 2 or 3 lines; a chunk with too much speech stays single.
+    merged_at: dict[int, list[int]] = {}
+    for positions in groups:
+        start = 0
+        for size in _chunk_sizes(len(positions)):
+            chunk = positions[start : start + size]
+            start += size
+            speech = sum(unit_seconds[shots[item]["speech_unit_ids"][0]] for item in chunk)
+            if speech <= EXCHANGE_SPEECH_MAX_S:
+                merged_at[chunk[0]] = chunk
+    if not merged_at:
+        return content, 0
+
+    new_warnings: list[str] = []
+    rebuilt: list[dict[str, Any]] = []
+    position = 0
+    while position < len(shots):
+        chunk = merged_at.get(position)
+        if chunk is None:
+            rebuilt.append(shots[position])
+            position += 1
+            continue
+        rebuilt.append(
+            _merged_shot(
+                [shots[item] for item in chunk],
+                unit_seconds,
+                target_min_seconds,
+                scene_timeline.DIALOGUE_SETTLE_S,
+                new_warnings,
+            )
+        )
+        position += len(chunk)
+
+    # The same checks as a model's answer: events all shown in order, lines carried, exchanges
+    # well formed. Anything wrong leaves the plan as the model made it.
+    checkable = [{k: v for k, v in shot.items() if k not in ("id", "scene_id")} for shot in rebuilt]
+    order = {event["id"]: index for index, event in enumerate(events)}
+    try:
+        _check_event_cover(
+            [
+                _event_span(shot["source_event_ids"], order, number)
+                for number, shot in enumerate(checkable, start=1)
+            ],
+            len(events),
+        )
+        _check_speech_placement(checkable, units, [event["id"] for event in events])
+        _check_exchanges(checkable, units)
+        _check_places(checkable)
+    except ValueError:
+        return content, 0
+
+    if warnings is not None:
+        warnings += new_warnings
+    scene_id = content["scene_id"]
+    numbered = [
+        {"id": f"shot_{number}", "scene_id": scene_id, **shot}
+        for number, shot in enumerate(checkable, start=1)
+    ]
+    return {**content, "shots": numbered}, len(merged_at)
 
 
 def total_seconds(shots: list[dict[str, Any]]) -> float:

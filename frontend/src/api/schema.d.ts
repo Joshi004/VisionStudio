@@ -65,6 +65,27 @@ export interface paths {
         patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
     };
+    "/api/projects/{project_id}/graphic-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Graphic Suggestions
+         * @description Replaces the words of the story marked as a suggested graphic. Only for an explainer with
+         *     a continuous voice and graphics on. A suggestion is a hint: the shot planner may decline it.
+         */
+        put: operations["set_graphic_suggestions_api_projects__project_id__graphic_suggestions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/story-bible/run": {
         parameters: {
             query?: never;
@@ -396,6 +417,201 @@ export interface paths {
         get: operations["get_callout_plan_version_api_projects__project_id__callout_plan_versions__version__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-theme/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Graphic Theme
+         * @description Starts the job that writes the graphics theme. If one is already waiting or running for
+         *     the project, its id is returned and no second job is made.
+         */
+        post: operations["run_graphic_theme_api_projects__project_id__graphic_theme_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-theme": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Graphic Theme */
+        get: operations["get_graphic_theme_api_projects__project_id__graphic_theme_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-theme/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Graphic Theme Version */
+        get: operations["get_graphic_theme_version_api_projects__project_id__graphic_theme_versions__version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-briefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Graphic Briefs */
+        get: operations["get_graphic_briefs_api_projects__project_id__graphic_briefs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphic-briefs/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Graphic Brief
+         * @description Starts the job that writes the brief of one graphic shot. If the shot already has a job
+         *     waiting or running, its id is returned and no second job is made.
+         */
+        post: operations["run_graphic_brief_api_projects__project_id__graphic_briefs__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/thumbnails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Thumbnails */
+        get: operations["get_thumbnails_api_projects__project_id__thumbnails_get"];
+        put?: never;
+        /**
+         * Make Thumbnails
+         * @description Starts one picture for each chosen concept of a version.
+         */
+        post: operations["make_thumbnails_api_projects__project_id__thumbnails_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/thumbnail-concepts/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Thumbnail Concepts
+         * @description Starts the job that writes the four thumbnail concepts. If one is already waiting or
+         *     running for the project, its id is returned and no second job is made.
+         */
+        post: operations["run_thumbnail_concepts_api_projects__project_id__thumbnail_concepts_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/thumbnail-concepts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Thumbnail Concepts
+         * @description Saves the owner's edit of the four concepts as the next version.
+         */
+        put: operations["save_thumbnail_concepts_api_projects__project_id__thumbnail_concepts_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/thumbnails/{thumbnail_id}/headline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change Headline
+         * @description Changes a headline and draws the picture again. No GPU work.
+         */
+        put: operations["change_headline_api_projects__project_id__thumbnails__thumbnail_id__headline_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/thumbnails/{thumbnail_id}/choose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Choose Thumbnail
+         * @description Makes a finished thumbnail the project's chosen one (`chosen` false clears the choice).
+         */
+        post: operations["choose_thumbnail_api_projects__project_id__thumbnails__thumbnail_id__choose_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2052,6 +2268,270 @@ export interface paths {
         patch: operations["update_trial_api_lab_music_trials__case_id__patch"];
         trace?: never;
     };
+    "/api/lab/graphics/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description The newest runs first. Pass the last id you have as `before_id` for the next page.
+         */
+        get: operations["list_runs_api_lab_graphics_runs_get"];
+        put?: never;
+        /**
+         * Create Run
+         * @description Makes a run from a line (1 to 300 characters), an orientation and, optionally, a saved
+         *     voice. No model is called. With a voice, its speech starts now (a GPU job).
+         */
+        post: operations["create_run_api_lab_graphics_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description One run with its brief and, for each of the four engines, its renders.
+         */
+        get: operations["get_run_api_lab_graphics_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/renders/{render_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Render
+         * @description Records the verdict and/or the note of a render. Only the fields in the body are changed.
+         */
+        patch: operations["update_render_api_lab_graphics_renders__render_id__patch"];
+        trace?: never;
+    };
+    "/api/lab/graphics/runs/{run_id}/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Brief
+         * @description Starts the paid call that writes the run's brief. Refused (409) while it is being written
+         *     or is written, and (422) for a line whose speech is longer than 15 s, before any call.
+         */
+        post: operations["write_brief_api_lab_graphics_runs__run_id__brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/runs/{run_id}/make-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make All
+         * @description Writes the brief, then starts every engine that is built and not retired. With the brief
+         *     already written, it only starts those engines that have no render. An engine that is not
+         *     built, and the retired template engines (EXG-008), are skipped.
+         */
+        post: operations["make_all_api_lab_graphics_runs__run_id__make_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/runs/{run_id}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Again
+         * @description Makes a new run with the same line and orientation, and starts its brief. The run this
+         *     was asked on is not changed. The answer is the new run.
+         */
+        post: operations["ask_again_api_lab_graphics_runs__run_id__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/runs/{run_id}/engines/{engine}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Engine Again
+         * @description A paid call: asks the model again for one engine of the run, with the same brief, and adds
+         *     a new render (the next attempt) beside the earlier ones. 409 while the engine is still
+         *     working, when it is not built or is retired (the template engines, EXG-008), or when the
+         *     brief is not written. The answer is the run.
+         */
+        post: operations["ask_engine_again_api_lab_graphics_runs__run_id__engines__engine__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/renders/{render_id}/render-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render Again
+         * @description Free, no model: renders the same input again as a new attempt (`repeat_of` names this
+         *     render) and compares the frames of the two videos (`metrics.repeat`). 409 when the render has
+         *     no video yet, its engine is still working or its engine is retired (EXG-008). The answer is
+         *     the run.
+         */
+        post: operations["render_again_api_lab_graphics_renders__render_id__render_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/test-cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Render Test Card
+         * @description Renders the test card at an orientation and a length (72 to 360 frames) in the motion
+         *     service. Refused (409) while another test card is being rendered. Nothing is paid for.
+         */
+        post: operations["render_test_card_api_lab_graphics_test_cards_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/test-cards/newest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Newest Test Card
+         * @description The newest test card job and the video of the newest one that succeeded.
+         */
+        get: operations["get_newest_test_card_api_lab_graphics_test_cards_newest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/trials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trials
+         * @description The excerpts of Appendix A, what a trial costs (with and without a voice) and the trial
+         *     sets made so far, newest first. Nothing is started.
+         */
+        get: operations["get_trials_api_lab_graphics_trials_get"];
+        put?: never;
+        /**
+         * Start Trial
+         * @description A paid action: makes one run for each of the ten excerpts and starts **Make all** on each
+         *     (with a voice, as soon as each voice is timed). The call counts are shown by `GET .../trials`
+         *     and confirmed on the page first. 409 while the newest set is still being made.
+         */
+        post: operations["start_trial_api_lab_graphics_trials_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/graphics/trials/{set_no}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trial Summary
+         * @description The summary of one trial set: the counts and medians of each engine, and each run's
+         *     outcome on each engine.
+         */
+        get: operations["get_trial_summary_api_lab_graphics_trials__set_no__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lab/characters": {
         parameters: {
             query?: never;
@@ -2159,6 +2639,102 @@ export interface paths {
         get: operations["list_named_looks_api_lab_characters__character_id__named_looks_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/characters/{character_id}/outfits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Outfits
+         * @description The character's outfits: its default outfit first, then every saved outfit that is not
+         *     deleted, oldest first. Each says which project made it, which projects use it, and where
+         *     its pictures stand.
+         */
+        get: operations["list_outfits_api_lab_characters__character_id__outfits_get"];
+        put?: never;
+        /**
+         * Create Outfit
+         * @description Saves a new outfit. Its pictures are made on request (`POST /lab/outfits/{id}/pictures`).
+         */
+        post: operations["create_outfit_api_lab_characters__character_id__outfits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/outfits/{outfit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Outfit
+         * @description Deletes an outfit from the lists. No project changes: its pictures and every version of
+         *     the character that froze them stay, so a story that used it keeps it.
+         */
+        delete: operations["delete_outfit_api_lab_outfits__outfit_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit Outfit
+         * @description Changes an outfit's name, note or description (a blank note clears it). No picture and no
+         *     project changes: a new description only makes the pictures out of date.
+         */
+        patch: operations["edit_outfit_api_lab_outfits__outfit_id__patch"];
+        trace?: never;
+    };
+    "/api/lab/outfits/{outfit_id}/pictures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make Outfit Pictures
+         * @description Makes the outfit's pictures (or makes them again from its description now): an edit of
+         *     the front picture of the character's current look, then the other four angles. The
+         *     pictures that exist stay until the new ones are ready.
+         */
+        post: operations["make_outfit_pictures_api_lab_outfits__outfit_id__pictures_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/outfits/{outfit_id}/make-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make Outfit Default
+         * @description Makes the outfit the character's default: its text becomes the profile outfit and its
+         *     pictures the current look. The pictures that were the default are kept as a saved outfit.
+         *     No project's pin moves. Answers with the character's outfits.
+         */
+        post: operations["make_outfit_default_api_lab_outfits__outfit_id__make_default_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2369,6 +2945,28 @@ export interface paths {
          * @description Starts the job that writes a short line to read aloud while auditioning a voice.
          */
         post: operations["start_audition_line_api_lab_characters__character_id__voice_audition_line_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lab/photos/{lab_image_id}/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe Photo
+         * @description Starts the job that reads a photo (one uploaded to the Image lab) with the vision model
+         *     and writes the text of a new character or of a new outfit. Each click is a paid call, so
+         *     none is merged into an earlier one. Follow the job; its `output.fields` holds the text.
+         */
+        post: operations["describe_photo_api_lab_photos__lab_image_id__describe_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3657,6 +4255,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/graphics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Shot Graphics */
+        get: operations["get_shot_graphics_api_projects__project_id__graphics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Shot Graphics
+         * @description Makes what is missing for one graphic shot. A version that has a current video, or that
+         *     failed outright, is left alone (a shot that has everything starts no job). A shot whose
+         *     graphics are being made is refused with 422.
+         */
+        post: operations["run_shot_graphics_api_projects__project_id__graphics__scene_id___shot_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/{engine}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Shot Graphic Again
+         * @description A paid model call: makes one version again as a new attempt, from the same brief.
+         */
+        post: operations["ask_shot_graphic_again_api_projects__project_id__graphics__scene_id___shot_id___engine__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/graphics/{scene_id}/{shot_id}/choice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Shot Graphic Choice
+         * @description Chooses the version the video uses for a shot, or `null` for the rule (the generated
+         *     component, and the blocks only when it failed outright). A version needs a current video.
+         *     A new brief puts the shot back on the rule.
+         */
+        put: operations["set_shot_graphic_choice_api_projects__project_id__graphics__scene_id___shot_id__choice_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-plans": {
         parameters: {
             query?: never;
@@ -4240,6 +4919,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/shot-takes/rescore-dialogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rescore Dialogue
+         * @description Judges every failed dialogue check of the project again from the words it recorded as
+         *     heard, with the current matching rules (SCN-001). Nothing is transcribed, no clip is made and
+         *     no job is queued. A shot with no selected take gets its newest take that passes now.
+         */
+        post: operations["rescore_dialogue_api_projects__project_id__shot_takes_rescore_dialogue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/check-silent-speech": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Silent Speech
+         * @description Queues a speech check for each selected take of a shot with no dialogue that was made
+         *     before the check existed, in one scene or in the whole project (SCN-009). Each is a short
+         *     GPU transcription and starts only from this call. The result is a report: the take stays
+         *     selected and no retry is queued. 422 when no take needs it.
+         */
+        post: operations["check_silent_speech_api_projects__project_id__shot_takes_check_silent_speech_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/shot-takes/run": {
         parameters: {
             query?: never;
@@ -4277,6 +5001,49 @@ export interface paths {
          */
         post: operations["run_scene_api_projects__project_id__shot_takes__scene_id__run_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/{scene_id}/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Scene
+         * @description Pushes one scene to the front of the GPU server's queue (SCN-002): its clips are sent
+         *     with the most urgent priority, and the ones already waiting on the server are changed. A
+         *     scene pushed before goes back to its place in story order. Starts no generation.
+         */
+        post: operations["push_scene_api_projects__project_id__shot_takes__scene_id__push_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/shot-takes/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Stop Push
+         * @description Ends the push: the scene's clips go back to their place in story order. Does nothing
+         *     when no scene is pushed.
+         */
+        delete: operations["stop_push_api_projects__project_id__shot_takes_push_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4387,6 +5154,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/story-renders/{render_number}/captions.ytt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Captions Ytt
+         * @description The render's caption track as a YouTube caption file, written now from the frozen track
+         *     (nothing is stored). It has the words and timing of the burned-in captions.
+         */
+        get: operations["get_captions_ytt_api_projects__project_id__story_renders__render_number__captions_ytt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-renders/{render_number}/captions.srt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Captions Srt
+         * @description The render's caption track as a plain SRT file, written now from the frozen track (nothing
+         *     is stored). Its lines are sentence-sized, in the script's own casing and punctuation.
+         */
+        get: operations["get_captions_srt_api_projects__project_id__story_renders__render_number__captions_srt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-renders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scene Renders */
+        get: operations["get_scene_renders_api_projects__project_id__scene_renders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/scene-renders/{scene_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scene Render
+         * @description Starts the job that renders one scene. If a render of that scene is already waiting or
+         *     running, that job's id is returned and no second render is made.
+         */
+        post: operations["run_scene_render_api_projects__project_id__scene_renders__scene_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/story-pipeline": {
         parameters: {
             query?: never;
@@ -4394,7 +5241,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Story Pipeline */
+        /**
+         * Get Story Pipeline
+         * @description The panel's state. `scenes` and `remake_from` are what a run would be started with, so
+         *     `confirmations` say what that run would replace (SCN-004).
+         */
         get: operations["get_story_pipeline_api_projects__project_id__story_pipeline_get"];
         put?: never;
         post?: never;
@@ -4440,6 +5291,28 @@ export interface paths {
          *     the run waits at the same review point once more; the others count as approved.
          */
         post: operations["continue_story_pipeline_api_projects__project_id__story_pipeline_continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-pipeline/scene-review/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer Scene Review
+         * @description Answers the review one scene waits at (SCN-010). The run goes on for the other scenes.
+         *     The targets in `rejected` are made again and the scene waits at the same review point once
+         *     more; with none, the scene is approved and goes on. 422 when the scene is not waiting.
+         */
+        post: operations["answer_scene_review_api_projects__project_id__story_pipeline_scene_review__scene_id__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4928,6 +5801,8 @@ export interface components {
             paused_at: string | null;
             /** Review At */
             review_at: string | null;
+            /** Scenes */
+            scenes: string[];
         };
         /** BoardStepOut */
         BoardStepOut: {
@@ -4990,6 +5865,111 @@ export interface components {
             join: "crossfade" | "under_cover" | "through_silence" | "hard_cut";
             /** Reason */
             reason: string;
+        };
+        /** BriefBeatOut */
+        BriefBeatOut: {
+            /** Id */
+            id: string;
+            /** Phrase */
+            phrase: string;
+            /** Shows */
+            shows: string;
+            /** Refs */
+            refs: string[];
+            /** At S */
+            at_s: number | null;
+        };
+        /** BriefContent */
+        BriefContent: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "kpi" | "comparison" | "trend" | "process" | "list" | "statement" | "concept";
+            /** Intent */
+            intent: string;
+            /** Visual Brief */
+            visual_brief: string;
+            /** Facts */
+            facts: components["schemas"]["BriefFactOut"][];
+            /** Derived */
+            derived: components["schemas"]["BriefDerivedOut"][];
+            /** Beats */
+            beats: components["schemas"]["BriefBeatOut"][];
+        };
+        /** BriefDerivedOut */
+        BriefDerivedOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "pct_change" | "difference" | "ratio" | "sum";
+            /** Of */
+            of: string[];
+        };
+        /** BriefFactOut */
+        BriefFactOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "usd" | "percent" | "points" | "multiple" | "count" | "none";
+            /**
+             * Scale
+             * @enum {string}
+             */
+            scale: "none" | "thousand" | "million" | "billion" | "trillion";
+            /** Said As */
+            said_as: string;
+        };
+        /**
+         * BriefJobOut
+         * @description The newest `write_shot_graphic_brief` job of the shot, whatever its status.
+         */
+        BriefJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** BriefOut */
+        BriefOut: {
+            /** Id */
+            id: number;
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
+            content: components["schemas"]["BriefContent"];
         };
         /** CalloutAccentOut */
         CalloutAccentOut: {
@@ -5225,6 +6205,20 @@ export interface components {
             mode: "as_is" | "rewrite_text";
             /** Archived */
             archived: boolean;
+        };
+        /**
+         * CastOptionOut
+         * @description A person who may appear, with the looks the owner may give them.
+         */
+        CastOptionOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** About */
+            about: string;
+            /** Looks */
+            looks: components["schemas"]["ThumbnailLookOut"][];
         };
         /** CastOut */
         CastOut: {
@@ -5540,6 +6534,22 @@ export interface components {
             /** Next Before Id */
             next_before_id: number | null;
         };
+        /**
+         * CheckSilentSpeechIn
+         * @description SCN-009: the scene to check, or none for the whole project.
+         */
+        CheckSilentSpeechIn: {
+            /** Scene Id */
+            scene_id?: string | null;
+        };
+        /**
+         * CheckSilentSpeechOut
+         * @description The speech checks queued for older silent takes. Each is a short GPU transcription.
+         */
+        CheckSilentSpeechOut: {
+            /** Job Ids */
+            job_ids: number[];
+        };
         /** ChoiceOut */
         ChoiceOut: {
             /** Direction Id */
@@ -5561,6 +6571,108 @@ export interface components {
         ChooseReferenceIn: {
             /** Candidate Id */
             candidate_id: number;
+        };
+        /**
+         * ConceptIn
+         * @description One concept as the owner saves it. The service checks it again with the model's rules.
+         */
+        ConceptIn: {
+            /** Label */
+            label: string;
+            /** Idea */
+            idea: string;
+            /** Composition */
+            composition: string;
+            /** Background */
+            background: string;
+            /** Mood */
+            mood: string;
+            /** Headline */
+            headline: string;
+            /**
+             * Text Area
+             * @enum {string}
+             */
+            text_area: "left" | "right" | "top" | "bottom" | "top_left" | "top_right" | "bottom_left" | "bottom_right";
+            /** People */
+            people: components["schemas"]["PersonIn"][];
+            /** People Reason */
+            people_reason: string;
+        };
+        /** ConceptOut */
+        ConceptOut: {
+            /** Label */
+            label: string;
+            /** Idea */
+            idea: string;
+            /** Composition */
+            composition: string;
+            /** Background */
+            background: string;
+            /** Mood */
+            mood: string;
+            /** Headline */
+            headline: string;
+            /**
+             * Text Area
+             * @enum {string}
+             */
+            text_area: "left" | "right" | "top" | "bottom" | "top_left" | "top_right" | "bottom_left" | "bottom_right";
+            /** People */
+            people: components["schemas"]["PersonOut"][];
+            /** People Reason */
+            people_reason: string;
+        };
+        /** ConceptsContent */
+        ConceptsContent: {
+            /** Concepts */
+            concepts: components["schemas"]["ConceptOut"][];
+        };
+        /** ConceptsIn */
+        ConceptsIn: {
+            /** Concepts */
+            concepts: components["schemas"]["ConceptIn"][];
+        };
+        /** ConceptsOut */
+        ConceptsOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
+            /** Id */
+            id: number;
+            content: components["schemas"]["ConceptsContent"];
+        };
+        /** ConceptsVersionOut */
+        ConceptsVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
         };
         /** ConnectionState */
         ConnectionState: {
@@ -5595,8 +6707,9 @@ export interface components {
         };
         /**
          * ContinuityMismatchOut
-         * @description A cut that does not line up. `before` and `after` are a shot id, `scene_start` or
-         *     `scene_end`. The problem belongs to the cut, not to either shot.
+         * @description A cut that does not line up. `before` and `after` are a shot id, `scene_start`,
+         *     `scene_end` or `previous_scene` (the last shot of the scene before, for a scene that
+         *     continues straight from it). The problem belongs to the cut, not to either shot.
          */
         ContinuityMismatchOut: {
             /** Id */
@@ -6928,6 +8041,845 @@ export interface components {
             /** Waiting Jobs */
             waiting_jobs: number;
         };
+        /** GraphicBeatOut */
+        GraphicBeatOut: {
+            /** Id */
+            id: string;
+            /** Phrase */
+            phrase: string;
+            /** Shows */
+            shows: string;
+            /** Refs */
+            refs: string[];
+        };
+        /** GraphicBoxOut */
+        GraphicBoxOut: {
+            /** Left */
+            left: number;
+            /** Top */
+            top: number;
+            /** Right */
+            right: number;
+            /** Bottom */
+            bottom: number;
+        };
+        /**
+         * GraphicBriefOut
+         * @description What the director decided (§4.3).
+         */
+        GraphicBriefOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "kpi" | "comparison" | "trend" | "process" | "list" | "statement" | "concept";
+            /** Intent */
+            intent: string;
+            /** Visual Brief */
+            visual_brief: string;
+            /** Facts */
+            facts: components["schemas"]["GraphicFactOut"][];
+            /** Derived */
+            derived: components["schemas"]["GraphicDerivedOut"][];
+            /** Beats */
+            beats: components["schemas"]["GraphicBeatOut"][];
+            theme: components["schemas"]["GraphicBriefThemeOut"];
+        };
+        /** GraphicBriefRun */
+        GraphicBriefRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** GraphicBriefRunIn */
+        GraphicBriefRunIn: {
+            /** Feedback */
+            feedback?: string | null;
+        };
+        /** GraphicBriefSceneOut */
+        GraphicBriefSceneOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Shots */
+            shots: components["schemas"]["GraphicShotOut"][];
+        };
+        /** GraphicBriefThemeOut */
+        GraphicBriefThemeOut: {
+            /** Palette */
+            palette: string;
+            /** Accent */
+            accent: string | null;
+            /** Background */
+            background: string;
+            /** Motion */
+            motion: string;
+            /** Mood */
+            mood: string;
+        };
+        /** GraphicBriefsState */
+        GraphicBriefsState: {
+            /** Scenes */
+            scenes: components["schemas"]["GraphicBriefSceneOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+        };
+        /**
+         * GraphicCallOut
+         * @description What the model call that wrote a render's input cost (every attempt of the job added up).
+         */
+        GraphicCallOut: {
+            /** Seconds */
+            seconds: number;
+            /** Attempts */
+            attempts: number;
+            /** Prompt Tokens */
+            prompt_tokens: number | null;
+            /** Completion Tokens */
+            completion_tokens: number | null;
+            /** Reasoning Tokens */
+            reasoning_tokens: number | null;
+        };
+        /**
+         * GraphicDerivedOut
+         * @description A value code works out from facts.
+         */
+        GraphicDerivedOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "pct_change" | "difference" | "ratio" | "sum";
+            /** Of */
+            of: string[];
+        };
+        /** GraphicEngineOut */
+        GraphicEngineOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "remotion_templates" | "python_templates" | "remotion_blocks" | "generated_component";
+            /** Label */
+            label: string;
+            /** Built */
+            built: boolean;
+            /** Renderer Built */
+            renderer_built: boolean;
+            /** Retired */
+            retired: boolean;
+            /** Renders */
+            renders: components["schemas"]["GraphicRenderOut"][];
+        };
+        /**
+         * GraphicFactOut
+         * @description A number the line says.
+         */
+        GraphicFactOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /** Unit */
+            unit: string;
+            /** Scale */
+            scale: string;
+            /** Said As */
+            said_as: string;
+        };
+        /** GraphicRenderOut */
+        GraphicRenderOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Run Id */
+            run_id: number;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "remotion_templates" | "python_templates" | "remotion_blocks" | "generated_component";
+            /** Attempt */
+            attempt: number;
+            /** Input */
+            input: unknown | null;
+            input_job: components["schemas"]["JobSummary"] | null;
+            input_call: components["schemas"]["GraphicCallOut"] | null;
+            /** Repeat Of */
+            repeat_of: number | null;
+            render_job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+            /** Metrics */
+            metrics: unknown | null;
+            /** Warnings */
+            warnings: unknown | null;
+            /** Verdict */
+            verdict: ("good" | "usable" | "bad") | null;
+            /** Note */
+            note: string | null;
+            /** Last Error */
+            last_error: string | null;
+        };
+        /**
+         * GraphicRenderUpdate
+         * @description Only the fields that are sent are changed; `null` clears one.
+         */
+        GraphicRenderUpdate: {
+            /** Verdict */
+            verdict?: ("good" | "usable" | "bad") | null;
+            /** Note */
+            note?: string | null;
+        };
+        /** GraphicResolvedBeatOut */
+        GraphicResolvedBeatOut: {
+            /** Frame */
+            frame: number;
+            /** Shows */
+            shows: string;
+        };
+        /**
+         * GraphicResolvedOut
+         * @description What code worked out from the brief, and what every engine is checked against (§4.4).
+         */
+        GraphicResolvedOut: {
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Fps */
+            fps: number;
+            /** Frames */
+            frames: number;
+            /** Timing Source */
+            timing_source: string;
+            /** Facts */
+            facts: {
+                [key: string]: components["schemas"]["GraphicResolvedValueOut"];
+            };
+            /** Derived */
+            derived: {
+                [key: string]: components["schemas"]["GraphicResolvedValueOut"];
+            };
+            /** Beats */
+            beats: {
+                [key: string]: components["schemas"]["GraphicResolvedBeatOut"];
+            };
+            theme: components["schemas"]["GraphicResolvedThemeOut"];
+            /** Fonts */
+            fonts: {
+                [key: string]: string;
+            };
+            safe_area: components["schemas"]["GraphicBoxOut"];
+            caption_zone: components["schemas"]["GraphicZoneOut"];
+            /** Notes */
+            notes: string[];
+        };
+        /** GraphicResolvedThemeOut */
+        GraphicResolvedThemeOut: {
+            /** Background */
+            background: string;
+            /** Surface */
+            surface: string;
+            /** Text */
+            text: string;
+            /** Muted */
+            muted: string;
+            /** Accent */
+            accent: string;
+            /** Positive */
+            positive: string;
+            /** Negative */
+            negative: string;
+            /** Number */
+            number: string;
+            /** Background Style */
+            background_style: string;
+            /** Motion */
+            motion: string;
+        };
+        /** GraphicResolvedValueOut */
+        GraphicResolvedValueOut: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /** Unit */
+            unit: string;
+            /** Display */
+            display: string;
+        };
+        /** GraphicRunCreate */
+        GraphicRunCreate: {
+            /** Line Text */
+            line_text: string;
+            /** Orientation */
+            orientation: string;
+            /** Voice Id */
+            voice_id?: number | null;
+        };
+        /** GraphicRunOut */
+        GraphicRunOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Line Text */
+            line_text: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Fps */
+            fps: number;
+            /** Voice Id */
+            voice_id: number | null;
+            /** Speech Run Id */
+            speech_run_id: number | null;
+            voice: components["schemas"]["GraphicVoiceOut"] | null;
+            /** Timing */
+            timing: unknown | null;
+            brief: components["schemas"]["GraphicBriefOut"] | null;
+            resolved: components["schemas"]["GraphicResolvedOut"] | null;
+            brief_job: components["schemas"]["JobSummary"] | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Engines */
+            engines: components["schemas"]["GraphicEngineOut"][];
+        };
+        /** GraphicRunSummaryOut */
+        GraphicRunSummaryOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Line Text */
+            line_text: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
+        };
+        /** GraphicShotOut */
+        GraphicShotOut: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Spoken Text */
+            spoken_text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /** Words Before */
+            words_before: string;
+            /** Words After */
+            words_after: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "writing" | "ready" | "failed" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /** Last Error */
+            last_error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            job: components["schemas"]["BriefJobOut"] | null;
+            brief: components["schemas"]["BriefOut"] | null;
+        };
+        /**
+         * GraphicSuggestionIn
+         * @description Words of the story the owner suggests a graphic for: `start` and `end` are character
+         *     positions in the story (`end` not included) and `text` is the story between them.
+         */
+        GraphicSuggestionIn: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+        };
+        /** GraphicSuggestionOut */
+        GraphicSuggestionOut: {
+            /** Id */
+            id: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
+        };
+        /**
+         * GraphicSuggestionResultOut
+         * @description What became of one graphic the owner suggested: it was followed when a graphic shot covers
+         *     some of its words, and `reason` is the planner's reason when it was not (None when it gave
+         *     none).
+         */
+        GraphicSuggestionResultOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Followed */
+            followed: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * GraphicSuggestionsSet
+         * @description The whole list of suggestions. Sent again, it replaces the one before.
+         */
+        GraphicSuggestionsSet: {
+            /** Suggestions */
+            suggestions: components["schemas"]["GraphicSuggestionIn"][];
+        };
+        /** GraphicTestCardCreate */
+        GraphicTestCardCreate: {
+            /** Orientation */
+            orientation: string;
+            /** Frames */
+            frames: number;
+        };
+        /** GraphicTestCardOut */
+        GraphicTestCardOut: {
+            job: components["schemas"]["JobSummary"] | null;
+            /** Orientation */
+            orientation: ("landscape" | "portrait") | null;
+            /** Frames */
+            frames: number | null;
+            result: components["schemas"]["GraphicTestCardResultOut"] | null;
+        };
+        /**
+         * GraphicTestCardResultOut
+         * @description A test card that was rendered and whose video is still stored.
+         */
+        GraphicTestCardResultOut: {
+            /** Job Id */
+            job_id: number;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Frames */
+            frames: number;
+            /** Url */
+            url: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Metrics */
+            metrics: unknown;
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * GraphicThemeColoursOut
+         * @description The colours the graphics are drawn with, from the palette and the accent.
+         */
+        GraphicThemeColoursOut: {
+            /** Background */
+            background: string;
+            /** Surface */
+            surface: string;
+            /** Text */
+            text: string;
+            /** Muted */
+            muted: string;
+            /** Accent */
+            accent: string;
+            /** Positive */
+            positive: string;
+            /** Negative */
+            negative: string;
+            /** Number */
+            number: string;
+        };
+        /** GraphicThemeContent */
+        GraphicThemeContent: {
+            theme: components["schemas"]["GraphicThemeLookOut"];
+            /** Reason */
+            reason: string;
+            /** Notes */
+            notes: string[];
+        };
+        /**
+         * GraphicThemeJobOut
+         * @description The newest `write_graphic_theme` job of the project, whatever its status.
+         */
+        GraphicThemeJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** GraphicThemeLookOut */
+        GraphicThemeLookOut: {
+            /**
+             * Palette
+             * @enum {string}
+             */
+            palette: "dark" | "light";
+            /** Accent */
+            accent: string;
+            /**
+             * Background
+             * @enum {string}
+             */
+            background: "solid" | "gradient" | "grid" | "glow";
+            /**
+             * Motion
+             * @enum {string}
+             */
+            motion: "snappy" | "smooth" | "calm";
+            /** Mood */
+            mood: string;
+        };
+        /** GraphicThemeOut */
+        GraphicThemeOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
+            /** Id */
+            id: number;
+            content: components["schemas"]["GraphicThemeContent"];
+            colours: components["schemas"]["GraphicThemeColoursOut"];
+        };
+        /** GraphicThemeRun */
+        GraphicThemeRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** GraphicThemeRunIn */
+        GraphicThemeRunIn: {
+            /** Feedback */
+            feedback?: string | null;
+        };
+        /** GraphicThemeState */
+        GraphicThemeState: {
+            latest: components["schemas"]["GraphicThemeOut"] | null;
+            /** Versions */
+            versions: components["schemas"]["GraphicThemeVersionOut"][];
+            job: components["schemas"]["GraphicThemeJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+        };
+        /** GraphicThemeVersionOut */
+        GraphicThemeVersionOut: {
+            /** Version */
+            version: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual";
+            /** Job Id */
+            job_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feedback */
+            feedback: string | null;
+        };
+        /**
+         * GraphicTrialCostOut
+         * @description What a trial will do, shown and confirmed before it starts.
+         */
+        GraphicTrialCostOut: {
+            /** Runs */
+            runs: number;
+            /** Paid Calls */
+            paid_calls: number;
+            /** Most Paid Calls */
+            most_paid_calls: number;
+            /** Speeches */
+            speeches: number;
+        };
+        /** GraphicTrialCreate */
+        GraphicTrialCreate: {
+            /** Voice Id */
+            voice_id?: number | null;
+            /**
+             * Orientation
+             * @default own
+             * @enum {string}
+             */
+            orientation: "own" | "landscape" | "portrait";
+        };
+        /**
+         * GraphicTrialEngineOut
+         * @description The counts of one engine over the set (§4.9). The three `of videos` counts are out of
+         *     `videos`; the repeat counts are over every Render again of the set.
+         */
+        GraphicTrialEngineOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "remotion_templates" | "python_templates" | "remotion_blocks" | "generated_component";
+            /** Label */
+            label: string;
+            /** Runs */
+            runs: number;
+            /** Videos */
+            videos: number;
+            /** No Fit */
+            no_fit: number;
+            /** Failed */
+            failed: number;
+            /** Working */
+            working: number;
+            /** Not Started */
+            not_started: number;
+            /** Checks Passed */
+            checks_passed: number;
+            /** No Layout Warning */
+            no_layout_warning: number;
+            /** Numbers Traced */
+            numbers_traced: number;
+            /** Median Render S */
+            median_render_s: number | null;
+            /** Median Tokens */
+            median_tokens: number | null;
+            /** Repeats Identical */
+            repeats_identical: number;
+            /** Repeats Differing */
+            repeats_differing: number;
+            /** Repeats Not Compared */
+            repeats_not_compared: number;
+            /** Verdict Good */
+            verdict_good: number;
+            /** Verdict Usable */
+            verdict_usable: number;
+            /** Verdict Bad */
+            verdict_bad: number;
+            /** Verdict None */
+            verdict_none: number;
+        };
+        /**
+         * GraphicTrialExcerptOut
+         * @description One line of Appendix A, with the orientation it runs in when the trial uses each excerpt's
+         *     own.
+         */
+        GraphicTrialExcerptOut: {
+            /** Key */
+            key: string;
+            /** Domain */
+            domain: string;
+            /** Text */
+            text: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /** Tests */
+            tests: string;
+        };
+        /**
+         * GraphicTrialOutcomeOut
+         * @description What became of one engine on one run: its newest render that is not a Render again.
+         */
+        GraphicTrialOutcomeOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "video" | "no_fit" | "failed" | "working" | "not_started";
+            /** Render Id */
+            render_id: number | null;
+            /** Attempt */
+            attempt: number | null;
+            /** Verdict */
+            verdict: ("good" | "usable" | "bad") | null;
+        };
+        /** GraphicTrialOverviewOut */
+        GraphicTrialOverviewOut: {
+            /** Excerpts */
+            excerpts: components["schemas"]["GraphicTrialExcerptOut"][];
+            cost: components["schemas"]["GraphicTrialCostOut"];
+            cost_with_voice: components["schemas"]["GraphicTrialCostOut"];
+            /** Sets */
+            sets: components["schemas"]["GraphicTrialSetOut"][];
+        };
+        /** GraphicTrialRunOut */
+        GraphicTrialRunOut: {
+            /** Run Id */
+            run_id: number;
+            /** Case */
+            case: string;
+            /** Domain */
+            domain: string;
+            /** Line Text */
+            line_text: string;
+            /**
+             * Orientation
+             * @enum {string}
+             */
+            orientation: "landscape" | "portrait";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "new" | "making_voice" | "voice_failed" | "writing_brief" | "brief_ready" | "brief_failed";
+            /** Last Error */
+            last_error: string | null;
+            /** Outcomes */
+            outcomes: {
+                [key: string]: components["schemas"]["GraphicTrialOutcomeOut"];
+            };
+        };
+        /** GraphicTrialSetOut */
+        GraphicTrialSetOut: {
+            /** Set No */
+            set_no: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Runs */
+            runs: number;
+        };
+        /** GraphicTrialStartedOut */
+        GraphicTrialStartedOut: {
+            /** Set No */
+            set_no: number;
+            /** Run Ids */
+            run_ids: number[];
+        };
+        /** GraphicTrialSummaryOut */
+        GraphicTrialSummaryOut: {
+            /** Set No */
+            set_no: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** With Voice */
+            with_voice: boolean;
+            /** Active */
+            active: boolean;
+            /** Engines */
+            engines: components["schemas"]["GraphicTrialEngineOut"][];
+            /** Runs */
+            runs: components["schemas"]["GraphicTrialRunOut"][];
+        };
+        /**
+         * GraphicVoiceOut
+         * @description The voice of a run (GFX-004): the speech and where the timing of its words stands.
+         */
+        GraphicVoiceOut: {
+            /** Voice Id */
+            voice_id: number | null;
+            /** Voice Name */
+            voice_name: string | null;
+            /** Speech Run Id */
+            speech_run_id: number;
+            /** Speech Url */
+            speech_url: string | null;
+            speech_job: components["schemas"]["JobSummary"] | null;
+            timing_job: components["schemas"]["JobSummary"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "speaking" | "timing" | "ready" | "failed";
+            /** Error */
+            error: string | null;
+            /** Timing Source */
+            timing_source: string | null;
+            /** Match Percent */
+            match_percent: number | null;
+            /** Threshold */
+            threshold: number | null;
+            /** Note */
+            note: string | null;
+        };
+        /** GraphicZoneOut */
+        GraphicZoneOut: {
+            /** Top */
+            top: number;
+            /** Bottom */
+            bottom: number;
+        };
         /** H3ReferenceRunCreate */
         H3ReferenceRunCreate: {
             /** Prompt */
@@ -6979,6 +8931,21 @@ export interface components {
             /** Description */
             description: string;
             at: components["schemas"]["AnchorOut"];
+        };
+        /** IdeasState */
+        IdeasState: {
+            latest: components["schemas"]["ConceptsOut"] | null;
+            /** Versions */
+            versions: components["schemas"]["ConceptsVersionOut"][];
+            job: components["schemas"]["ThumbnailJobOut"] | null;
+            /** Out Of Date */
+            out_of_date: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Cast */
+            cast: components["schemas"]["CastOptionOut"][];
         };
         /**
          * ImageEntryOut
@@ -7055,6 +9022,23 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** InnerPlaceIn */
+        InnerPlaceIn: {
+            /** Environment Id */
+            environment_id: string;
+            /** Relation */
+            relation: string;
+        };
+        /**
+         * InnerPlaceOut
+         * @description A place inside the scene's main place (SCN-007).
+         */
+        InnerPlaceOut: {
+            /** Environment Id */
+            environment_id: string;
+            /** Relation */
+            relation: string;
+        };
         /**
          * ItemOut
          * @description One thing that is generated: the cue itself, or a hit it asked for.
@@ -7128,7 +9112,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts";
             /**
              * Status
              * @enum {string}
@@ -7163,6 +9147,10 @@ export interface components {
             upload?: components["schemas"]["UploadProgressOut"] | null;
             download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
+            /** Server Priority */
+            server_priority?: number | null;
+            /** Queue State */
+            queue_state?: string | null;
             /** Provider Job Id */
             provider_job_id: string | null;
             /** Input */
@@ -7207,7 +9195,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts";
             /**
              * Kind
              * @enum {string}
@@ -7246,7 +9234,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts";
             /**
              * Status
              * @enum {string}
@@ -7281,6 +9269,10 @@ export interface components {
             upload?: components["schemas"]["UploadProgressOut"] | null;
             download?: components["schemas"]["DownloadProgressOut"] | null;
             connection?: components["schemas"]["JobConnectionOut"] | null;
+            /** Server Priority */
+            server_priority?: number | null;
+            /** Queue State */
+            queue_state?: string | null;
             /**
              * Stage
              * @description The step the job is in, worked out from `status` and `phase` (`phases.stage_of`).
@@ -7589,13 +9581,15 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test";
+            kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test" | "graphic_run";
             /** Sample Id */
             sample_id: number;
             /** Label */
             label: string;
             /** Used By */
             used_by: string[];
+            /** Also Deletes */
+            also_deletes: string[];
             /** Blocked Reason */
             blocked_reason: string | null;
         };
@@ -7818,6 +9812,19 @@ export interface components {
         LookFromPictureIn: {
             /** Image Id */
             image_id: number;
+        };
+        /**
+         * LookMismatchOut
+         * @description SCN-012: a character seen on both sides of a scene boundary whose resolved look is not the
+         *     same. A look is its id, or `default`.
+         */
+        LookMismatchOut: {
+            /** Character Id */
+            character_id: string;
+            /** Previous Look */
+            previous_look: string;
+            /** Look */
+            look: string;
         };
         /** LookOut */
         LookOut: {
@@ -8055,6 +10062,13 @@ export interface components {
              * @enum {string}
              */
             kind: "younger_self" | "older_self" | "twin";
+        };
+        /** MakeThumbnailsIn */
+        MakeThumbnailsIn: {
+            /** Concept Version */
+            concept_version: number;
+            /** Indexes */
+            indexes: number[];
         };
         /** MapIn */
         MapIn: {
@@ -9309,6 +11323,77 @@ export interface components {
             /** Discovery Id */
             discovery_id: string;
         };
+        /** OutfitIn */
+        OutfitIn: {
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Description */
+            description: string;
+        };
+        /**
+         * OutfitOut
+         * @description One outfit of a character. The first of the list is the character's default outfit: it
+         *     has no `id`, cannot be edited here or deleted, and its pictures are the current look's.
+         */
+        OutfitOut: {
+            /** Id */
+            id: number | null;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            /** Description */
+            description: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "manual" | "default";
+            /** Is Default */
+            is_default: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            made_for: components["schemas"]["OutfitProjectOut"] | null;
+            /** Used By */
+            used_by: components["schemas"]["OutfitProjectOut"][];
+            /**
+             * Pictures Status
+             * @enum {string}
+             */
+            pictures_status: "none" | "in_progress" | "ready" | "failed";
+            /** Pictures Out Of Date */
+            pictures_out_of_date: boolean;
+            look: components["schemas"]["LookOut"] | null;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /**
+             * Is Default Now
+             * @default false
+             */
+            is_default_now: boolean;
+        };
+        /** OutfitPatch */
+        OutfitPatch: {
+            /** Name */
+            name?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Description */
+            description?: string | null;
+        };
+        /** OutfitProjectOut */
+        OutfitProjectOut: {
+            /** Project Id */
+            project_id: number;
+            /** Project Name */
+            project_name: string;
+        };
         /** OutsideWindowOut */
         OutsideWindowOut: {
             /** Window Start S */
@@ -9362,6 +11447,36 @@ export interface components {
              */
             fetched_at: string;
             diff: components["schemas"]["ContractDiffOut"];
+        };
+        /** PersonIn */
+        PersonIn: {
+            /** Id */
+            id: string;
+            /** Look */
+            look: string;
+            /** Expression */
+            expression: string;
+            /** Pose */
+            pose: string;
+        };
+        /** PersonOut */
+        PersonOut: {
+            /** Id */
+            id: string;
+            /** Look */
+            look: string;
+            /** Expression */
+            expression: string;
+            /** Pose */
+            pose: string;
+        };
+        /** PhotoDescribeIn */
+        PhotoDescribeIn: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "character" | "outfit";
         };
         /**
          * PictureImageOut
@@ -9439,6 +11554,35 @@ export interface components {
             /** Rejected */
             rejected?: components["schemas"]["RejectedTarget"][];
         };
+        /**
+         * PipelineLaneOut
+         * @description Where one scene stands in the scene lanes of a run (SCN-010).
+         */
+        PipelineLaneOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "waiting" | "going" | "review" | "problem" | "done";
+            /** Step */
+            step: string | null;
+            /** Step Label */
+            step_label: string | null;
+            /** Review */
+            review: string | null;
+            /** Review Label */
+            review_label: string | null;
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+        };
         /** PipelineProblemOut */
         PipelineProblemOut: {
             /** Step */
@@ -9467,6 +11611,10 @@ export interface components {
              * @enum {string}
              */
             scope: "all" | "out_of_date";
+            /** Scenes */
+            scenes?: string[];
+            /** Remake From */
+            remake_from?: string | null;
         };
         /** PipelineRunOut */
         PipelineRunOut: {
@@ -9509,13 +11657,31 @@ export interface components {
              * @enum {string}
              */
             scope: "all" | "out_of_date";
+            /** Scenes */
+            scenes: components["schemas"]["PipelineSceneOut"][];
+            /** Remake From */
+            remake_from: string | null;
             /** Jobs Made */
             jobs_made: number;
+            /** Lanes */
+            lanes: components["schemas"]["PipelineLaneOut"][];
         };
         /** PipelineRunStartedOut */
         PipelineRunStartedOut: {
             /** Job Id */
             job_id: number;
+        };
+        /**
+         * PipelineSceneOut
+         * @description A scene a run is limited to.
+         */
+        PipelineSceneOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
         };
         /**
          * PipelineStepOut
@@ -9920,11 +12086,32 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts";
             /** Running */
             running: number;
             /** Queued */
             queued: number;
+        };
+        /** PresenceIn */
+        PresenceIn: {
+            /** Character Id */
+            character_id: string;
+            /** Arrives After Event Id */
+            arrives_after_event_id?: string | null;
+            /** Leaves After Event Id */
+            leaves_after_event_id?: string | null;
+        };
+        /**
+         * PresenceOut
+         * @description A placed character who arrives or leaves during the scene (SCN-006).
+         */
+        PresenceOut: {
+            /** Character Id */
+            character_id: string;
+            /** Arrives After Event Id */
+            arrives_after_event_id: string | null;
+            /** Leaves After Event Id */
+            leaves_after_event_id: string | null;
         };
         /** ProfileRef */
         ProfileRef: {
@@ -9959,10 +12146,11 @@ export interface components {
             /** Set Environment Id */
             set_environment_id?: number | null;
             /**
-             * Captions
-             * @default true
+             * Caption Mode
+             * @default burned
+             * @enum {string}
              */
-            captions: boolean;
+            caption_mode: "burned" | "ytt";
             /**
              * Callouts
              * @default true
@@ -9972,6 +12160,14 @@ export interface components {
             voice_track?: ("lines" | "continuous") | null;
             /** Presenter Delivery */
             presenter_delivery?: string | null;
+            /** Graphics */
+            graphics?: boolean | null;
+            /** Presenter Staging */
+            presenter_staging?: string | null;
+            /** Presenter Outfit */
+            presenter_outfit?: string | null;
+            /** Presenter Named Look Id */
+            presenter_named_look_id?: number | null;
         };
         /**
          * ProjectDeleteIn
@@ -10050,8 +12246,11 @@ export interface components {
             music_enabled: boolean;
             /** Ambience Enabled */
             ambience_enabled: boolean;
-            /** Captions */
-            captions: boolean;
+            /**
+             * Caption Mode
+             * @enum {string}
+             */
+            caption_mode: "burned" | "ytt";
             /** Callouts */
             callouts: boolean;
             /**
@@ -10061,6 +12260,20 @@ export interface components {
             voice_track: "lines" | "continuous";
             /** Presenter Delivery */
             presenter_delivery: string | null;
+            /** Presenter Staging */
+            presenter_staging: string | null;
+            /** Presenter Outfit */
+            presenter_outfit: string | null;
+            /** Presenter Named Look Id */
+            presenter_named_look_id: number | null;
+            /** Presenter Named Look Name */
+            presenter_named_look_name: string | null;
+            /** Presenter Named Look Deleted */
+            presenter_named_look_deleted: boolean;
+            /** Graphics */
+            graphics: boolean;
+            /** Graphic Suggestions */
+            graphic_suggestions: components["schemas"]["GraphicSuggestionOut"][];
             story_length: components["schemas"]["StoryLengthOut"];
         };
         /** ProjectFrameOut */
@@ -10111,8 +12324,8 @@ export interface components {
         };
         /**
          * ProjectUpdate
-         * @description Only the fields that are sent are changed. The orientation, the speech mode, the kind and
-         *     the voice track cannot be changed.
+         * @description Only the fields that are sent are changed. The orientation, the speech mode, the kind,
+         *     the voice track and the graphics setting cannot be changed.
          */
         ProjectUpdate: {
             /** Name */
@@ -10135,12 +12348,18 @@ export interface components {
             music_enabled?: boolean | null;
             /** Ambience Enabled */
             ambience_enabled?: boolean | null;
-            /** Captions */
-            captions?: boolean | null;
+            /** Caption Mode */
+            caption_mode?: ("burned" | "ytt") | null;
             /** Callouts */
             callouts?: boolean | null;
             /** Presenter Delivery */
             presenter_delivery?: string | null;
+            /** Presenter Staging */
+            presenter_staging?: string | null;
+            /** Presenter Outfit */
+            presenter_outfit?: string | null;
+            /** Presenter Named Look Id */
+            presenter_named_look_id?: number | null;
         };
         /**
          * ProjectUseOut
@@ -10206,7 +12425,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -10254,6 +12473,21 @@ export interface components {
             pictures: string[];
             /** Views */
             views: string[];
+        };
+        /**
+         * PushSceneOut
+         * @description What a push (or "Stop pushing") did to the clips of the scene that already wait on the
+         *     GPU server. Clips not yet sent take the new level when they are sent.
+         */
+        PushSceneOut: {
+            /** Scene Id */
+            scene_id: string | null;
+            /** Changed */
+            changed: number;
+            /** Already Running */
+            already_running: number;
+            /** Not Reached */
+            not_reached: number;
         };
         /** PushbackOut */
         PushbackOut: {
@@ -10442,6 +12676,21 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * RenderGraphicOut
+         * @description The graphic a render used for a graphic shot (EXG-007): which attempt of which version.
+         */
+        RenderGraphicOut: {
+            /** Id */
+            id: number;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "generated_component" | "remotion_blocks";
+            /** Attempt */
+            attempt: number;
+        };
         /** RenderInfoOut */
         RenderInfoOut: {
             /** Fps */
@@ -10495,6 +12744,11 @@ export interface components {
             left_out: number;
             /** Lanes */
             lanes: string[];
+            /**
+             * Provisional
+             * @default false
+             */
+            provisional: boolean;
         };
         /** RenderNarrationOut */
         RenderNarrationOut: {
@@ -10507,7 +12761,8 @@ export interface components {
         };
         /**
          * RenderTakeOut
-         * @description The take a render used for one shot.
+         * @description The take a render used for one shot, or the graphic it used for a graphic shot (which has
+         *     no take).
          */
         RenderTakeOut: {
             /** Scene Id */
@@ -10517,9 +12772,12 @@ export interface components {
             /** Shot Id */
             shot_id: string;
             /** Take Id */
-            take_id: number;
+            take_id: number | null;
             /** Take Number */
-            take_number: number;
+            take_number: number | null;
+            graphic: components["schemas"]["RenderGraphicOut"] | null;
+            /** Placeholder */
+            placeholder: boolean;
             /** Frames */
             frames: number;
             /** Sound */
@@ -10535,7 +12793,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated";
+            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped" | "shot_placeholder" | "dialogue_not_heard" | "scene_start_unknown";
             /** Scene Id */
             scene_id?: string | null;
             /** Shot Id */
@@ -10652,7 +12910,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -10691,6 +12949,31 @@ export interface components {
             video_prompt?: string | null;
             /** Delivery Instruction */
             delivery_instruction?: string | null;
+        };
+        /**
+         * RescoreDialogueOut
+         * @description What "Score dialogue again" did (SCN-001): no clip was made and no job was queued.
+         */
+        RescoreDialogueOut: {
+            /** Rescored */
+            rescored: number;
+            /** Now Passing By Rule */
+            now_passing_by_rule: {
+                [key: string]: number;
+            };
+            /** Still Failing */
+            still_failing: number;
+            /** Selected */
+            selected: components["schemas"]["RescoredTakeOut"][];
+        };
+        /** RescoredTakeOut */
+        RescoredTakeOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Shot Id */
+            shot_id: string;
+            /** Take Number */
+            take_number: number;
         };
         /** Restraint */
         Restraint: {
@@ -10827,6 +13110,22 @@ export interface components {
             /** Seam S */
             seam_s: number | null;
         };
+        /**
+         * SceneChangeOut
+         * @description A scene of the newest full render that differs from its newest scene render (SCN-013).
+         */
+        SceneChangeOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Scene Index */
+            scene_index: number;
+            /** Title */
+            title: string;
+            /** Has Scene Render */
+            has_scene_render: boolean;
+            /** Reasons */
+            reasons: string[];
+        };
         /** SceneContinuityOut */
         SceneContinuityOut: {
             /** Id */
@@ -10856,6 +13155,10 @@ export interface components {
             can_run: boolean;
             /** Blocked Reason */
             blocked_reason: string | null;
+            /** Previous Scene Id */
+            previous_scene_id: string | null;
+            /** Look Mismatches */
+            look_mismatches: components["schemas"]["LookMismatchOut"][];
         };
         /**
          * SceneCoverageOut
@@ -10915,6 +13218,8 @@ export interface components {
             environment_id: string;
             /** Environment State */
             environment_state: string;
+            /** Inner Places */
+            inner_places?: components["schemas"]["InnerPlaceIn"][];
             time: components["schemas"]["SceneTimeIn"];
             /** Characters */
             characters: string[];
@@ -10935,6 +13240,11 @@ export interface components {
             continuity_end: {
                 [key: string]: string;
             };
+            /**
+             * Continues Previous
+             * @default false
+             */
+            continues_previous: boolean;
         };
         /** SceneDefinitionOut */
         SceneDefinitionOut: {
@@ -10945,6 +13255,11 @@ export interface components {
             environment_id: string;
             /** Environment State */
             environment_state: string;
+            /**
+             * Inner Places
+             * @default []
+             */
+            inner_places: components["schemas"]["InnerPlaceOut"][];
             time: components["schemas"]["SceneTimeOut"];
             /** Characters */
             characters: string[];
@@ -10968,6 +13283,11 @@ export interface components {
             continuity_end: {
                 [key: string]: string;
             };
+            /**
+             * Continues Previous
+             * @default false
+             */
+            continues_previous: boolean;
         };
         /** SceneDefinitionRunAllOut */
         SceneDefinitionRunAllOut: {
@@ -11305,6 +13625,113 @@ export interface components {
             id: string;
             /** Title */
             title: string;
+        };
+        /** SceneRenderOut */
+        SceneRenderOut: {
+            /** Id */
+            id: number;
+            /** Render Number */
+            render_number: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "current" | "out_of_date";
+            /** Reasons */
+            reasons: string[];
+            /** Url */
+            url: string;
+            /** Duration S */
+            duration_s: number | null;
+            /** Frame Count */
+            frame_count: number | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Has Audio */
+            has_audio: boolean;
+            /** Warnings */
+            warnings: components["schemas"]["RenderWarningOut"][];
+            /** Takes */
+            takes: components["schemas"]["RenderTakeOut"][];
+            /** Placeholders */
+            placeholders: number;
+            narration: components["schemas"]["RenderNarrationOut"] | null;
+            music: components["schemas"]["RenderMusicOut"] | null;
+            master: components["schemas"]["RenderMasterOut"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+        };
+        /** SceneRenderRunOut */
+        SceneRenderRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** SceneRenderStateOut */
+        SceneRenderStateOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Index */
+            index: number;
+            /** Title */
+            title: string;
+            /** Can Render */
+            can_render: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Warnings */
+            warnings: components["schemas"]["RenderWarningOut"][];
+            /** Planned Frames */
+            planned_frames: number | null;
+            /** Planned Seconds */
+            planned_seconds: number | null;
+            /** Placeholders */
+            placeholders: number;
+            /** Music Placement Version */
+            music_placement_version: number | null;
+            /** Music Provisional */
+            music_provisional: boolean;
+            /** No Music Reason */
+            no_music_reason: string | null;
+            job: components["schemas"]["DiscoveryJobOut"] | null;
+            /** Renders */
+            renders: components["schemas"]["SceneRenderOut"][];
+        };
+        /** SceneRendersOut */
+        SceneRendersOut: {
+            /** Fps */
+            fps: number;
+            /** Scenes */
+            scenes: components["schemas"]["SceneRenderStateOut"][];
+        };
+        /** SceneReviewBody */
+        SceneReviewBody: {
+            /** Rejected */
+            rejected?: components["schemas"]["RejectedTarget"][];
+        };
+        /**
+         * SceneReviewOut
+         * @description What one scene waits for the user to review (SCN-010): the review point held scene by
+         *     scene, and the targets of that scene in its steps.
+         */
+        SceneReviewOut: {
+            scene: components["schemas"]["PipelineSceneOut"];
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "story_structure" | "images" | "scenes" | "staging" | "shot_plans" | "shots";
+            /** Label */
+            label: string;
+            /** Steps */
+            steps: components["schemas"]["ReviewStepOut"][];
         };
         /** SceneRunIn */
         SceneRunIn: {
@@ -11801,6 +14228,8 @@ export interface components {
             shot_id: string;
             /** Scene Id */
             scene_id: string;
+            /** Place */
+            place?: string | null;
             /** Duration */
             duration: number;
             /** Visual Story */
@@ -11844,6 +14273,7 @@ export interface components {
             /** Needs Confirmation */
             needs_confirmation: boolean;
             staging?: components["schemas"]["ShotStagingOut"] | null;
+            inner_place?: components["schemas"]["ShotInnerPlaceOut"] | null;
         };
         /** ShotDefinitionIn */
         ShotDefinitionIn: {
@@ -11962,7 +14392,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Target Duration */
             target_duration: number;
             /**
@@ -11975,6 +14405,206 @@ export interface components {
              * @default false
              */
             rapid_exchange: boolean;
+            /** Place */
+            place?: string | null;
+            /** Description */
+            description: string;
+        };
+        /** ShotGraphicAskRun */
+        ShotGraphicAskRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /**
+         * ShotGraphicAttemptOut
+         * @description One attempt of one version: what it draws from, the jobs, the video and the checks.
+         */
+        ShotGraphicAttemptOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Attempt */
+            attempt: number;
+            /** Current */
+            current: boolean;
+            /** Stage */
+            stage: ("writing" | "rendering") | null;
+            /** Input */
+            input: unknown | null;
+            input_job: components["schemas"]["JobSummary"] | null;
+            input_call: components["schemas"]["GraphicCallOut"] | null;
+            render_job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+            /** Metrics */
+            metrics: unknown | null;
+            /** Warnings */
+            warnings: unknown | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Failed Outright */
+            failed_outright: boolean;
+            /** Rerender Of */
+            rerender_of: number | null;
+            /** Repair Of */
+            repair_of: number | null;
+        };
+        /** ShotGraphicChoiceIn */
+        ShotGraphicChoiceIn: {
+            /** Engine */
+            engine: ("generated_component" | "remotion_blocks") | null;
+        };
+        /** ShotGraphicChoiceOut */
+        ShotGraphicChoiceOut: {
+            /** Engine */
+            engine: ("generated_component" | "remotion_blocks") | null;
+        };
+        /** ShotGraphicEngineOut */
+        ShotGraphicEngineOut: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "generated_component" | "remotion_blocks";
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "writing" | "rendering" | "ready" | "out_of_date" | "failed";
+            /** Failed Outright */
+            failed_outright: boolean;
+            /** Last Error */
+            last_error: string | null;
+            /** Attempts */
+            attempts: components["schemas"]["ShotGraphicAttemptOut"][];
+        };
+        /** ShotGraphicSceneOut */
+        ShotGraphicSceneOut: {
+            /** Id */
+            id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Shots */
+            shots: components["schemas"]["ShotGraphicShotOut"][];
+        };
+        /** ShotGraphicShotOut */
+        ShotGraphicShotOut: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Spoken Text */
+            spoken_text: string;
+            /** Start S */
+            start_s: number;
+            /** End S */
+            end_s: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "working" | "ready" | "out_of_date" | "failed";
+            /** Reasons */
+            reasons: string[];
+            /** Last Error */
+            last_error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Brief Id */
+            brief_id: number | null;
+            /** Brief Version */
+            brief_version: number | null;
+            /**
+             * Brief Status
+             * @enum {string}
+             */
+            brief_status: "none" | "writing" | "ready" | "failed" | "out_of_date";
+            resolved: components["schemas"]["GraphicResolvedOut"] | null;
+            voice: components["schemas"]["ShotVoiceOut"] | null;
+            /** Choice */
+            choice: ("generated_component" | "remotion_blocks") | null;
+            used: components["schemas"]["ShotGraphicUsedOut"] | null;
+            /** Engines */
+            engines: components["schemas"]["ShotGraphicEngineOut"][];
+        };
+        /**
+         * ShotGraphicUsedOut
+         * @description The video the story render uses for a shot (§3.8).
+         */
+        ShotGraphicUsedOut: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "generated_component" | "remotion_blocks";
+            /** Attempt Id */
+            attempt_id: number;
+            /** Attempt */
+            attempt: number;
+            /**
+             * Because
+             * @enum {string}
+             */
+            because: "chosen" | "default" | "component_failed";
+        };
+        /** ShotGraphicsRun */
+        ShotGraphicsRun: {
+            /** Job Ids */
+            job_ids: number[];
+        };
+        /** ShotGraphicsStateOut */
+        ShotGraphicsStateOut: {
+            /** Scenes */
+            scenes: components["schemas"]["ShotGraphicSceneOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+            /** Theme Version */
+            theme_version: number | null;
+            /** Theme Current */
+            theme_current: boolean;
+        };
+        /**
+         * ShotInnerPlaceOut
+         * @description The place inside the scene's main place that a shot is inside (SCN-007).
+         */
+        ShotInnerPlaceOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Relation */
+            relation: string;
+            /** Views */
+            views: components["schemas"]["ShotInnerViewOut"][];
+        };
+        /**
+         * ShotInnerViewOut
+         * @description A view of a place inside the scene's main place (SCN-007). It has no `allowed_for`:
+         *     nobody is staged inside such a place, so any of its views may stand behind the shot.
+         */
+        ShotInnerViewOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Side */
+            side: string;
+            /** Framing */
+            framing: string;
             /** Description */
             description: string;
         };
@@ -11995,7 +14625,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Target Duration */
             target_duration: number;
             /**
@@ -12008,6 +14638,8 @@ export interface components {
              * @default false
              */
             rapid_exchange: boolean;
+            /** Place */
+            place?: string | null;
             /** Description */
             description: string;
             /** Start Word */
@@ -12042,6 +14674,11 @@ export interface components {
             scene_id: string;
             /** Shots */
             shots: components["schemas"]["ShotOut"][];
+            /**
+             * Graphic Suggestions
+             * @default []
+             */
+            graphic_suggestions: components["schemas"]["GraphicSuggestionResultOut"][];
         };
         /** ShotPlanEditIn */
         ShotPlanEditIn: {
@@ -12382,7 +15019,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -12458,7 +15095,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Source Event Ids */
@@ -12469,6 +15106,8 @@ export interface components {
             duration_seconds: number;
             /** Start Seconds */
             start_seconds: number | null;
+            /** Place */
+            place?: string | null;
         };
         /** ShotSpanOut */
         ShotSpanOut: {
@@ -12548,6 +15187,16 @@ export interface components {
             anchor?: components["schemas"]["TakeAnchorOut"] | null;
             /** Prompt Version */
             prompt_version?: number | null;
+            /**
+             * Checks Speech
+             * @default false
+             */
+            checks_speech: boolean;
+            /**
+             * Can Audit Speech
+             * @default false
+             */
+            can_audit_speech: boolean;
         };
         /** ShotTakesCheckOut */
         ShotTakesCheckOut: {
@@ -12582,6 +15231,11 @@ export interface components {
             continues_from?: string | null;
             /** Voice Source */
             voice_source?: ("take" | "clip") | null;
+            /**
+             * Needs Review
+             * @default false
+             */
+            needs_review: boolean;
         };
         /** ShotTakesOut */
         ShotTakesOut: {
@@ -12596,6 +15250,18 @@ export interface components {
             check_job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Max Retries */
             max_retries: number;
+            /**
+             * Rescorable Count
+             * @default 0
+             */
+            rescorable_count: number;
+            /**
+             * Silent Unchecked Count
+             * @default 0
+             */
+            silent_unchecked_count: number;
+            /** Pushed Scene Id */
+            pushed_scene_id?: string | null;
         };
         /** ShotTakesRunManyOut */
         ShotTakesRunManyOut: {
@@ -12637,6 +15303,16 @@ export interface components {
             description: string;
             /** Allowed For */
             allowed_for: string[];
+        };
+        /**
+         * ShotVoiceOut
+         * @description The scene's voice take, which the panel plays with the videos. The clips have no sound.
+         */
+        ShotVoiceOut: {
+            /** Url */
+            url: string;
+            /** Offset S */
+            offset_s: number;
         };
         /** SilenceOut */
         SilenceOut: {
@@ -13032,6 +15708,11 @@ export interface components {
             group_side: "ahead" | "left" | "right" | "behind";
             /** Moves */
             moves: components["schemas"]["MoveOut"][];
+            /**
+             * Presence
+             * @default []
+             */
+            presence: components["schemas"]["PresenceOut"][];
         };
         /**
          * StagingEntryOut
@@ -13106,6 +15787,8 @@ export interface components {
             group_side: string;
             /** Moves */
             moves?: components["schemas"]["MoveIn"][];
+            /** Presence */
+            presence?: components["schemas"]["PresenceIn"][];
         };
         /** StagingSkippedOut */
         StagingSkippedOut: {
@@ -13355,6 +16038,8 @@ export interface components {
             /** Review Points */
             review_points: components["schemas"]["ReviewPointOut"][];
             review: components["schemas"]["ReviewOut"] | null;
+            /** Scene Reviews */
+            scene_reviews: components["schemas"]["SceneReviewOut"][];
             run: components["schemas"]["PipelineRunOut"] | null;
             /** Can Start */
             can_start: boolean;
@@ -13366,6 +16051,8 @@ export interface components {
             regenerate_confirmations: components["schemas"]["PipelineConfirmationOut"][];
             /** Max Tries */
             max_tries: number;
+            /** Remake Steps */
+            remake_steps: components["schemas"]["PipelineStepOut"][];
         };
         /** StoryRenderOut */
         StoryRenderOut: {
@@ -13401,6 +16088,10 @@ export interface components {
             narration: components["schemas"]["RenderNarrationOut"] | null;
             music: components["schemas"]["RenderMusicOut"] | null;
             master: components["schemas"]["RenderMasterOut"] | null;
+            /** Caption File Available */
+            caption_file_available: boolean;
+            /** Captions Burned */
+            captions_burned: boolean;
             /**
              * Created At
              * Format: date-time
@@ -13434,6 +16125,8 @@ export interface components {
             job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Renders */
             renders: components["schemas"]["StoryRenderOut"][];
+            /** Changed Scenes */
+            changed_scenes: components["schemas"]["SceneChangeOut"][];
         };
         /**
          * StoryVoiceEntryOut
@@ -13620,6 +16313,30 @@ export interface components {
             checked_at: string | null;
             /** Accepted */
             accepted: boolean;
+            /**
+             * Outcome
+             * @default matched
+             * @enum {string}
+             */
+            outcome: "matched" | "close_match" | "not_verifiable" | "mismatch" | "no_speech" | "extra_speech" | "silent" | "speech_heard";
+            /** Rule */
+            rule?: string | null;
+            /**
+             * Mode
+             * @default dialogue
+             * @enum {string}
+             */
+            mode: "dialogue" | "silent";
+            /**
+             * Extra Text
+             * @default
+             */
+            extra_text: string;
+            /**
+             * Report Only
+             * @default false
+             */
+            report_only: boolean;
         };
         /** TakeIn */
         TakeIn: {
@@ -13792,7 +16509,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter";
+            type: "establishing" | "action" | "reaction" | "dialogue" | "insert" | "transition" | "presenter" | "graphic";
             /** Description */
             description: string;
             /** Duration Seconds */
@@ -14010,6 +16727,99 @@ export interface components {
             current: boolean;
             run: components["schemas"]["LabMusicRunOut"] | null;
             check: components["schemas"]["ThemeCheckOut"] | null;
+        };
+        /** ThumbnailChooseIn */
+        ThumbnailChooseIn: {
+            /**
+             * Chosen
+             * @default true
+             */
+            chosen: boolean;
+        };
+        /** ThumbnailHeadlineIn */
+        ThumbnailHeadlineIn: {
+            /** Headline */
+            headline: string;
+        };
+        /**
+         * ThumbnailJobOut
+         * @description A job's status, whatever it is.
+         */
+        ThumbnailJobOut: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+            /** Phase */
+            phase: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** ThumbnailLookOut */
+        ThumbnailLookOut: {
+            /** Slug */
+            slug: string;
+            /** Description */
+            description: string;
+        };
+        /** ThumbnailOut */
+        ThumbnailOut: {
+            /** Id */
+            id: number;
+            /** Concept Version */
+            concept_version: number;
+            /** Concept Index */
+            concept_index: number;
+            /** Headline */
+            headline: string;
+            /**
+             * Text Area
+             * @enum {string}
+             */
+            text_area: "left" | "right" | "top" | "bottom" | "top_left" | "top_right" | "bottom_left" | "bottom_right";
+            /** Chosen */
+            chosen: boolean;
+            /** Url */
+            url: string | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Has Picture */
+            has_picture: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            job: components["schemas"]["ThumbnailJobOut"] | null;
+            /** Error */
+            error: string | null;
+            /** Reasons */
+            reasons: string[];
+        };
+        /** ThumbnailRunIn */
+        ThumbnailRunIn: {
+            /** Feedback */
+            feedback?: string | null;
+        };
+        /** ThumbnailRunOut */
+        ThumbnailRunOut: {
+            /** Job Id */
+            job_id: number;
+        };
+        /** ThumbnailsState */
+        ThumbnailsState: {
+            ideas: components["schemas"]["IdeasState"];
+            /** Thumbnails */
+            thumbnails: components["schemas"]["ThumbnailOut"][];
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
         };
         /**
          * TimelineOut
@@ -14717,6 +17527,50 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProjectUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetail"];
+                };
+            };
+            /** @description No project has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A value breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_graphic_suggestions_api_projects__project_id__graphic_suggestions_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicSuggestionsSet"];
             };
         };
         responses: {
@@ -15638,6 +18492,479 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_graphic_theme_api_projects__project_id__graphic_theme_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GraphicThemeRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicThemeRun"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the Story Bible is missing, or the note cannot be used. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_graphic_theme_api_projects__project_id__graphic_theme_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicThemeState"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graphic_theme_version_api_projects__project_id__graphic_theme_versions__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicThemeOut"];
+                };
+            };
+            /** @description No such project or version. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graphic_briefs_api_projects__project_id__graphic_briefs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicBriefsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_graphic_brief_api_projects__project_id__graphic_briefs__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GraphicBriefRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicBriefRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the Story Bible is missing, the scene's shots are not planned and current, the shot is not a graphic shot, or the note cannot be used. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_thumbnails_api_projects__project_id__thumbnails_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbnailsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    make_thumbnails_api_projects__project_id__thumbnails_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MakeThumbnailsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbnailsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Story Bible is missing, the ideas or the note cannot be used, or the thumbnail cannot be made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_thumbnail_concepts_api_projects__project_id__thumbnail_concepts_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ThumbnailRunIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbnailRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Story Bible is missing, the ideas or the note cannot be used, or the thumbnail cannot be made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_thumbnail_concepts_api_projects__project_id__thumbnail_concepts_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbnailsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Story Bible is missing, the ideas or the note cannot be used, or the thumbnail cannot be made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    change_headline_api_projects__project_id__thumbnails__thumbnail_id__headline_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                thumbnail_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ThumbnailHeadlineIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbnailsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Story Bible is missing, the ideas or the note cannot be used, or the thumbnail cannot be made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    choose_thumbnail_api_projects__project_id__thumbnails__thumbnail_id__choose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                thumbnail_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ThumbnailChooseIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThumbnailsState"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The Story Bible is missing, the ideas or the note cannot be used, or the thumbnail cannot be made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -17720,7 +21047,7 @@ export interface operations {
                 /** @description Only jobs with one of these statuses (repeat it). */
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
                 /** @description Only jobs of one of these types (repeat it). */
-                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test")[] | null;
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts")[] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -19251,6 +22578,565 @@ export interface operations {
             };
         };
     };
+    list_runs_api_lab_graphics_runs_get: {
+        parameters: {
+            query?: {
+                before_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunSummaryOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_api_lab_graphics_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_api_lab_graphics_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_render_api_lab_graphics_renders__render_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicRenderUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRenderOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    write_brief_api_lab_graphics_runs__run_id__brief_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    make_all_api_lab_graphics_runs__run_id__make_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_again_api_lab_graphics_runs__run_id__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_engine_again_api_lab_graphics_runs__run_id__engines__engine__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+                engine: "remotion_templates" | "python_templates" | "remotion_blocks" | "generated_component";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_again_api_lab_graphics_renders__render_id__render_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicRunOut"];
+                };
+            };
+            /** @description No run or render has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    render_test_card_api_lab_graphics_test_cards_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicTestCardCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTestCardOut"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_newest_test_card_api_lab_graphics_test_cards_newest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTestCardOut"];
+                };
+            };
+        };
+    };
+    get_trials_api_lab_graphics_trials_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTrialOverviewOut"];
+                };
+            };
+        };
+    };
+    start_trial_api_lab_graphics_trials_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphicTrialCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTrialStartedOut"];
+                };
+            };
+            /** @description The run's state does not allow it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_trial_summary_api_lab_graphics_trials__set_no__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                set_no: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphicTrialSummaryOut"];
+                };
+            };
+            /** @description No trial set has this number. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_characters_api_lab_characters_get: {
         parameters: {
             query?: {
@@ -19546,6 +23432,252 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_outfits_api_lab_characters__character_id__outfits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_outfit_api_lab_characters__character_id__outfits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                character_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutfitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_outfit_api_lab_outfits__outfit_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_outfit_api_lab_outfits__outfit_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutfitPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    make_outfit_pictures_api_lab_outfits__outfit_id__pictures_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    make_outfit_default_api_lab_outfits__outfit_id__make_default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outfit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutfitOut"][];
+                };
+            };
+            /** @description No character, look or take has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The form breaks a rule. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -19998,6 +24130,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    describe_photo_api_lab_photos__lab_image_id__describe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lab_image_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoDescribeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobSummary"];
+                };
+            };
+            /** @description No photo has this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -22849,6 +27025,177 @@ export interface operations {
             };
         };
     };
+    get_shot_graphics_api_projects__project_id__graphics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicsStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_shot_graphics_api_projects__project_id__graphics__scene_id___shot_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicsRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_shot_graphic_again_api_projects__project_id__graphics__scene_id___shot_id___engine__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+                engine: "generated_component" | "remotion_blocks";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicAskRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_shot_graphic_choice_api_projects__project_id__graphics__scene_id___shot_id__choice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+                shot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShotGraphicChoiceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotGraphicChoiceOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a continuous explainer with graphics on, the shot is not a graphic shot, the theme or the brief is missing or out of date, or a version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_shot_plans_api_projects__project_id__shot_plans_get: {
         parameters: {
             query?: never;
@@ -24093,6 +28440,90 @@ export interface operations {
             };
         };
     };
+    rescore_dialogue_api_projects__project_id__shot_takes_rescore_dialogue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RescoreDialogueOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_silent_speech_api_projects__project_id__shot_takes_check_silent_speech_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CheckSilentSpeechIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckSilentSpeechOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     run_all_api_projects__project_id__shot_takes_run_post: {
         parameters: {
             query?: never;
@@ -24170,6 +28601,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    push_scene_api_projects__project_id__shot_takes__scene_id__push_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSceneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The shot's prompt is not compiled and current, a picture or an audio file is missing, the remote server API has no such endpoint, the take has no clip or its checks are not done, or the scene, shot or take is not in the newest list of scenes and shot plan. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    stop_push_api_projects__project_id__shot_takes_push_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushSceneOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -24385,9 +28897,175 @@ export interface operations {
             };
         };
     };
-    get_story_pipeline_api_projects__project_id__story_pipeline_get: {
+    get_captions_ytt_api_projects__project_id__story_renders__render_number__captions_ytt_get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                render_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The YouTube caption file (YTT) of the render. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xml": string;
+                };
+            };
+            /** @description No such project or render, or the render has no caption track. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caption track recorded with the render cannot be read. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_captions_srt_api_projects__project_id__story_renders__render_number__captions_srt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                render_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subtitle file (SRT) of the render. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-subrip": string;
+                };
+            };
+            /** @description No such project or render, or the render has no caption track. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caption track recorded with the render cannot be read. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_scene_renders_api_projects__project_id__scene_renders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneRendersOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_scene_render_api_projects__project_id__scene_renders__scene_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneRenderRunOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The scene cannot be rendered now: it has no such scene, its shots are not ready, a clip is too short, or a speech file is missing. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_story_pipeline_api_projects__project_id__story_pipeline_get: {
+        parameters: {
+            query?: {
+                scenes?: string[];
+                remake_from?: string | null;
+            };
             header?: never;
             path: {
                 project_id: number;
@@ -24490,6 +29168,51 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["PipelineContinueBody"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunStartedOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The run cannot start now (no story, or another job is waiting or running), an unknown step was named, or there is no paused run. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    answer_scene_review_api_projects__project_id__story_pipeline_scene_review__scene_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SceneReviewBody"] | null;
             };
         };
         responses: {
@@ -24988,7 +29711,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test";
+                kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test" | "graphic_run";
                 sample_id: number;
             };
             cookie?: never;
@@ -25031,7 +29754,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test";
+                kind: "image_run" | "video_run" | "voice_run" | "music_run" | "av_test" | "graphic_run";
                 sample_id: number;
             };
             cookie?: never;

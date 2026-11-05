@@ -63,7 +63,13 @@ export function BoardHeader({ projectId, board, onOpenStep }: BoardHeaderProps) 
   switch (board.mode) {
     case "pipeline_running": {
       const working = board.steps.filter((step) => step.status === "running");
-      headline = "Pipeline running";
+      const scenes = run?.scenes ?? [];
+      headline =
+        scenes.length === 0
+          ? "Pipeline running"
+          : scenes.length === 1
+            ? `Running ${scenes[0]}`
+            : `Running ${scenes.length} scenes`;
       if (working.length > 0) {
         detail = working
           .map((step) => (step.total > 1 ? `${step.label} ${step.done} of ${step.total}` : step.label))

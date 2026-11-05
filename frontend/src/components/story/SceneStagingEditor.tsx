@@ -76,6 +76,8 @@ export function SceneStagingEditor({
       axis: { between, camera_half: between.length === 2 ? cameraHalf : null, note },
       group_side: groupSide,
       moves,
+      // Who arrives or leaves is decided when the scene is staged: it is kept as it is.
+      presence: initial.presence ?? [],
     });
 
   return (

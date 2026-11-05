@@ -30,6 +30,7 @@ class DiscoverScenesHandler(DiscoveryHandler):
         model: str,
         library_cast: object,
         explainer: bool = False,
+        presenter_staging: str | None = None,
     ) -> dict[str, Any]:
         return scene_discovery_writer.build_request(
             story, bible_content, model=model, explainer=explainer

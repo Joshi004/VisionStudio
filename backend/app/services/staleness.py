@@ -30,6 +30,7 @@ from app.services import (
     environment_definitions,
     environment_views,
     generation_requests,
+    graphic_theme,
     look_state_images,
     look_state_resolution,
     music_bible,
@@ -43,6 +44,8 @@ from app.services import (
     scene_events,
     scene_staging,
     shot_definitions,
+    shot_graphic_briefs,
+    shot_graphics,
     shot_plans,
     shot_prompts,
     shot_references,
@@ -392,6 +395,16 @@ async def _collect_scenes(session: AsyncSession, project: Project, found: _Colle
                 Item("callout_plan", "Callout plan", callouts.reasons, acceptable=False),
             )
 
+    # The graphics theme of a continuous explainer (EXG-002). Its Story Bible was written again:
+    # the theme has to be written again, since it follows the Story Bible's tone.
+    if graphic_theme.wanted(project):
+        theme = await graphic_theme.state(session, project)
+        if theme.latest is not None and theme.out_of_date:
+            found.add(
+                "graphic_theme",
+                Item("graphic_theme", "Graphics look", theme.reasons, acceptable=False),
+            )
+
     # The detail and prompts of each music cue (MUSIC-009). Only for a plan that is current: a
     # plan that is out of date has to be written again first.
     if project.music_enabled:
@@ -530,6 +543,13 @@ async def _collect_shots(session: AsyncSession, project: Project, found: _Collec
                     )
 
     add_shots("shot_definitions", (await shot_definitions.state(session, project)).entries, True)
+    # The briefs of the graphic shots (EXG-004): an out-of-date brief is written again.
+    if graphic_theme.wanted(project):
+        add_shots(
+            "graphic_briefs", (await shot_graphic_briefs.state(session, project)).entries, False
+        )
+        # The graphics of those shots (EXG-005): a video drawn for another look is made again.
+        add_shots("graphics", (await shot_graphics.state(session, project)).entries, False)
     add_shots("references", (await shot_references.state(session, project)).entries, True)
     add_shots(
         "generation_requests",

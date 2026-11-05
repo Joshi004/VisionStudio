@@ -15,7 +15,7 @@
   spoken one by one.
 
 A speech is made by the `synthesize_speech_unit` job (`services/speech_synthesis.py`). For an
-explainer with captions or callouts on, each unit also says where the timing of its words stands
+explainer, each unit also says where the timing of its words stands
 (`word_timing`, `services/word_timings.py`). The answers never return ORM objects.
 """
 
@@ -112,8 +112,8 @@ class SpeechUnitAudioOut(BaseModel):
     blocked_reason: str | None
     # The newest job of this unit's current speech, whatever its status.
     job: DiscoveryJobOut | None
-    # The time of each word of the stored speech. None unless the project is an explainer with
-    # captions or callouts on, and the unit has stored audio.
+    # The time of each word of the stored speech. None unless the project is an explainer, and
+    # the unit has stored audio.
     word_timing: WordTimingOut | None
 
 

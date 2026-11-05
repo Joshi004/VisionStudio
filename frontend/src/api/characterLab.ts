@@ -16,7 +16,9 @@ export type CharacterPatch = components["schemas"]["CharacterPatch"];
 export type CharacterOptions = components["schemas"]["OptionsOut"];
 export type CharacterVersion = components["schemas"]["CharacterVersionOut"];
 export type CharacterLook = components["schemas"]["LookOut"];
-export type NamedLook = components["schemas"]["NamedLookOut"];
+export type Outfit = components["schemas"]["OutfitOut"];
+export type OutfitIn = components["schemas"]["OutfitIn"];
+export type OutfitPatch = components["schemas"]["OutfitPatch"];
 export type LookCandidate = components["schemas"]["LookCandidateOut"];
 export type CharacterReference = components["schemas"]["CharacterReferenceOut"];
 export type Angle = CharacterReference["angle"];
@@ -43,8 +45,8 @@ const takesKey = (characterId: number | null) =>
   [...CHARACTER_LAB_KEY, "takes", characterId] as const;
 const versionsKey = (characterId: number | null) =>
   [...CHARACTER_LAB_KEY, "versions", characterId] as const;
-const namedLooksKey = (characterId: number | null) =>
-  [...CHARACTER_LAB_KEY, "named-looks", characterId] as const;
+const outfitsKey = (characterId: number | null) =>
+  [...CHARACTER_LAB_KEY, "outfits", characterId] as const;
 
 function failure(error: unknown, status: number, what: string): ApiError {
   return new ApiError(detailMessage(error, `${what} (HTTP ${status}).`), status);
@@ -380,28 +382,149 @@ export function useCharacterVersions(characterId: number | null) {
   });
 }
 
-// --- Named looks -------------------------------------------------------------------------------
+// --- Outfits -----------------------------------------------------------------------------------
 
-async function fetchNamedLooks(characterId: number) {
-  const { data, error, response } = await api.GET(
-    "/api/lab/characters/{character_id}/named-looks",
-    { params: { path: { character_id: characterId } } },
-  );
+async function fetchOutfits(characterId: number) {
+  const { data, error, response } = await api.GET("/api/lab/characters/{character_id}/outfits", {
+    params: { path: { character_id: characterId } },
+  });
   if (!data) {
-    throw failure(error, response.status, "Could not load the named looks");
+    throw failure(error, response.status, "Could not load the outfits");
   }
   return data;
 }
 
+/** Whether an outfit's pictures are still being made. */
+export function outfitIsBusy(outfit: Outfit): boolean {
+  return outfit.pictures_status === "in_progress" || (outfit.look !== null && lookIsBusy(outfit.look));
+}
+
 /**
- * The named looks of a character (such as night clothes), read-only. A story project's
- * resolution creates them and makes their pictures, so they are loaded again after any change.
+ * The outfits of a character, the default one first. They are loaded again every few seconds
+ * while the pictures of one are being made.
  */
-export function useNamedLooks(characterId: number | null) {
+export function useCharacterOutfits(characterId: number | null) {
   return useQuery({
-    queryKey: namedLooksKey(characterId),
-    queryFn: () => fetchNamedLooks(characterId as number),
+    queryKey: outfitsKey(characterId),
+    queryFn: () => fetchOutfits(characterId as number),
     enabled: characterId !== null,
+    refetchInterval: (query) => (query.state.data?.some(outfitIsBusy) ? ACTIVE_POLL_MS : false),
+  });
+}
+
+/** Makes a new outfit by hand. Its pictures are made separately. */
+export function useCreateOutfit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { characterId: number; body: OutfitIn }) => {
+      const { data, error, response } = await api.POST(
+        "/api/lab/characters/{character_id}/outfits",
+        { params: { path: { character_id: input.characterId } }, body: input.body },
+      );
+      if (!data) {
+        throw failure(error, response.status, "The outfit was not saved");
+      }
+      return data;
+    },
+    onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+/** Changes the name, the note or the description of an outfit. */
+export function useEditOutfit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { outfitId: number; body: OutfitPatch }) => {
+      const { data, error, response } = await api.PATCH("/api/lab/outfits/{outfit_id}", {
+        params: { path: { outfit_id: input.outfitId } },
+        body: input.body,
+      });
+      if (!data) {
+        throw failure(error, response.status, "The outfit was not saved");
+      }
+      return data;
+    },
+    onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+/** Deletes an outfit from the Lab. The projects that already use it keep it. */
+export function useDeleteOutfit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (outfitId: number) => {
+      const { error, response } = await api.DELETE("/api/lab/outfits/{outfit_id}", {
+        params: { path: { outfit_id: outfitId } },
+      });
+      // The answer has no body (204), so success is the status and not `data`.
+      if (!response.ok) {
+        throw failure(error, response.status, "The outfit was not deleted");
+      }
+    },
+    onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+/**
+ * Makes a saved outfit the character's default: its text and pictures become the character's,
+ * and the old default is kept as a saved outfit. Existing projects keep their pinned version.
+ */
+export function useMakeOutfitDefault() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (outfitId: number) => {
+      const { data, error, response } = await api.POST("/api/lab/outfits/{outfit_id}/make-default", {
+        params: { path: { outfit_id: outfitId } },
+      });
+      if (!data) {
+        throw failure(error, response.status, "The default outfit was not changed");
+      }
+      return data;
+    },
+    onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+/** Makes the pictures of an outfit, or makes them again after its description changed. */
+export function useMakeOutfitPictures() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (outfitId: number) => {
+      const { data, error, response } = await api.POST("/api/lab/outfits/{outfit_id}/pictures", {
+        params: { path: { outfit_id: outfitId } },
+      });
+      if (!data) {
+        throw failure(error, response.status, "The pictures were not started");
+      }
+      return data;
+    },
+    onSuccess: () => refreshAfterChange(queryClient),
+  });
+}
+
+// --- Reading a photo ---------------------------------------------------------------------------
+
+export type PhotoMode = "character" | "outfit";
+
+/**
+ * Starts the job that reads a photo (already uploaded to the Image lab) with the vision model
+ * (a paid call). It answers with that job: follow it with `useJob`, and read `output.fields`
+ * when it has succeeded.
+ */
+export function useDescribePhoto() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { imageId: number; mode: PhotoMode }) => {
+      const { data, error, response } = await api.POST("/api/lab/photos/{lab_image_id}/describe", {
+        params: { path: { lab_image_id: input.imageId } },
+        body: { mode: input.mode },
+      });
+      if (!data) {
+        throw failure(error, response.status, "The photo was not read");
+      }
+      return data;
+    },
+    onSuccess: () => invalidateAfterJobAction(queryClient),
   });
 }
 

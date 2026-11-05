@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
-from app.services import callout_plan, word_timings
+from app.services import callout_plan, graphic_theme, word_timings
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
@@ -58,13 +58,16 @@ MUSIC_STEPS: Final = frozenset(
     }
 )
 
-# The step that is switched off for every project but an explainer with captions or callouts on
-# (EXPLAINER-007).
+# The step that is switched off for every project but an explainer (EXPLAINER-007, CAP-001).
 WORD_TIMINGS_STEP: Final = "word_timings"
 
 # The step that is switched off for every project but an explainer with callouts on
 # (EXPLAINER-009).
 CALLOUT_PLAN_STEP: Final = "callout_plan"
+
+# The steps that are switched off for every project but a continuous explainer with graphics on
+# (EXG-002, EXG-004, EXG-005).
+GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs", "graphics")
 
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
@@ -88,6 +91,9 @@ GROUPS: Final[dict[str, str]] = {
     "speech_synthesis": "speech",
     "word_timings": "speech",
     "callout_plan": "speech",
+    "graphic_theme": "graphics",
+    "graphic_briefs": "graphics",
+    "graphics": "graphics",
     "music_bible": "music",
     "music_themes": "music",
     "music_plan": "music",
@@ -101,6 +107,7 @@ GROUPS: Final[dict[str, str]] = {
     "generation_requests": "shots",
     "prompts": "shots",
     "shot_generation": "shots",
+    "scene_render": "render",
     "render": "render",
 }
 
@@ -163,6 +170,9 @@ class BoardRun:
     phase: str | None
     paused_at: str | None
     review_at: str | None
+    # What a run of some scenes is limited to, as "Scene 3: The cellar" (SCN-004). Empty for a
+    # run of the whole story.
+    scenes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -273,6 +283,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
             (music_off and step.key in MUSIC_STEPS)
             or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
+            or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (
@@ -299,6 +310,11 @@ async def build(session: AsyncSession, project: Project) -> Board:
     run = await store.latest_job(session, project.id, pipeline.JOB_TYPE)
     run_output = pipeline.read_output(run.output) if run is not None else pipeline.new_output()
     active = run is not None and run.status in store.ACTIVE_STATUSES
+    run_scenes = (
+        pipeline.RunOptions.from_input(run.input).scenes if run is not None else frozenset()
+    )
+    items = await pipeline.scene_items(session, project.id) if run_scenes else []
+    scene_labels = tuple(pipeline.scene_label(item) for item in items if item["id"] in run_scenes)
     return Board(
         revision=activity.revision,
         mode=_mode_of(run, run_output, activity.queued + activity.running + activity.paused > 0),
@@ -310,6 +326,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
                 # A run that has ended is not waiting for anybody.
                 paused_at=run_output["paused_at"] if active else None,
                 review_at=run_output["review_at"] if active else None,
+                scenes=scene_labels,
             )
             if run is not None
             else None

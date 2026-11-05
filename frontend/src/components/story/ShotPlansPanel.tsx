@@ -200,6 +200,35 @@ function EntryRow({
               {text}
             </Text>
           ))}
+          {entry.shots !== null && entry.shots.graphic_suggestions.length > 0 && (
+            <Stack gap={2}>
+              <Text size="xs" fw={500}>
+                Graphics you suggested
+              </Text>
+              {entry.shots.graphic_suggestions.map((suggestion) => (
+                <Group key={suggestion.id} gap={6} wrap="nowrap" align="flex-start">
+                  <Badge
+                    variant="light"
+                    color={suggestion.followed ? "green" : "orange"}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {suggestion.followed ? "Followed" : "Declined"}
+                  </Badge>
+                  <Text size="xs">
+                    <Text span fs="italic">
+                      “{suggestion.text}”
+                    </Text>
+                    {!suggestion.followed && (
+                      <Text span c="dimmed">
+                        {" "}
+                        — {suggestion.reason ?? "No reason given."}
+                      </Text>
+                    )}
+                  </Text>
+                </Group>
+              ))}
+            </Stack>
+          )}
           {triesUsed && (
             <Text size="xs" c="dimmed">
               {replanMaxTries === 0

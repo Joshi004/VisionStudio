@@ -89,6 +89,8 @@ CHECK_JOB_TYPE: Final = "check_shot_takes"
 # dialogue lines (PHASE-031). One per take: its input holds `take_id`, which is also its dedupe key.
 DIALOGUE_JOB_TYPE: Final = "check_take_dialogue"
 DIALOGUE_DEDUPE_KEY: Final = "take_id"
+# SCN-009: on the job's input of a check made as a report on an older silent take.
+REPORT_ONLY_KEY: Final = "report_only"
 # Two presses on one shot make one job; two shots run side by side. The key is `scene/shot`.
 DEDUPE_KEY: Final = "shot_key"
 
@@ -146,6 +148,11 @@ class TakeEntry:
     # True when the take was queued by **Generate all** or **Generate scene**, so that the shot
     # that continues it is queued by itself once this take is selected.
     chain: bool = False
+    # SCN-009: the take's speech is judged (it has lines, or it is a silent take that is checked).
+    checks_speech: bool = False
+    # SCN-009: the selected take of a shot with no dialogue, made before the check existed, that
+    # "Check silent takes for speech" can report on.
+    can_audit_speech: bool = False
 
 
 @dataclass(frozen=True)
@@ -171,6 +178,9 @@ class ShotEntry:
     waiting_on: str | None = None
     # FLOW-008: `take` or `clip` for a presenter shot of a continuous explainer, else None.
     voice_source: str | None = None
+    # SCN-001: the shot failed, and its two newest takes heard the same words, so no more takes
+    # are made by themselves (see `_repeated_answer`).
+    needs_review: bool = False
 
     @property
     def selected(self) -> TakeEntry | None:
@@ -199,6 +209,11 @@ class ShotTakesState:
     check_job: Job | None
     # The `shot_take_max_retries` setting, for showing "retry n of m".
     max_retries: int
+    # SCN-001: how many takes have a stored dialogue check that failed, which "Score dialogue
+    # again" can judge again.
+    rescorable_count: int = 0
+    # SCN-009: how many selected silent takes (made before the speech check) have no check.
+    silent_unchecked_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -250,11 +265,35 @@ def _dialogue_of(
     return []
 
 
-def _needs_dialogue_check(row: ShotTake, lines: list[dialogue_check.DialogueLine]) -> bool:
-    """A take with dialogue whose clip passed its technical check and whose speech has not been
-    compared with the lines yet.
+def silent_checked(row: ShotTake) -> bool:
+    """SCN-009: a take of a shot with no dialogue that was made to be checked for speech
+    (`inputs.silent_check`) and whose clip has a sound track. Takes made before the phase do not
+    have the flag: they are never "not checked" and never wait for a check (a report on them is
+    made only from a click, `start_silent_speech_check`).
     """
-    return bool(lines) and take_validation.passed(row.validation) and row.dialogue_check is None
+    return (
+        isinstance(row.inputs, dict)
+        and row.inputs.get("silent_check") is True
+        and isinstance(row.audio, dict)
+    )
+
+
+def checks_speech(row: ShotTake, lines: list[dialogue_check.DialogueLine]) -> bool:
+    """Whether this take's speech is judged: it carries lines to compare, or it is a silent take
+    that is checked for speech (SCN-009).
+    """
+    return bool(lines) or silent_checked(row)
+
+
+def _needs_dialogue_check(row: ShotTake, lines: list[dialogue_check.DialogueLine]) -> bool:
+    """A take whose speech is judged (lines to compare, or a silent shot checked for speech),
+    whose clip passed its technical check and whose speech has not been judged yet.
+    """
+    return (
+        checks_speech(row, lines)
+        and take_validation.passed(row.validation)
+        and row.dialogue_check is None
+    )
 
 
 def _accepted(check: Any) -> bool:
@@ -278,7 +317,11 @@ def _usable(row: ShotTake, lines: list[dialogue_check.DialogueLine]) -> bool:
     if _accepted(row.validation):
         return True
     return take_validation.passed(row.validation) and (
-        not lines or dialogue_check.passed(row.dialogue_check) or _accepted(row.dialogue_check)
+        not checks_speech(row, lines)
+        or dialogue_check.passed(row.dialogue_check)
+        or _accepted(row.dialogue_check)
+        # SCN-009: a report on an older take is shown, but it never decides the selection.
+        or dialogue_check.is_report_only(row.dialogue_check)
     )
 
 
@@ -559,6 +602,20 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                         chain=bool(row.inputs.get("chain"))
                         if isinstance(row.inputs, dict)
                         else False,
+                        checks_speech=checks_speech(row, lines),
+                        can_audit_speech=(
+                            row.id == selected_id
+                            and not lines
+                            and isinstance(row.audio, dict)
+                            and row.dialogue_check is None
+                            and not (
+                                isinstance(row.inputs, dict) and row.inputs.get("silent_check")
+                            )
+                            and not (
+                                dialogue_jobs.get(row.id) is not None
+                                and dialogue_jobs[row.id].status in store.ACTIVE_STATUSES
+                            )
+                        ),
                     )
                 )
             status: Status = "not_generated"
@@ -586,6 +643,9 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
                     blocked_reason=blocked,
                     continues_from=continues_from,
                     waiting_on=continues_from if only_waiting else None,
+                    needs_review=(
+                        status == "failed" and len(rows) >= 2 and _repeated_answer(rows[0], rows[1])
+                    ),
                     voice_source=(
                         (
                             shot_voice_sources.CLIP
@@ -608,6 +668,18 @@ async def state(session: AsyncSession, project: Project) -> ShotTakesState:
         check_job=await store.latest_job(session, project.id, CHECK_JOB_TYPE),
         max_retries=await settings_service.get_int(
             session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY
+        ),
+        rescorable_count=sum(
+            1
+            for row in all_rows
+            if isinstance(row.dialogue_check, dict) and row.dialogue_check.get("passed") is False
+        ),
+        silent_unchecked_count=sum(
+            1
+            for scene_entry in entries
+            for shot_entry in scene_entry.shots
+            for take_entry in shot_entry.takes
+            if take_entry.can_audit_speech
         ),
     )
 
@@ -917,6 +989,9 @@ async def _queue(
             "target_seconds": content["target_seconds"],
             # The lines the clip must contain (PHASE-031); empty for a shot with no dialogue.
             "dialogue": dialogue_check.lines_as_json(dialogue_check.lines_of(content["audios"])),
+            # SCN-009: a take of a shot with no dialogue is transcribed too, and fails when words
+            # are heard. Takes made before the phase have no flag and are never transcribed.
+            **({} if dialogue_check.lines_of(content["audios"]) else {"silent_check": True}),
             # Only a take made by the automatic retry of a failed clip has this (PHASE-029).
             **({"retry": retry} if retry is not None else {}),
             # Only a take of a continuity shot has an anchor (PHASE-032): the take of the shot
@@ -1163,19 +1238,146 @@ async def select_take(
         raise ShotTakesError("This take has not been checked yet. Press Check takes first.")
     lines = await dialogue_lines(session, take)
     clip_passed = take_validation.passed(take.validation)
-    if lines and clip_passed and not isinstance(take.dialogue_check, dict):
+    judges_speech = checks_speech(take, lines)
+    if judges_speech and clip_passed and not isinstance(take.dialogue_check, dict):
         raise ShotTakesError(
-            "The speech in this take has not been checked against the dialogue yet. "
+            "The speech in this take has not been checked yet. "
             "Wait for the check, or press Check takes."
         )
     accepted_at = utcnow().isoformat()
     if not clip_passed:
         take.validation = {**take.validation, "accepted_at": accepted_at}
-    elif lines and not dialogue_check.passed(take.dialogue_check):
+    elif judges_speech and not dialogue_check.passed(take.dialogue_check):
         take.dialogue_check = {**take.dialogue_check, "accepted_at": accepted_at}
     take.selected_at = await selection_time(session, project.id, scene_id, shot_id)
     await session.commit()
     return take
+
+
+def _any_job_active(
+    rows: list[ShotTake], jobs: dict[int, Job], dialogue_jobs: dict[int, Job]
+) -> bool:
+    """Whether a take of the list is being made, or its speech is being checked."""
+    for row in rows:
+        job = jobs.get(row.job_id) if row.job_id is not None else None
+        if not _is_ready(row) and job is not None and job.status in store.ACTIVE_STATUSES:
+            return True
+        checking = dialogue_jobs.get(row.id)
+        if checking is not None and checking.status in store.ACTIVE_STATUSES:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class RescoreReport:
+    """What "Score dialogue again" did (SCN-001)."""
+
+    # How many stored checks that had failed were judged again.
+    rescored: int
+    # Of those, how many pass now, by the matching step at which they passed.
+    now_passing_by_rule: dict[str, int]
+    still_failing: int
+    # The takes it selected: `(scene_id, shot_id, take_number)`.
+    selected: list[tuple[str, str, int]]
+
+
+async def rescore_dialogue(session: AsyncSession, project: Project) -> RescoreReport:
+    """Judges every stored dialogue check that failed again, from the words it recorded as
+    heard, with the current rules and threshold, and commits (SCN-001). It sends nothing to the
+    server and queues no job (S-11).
+
+    - A check that passed is never touched, so a take is never turned from passing to failing.
+    - The check keeps its `checked_at` and any `accepted_at`, and gets `rescored_at`.
+    - A shot that has no selected take, and no clip being made or checked, gets its newest take
+      that passes now as its selected take. A shot that has a selected take keeps it.
+    - It does not start the shot that continues a selected take: the owner does that.
+    """
+    threshold = await settings_service.get_int(
+        session, settings_service.DIALOGUE_MATCH_THRESHOLD_KEY
+    )
+    grouped = await _takes_by_shot(session, project.id)
+    all_rows = [row for rows in grouped.values() for row in rows]
+    jobs = await _jobs_of(session, all_rows)
+    dialogue_jobs = await _dialogue_jobs(session, project.id)
+    requests = await _requests_of(session, all_rows)
+    lines_by_take = {
+        row.id: _dialogue_of(
+            row, requests.get(row.generation_request_id) if row.generation_request_id else None
+        )
+        for row in all_rows
+    }
+
+    rescored = 0
+    still_failing = 0
+    by_rule: dict[str, int] = {}
+    now_passing: set[int] = set()
+    now = utcnow().isoformat()
+    for row in all_rows:
+        old = row.dialogue_check
+        lines = lines_by_take[row.id]
+        silent = dialogue_check.is_silent(old)  # SCN-009: a silent shot has no lines
+        if not isinstance(old, dict) or old.get("passed") is not False or not (lines or silent):
+            continue
+        spoken = dialogue_check.spoken_of(old)
+        result = (
+            dialogue_check.compare_silent(spoken)
+            if silent
+            else dialogue_check.compare(lines, spoken, threshold)
+        )
+        stored = result.to_json(lines, spoken, threshold=threshold, checked_at=utcnow())
+        stored["checked_at"] = old.get("checked_at")
+        stored["rescored_at"] = now
+        if dialogue_check.is_report_only(old):
+            stored["report_only"] = True
+            stored["kind"] = None
+        if old.get("accepted_at") is not None:
+            stored["accepted_at"] = old["accepted_at"]
+        row.dialogue_check = stored
+        rescored += 1
+        if result.passed:
+            now_passing.add(row.id)
+            rule = result.rule or "exact"
+            by_rule[rule] = by_rule.get(rule, 0) + 1
+        else:
+            still_failing += 1
+
+    selected: list[tuple[str, str, int]] = []
+    for rows in grouped.values():
+        # `rows` is newest first. A take that is being made or checked leaves the shot alone.
+        if _any_job_active(rows, jobs, dialogue_jobs):
+            continue
+        if _selected_id(rows, lines_by_take) is not None:
+            continue
+        winner = next(
+            (
+                row
+                for row in rows
+                if row.id in now_passing
+                and take_validation.passed(row.validation)
+                and _is_ready(row)
+            ),
+            None,
+        )
+        if winner is None:
+            continue
+        winner.selected_at = await selection_time(
+            session, winner.project_id, winner.scene_id, winner.shot_id
+        )
+        selected.append((winner.scene_id, winner.shot_id, winner.take_number))
+    await session.commit()
+    _logger.info(
+        "project %d: %d dialogue checks judged again, %d pass now, %d takes selected",
+        project.id,
+        rescored,
+        len(now_passing),
+        len(selected),
+    )
+    return RescoreReport(
+        rescored=rescored,
+        now_passing_by_rule=by_rule,
+        still_failing=still_failing,
+        selected=selected,
+    )
 
 
 async def active_retry_jobs(
@@ -1326,13 +1528,41 @@ def _retryable_failure(take: ShotTake) -> dict[str, Any] | None:
     return None
 
 
+def _repeated_answer(newest: ShotTake, before: ShotTake) -> bool:
+    """SCN-001: whether two takes in a row failed the dialogue check and heard the same words
+    (after every matching step; two empty transcripts are the same), from the same prompt. A
+    new seed is then unlikely to help, so no more takes are made by themselves and the shot
+    needs the owner's review. Worked out on read from the stored checks, never stored.
+    """
+    if newest.shot_prompt_id != before.shot_prompt_id:
+        return False
+    checks = (newest.dialogue_check, before.dialogue_check)
+    if not all(isinstance(check, dict) and check.get("passed") is False for check in checks):
+        return False
+    return dialogue_check.heard_key(checks[0]) == dialogue_check.heard_key(checks[1])
+
+
+async def _take_before(session: AsyncSession, take: ShotTake) -> ShotTake | None:
+    """The take of the same shot with the next lower number, or None."""
+    statement = select(ShotTake).where(
+        ShotTake.project_id == take.project_id,
+        ShotTake.scene_id == take.scene_id,
+        ShotTake.shot_id == take.shot_id,
+        ShotTake.take_number < take.take_number,
+    )
+    statement = statement.order_by(ShotTake.take_number.desc()).limit(1)
+    return (await session.execute(statement)).scalar_one_or_none()
+
+
 async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
     """Queues another take of a shot whose take `take_id` failed its technical check or its
     dialogue check, with a new seed, and commits. Returns the job, or None when no retry is made:
     the take did not fail for a reason another seed can fix (`kind` is not `clip`), the tries are
     used up (`shot_take_max_retries`), the take is not the shot's newest take any more, the user
-    selected a take of the shot while this one was being made (`chosen_since`), or the shot
-    cannot be generated now (its prompt or request changed meanwhile; the user presses Generate).
+    selected a take of the shot while this one was being made (`chosen_since`), the take and the
+    one before it failed the dialogue check hearing the same words (`_repeated_answer`, SCN-001),
+    or the shot cannot be generated now (its prompt or request changed meanwhile; the user
+    presses Generate).
     """
     take = await session.get(ShotTake, take_id)
     if take is None:
@@ -1350,6 +1580,20 @@ async def queue_retry(session: AsyncSession, take_id: int) -> Job | None:
     validation = _retryable_failure(take)
     if validation is None:
         return None
+    if validation is take.dialogue_check:
+        # SCN-001: two takes in a row that hear the same words point at the check, not the clip.
+        before = await _take_before(session, take)
+        if before is not None and _repeated_answer(take, before):
+            _logger.info(
+                "shot '%s' of scene '%s' of project %d: takes %d and %d heard the same words; "
+                "not retried, the shot needs review",
+                take.shot_id,
+                take.scene_id,
+                take.project_id,
+                before.take_number,
+                take.take_number,
+            )
+            return None
     attempt = _retry_attempt(take)
     max_tries = await settings_service.get_int(session, settings_service.SHOT_TAKE_MAX_RETRIES_KEY)
     if attempt >= max_tries:
@@ -1527,18 +1771,25 @@ async def takes_needing_a_check(session: AsyncSession, project_id: int) -> list[
 
 
 async def queue_dialogue_check(
-    session: AsyncSession, take: ShotTake, *, commit: bool = True
+    session: AsyncSession, take: ShotTake, *, commit: bool = True, report_only: bool = False
 ) -> tuple[Job, bool]:
-    """Queues the job that compares the speech in a take's clip with the shot's dialogue lines.
-    Returns `(job, created)`: the job already checking the take when it was not created. With
-    `commit=False` the job is only flushed, so the caller saves it with the take.
+    """Queues the job that compares the speech in a take's clip with the shot's dialogue lines
+    (or, for a shot with no dialogue, checks that nobody speaks, SCN-009). Returns
+    `(job, created)`: the job already checking the take when it was not created. With
+    `commit=False` the job is only flushed, so the caller saves it with the take. With
+    `report_only` the result is stored as a report: it never changes the selection and never
+    starts a retry (`start_silent_speech_check`).
     """
     job, created = await store.create_job(
         session,
         project_id=take.project_id,
         type=DIALOGUE_JOB_TYPE,
         provider="gpu",
-        input={"requested": DIALOGUE_JOB_TYPE, DIALOGUE_DEDUPE_KEY: take.id},
+        input={
+            "requested": DIALOGUE_JOB_TYPE,
+            DIALOGUE_DEDUPE_KEY: take.id,
+            **({REPORT_ONLY_KEY: True} if report_only else {}),
+        },
         commit=commit,
         dedupe_key=DIALOGUE_DEDUPE_KEY,
     )
@@ -1550,6 +1801,40 @@ async def queue_dialogue_check(
             job.id,
         )
     return job, created
+
+
+async def start_silent_speech_check(
+    session: AsyncSession, project: Project, scene_id: str | None = None
+) -> list[Job]:
+    """SCN-009: queues one speech check for each selected take of a shot with no dialogue that
+    was made before the check existed (`TakeEntry.can_audit_speech`), in one scene or in the
+    whole project, and commits. Each is a short transcription on the GPU server, and it is queued
+    only by this call, which a click starts (S-11). The result is a report: it is shown on the
+    take, but the take stays selected and no retry is queued. Raises ShotTakesError when no take
+    needs it.
+    """
+    current = await state(session, project)
+    if scene_id is not None and not any(entry.item["id"] == scene_id for entry in current.entries):
+        raise ShotTakesError(f"There is no scene '{scene_id}' in the newest scene list.")
+    takes = [
+        take
+        for scene in current.entries
+        if scene_id is None or scene.item["id"] == scene_id
+        for shot in scene.shots
+        for take in shot.takes
+        if take.can_audit_speech
+    ]
+    if not takes:
+        raise ShotTakesError("No selected silent take is waiting for a speech check.")
+    jobs: list[Job] = []
+    for take in takes:
+        job, _created = await queue_dialogue_check(
+            session, take.row, commit=False, report_only=True
+        )
+        jobs.append(job)
+    await session.commit()
+    _logger.info("project %d: %d silent takes queued for a speech report", project.id, len(jobs))
+    return jobs
 
 
 async def start_check(session: AsyncSession, project: Project) -> Job:

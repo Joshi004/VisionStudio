@@ -179,6 +179,8 @@ class EnvironmentEntry:
     # What the plan is made from: the scenes' needs and the environment as it stands now.
     needs: list[SceneNeed] = field(default_factory=list)
     current: scene_definitions.CurrentDefinition | None = None
+    # The ids of every scene set in this environment, staged or not, in story order (SCN-010).
+    scene_ids: list[str] = field(default_factory=list)
 
     @property
     def pictures_status(self) -> ViewStatus:
@@ -263,19 +265,22 @@ def _need_for(entry: scene_staging.SceneEntry, characters: dict[str, str]) -> Sc
 
 async def _needs_by_environment(
     session: AsyncSession, project: Project
-) -> tuple[dict[str, list[SceneNeed]], dict[str, list[str]], str | None]:
+) -> tuple[dict[str, list[SceneNeed]], dict[str, list[str]], dict[str, list[str]], str | None]:
     """The scenes' needs grouped by the discovered environment they are set in, in story order;
-    the titles of the scenes of each environment that have no current staging; and why staging
-    is blocked for the whole project (or None).
+    the titles of the scenes of each environment that have no current staging; the ids of every
+    scene set in each environment, staged or not (SCN-010); and why staging is blocked for the
+    whole project (or None).
     """
     staging = await scene_staging.state(session, project)
     names = {item["id"]: item["name"] for item in staging.characters}
     grouped: dict[str, list[SceneNeed]] = {}
     missing: dict[str, list[str]] = {}
+    scene_ids: dict[str, list[str]] = {}
     for entry in staging.entries:
         if entry.environment_id is None:
             continue
         grouped.setdefault(entry.environment_id, [])
+        scene_ids.setdefault(entry.environment_id, []).append(entry.item["id"])
         need = _need_for(entry, names)
         if need is not None:
             grouped[entry.environment_id].append(need)
@@ -283,7 +288,7 @@ async def _needs_by_environment(
             missing.setdefault(entry.environment_id, []).append(
                 str(entry.item.get("title", entry.item["id"]))
             )
-    return grouped, missing, staging.blocked_reason
+    return grouped, missing, scene_ids, staging.blocked_reason
 
 
 # --- Pictures of one view -----------------------------------------------------------------
@@ -528,7 +533,9 @@ async def state(session: AsyncSession, project: Project) -> ViewsState:
     """The environments scenes are set in, each with its view plan and where its views stand.
     Worked out on every read; nothing here is stored.
     """
-    needs_by_env, unstaged, blocked = await _needs_by_environment(session, project)
+    needs_by_env, unstaged, scene_ids_by_env, blocked = await _needs_by_environment(
+        session, project
+    )
     if blocked is not None and not needs_by_env:
         return ViewsState([], blocked)
     current = await scene_definitions.current_definitions(session, project)
@@ -601,6 +608,7 @@ async def state(session: AsyncSession, project: Project) -> ViewsState:
                 master_image_id=master,
                 needs=needs,
                 current=defined,
+                scene_ids=scene_ids_by_env.get(discovery_id, []),
             )
         )
     return ViewsState(entries, blocked)

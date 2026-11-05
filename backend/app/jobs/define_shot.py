@@ -92,6 +92,12 @@ class _Input:
     explainer: bool = False
     # A continuous explainer's cut-based shot (FLOW-005); False on every other job.
     continuous: bool = False
+    # The explainer owner's text for how the presenter is placed and moves; None when there is
+    # none, and on every job of a story.
+    presenter_staging: str | None = None
+    # The place inside the scene's main place this shot is inside, with its views (SCN-007);
+    # None for a shot of the main place and on every job made before it.
+    inner_place: dict[str, Any] | None = None
 
 
 def _is_number(value: Any) -> bool:
@@ -122,12 +128,16 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     staging = job_input.get("staging")
     explainer = job_input.get("explainer", False)
     continuous = job_input.get("continuous", False)
+    presenter_staging = job_input.get("presenter_staging")
+    inner_place = job_input.get("inner_place")
     feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     if (
         not feedback_ok
         or not isinstance(explainer, bool)
         or not isinstance(continuous, bool)
+        or not (presenter_staging is None or isinstance(presenter_staging, str))
         or not (staging is None or isinstance(staging, dict))
+        or not (inner_place is None or isinstance(inner_place, dict))
         or not isinstance(scene, dict)
         or not isinstance(scene_id, str)
         or not isinstance(shot_id, str)
@@ -175,6 +185,8 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         staging=staging,
         explainer=explainer,
         continuous=continuous,
+        presenter_staging=presenter_staging,
+        inner_place=inner_place,
     )
 
 
@@ -206,6 +218,8 @@ class DefineShotHandler(JobHandler):
                 exchange=read.shot.get("rapid_exchange") is True,
                 staging=read.staging,
                 explainer=read.explainer,
+                check_presence=True,
+                inner_place=read.inner_place,
                 warnings=found,
             )
         except ValueError as exc:
@@ -257,6 +271,8 @@ class DefineShotHandler(JobHandler):
             staging=read.staging,
             explainer=read.explainer,
             continuous=read.continuous,
+            presenter_staging=read.presenter_staging,
+            inner_place=read.inner_place,
         )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),

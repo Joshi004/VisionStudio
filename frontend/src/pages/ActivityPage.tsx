@@ -32,6 +32,8 @@ import {
   jobTypeLabel,
   jobTypeOptions,
   labPathFor,
+  priorityText,
+  showsPhase,
 } from "../components/jobs/jobFormat";
 import { useActivityFilters } from "../components/jobs/useActivityFilters";
 import { formatDateTime } from "../format";
@@ -187,6 +189,11 @@ export function ActivityPage() {
                   </Table.Td>
                   <Table.Td>
                     <JobStatusBadge job={job} />
+                    {showsPhase(job.status) && priorityText(job) !== "" && (
+                      <Text size="xs" c="dimmed">
+                        {priorityText(job)}
+                      </Text>
+                    )}
                   </Table.Td>
                   <Table.Td>{formatDateTime(job.created_at)}</Table.Td>
                   <Table.Td>{elapsedText(job, now)}</Table.Td>

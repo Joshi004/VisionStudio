@@ -30,8 +30,9 @@ pipeline look whose candidate is an edit of the character's canonical front pict
 prompt made from a template (`look_state_edit_prompts`), so no prompt job runs. Its master is
 chosen automatically and the five angles follow. When it is ready it fills
 `character_named_look.look_id` and writes the character's next version, which freezes the
-named look's pictures and moves the pin, but it **never** becomes the character's current look
-and is left out of `list_looks`.
+named look's pictures and moves the pin. It does not become the character's current look by
+itself and is left out of `list_looks`; only `character_outfits.make_default` makes an outfit's
+pictures the current look, and `list_looks` then shows that one look.
 
 A pipeline look for a character that is the same person as another (a younger self, an older
 self, a twin; PHASE-047) is made by editing that other character's front picture. While that
@@ -53,7 +54,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Final
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
@@ -203,9 +204,10 @@ async def start_look(
 
     A look for a named look (PHASE-017) passes `named_look_id` and the finished edit `prompt`,
     written from a template in code, so no job writes a prompt: the candidate is started at
-    once. It needs `automatic` and `reference_image_id` (the character's canonical front
-    picture), never waits, and when it is ready it fills the named look and never becomes the
-    character's current look.
+    once. It needs `reference_image_id` (the character's canonical front picture) and never
+    waits. The story pipeline passes `automatic`; the Character Lab's outfits do not (a look
+    for a named look always makes one candidate and chooses its master by itself). When it is
+    ready it fills the named look and never becomes the character's current look.
     Commits. Raises CharacterLookError.
     """
     character = await session.get(LibraryCharacter, character_id)
@@ -218,10 +220,8 @@ async def start_look(
     if named_look_id is not None or prompt is not None:
         if named_look_id is None or prompt is None or not prompt.strip():
             raise CharacterLookError("A named look needs both its look and its edit prompt.")
-        if automatic is None or reference_image_id is None or wait:
-            raise CharacterLookError(
-                "A named look is made by the story pipeline, from a picture, without waiting."
-            )
+        if reference_image_id is None or wait:
+            raise CharacterLookError("A named look is made from a picture, without waiting.")
         named = await session.get(CharacterNamedLook, named_look_id)
         if named is None or named.character_id != character_id:
             raise CharacterLookError(f"There is no named look {named_look_id} on this character.")
@@ -417,7 +417,11 @@ async def on_candidate_image_stored(run_id: int) -> bool:
         )
         candidate = (await session.execute(statement)).scalars().first()
         look = await session.get(CharacterLook, candidate.look_id) if candidate else None
-        if candidate is None or look is None or look.project_id is None:
+        if (
+            candidate is None
+            or look is None
+            or (look.project_id is None and look.named_look_id is None)
+        ):
             await session.commit()
             return False
         if look.status != "choosing":
@@ -443,8 +447,11 @@ async def on_candidate_image_stored(run_id: int) -> bool:
 
 
 def _candidate_count(look: CharacterLook) -> int:
-    """One candidate for a look the story pipeline makes, four for one made in the lab."""
-    return AUTOMATIC_CANDIDATE_COUNT if look.project_id is not None else CANDIDATE_COUNT
+    """One candidate for a look the story pipeline makes and for the pictures of a named look,
+    four for one made in the lab.
+    """
+    automatic = look.project_id is not None or look.named_look_id is not None
+    return AUTOMATIC_CANDIDATE_COUNT if automatic else CANDIDATE_COUNT
 
 
 async def _start_candidates(
@@ -697,7 +704,8 @@ async def _finish_named_look(
     session: AsyncSession, look: CharacterLook, character: LibraryCharacter | None
 ) -> None:
     """A named look's five pictures are all there: points the named look at them and writes the
-    character's next version (`ai`) that freezes them, moving the project's pin. The character's
+    character's next version (`ai`) that freezes them, moving the project's pin. Pictures made
+    in the Character Lab (no project) write a version by hand and move no pin. The character's
     current look is not touched. Flushes; the caller commits.
     """
     named = (
@@ -709,6 +717,11 @@ async def _finish_named_look(
         return
     named.look_id = look.id
     await session.flush()
+    if look.project_id is None:
+        # Made in the Character Lab: a version by hand freezes the pictures, and no project's
+        # pin moves.
+        await character_versions.record_version_if_changed(session, character)
+        return
     await _pin_pipeline_look(session, look, character)
 
 
@@ -886,7 +899,18 @@ async def list_looks(session: AsyncSession, character_id: int) -> list[Character
     """
     statement = (
         select(CharacterLook)
-        .where(CharacterLook.character_id == character_id, CharacterLook.named_look_id.is_(None))
+        .where(CharacterLook.character_id == character_id)
+        .where(
+            or_(
+                CharacterLook.named_look_id.is_(None),
+                # An outfit made the default: its pictures are the character's current look.
+                CharacterLook.id.in_(
+                    select(LibraryCharacter.current_look_id).where(
+                        LibraryCharacter.id == character_id
+                    )
+                ),
+            )
+        )
         .order_by(CharacterLook.version.desc())
     )
     return list((await session.execute(statement)).scalars().all())

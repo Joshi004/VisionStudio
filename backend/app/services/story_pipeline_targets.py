@@ -42,6 +42,7 @@ from app.services import (
     environment_views,
     explainer,
     generation_requests,
+    graphic_theme,
     look_state_images,
     look_state_resolution,
     music_bible,
@@ -54,9 +55,12 @@ from app.services import (
     review_points,
     scene_definitions,
     scene_events,
+    scene_renders,
     scene_staging,
     shot_continuity,
     shot_definitions,
+    shot_graphic_briefs,
+    shot_graphics,
     shot_plans,
     shot_prompts,
     shot_references,
@@ -72,6 +76,7 @@ from app.services import (
 from app.services.projects import SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION
 from app.services.story_pipeline import (
     PROJECT_KEY,
+    SCENE_RUN_SKIPS,
     SCOPE_OUT_OF_DATE,
     STEP_KEYS,
     STEP_LABELS,
@@ -79,6 +84,10 @@ from app.services.story_pipeline import (
     Started,
     StepView,
     Target,
+    in_run_scenes,
+    in_scope,
+    is_story_wide,
+    target_scenes,
 )
 
 _logger = logging.getLogger(__name__)
@@ -840,7 +849,7 @@ async def _evaluate_scene_definitions(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
-                consent=_MANUAL_DEFINITION if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_DEFINITION if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -889,7 +898,7 @@ async def _evaluate_events(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
-                consent=_MANUAL_EVENTS if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_EVENTS if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -1254,7 +1263,7 @@ async def _evaluate_scene_staging(
                 done,
                 active=active,
                 block=None if done or active else entry.blocked_reason,
-                consent=_MANUAL_STAGING if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_STAGING if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -1320,6 +1329,9 @@ async def _evaluate_environment_views(
                 last_error=last_error,
                 ref=(entry.discovery_id, step),
                 stale=entry.status == "out_of_date" or any(item.reasons for item in entry.views),
+                # A scene run looks at the places its scenes are set in (SCN-004). In the lanes
+                # the place waits for every scene set there, staged or not (SCN-010).
+                scenes=tuple(entry.scene_ids or [need.scene_id for need in entry.needs]),
             )
         )
     return StepView(targets)
@@ -1443,11 +1455,7 @@ async def _evaluate_speech_units(
                 _scene_label(entry.item),
                 entry.status == "planned",
                 block=None if entry.status == "planned" else entry.blocked_reason,
-                consent=(
-                    _MANUAL_UNITS
-                    if entry.needs_confirmation and entry.status != "planned"
-                    else None
-                ),
+                consent=_MANUAL_UNITS if entry.needs_confirmation else None,
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
                 group=entry.item["id"],
@@ -1464,7 +1472,7 @@ async def _start_speech_units(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    if options.scope == SCOPE_OUT_OF_DATE:
+    if options.scope == SCOPE_OUT_OF_DATE or options.scenes:
         # Only the scenes the run chose: "plan all" would also plan scenes it leaves alone.
         async def plan_scene(target: Target) -> tuple[int, ...]:
             await speech_units.plan_scene(
@@ -1557,8 +1565,9 @@ async def _start_speech_synthesis(
 async def _evaluate_word_timings(
     session: AsyncSession, project: Project, options: RunOptions
 ) -> StepView:
-    # Only an explainer with captions or callouts on needs the time of each word. For any other
-    # project the step has one target that is already done, so a run reports it as skipped.
+    # Only an explainer needs the time of each word (its caption track is always frozen). For
+    # any other project the step has one target that is already done, so a run reports it as
+    # skipped.
     if not word_timings.wanted(project):
         return StepView([Target(PROJECT_KEY, "", True)])
     state = await speech_synthesis.state(session, project)
@@ -1693,6 +1702,38 @@ async def _call_callout_plan(session: AsyncSession, project: Project, options: R
     )
 
 
+# --- The graphics theme (EXG-002) -------------------------------------------------------------
+
+
+async def _evaluate_graphic_theme(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with graphics on has a graphics theme. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not graphic_theme.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await graphic_theme.state(session, project)
+    done = state.latest is not None and not state.out_of_date
+    active = _active(state.job)
+    return StepView(
+        [
+            Target(
+                PROJECT_KEY,
+                "",
+                done,
+                active=active,
+                block=None if done or active else state.blocked_reason,
+                last_error=_failure(state.job),
+                stale=state.latest is not None and not done,
+            )
+        ]
+    )
+
+
+async def _call_graphic_theme(session: AsyncSession, project: Project, options: RunOptions) -> Job:
+    return await graphic_theme.start_run(session, project)
+
+
 # --- Shot plans -----------------------------------------------------------------------------
 
 
@@ -1738,7 +1779,7 @@ async def _evaluate_shot_plans(
                 active=active,
                 block=block,
                 settling=settling,
-                consent=_MANUAL_SHOT_PLAN if entry.needs_confirmation and not done else None,
+                consent=_MANUAL_SHOT_PLAN if entry.needs_confirmation else None,
                 last_error=_failure(entry.job),
                 ref=(entry.item["id"],),
                 stale=entry.status == "out_of_date",
@@ -1768,6 +1809,104 @@ async def _start_shot_plans(
             )
         ),
     )
+
+
+# --- Graphic briefs -------------------------------------------------------------------------
+
+
+async def _evaluate_graphic_briefs(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with graphics on has graphic briefs. For any other project the
+    # step has one target that is already done, so a run reports it as skipped and no call is made.
+    if not graphic_theme.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await shot_graphic_briefs.state(session, project)
+    targets: list[Target] = []
+    for scene in state.entries:
+        scene_id = scene.item["id"]
+        for shot in scene.shots:
+            shot_id = shot.shot["id"]
+            active = shot.status == "writing"
+            done = shot.status == "ready"
+            targets.append(
+                Target(
+                    _shot_key(scene_id, shot_id),
+                    _shot_label(scene.item, shot.shot),
+                    done,
+                    active=active,
+                    block=None if done or active else shot.blocked_reason,
+                    last_error=None if done else shot.last_error,
+                    ref=(scene_id, shot_id),
+                    stale=shot.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
+    return StepView(targets)
+
+
+async def _start_graphic_briefs(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    return await _start_each(
+        session,
+        targets,
+        deadline,
+        lambda target: _ids_of(
+            shot_graphic_briefs.start_shot(session, project, target.ref[0], target.ref[1])
+        ),
+    )
+
+
+# --- Graphics ---------------------------------------------------------------------------------
+
+
+async def _evaluate_graphics(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with graphics on has graphics. For any other project the step
+    # has one target that is already done, so a run reports it as skipped and no call is made.
+    if not graphic_theme.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    state = await shot_graphics.state(session, project)
+    targets: list[Target] = []
+    for scene in state.entries:
+        scene_id = scene.item["id"]
+        for shot in scene.shots:
+            shot_id = shot.shot["id"]
+            active = shot.status == "working"
+            targets.append(
+                Target(
+                    _shot_key(scene_id, shot_id),
+                    _shot_label(scene.item, shot.shot),
+                    shot.done,
+                    active=active,
+                    block=None if shot.done or active else shot.refusal,
+                    last_error=None if shot.done else shot.last_error,
+                    ref=(scene_id, shot_id),
+                    stale=shot.status == "out_of_date",
+                    group=scene_id,
+                )
+            )
+    return StepView(targets)
+
+
+async def _start_graphics(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        jobs = await shot_graphics.start_shot(session, project, target.ref[0], target.ref[1])
+        return tuple(job.id for job in jobs)
+
+    return await _start_each(session, targets, deadline, make)
 
 
 # --- Shot definitions -----------------------------------------------------------------------
@@ -1804,9 +1943,7 @@ async def _evaluate_shot_definitions(
                     done,
                     active=active,
                     block=None if done or active else (shot.blocked_reason or scene.blocked_reason),
-                    consent=(
-                        _MANUAL_SHOT_DEFINITION if shot.needs_confirmation and not done else None
-                    ),
+                    consent=_MANUAL_SHOT_DEFINITION if shot.needs_confirmation else None,
                     last_error=_failure(shot.job),
                     ref=(scene_id, shot_id),
                     stale=shot.status == "out_of_date",
@@ -1875,6 +2012,16 @@ async def _evaluate_shot_continuity(
                 )
         elif entry.status == "not_checked" and not entry.can_run:
             block = entry.blocked_reason
+        # SCN-012: a scene that continues straight from the scene before it is checked against
+        # that scene's last shot, so it waits for that scene's check (and its repairs) to end.
+        waits_for = (f"scene:{entry.previous_scene_id}",) if entry.previous_scene_id else ()
+        if entry.look_mismatches:
+            who = ", ".join(item["character_id"] for item in entry.look_mismatches)
+            warnings.append(
+                f"{label}: the look of {who} is not the same as at the end of the scene before "
+                "it, which this scene continues straight from. Define the scene again with a "
+                "note, or change the look."
+            )
         targets.append(
             Target(
                 f"scene:{scene_id}",
@@ -1884,6 +2031,7 @@ async def _evaluate_shot_continuity(
                 block=block,
                 settling=settling,
                 last_error=_failure(entry.job),
+                waits_for=waits_for,
                 ref=(scene_id,),
                 # A check was made for shots that have changed since.
                 stale=entry.status == "not_checked" and entry.row is not None,
@@ -1955,7 +2103,7 @@ async def _start_references(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    if options.scope == SCOPE_OUT_OF_DATE:
+    if options.scope == SCOPE_OUT_OF_DATE or options.scenes:
         # Only the shots the run chose: "select all" would also choose for shots it leaves alone.
         async def select(target: Target) -> tuple[int, ...]:
             result = await shot_references.select_shot(
@@ -2028,7 +2176,7 @@ async def _start_generation_requests(
     options: RunOptions,
     deadline: float,
 ) -> list[Started]:
-    if options.scope == SCOPE_OUT_OF_DATE:
+    if options.scope == SCOPE_OUT_OF_DATE or options.scenes:
         # Only the shots the run chose: "plan all" would also plan shots it leaves alone.
         async def plan(target: Target) -> tuple[int, ...]:
             await generation_requests.plan_shot(session, project, target.ref[0], target.ref[1])
@@ -2068,7 +2216,7 @@ async def _evaluate_prompts(
                     done,
                     active=active,
                     block=None if done or active else shot.blocked_reason,
-                    consent=_MANUAL_PROMPT if shot.needs_confirmation and not done else None,
+                    consent=_MANUAL_PROMPT if shot.needs_confirmation else None,
                     last_error=_failure(shot.job),
                     ref=(scene.item["id"], shot.shot["id"]),
                     stale=shot.status == "out_of_date",
@@ -2131,6 +2279,10 @@ def _failed_shot_reason(shot: shot_takes.ShotEntry) -> str:
             if isinstance(problem, dict) and problem.get("message")
         ]
         text = " ".join(messages) or "The speech in the clip does not match the dialogue."
+        if shot.needs_review:
+            text += (
+                " Two takes in a row heard the same words, so no more takes are made by themselves."
+            )
         return (
             f"No take passed its dialogue check: {text} "
             "Generate the shot from its own button to retry, or select one of its takes to use "
@@ -2258,6 +2410,69 @@ async def _call_render(session: AsyncSession, project: Project, options: RunOpti
     return await story_renders.start_render(session, project)
 
 
+# --- The render of each scene: the end of its lane (SCN-004, SCN-010) ------------------------
+
+
+async def _evaluate_scene_render(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    state = await scene_renders.state(session, project)
+    targets: list[Target] = []
+    warnings: list[str] = []
+    for scene in state.scenes:
+        if options.scenes and scene.scene_id not in options.scenes:
+            continue
+        active = _active(scene.job)
+        newest = scene.renders[0] if scene.renders else None
+        done = newest is not None and newest.status == scene_renders.STATUS_CURRENT and not active
+        if not options.scenes and newest is not None and newest.final_music_only and not active:
+            # SCN-013: once the final music is placed, a scene render made before it (with
+            # provisional music, or none) is kept in a run of the whole story. The full video
+            # has the final music; "Render scene" makes this one again.
+            done = True
+        if not options.scenes and not done and not active and not scene.can_render:
+            # In a run of the whole story the scene render is a convenience at the end of the
+            # lane: a scene that cannot be rendered must not stop the run from finishing (the
+            # full video does not need it). It is a warning, not a problem.
+            done = True
+            warnings.append(
+                f"Scene {scene.index}: {scene.title}: no scene render was made: "
+                f"{scene.blocked_reason or 'it cannot be rendered'}"
+            )
+        targets.append(
+            Target(
+                f"scene:{scene.scene_id}",
+                f"Scene {scene.index}: {scene.title}",
+                done,
+                active=active,
+                block=None if done or active or scene.can_render else scene.blocked_reason,
+                last_error=_failure(scene.job),
+                ref=(scene.scene_id,),
+                # In a scene run a scene with no render yet is made one, as one that is out of
+                # date. In a run of the whole story only a render that exists can be out of date.
+                stale=not done if options.scenes else newest is not None and not done,
+                group=scene.scene_id,
+                existing=newest is not None,
+            )
+        )
+    return StepView(targets, warnings=warnings)
+
+
+async def _start_scene_render(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    return await _start_each(
+        session,
+        targets,
+        deadline,
+        lambda target: _ids_of(scene_renders.start_render(session, project, target.ref[0])),
+    )
+
+
 # --- The adapters ---------------------------------------------------------------------------
 
 ADAPTERS: Final[dict[str, Adapter]] = {
@@ -2288,13 +2503,17 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "speech_synthesis": Adapter(_evaluate_speech_synthesis, _start_speech_synthesis),
     "word_timings": Adapter(_evaluate_word_timings, _start_word_timings),
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
+    "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
+    "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),
+    "graphics": Adapter(_evaluate_graphics, _start_graphics),
     "shot_definitions": Adapter(_evaluate_shot_definitions, _start_shot_definitions),
     "shot_continuity": Adapter(_evaluate_shot_continuity, _start_shot_continuity),
     "references": Adapter(_evaluate_references, _start_references),
     "generation_requests": Adapter(_evaluate_generation_requests, _start_generation_requests),
     "prompts": Adapter(_evaluate_prompts, _start_prompts),
     "shot_generation": Adapter(_evaluate_shot_generation, _start_shot_generation),
+    "scene_render": Adapter(_evaluate_scene_render, _start_scene_render),
     "music_placement": Adapter(_evaluate_music_placement, _project_start(_call_music_placement)),
     "render": Adapter(_evaluate_render, _project_start(_call_render)),
 }
@@ -2345,19 +2564,36 @@ class Confirmation:
     stale: bool = False
 
 
-async def confirmations(session: AsyncSession, project: Project) -> list[Confirmation]:
+async def confirmations(
+    session: AsyncSession, project: Project, options: RunOptions | None = None
+) -> list[Confirmation]:
     """The targets that a run started now would replace, and that need the user's consent: the
     ones that are not up to date and hold what the user chose or wrote. Read-only.
+
+    For a run of some scenes (SCN-004, `options`) only what that run looks at is listed: the
+    targets of those scenes (and no step it skips), the story-wide ones it would make, and,
+    with `remake_from`, the targets of that step in those scenes that are up to date.
     """
+    options = options if options is not None else RunOptions()
     found: list[Confirmation] = []
-    options = RunOptions()
     for key in _CONSENT_STEPS:
+        if options.scenes and key in SCENE_RUN_SKIPS:
+            continue
         view = await ADAPTERS[key].evaluate(session, project, options)
-        found.extend(
-            Confirmation(key, STEP_LABELS[key], target.label, target.consent, target.stale)
-            for target in view.targets
-            if not target.done and target.consent is not None
-        )
+        for target in view.targets:
+            if target.consent is None or not in_run_scenes(target, options.scenes):
+                continue
+            again = key == options.remake_from and not is_story_wide(target)
+            if target.done and not again:
+                continue
+            # What the run leaves alone is not replaced (a stale story-wide target).
+            if not target.done and not in_scope(
+                target, replace(options, scope="all"), False, set()
+            ):
+                continue
+            found.append(
+                Confirmation(key, STEP_LABELS[key], target.label, target.consent, target.stale)
+            )
     return found
 
 
@@ -2375,17 +2611,34 @@ class ReviewStep:
 
 
 async def review_targets(
-    session: AsyncSession, project: Project, point_key: str
+    session: AsyncSession,
+    project: Project,
+    point_key: str,
+    options: RunOptions | None = None,
+    scene_id: str | None = None,
 ) -> list[ReviewStep]:
     """The done targets of every step of a review point, read through the adapters. Read-only.
-    An unknown point has none.
+    An unknown point has none. With `scene_id` (SCN-010) only the targets of that scene: a review
+    point held scene by scene shows each scene its own targets.
     """
     point = review_points.POINTS_BY_KEY.get(point_key)
     if point is None:
         return []
-    options = RunOptions()
+    options = options if options is not None else RunOptions()
     steps: list[ReviewStep] = []
     for key in point.steps:
         view = await ADAPTERS[key].evaluate(session, project, options)
-        steps.append(ReviewStep(key, STEP_LABELS[key], [t for t in view.targets if t.done]))
+        steps.append(
+            ReviewStep(
+                key,
+                STEP_LABELS[key],
+                [
+                    t
+                    for t in view.targets
+                    if t.done
+                    and in_run_scenes(t, options.scenes)
+                    and (scene_id is None or scene_id in target_scenes(t))
+                ],
+            )
+        )
     return steps

@@ -131,6 +131,9 @@ class ShotEntry:
     # Where the characters stand in this shot and the views that may stand behind it
     # (`shot_staging.for_shot`), or None when the scene is not staged yet (PHASE-054).
     staging: dict[str, Any] | None = None
+    # The place inside the scene's main place this shot is inside, with its views (SCN-007), or
+    # None for a shot of the main place.
+    inner_place: dict[str, Any] | None = None
 
     @property
     def content(self) -> dict[str, Any] | None:
@@ -205,6 +208,9 @@ class _Loaded:
     blocked_reason: str | None
     # An explainer project (EXPLAINER-004): its shots are the presenter's or B-roll.
     explainer: bool = False
+    # The explainer owner's text for how the presenter is placed and moves; None when there is
+    # none, and for a story.
+    presenter_staging: str | None = None
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -242,15 +248,20 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         views={entry.discovery_id: entry for entry in views.entries},
         blocked_reason=_blocked_reason(project.script_text, bible, plans.blocked_reason),
         explainer=project.kind == KIND_EXPLAINER,
+        presenter_staging=project.presenter_staging if project.kind == KIND_EXPLAINER else None,
     )
 
 
 def _chosen(definition: dict[str, Any]) -> list[tuple[str, str]]:
-    """What a scene definition chose, as `(kind, discovery id)`: its environment, then its
-    characters.
+    """What a scene definition chose, as `(kind, discovery id)`: its environment, the places
+    inside it (SCN-007), then its characters.
     """
     return [
         (ENVIRONMENT_DEFINITION_KIND, definition["environment_id"]),
+        *(
+            (ENVIRONMENT_DEFINITION_KIND, place["environment_id"])
+            for place in definition.get("inner_places", [])
+        ),
         *((CHARACTER_DEFINITION_KIND, character) for character in definition["characters"]),
     ]
 
@@ -363,6 +374,13 @@ def _resolved_item(item: look_state_resolution.ResolvedItem | None, key: str) ->
     }
 
 
+def is_graphic_shot(shot: dict[str, Any]) -> bool:
+    """Whether a shot of a plan is a graphic shot (EXG-003): drawn by code, never defined,
+    never made by H3.
+    """
+    return shot.get("type") == cut_planning_writer.GRAPHIC
+
+
 def _skeleton(shot: dict[str, Any], duration: float) -> dict[str, Any]:
     """A shot's skeleton as the model reads it: the plan's fields, with the length from the
     timeline in place of the planner's target.
@@ -380,6 +398,9 @@ def _skeleton(shot: dict[str, Any], duration: float) -> dict[str, Any]:
         # PHASE-043. Written only when true, so the skeleton (and its hash, which says whether
         # a definition is out of date) of every other shot is exactly what it was before.
         skeleton["rapid_exchange"] = True
+    if shot.get("place"):
+        # SCN-007. Written only for a shot inside an inner place, for the same reason.
+        skeleton["place"] = shot["place"]
     return skeleton
 
 
@@ -581,7 +602,10 @@ _VIEW_FIELDS: Final = ("id", "name", "side", "framing", "zone", "description")
 def _shot_staging(loaded: _Loaded, scene_id: str, shot: dict[str, Any]) -> dict[str, Any] | None:
     """What this shot is staged and framed from (`shot_staging.for_shot`), or None when the
     scene is not staged or its place has no planned views yet. Pure; the scene is not refused.
+    A shot inside an inner place (SCN-007) has none: nobody is staged inside it.
     """
+    if shot.get("place"):
+        return None
     staged = loaded.staging.get(scene_id)
     definition = loaded.definitions.get(scene_id)
     speech = loaded.speech.get(scene_id)
@@ -621,10 +645,69 @@ def _shot_staging(loaded: _Loaded, scene_id: str, shot: dict[str, Any]) -> dict[
     )
 
 
+def _inner_place(loaded: _Loaded, scene_id: str, shot: dict[str, Any]) -> dict[str, Any] | None:
+    """SCN-007: the place inside the scene's main place that this shot happens inside, as
+    `{id, name, relation, views}`, or None for a shot of the main place. `views` are the
+    place's `establishing` view and the views its own view plan has, if some scene is set
+    there; none has `allowed_for`, because nobody is staged inside it. Pure. Raises
+    ShotDefinitionsError when the shot names a place the scene does not list or that is not
+    defined.
+    """
+    place_id = shot.get("place")
+    if not place_id:
+        return None
+    definition = loaded.definitions.get(scene_id)
+    listed = (
+        definition.row.content.get("inner_places", [])
+        if definition is not None and definition.row is not None
+        else []
+    )
+    place = next((item for item in listed if item["environment_id"] == place_id), None)
+    current = loaded.current.get((ENVIRONMENT_DEFINITION_KIND, place_id))
+    if place is None or current is None:
+        raise ShotDefinitionsError(
+            f"The shot '{shot['id']}' is inside the place '{place_id}', which the scene "
+            "does not list as an inner place or which is not linked and defined. Define the "
+            "scene again or plan its shots again first."
+        )
+    spatial = current.definition.get("spatial_plan")
+    master = spatial.get("master_view") if isinstance(spatial, dict) else None
+    entry = loaded.views.get(place_id)
+    views = [shot_staging.establishing_view(master if isinstance(master, str) else None)]
+    if entry is not None and entry.plan is not None:
+        views += [
+            {key: view[key] for key in _VIEW_FIELDS}
+            for view in entry.plan.content["views"]
+            if view["id"] != shot_staging.ESTABLISHING
+        ]
+    return {
+        "id": place_id,
+        "name": current.name,
+        "relation": place["relation"],
+        "views": views,
+    }
+
+
+def _inner_place_sha256(inner_place: dict[str, Any] | None) -> str | None:
+    """What a shot inside an inner place was defined from: the place, how it stands in the main
+    place and its views. None for a shot of the main place.
+    """
+    if inner_place is None:
+        return None
+    text = json.dumps(inner_place, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _staging_sha256(staging: dict[str, Any] | None) -> str | None:
     if staging is None:
         return None
     text = json.dumps(staging, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _presenter_staging_sha256(text: str | None) -> str | None:
+    if text is None:
+        return None
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
@@ -654,10 +737,15 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         )
     placed = _durations(timeline)
     shot = shots[position]
+    if is_graphic_shot(shot):
+        raise ShotDefinitionsError(
+            f"The shot '{shot_id}' is a graphic shot: it is drawn by code, so it has no definition."
+        )
     start_s, duration = placed[shot_id]
 
     def neighbour(index: int) -> dict[str, Any] | None:
-        if index < 0 or index >= len(shots):
+        # A graphic shot is no neighbour: the cut across it is not a cut between two H3 shots.
+        if index < 0 or index >= len(shots) or is_graphic_shot(shots[index]):
             return None
         return _skeleton(shots[index], placed[shots[index]["id"]][1])
 
@@ -680,6 +768,7 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         (CHARACTER_DEFINITION_KIND, character_id) for character_id in definition["characters"]
     ]
     environment_key = (ENVIRONMENT_DEFINITION_KIND, definition["environment_id"])
+    inner_place = _inner_place(loaded, scene_id, shot)
     looks = {look.subject_id: look for look in resolved.looks}
     characters = [
         _for_model(loaded.current[key], _resolved_item(looks.get(key[1]), "look"))
@@ -689,6 +778,20 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         loaded.current[environment_key], _resolved_item(resolved.environment, "state")
     )
     chosen = [environment_key, *chosen_characters]
+    if inner_place is not None:
+        # SCN-007: the shot is inside the inner place, so that is its environment. The main
+        # place it stands in is given as text, with its own state.
+        inner_key = (ENVIRONMENT_DEFINITION_KIND, inner_place["id"])
+        environment = {
+            **_for_model(loaded.current[inner_key], _resolved_item(None, "state")),
+            "inside_of": {
+                "name": environment["name"],
+                "description": environment["description"],
+                "state": environment["state"],
+                "relation": inner_place["relation"],
+            },
+        }
+        chosen = [inner_key, *chosen]
 
     # None for a scene that was never staged: its shots are defined as before.
     staging = _shot_staging(loaded, scene_id, shot)
@@ -745,6 +848,19 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         },
         # What the shot was staged from; the shot is out of date when it changes.
         **({"staging": {"sha256": _staging_sha256(staging)}} if staging is not None else {}),
+        # What a shot inside an inner place was defined from (SCN-007).
+        **(
+            {"inner_place": {"sha256": _inner_place_sha256(inner_place)}}
+            if inner_place is not None
+            else {}
+        ),
+        # The presenter staging an explainer's shot was defined with (None when there was none);
+        # a presenter shot is out of date when it changes.
+        **(
+            {"presenter_staging": {"sha256": _presenter_staging_sha256(loaded.presenter_staging)}}
+            if loaded.explainer
+            else {}
+        ),
         # Narrowed to what the shot uses by `save_shot_definition` (PHASE-039).
         "resolved": _resolved_record(resolved),
     }
@@ -772,9 +888,15 @@ def _shot_fields(loaded: _Loaded, project_id: int, scene_id: str, shot_id: str) 
         "characters": characters,
         "environment": environment,
         "staging": staging,
+        **({"inner_place": inner_place} if inner_place is not None else {}),
         "explainer": loaded.explainer,
         # Only for a cut plan (FLOW-005), so every other job is exactly what it was.
         **({"continuous": True} if cut else {}),
+        **(
+            {"presenter_staging": loaded.presenter_staging}
+            if loaded.presenter_staging is not None
+            else {}
+        ),
         # Written onto the version the job makes (D-3).
         "inputs": inputs,
     }
@@ -1152,6 +1274,7 @@ def _out_of_date_reasons(
     resolved: look_state_resolution.SceneResolution | None,
     skeleton_sha256: str | None,
     staging_sha256: str | None,
+    inner_place_sha256: str | None = None,
 ) -> list[str]:
     """Why a specification made for this shot is no longer current, one sentence each.
 
@@ -1184,6 +1307,23 @@ def _out_of_date_reasons(
             reasons.append("The staging of this shot or the views of its place changed.")
     elif staging_sha256 is not None:
         reasons.append("This shot was defined before its scene was staged.")
+
+    recorded_inner = inputs.get("inner_place")
+    recorded_inner_sha = recorded_inner.get("sha256") if isinstance(recorded_inner, dict) else None
+    if isinstance(recorded_inner_sha, str):
+        if inner_place_sha256 is None:
+            reasons.append("The place this shot is inside is no longer there.")
+        elif recorded_inner_sha != inner_place_sha256:
+            reasons.append("The place this shot is inside, or its views, changed.")
+
+    # Only a presenter shot shows anyone in an explainer; B-roll does not depend on the staging.
+    if loaded.explainer and isinstance(row.content, dict) and row.content.get("characters"):
+        recorded_presenter = inputs.get("presenter_staging")
+        recorded_presenter_sha = (
+            recorded_presenter.get("sha256") if isinstance(recorded_presenter, dict) else None
+        )
+        if recorded_presenter_sha != _presenter_staging_sha256(loaded.presenter_staging):
+            reasons.append("The presenter staging changed since this shot was defined.")
 
     newest = loaded.resolution.version
     uses = inputs.get("uses")
@@ -1259,11 +1399,18 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
         )
         shots: list[ShotEntry] = []
         for shot in plan.content["shots"] if plan.content is not None else []:
+            if is_graphic_shot(shot):
+                # Drawn by code, not made by H3 (EXG-003): it leaves the whole H3 chain here.
+                continue
             key = _shot_key(scene_id, shot["id"])
             row = rows.get(key)
             job = jobs.get(key)
             active = job is not None and job.status in store.ACTIVE_STATUSES
             staging = _shot_staging(loaded, scene_id, shot)
+            try:
+                inner_place = _inner_place(loaded, scene_id, shot)
+            except ShotDefinitionsError:
+                inner_place = None
             status: Status = "not_defined"
             reasons: list[str] = []
             if row is not None and isinstance(row.inputs, dict):
@@ -1274,6 +1421,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                     resolved,
                     current_skeleton_sha256(plan, shot, units, character_ids),
                     _staging_sha256(staging),
+                    _inner_place_sha256(inner_place),
                 )
                 status = "out_of_date" if reasons else "defined"
             blocked = refusal
@@ -1294,6 +1442,7 @@ async def _build(session: AsyncSession, project: Project, loaded: _Loaded) -> Sh
                     can_run=blocked is None,
                     blocked_reason=blocked,
                     staging=staging,
+                    inner_place=inner_place,
                 )
             )
         entries.append(
@@ -1431,6 +1580,7 @@ async def save_manual(
             exchange=fields["shot"].get("rapid_exchange") is True,
             staging=fields["staging"],
             explainer=fields["explainer"],
+            inner_place=fields.get("inner_place"),
         )
     except ValueError as exc:
         raise ShotDefinitionsError(str(exc)) from exc

@@ -39,6 +39,8 @@ type ShotDraft = {
   targetDuration: number | string;
   continuesPrevious: boolean;
   rapidExchange: boolean;
+  /** The place inside the scene's main place the shot is inside; kept as it is, not edited here. */
+  place: string | null;
   description: string;
   eventIds: string[];
   unitIds: string[];
@@ -51,6 +53,7 @@ function toDraft(shot: Shot): ShotDraft {
     targetDuration: shot.target_duration,
     continuesPrevious: shot.continues_previous,
     rapidExchange: shot.rapid_exchange,
+    place: shot.place ?? null,
     description: shot.description,
     eventIds: shot.source_event_ids,
     unitIds: shot.speech_unit_ids,
@@ -118,6 +121,7 @@ export function ShotPlanEditor({
         target_duration: Number(shot.targetDuration),
         continues_previous: shot.continuesPrevious,
         rapid_exchange: shot.rapidExchange,
+        place: shot.place,
         description: shot.description.trim(),
         source_event_ids: shot.eventIds,
         speech_unit_ids: shot.unitIds,

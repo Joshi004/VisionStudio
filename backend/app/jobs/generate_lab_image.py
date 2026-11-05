@@ -23,7 +23,8 @@ picture made for the one candidate of an environment's picture the story pipelin
 version's canonical picture by itself, and a picture made for an environment state
 (`look_state_images.on_state_image_stored`, PHASE-017) becomes that state's picture, and one made
 for a view of an environment (`environment_views.on_view_image_stored`, PHASE-052) becomes that
-view's picture. A plain
+view's picture. A picture made for a thumbnail
+(`thumbnails.on_thumbnail_image_stored`) gets its headline drawn on it. A plain
 Image lab run is none of these and all are no-ops for it.
 """
 
@@ -49,8 +50,10 @@ from app.services import (
     environment_references,
     environment_views,
     frame_images,
+    gpu_priority,
     image_lab,
     look_state_images,
+    thumbnails,
 )
 from app.services.frame_images import FrameRejected
 from app.services.storage import StorageError, TempFile, get_storage
@@ -72,6 +75,7 @@ class GenerateLabImageHandler(RemoteImageHandler):
                 await session.commit()
                 return
             base_url = await settings_service.get_str(session, GPU_URL_KEY)
+            priority = await gpu_priority.level_for(session, job)
             await session.commit()
 
         recorded = job.input if isinstance(job.input, dict) else {}
@@ -92,9 +96,10 @@ class GenerateLabImageHandler(RemoteImageHandler):
                 recorded,
                 endpoint=image_generator.EDIT_PATH,
                 build_body=build_body,
+                priority=priority,
             )
             return
-        await self.submit(job_id, base_url, request, recorded)
+        await self.submit(job_id, base_url, request, recorded, priority=priority)
 
     @staticmethod
     async def _reference_path(source: str, ref_id: int) -> str | None:
@@ -223,6 +228,7 @@ class GenerateLabImageHandler(RemoteImageHandler):
         if isinstance(run_id, int):
             await self._continue_character_lab(job.id, run_id)
             await self._continue_environment_lab(job.id, run_id)
+            await self._continue_thumbnail(job.id, run_id)
         # Best effort: a failure here is recorded and never fails the run.
         purge = await self._purge(base_url, job.provider_job_id)
         async with SessionLocal() as session:
@@ -246,6 +252,17 @@ class GenerateLabImageHandler(RemoteImageHandler):
             return
         if started or angles_started or released:
             dispatcher.nudge()
+
+    @staticmethod
+    async def _continue_thumbnail(job_id: int, run_id: int) -> None:
+        """Draws the headline on the picture when it is the one a thumbnail was waiting for.
+        Best effort: a failure never fails the picture (it is stored), and the headline can be
+        drawn again by changing it.
+        """
+        try:
+            await thumbnails.on_thumbnail_image_stored(run_id)
+        except Exception:
+            _logger.exception("job %d: the thumbnail could not be finished", job_id)
 
     @staticmethod
     async def _continue_environment_lab(job_id: int, run_id: int) -> None:

@@ -166,6 +166,33 @@ SAVING_MUSIC_PLAN: Final = "saving the music plan"
 # `write_callout_plan` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_CALLOUT_PLAN: Final = "saving the callout plan"
 
+# --- Running: the graphics theme of an explainer (EXG-002) -------------------------------
+# `write_graphic_theme` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
+
+# --- Running: the thumbnail concepts ------------------------------------------------------
+# `write_thumbnail_concepts` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+TAKING_FRAMES: Final = "taking frames from the video"
+SAVING_THUMBNAIL_CONCEPTS: Final = "saving the thumbnail ideas"
+
+# --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
+# `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+# `write_shot_graphic_brief` (EXG-004) uses the same three phases, one call per graphic shot.
+SAVING_GRAPHIC_BRIEF: Final = "saving the graphic brief"
+# `write_lab_graphic_template_spec` (GFX-006) also uses PREPARING_PROMPT and `asking_model` from
+# above (one call).
+SAVING_TEMPLATE_SPEC: Final = "saving the template spec"
+# `write_lab_graphic_block_scene` (GFX-009) also uses PREPARING_PROMPT and `asking_model` from
+# above (the scene, then at most one more call with the layout problems).
+CHECKING_BLOCK_LAYOUT: Final = "measuring the layout in the browser"
+SAVING_BLOCK_SCENE: Final = "saving the block scene"
+# `write_lab_graphic_component` (GFX-010) also uses PREPARING_PROMPT and `asking_model` from above
+# (the component, then at most one more call with the errors of the browser check).
+CHECKING_COMPONENT: Final = "compiling the component in the browser"
+SAVING_COMPONENT: Final = "saving the component"
+# `write_shot_graphic_component` and `write_shot_graphic_scene` (EXG-005) use the phases of the two
+# lab jobs above, and `render_shot_graphic` those of `render_lab_graphic` below (minus the voice).
+
 # --- Running: the music cues (MUSIC-009) -------------------------------------------------
 # `write_music_cue` and `audit_music_cues` also use PREPARING_PROMPT and `asking_model` from above
 # (once per call: the cue's detail, then one call per prompt to write; or the audit).
@@ -271,8 +298,8 @@ PLACING_VOICE: Final = "placing the voice"
 PLACING_MUSIC_LAYERS: Final = "placing the music layers"
 MIXING_SOUND: Final = "mixing the sound"
 MEASURING_MIX: Final = "measuring the mix"
-# EXPLAINER-008, 010: only for an explainer with captions or callouts, before the final encode
-# burns them in.
+# EXPLAINER-008, 010: only for an explainer with burned captions or callouts, before the final
+# encode burns them in.
 WRITING_CAPTIONS: Final = "writing the captions and callouts"
 JOINING_STORY: Final = "joining the shots and encoding the video"
 CHECKING_STORY_VIDEO: Final = "checking the video"
@@ -287,6 +314,20 @@ RENDERING_AV_PICTURE: Final = "making the picture"
 MIXING_AV_CLIP_SOUND: Final = "adding the speech and the clips' sound"
 MIXING_AV_TTS_SOUND: Final = "adding the speech alone"
 SAVING_AV_VIDEOS: Final = "saving the videos"
+# The video of a Graphics lab render (GFX-005): the motion service (or the Python renderer) draws
+# it, then the backend checks it, adds the voice and stores it.
+SENDING_GRAPHIC: Final = "sending the graphic to the motion service"
+DRAWING_GRAPHIC_IN_PYTHON: Final = "drawing the graphic in Python"
+DOWNLOADING_GRAPHIC: Final = "downloading the video"
+CHECKING_GRAPHIC: Final = "checking the video"
+# Render again (GFX-011): the frames of the new video are compared with the earlier one's.
+COMPARING_GRAPHIC_FRAMES: Final = "comparing the frames"
+ADDING_GRAPHIC_VOICE: Final = "adding the voice"
+SAVING_GRAPHIC: Final = "saving the video"
+
+
+def rendering_graphic(percent: int) -> str:
+    return f"rendering the graphic: {percent}%"
 
 
 def trimming_shot(number: int, total: int) -> str:

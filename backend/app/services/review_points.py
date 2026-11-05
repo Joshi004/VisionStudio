@@ -25,6 +25,9 @@ class ReviewPoint:
     label: str
     # The keys of the pipeline steps the point waits for. A step is in at most one point.
     steps: tuple[str, ...]
+    # SCN-010: a point of per-scene steps holds one scene at a time. Each scene waits at it for
+    # its own review while the other scenes go on. Otherwise the whole run waits.
+    per_scene: bool = False
 
 
 # In the order of the pipeline. None is enabled by default.
@@ -39,14 +42,20 @@ REVIEW_POINTS: Final[tuple[ReviewPoint, ...]] = (
         "After character and environment images",
         ("character_images", "environment_definitions"),
     ),
-    ReviewPoint("scenes", "After scene definition and events", ("scene_definitions", "events")),
+    ReviewPoint(
+        "scenes",
+        "After scene definition and events",
+        ("scene_definitions", "events"),
+        per_scene=True,
+    ),
     ReviewPoint(
         "staging",
         "After staging and environment views",
         ("scene_staging", "environment_views"),
+        per_scene=True,
     ),
-    ReviewPoint("shot_plans", "After shot planning", ("shot_plans",)),
-    ReviewPoint("shots", "After generated shots", ("shot_generation",)),
+    ReviewPoint("shot_plans", "After shot planning", ("shot_plans",), per_scene=True),
+    ReviewPoint("shots", "After generated shots", ("shot_generation",), per_scene=True),
 )
 
 REVIEW_POINT_KEYS: Final[tuple[ReviewPointKey, ...]] = tuple(point.key for point in REVIEW_POINTS)

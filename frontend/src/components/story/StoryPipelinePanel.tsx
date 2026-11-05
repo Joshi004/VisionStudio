@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   Badge,
@@ -7,8 +7,10 @@ import {
   Collapse,
   Group,
   Loader,
+  MultiSelect,
   Paper,
   SegmentedControl,
+  Select,
   Stack,
   Text,
   Title,
@@ -20,6 +22,7 @@ import { useCancelJob } from "../../api/jobs";
 import { isJobActive } from "../../api/polling";
 import {
   storyPipelineKey,
+  useAnswerSceneReview,
   useContinueStoryPipeline,
   useStartStoryPipeline,
   useStoryPipeline,
@@ -28,9 +31,11 @@ import {
   type ReviewPointKey,
 } from "../../api/storyPipeline";
 import { useProject, useUpdateProject } from "../../api/projects";
+import { useScenes } from "../../api/scenes";
 import { useStaleness } from "../../api/staleness";
 import { formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { PipelineLaneList } from "./PipelineLaneList";
 import { ReviewPointPanel } from "./ReviewPointPanel";
 
 type StoryPipelinePanelProps = {
@@ -73,9 +78,25 @@ function progressText(step: PipelineStepProgress): string {
  */
 export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError, error } = useStoryPipeline(projectId);
+  // SCN-004: the scenes a run is limited to (none: the whole story), and the step it makes
+  // again in them.
+  const [sceneIds, setSceneIds] = useState<string[]>([]);
+  const [remakeFrom, setRemakeFrom] = useState<string | null>(null);
+  const selection = useMemo(
+    () => ({
+      scenes: sceneIds,
+      remakeFrom: sceneIds.length > 0 ? remakeFrom : null,
+    }),
+    [sceneIds, remakeFrom],
+  );
+  const { data, isLoading, isError, error } = useStoryPipeline(
+    projectId,
+    selection,
+  );
+  const sceneList = useScenes(projectId).data?.latest?.scenes ?? [];
   const start = useStartStoryPipeline(projectId);
   const resume = useContinueStoryPipeline(projectId);
+  const answerScene = useAnswerSceneReview(projectId);
   const stop = useCancelJob();
   const project = useProject(projectId);
   const saveProject = useUpdateProject(projectId);
@@ -86,7 +107,16 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
   const regenerating = scope === "out_of_date";
   // What is out of date is expensive to work out; it is asked only when this choice needs it.
   const staleness = useStaleness(projectId, { enabled: regenerating });
-  const outOfDateCount = staleness.data?.count ?? 0;
+  const outOfDateCount =
+    sceneIds.length > 0
+      ? (staleness.data?.groups
+          .flatMap((group) => group.items)
+          .filter(
+            (item) => item.scene_id != null && sceneIds.includes(item.scene_id),
+          ).length ?? 0)
+      : (staleness.data?.count ?? 0);
+  const sceneRun = sceneIds.length > 0;
+  const sceneText = `${sceneIds.length} ${sceneIds.length === 1 ? "scene" : "scenes"}`;
 
   const run = data?.run ?? null;
   const active = isJobActive(run);
@@ -101,8 +131,20 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
 
   function startRun() {
     start.mutate(
-      { pauseAfter, confirmOverwrite: allowOverwrite, scope },
-      { onSuccess: () => setAllowOverwrite(false) },
+      {
+        pauseAfter,
+        confirmOverwrite: allowOverwrite,
+        scope,
+        scenes: sceneIds,
+        remakeFrom: selection.remakeFrom,
+      },
+      {
+        onSuccess: () => {
+          setAllowOverwrite(false);
+          setSceneIds([]);
+          setRemakeFrom(null);
+        },
+      },
     );
   }
 
@@ -146,7 +188,10 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
               &quot;Only what is out of date&quot; makes again only what exists
               and is out of date, with what that makes necessary (and the
               render), and leaves everything else as it is. Earlier clips, speech
-              and renders stay until a new one replaces them.
+              and renders stay until a new one replaces them. Choosing scenes
+              limits the run to them: it makes only their work (and the
+              story-wide work that is missing), no music and no full video, and
+              ends with a render of each scene.
             </Text>
           </Stack>
           {!active && (
@@ -158,11 +203,17 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                 isError ||
                 !data?.can_start ||
                 needsConsent ||
-                (regenerating && outOfDateCount === 0)
+                (regenerating &&
+                  outOfDateCount === 0 &&
+                  selection.remakeFrom === null)
               }
               style={{ flexShrink: 0 }}
             >
-              {regenerating ? "Regenerate out-of-date" : "Run whole pipeline"}
+              {regenerating
+                ? `Regenerate out-of-date${sceneRun ? ` (${sceneText})` : ""}`
+                : sceneRun
+                  ? `Run ${sceneText}`
+                  : "Run whole pipeline"}
             </Button>
           )}
           {active && run !== null && (
@@ -231,11 +282,61 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                 {staleness.isLoading
                   ? "Checking what is out of date..."
                   : outOfDateCount === 0
-                    ? "Nothing is out of date."
+                    ? sceneRun
+                      ? "Nothing is out of date in the chosen scenes."
+                      : "Nothing is out of date."
                     : `${outOfDateCount} out of date (open "What is out of date" below to see the list).`}
               </Text>
             )}
           </Group>
+        )}
+
+        {data && !active && sceneList.length > 0 && (
+          <Stack gap="xs">
+            <MultiSelect
+              size="xs"
+              label="Scenes"
+              placeholder={sceneRun ? undefined : "All scenes"}
+              data={sceneList.map((scene) => ({
+                value: scene.id,
+                label: `${scene.index}. ${scene.title}`,
+              }))}
+              value={sceneIds}
+              onChange={(value) => {
+                setSceneIds(value);
+                setAllowOverwrite(false);
+              }}
+              searchable
+              clearable
+              maxValues={200}
+            />
+            {sceneRun && (
+              <Select
+                size="xs"
+                label="Make again from"
+                placeholder="Nothing: only what is missing or out of date"
+                data={(data.remake_steps ?? []).map((step) => ({
+                  value: step.key,
+                  label: step.label,
+                }))}
+                value={remakeFrom}
+                onChange={(value) => {
+                  setRemakeFrom(value);
+                  setAllowOverwrite(false);
+                }}
+                clearable
+              />
+            )}
+            {sceneRun && (
+              <Text size="xs" c="dimmed">
+                Only the chosen scenes are looked at. Nothing about the other
+                scenes, the music or the full video is made.
+                {remakeFrom !== null
+                  ? " Making a step again uses the language model (a paid call) or the GPUs for every target of the scene in that step, and everything after it that this makes out of date."
+                  : ""}
+              </Text>
+            )}
+          </Stack>
         )}
 
         {data && !active && data.can_start && (
@@ -287,9 +388,12 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
             <Text size="xs" c="dimmed">
               Saved with this project. None is on by default. A review point
               stops the run once, after its whole stage is made, so you can look
-              at it, edit it, or reject what you want made again. Whatever you
-              change goes through the usual out-of-date rules. A run keeps the
-              review points it started with.
+              at it, edit it, or reject what you want made again. The points
+              about single scenes (scene definition and events, staging,
+              shot planning, generated shots) stop one scene at a time: the
+              other scenes go on. Whatever you change goes through the usual
+              out-of-date rules. A run keeps the review points it started
+              with.
             </Text>
             {data.review_points.map((point) => (
               <Checkbox
@@ -343,6 +447,30 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                   Only what is out of date
                 </Badge>
               )}
+              {run.scenes.slice(0, 3).map((scene) => (
+                <Badge
+                  key={scene.id}
+                  variant="light"
+                  color="cyan"
+                  style={{ textTransform: "none" }}
+                >
+                  {scene.index !== null ? `Scene ${scene.index}: ` : ""}
+                  {scene.title}
+                </Badge>
+              ))}
+              {run.scenes.length > 3 && (
+                <Badge variant="light" color="cyan">
+                  +{run.scenes.length - 3} more scenes
+                </Badge>
+              )}
+              {run.remake_from != null && (
+                <Badge variant="light" color="grape">
+                  Made again from{" "}
+                  {data?.remake_steps
+                    .find((step) => step.key === run.remake_from)
+                    ?.label.toLowerCase() ?? run.remake_from}
+                </Badge>
+              )}
               <JobStatusBadge job={run} />
               <Text size="xs" c="dimmed">
                 Started {formatDateTime(run.created_at)}
@@ -356,6 +484,23 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                 isPending={resume.isPending}
                 onContinue={(rejected) => resume.mutate(rejected)}
               />
+            )}
+
+            {(data?.scene_reviews ?? []).map((item) => (
+              <ReviewPointPanel
+                key={`${item.scene.id}/${item.key}`}
+                review={item}
+                sceneLabel={`${item.scene.index !== null ? `scene ${item.scene.index}: ` : ""}${item.scene.title}`}
+                isPending={answerScene.isPending}
+                onContinue={(rejected) =>
+                  answerScene.mutate({ sceneId: item.scene.id, rejected })
+                }
+              />
+            ))}
+            {answerScene.isError && (
+              <Text size="xs" c="red.8">
+                {describeError(answerScene.error)}
+              </Text>
             )}
 
             {pausedLabel !== null && (
@@ -401,6 +546,8 @@ export function StoryPipelinePanel({ projectId }: StoryPipelinePanelProps) {
                 {text}
               </Text>
             ))}
+
+            <PipelineLaneList lanes={run.lanes} />
 
             <Stack gap={2}>
               {run.steps.map((step) => {

@@ -93,7 +93,8 @@ def _digit_value(token: str) -> Decimal | None:
     return value * _SUFFIXES[suffix] if suffix else value
 
 
-def _is_number_word(word: str) -> bool:
+def is_number_word(word: str) -> bool:
+    """Whether `word` (lower case) is an English number word: "six", "forty", "hundred", "lakh"."""
     return word in _ONES or word in _TENS or word == _HUNDRED or word in _SCALES
 
 
@@ -148,7 +149,7 @@ def numbers_in(text: str) -> set[Decimal]:
             token == "and"
             and in_run
             and index + 1 < len(tokens)
-            and _is_number_word(tokens[index + 1])
+            and is_number_word(tokens[index + 1])
             and (tokens[index - 1] == _HUNDRED or tokens[index - 1] in _SCALES)
         ):
             pass  # "one hundred and five", but not "five and ten"

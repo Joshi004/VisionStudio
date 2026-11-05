@@ -60,6 +60,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.session import SessionLocal
 from app.jobs import phase_writer, phases, store
 from app.jobs.handlers import JobHandler
@@ -69,6 +71,7 @@ from app.services import (
     caption_plan,
     ffmpeg,
     font_metrics,
+    placeholder_frame,
     render_commands,
     story_render_plan,
     story_renders,
@@ -124,13 +127,25 @@ class VoiceWindow:
 
 
 @dataclass(frozen=True)
+class Placeholder:
+    """What a scene render (SCN-003) draws for a shot that has no clip yet."""
+
+    reason: str
+    position: int
+    shot_count: int
+    description: str | None
+    seconds: float
+
+
+@dataclass(frozen=True)
 class Shot:
     scene_id: str
     scene_index: int
     shot_id: str
     frames: int
-    take_id: int
-    take_number: int
+    # None for a graphic shot (EXG-007), which has `graphic_id` instead.
+    take_id: int | None
+    take_number: int | None
     path: str
     source_frames: int
     duck: tuple[tuple[float, float], ...]
@@ -139,6 +154,13 @@ class Shot:
     # clip's own sound is the voice) for a presenter shot, None for any other shot.
     voice: str | None = None
     voice_window: VoiceWindow | None = None
+    graphic_id: int | None = None
+    # Only in a scene render: the shot has no clip, so `path` is empty and a frame is drawn.
+    placeholder: Placeholder | None = None
+    # SCN-013: a longer fade of the clip's own sound at the edge of a scene (the first shot fades
+    # in, the last fades out). None: the usual fade.
+    fade_in_s: float | None = None
+    fade_out_s: float | None = None
 
     @property
     def label(self) -> str:
@@ -267,6 +289,19 @@ def _number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)
+
+
+def _parse_fade(entry: dict[str, Any], key: str) -> float | None:
+    """A shot's longer fade at a scene's edge (SCN-013), or None when the timeline has none (a
+    timeline made before the phase). A value that is there must be a positive number.
+    """
+    raw = entry.get(key)
+    if raw is None:
+        return None
+    value = _number(raw)
+    if value is None or value <= 0:
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return value
 
 
 def _windows(value: object) -> tuple[tuple[float, float], ...] | None:
@@ -492,6 +527,28 @@ def _parse_voice_window(raw: object) -> VoiceWindow | None:
     return VoiceWindow(start, end)
 
 
+def _parse_placeholder(raw: object) -> Placeholder | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    reason, position, count = raw.get("reason"), _whole(raw.get("position")), raw.get("shot_count")
+    description, seconds = raw.get("description"), _number(raw.get("seconds"))
+    if (
+        not isinstance(reason, str)
+        or position is None
+        or position < 1
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count < position
+        or not (description is None or isinstance(description, str))
+        or seconds is None
+        or seconds <= 0
+    ):
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return Placeholder(reason, position, count, description, seconds)
+
+
 def parse_timeline(recorded: object) -> Timeline:
     """Reads `job.input` (or a `{"timeline": ...}` made in memory) back into a timeline. Raises
     `RenderFailed` for anything the handler does not understand, instead of rendering something
@@ -530,14 +587,37 @@ def parse_timeline(recorded: object) -> Timeline:
         index = _whole(entry.get("scene_index"))
         duck, bed_duck = _windows(entry.get("duck")), _windows(entry.get("bed_duck"))
         voice_of_shot, window = entry.get("voice"), _parse_voice_window(entry.get("voice_window"))
+        fade_in, fade_out = (
+            _parse_fade(entry, "sound_fade_in_s"),
+            _parse_fade(entry, "sound_fade_out_s"),
+        )
         scene_id, shot_id, path = entry.get("scene_id"), entry.get("shot_id"), entry.get("path")
+        # A placeholder (a scene render) has neither take, graphic nor file.
+        placeholder = _parse_placeholder(entry.get("placeholder"))
+        if placeholder is not None:
+            if (
+                take_id is not None
+                or number is not None
+                or entry.get("graphic") is not None
+                or path is not None
+            ):
+                raise RenderFailed(_CHANGED_MESSAGE)
+            path = ""
+        # A graphic shot (EXG-007) has the id of its graphic in place of a take; any other shot
+        # needs its take.
+        graphic = entry.get("graphic")
+        graphic_id = _whole(graphic.get("id")) if isinstance(graphic, dict) else None
+        if graphic is not None and graphic_id is None:
+            raise RenderFailed(_CHANGED_MESSAGE)
+        if graphic_id is not None and (take_id is not None or number is not None):
+            raise RenderFailed(_CHANGED_MESSAGE)
         if (
             frames is None
             or frames < 1
-            or take_id is None
+            or (placeholder is None and take_id is None and graphic_id is None)
             or source_frames is None
             or source_frames < 1
-            or number is None
+            or (placeholder is None and number is None and graphic_id is None)
             or index is None
             or duck is None
             or bed_duck is None
@@ -561,6 +641,10 @@ def parse_timeline(recorded: object) -> Timeline:
                 bed_duck,
                 voice_of_shot,
                 window,
+                graphic_id,
+                placeholder,
+                fade_in,
+                fade_out,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -659,6 +743,9 @@ class RenderStoryHandler(JobHandler):
     job_type = JOB_TYPE
     provider = "local"
     restart_rule = "start_again"
+    # Only a scene render (`jobs/render_scene.py`) has placeholders; a story render refuses a
+    # timeline that has one.
+    allows_placeholders = False
 
     async def start(self, job_id: int) -> None:
         storage = get_storage()
@@ -681,9 +768,14 @@ class RenderStoryHandler(JobHandler):
         if job is None or job.status != "running" or job.project_id is None:
             return
         timeline = parse_timeline(job.input)
+        if not self.allows_placeholders and any(shot.placeholder for shot in timeline.shots):
+            raise RenderFailed(_CHANGED_MESSAGE)
 
         await self._phase(job_id, phases.CHECKING_RENDER_CLIPS)
-        sources = [await probe_shot(storage, shot) for shot in timeline.shots]
+        sources = [
+            None if shot.placeholder is not None else await probe_shot(storage, shot)
+            for shot in timeline.shots
+        ]
         speeches = [(speech, *await probe_speech(storage, speech)) for speech in timeline.narration]
         take_files = [(take, *await probe_take(storage, take)) for take in timeline.voice or []]
         music_files = (
@@ -696,7 +788,7 @@ class RenderStoryHandler(JobHandler):
         shot_lufs = [
             # The sound of a presenter clip on the take's voice is dropped: not measured.
             None
-            if shot.voice == story_render_plan.VOICE_TAKE
+            if source is None or shot.voice == story_render_plan.VOICE_TAKE
             else await measure_shot(shot, source, timeline.fps)
             for shot, source in zip(timeline.shots, sources, strict=True)
         ]
@@ -734,8 +826,12 @@ class RenderStoryHandler(JobHandler):
         for number, shot in enumerate(timeline.shots, start=1):
             await self._phase(job_id, phases.trimming_shot(number, len(timeline.shots)))
             source = sources[number - 1]
-            audio = clip_audio(
-                timeline, shot, source, shot_lufs[number - 1], matches.get(number - 1)
+            audio = (
+                None
+                if source is None
+                else clip_audio(
+                    timeline, shot, source, shot_lufs[number - 1], matches.get(number - 1)
+                )
             )
             sounds.append(
                 _ShotSound(
@@ -746,19 +842,46 @@ class RenderStoryHandler(JobHandler):
             )
             dest = storage.new_temp_path("mov")
             temp_paths.append(dest)
-            await run_ffmpeg(
-                render_commands.trim_args(
-                    source.path,
-                    dest,
-                    frames=shot.frames,
-                    fps=timeline.fps,
-                    width=timeline.width,
-                    height=timeline.height,
-                    audio=audio,
-                ),
-                TRIM_TIMEOUT_S,
-                f"trimming the clip of shot {shot.label}",
-            )
+            if source is None or shot.placeholder is not None:
+                assert shot.placeholder is not None  # only a placeholder has no source
+                picture = storage.new_temp_path("png")
+                temp_paths.append(picture)
+                await asyncio.to_thread(
+                    placeholder_frame.draw,
+                    picture,
+                    timeline.width,
+                    timeline.height,
+                    title=_placeholder_title(shot),
+                    reason=shot.placeholder.reason,
+                    description=shot.placeholder.description,
+                    seconds=shot.placeholder.seconds,
+                )
+                await run_ffmpeg(
+                    render_commands.placeholder_args(
+                        picture,
+                        dest,
+                        frames=shot.frames,
+                        fps=timeline.fps,
+                        width=timeline.width,
+                        height=timeline.height,
+                    ),
+                    TRIM_TIMEOUT_S,
+                    f"drawing the placeholder of shot {shot.label}",
+                )
+            else:
+                await run_ffmpeg(
+                    render_commands.trim_args(
+                        source.path,
+                        dest,
+                        frames=shot.frames,
+                        fps=timeline.fps,
+                        width=timeline.width,
+                        height=timeline.height,
+                        audio=audio,
+                    ),
+                    TRIM_TIMEOUT_S,
+                    f"trimming the clip of shot {shot.label}",
+                )
             trimmed.append(dest)
         trim_seconds = time.monotonic() - started
 
@@ -779,8 +902,13 @@ class RenderStoryHandler(JobHandler):
         norm, measured = await measure_master(timeline, premaster)
 
         # The captions and callouts of an explainer, as one ASS file the final encode burns in.
+        # A caption track that is not burned (CAP-001) stays in the timeline only.
         captions: tuple[Path, Path] | None = None
-        has_captions = timeline.captions is not None and bool(timeline.captions.groups)
+        has_captions = (
+            timeline.captions is not None
+            and timeline.captions.burned
+            and bool(timeline.captions.groups)
+        )
         has_callouts = timeline.callouts is not None and bool(timeline.callouts.entries)
         if has_captions or has_callouts:
             await self._phase(job_id, phases.WRITING_CAPTIONS)
@@ -829,8 +957,8 @@ class RenderStoryHandler(JobHandler):
             (trim_seconds, join_seconds),
         )
 
-    @staticmethod
     async def _save(
+        self,
         job_id: int,
         project_id: int,
         recorded: Any,
@@ -864,6 +992,8 @@ class RenderStoryHandler(JobHandler):
                     "scene_id": shot.scene_id,
                     "shot_id": shot.shot_id,
                     "take_id": shot.take_id,
+                    **({"graphic_id": shot.graphic_id} if shot.graphic_id is not None else {}),
+                    **({"placeholder": True} if shot.placeholder is not None else {}),
                     "sound": sound.label,
                     "loudness_lufs": _tenth(sound.loudness_lufs),
                     "gain_db": _tenth(sound.gain_db),
@@ -897,6 +1027,7 @@ class RenderStoryHandler(JobHandler):
             "captions": (
                 {
                     "layout": timeline.captions.style.layout,
+                    "burned": timeline.captions.burned,
                     "groups": len(timeline.captions.groups),
                     "words": sum(len(group.words) for group in timeline.captions.groups),
                 }
@@ -915,15 +1046,16 @@ class RenderStoryHandler(JobHandler):
             "video": VIDEO_SETTINGS,
             "audio": AUDIO_SETTINGS,
             "seconds": {"trim": round(seconds[0], 1), "join": round(seconds[1], 1)},
+            **self._extra_output(recorded, timeline),
         }
 
         # The render, the finished job and nothing else: saved together or not at all.
         async with SessionLocal() as session:
-            row = await story_renders.save_story_render(
+            row = await self._add_row(
                 session,
                 project_id=project_id,
                 job_id=job_id,
-                inputs=recorded["timeline"],
+                recorded=recorded,
                 levels=levels,
                 path=stored.relative_path,
                 size_bytes=temp.size_bytes,
@@ -958,6 +1090,46 @@ class RenderStoryHandler(JobHandler):
             seconds[1],
         )
 
+    async def _add_row(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: int,
+        job_id: int,
+        recorded: Any,
+        levels: dict[str, Any],
+        path: str,
+        size_bytes: int,
+        sha256: str,
+        width: int | None,
+        height: int | None,
+        frame_count: int | None,
+        duration_s: float | None,
+        audio: dict[str, Any] | None,
+    ) -> Any:
+        """Adds the finished video's row, which has a `render_number`. A scene render
+        (`jobs/render_scene.py`) adds its own kind of row.
+        """
+        return await story_renders.save_story_render(
+            session,
+            project_id=project_id,
+            job_id=job_id,
+            inputs=recorded["timeline"],
+            levels=levels,
+            path=path,
+            size_bytes=size_bytes,
+            sha256=sha256,
+            width=width,
+            height=height,
+            frame_count=frame_count,
+            duration_s=duration_s,
+            audio=audio,
+        )
+
+    def _extra_output(self, recorded: Any, timeline: Timeline) -> dict[str, Any]:
+        """What a kind of render adds to the finished job's output."""
+        return {}
+
     @staticmethod
     async def _phase(job_id: int, phase: str) -> None:
         await phase_writer.note(job_id, phase)
@@ -977,7 +1149,15 @@ async def probe_shot(storage: Storage, shot: Shot) -> Source:
         raise RenderFailed(
             f"The clip of shot {shot.label} could not be read. Regenerate it, or use another take."
         )
-    if probe.frame_count < shot.source_frames:
+    # A graphic is drawn at the shot's frames plus one spare, so at the story's rounding it may be
+    # one frame short: the render repeats its last frame, as the plan allows (D-9).
+    short_by = shot.source_frames - probe.frame_count
+    if shot.graphic_id is not None and short_by > 1:
+        raise RenderFailed(
+            f"The graphic of shot {shot.label} has {probe.frame_count} frames; the shot "
+            f"needs {shot.source_frames}. Make the graphics again."
+        )
+    if shot.graphic_id is None and short_by > 0:
         raise RenderFailed(
             f"The clip of shot {shot.label} has {probe.frame_count} frames; the shot "
             f"needs {shot.source_frames}. Regenerate it, or use another take."
@@ -1076,7 +1256,8 @@ def clip_audio(
                 timeline.shot_target_lufs,
                 timeline.max_boost_db,
             ),
-            fade_s=timeline.voice_fade_s,
+            fade_in_s=timeline.voice_fade_s,
+            fade_out_s=timeline.voice_fade_s,
         )
     if audio is None:
         return None
@@ -1092,6 +1273,8 @@ def clip_audio(
         bed_duck_windows=shot.bed_duck,
         bed_duck_db=timeline.bed_shot_duck_db,
         bed_duck_ramp_s=timeline.bed_shot_ramp_s,
+        fade_in_s=shot.fade_in_s if shot.fade_in_s is not None else render_commands.FADE_S,
+        fade_out_s=shot.fade_out_s if shot.fade_out_s is not None else render_commands.FADE_S,
     )
 
 
@@ -1320,12 +1503,26 @@ async def measure_master(
     )
 
 
+def _placeholder_title(shot: Shot) -> str:
+    """The first line of a shot's placeholder picture."""
+    placeholder = shot.placeholder
+    assert placeholder is not None
+    return (
+        f"Scene {shot.scene_index} \u00b7 Shot {placeholder.position} of "
+        f"{placeholder.shot_count} ({shot.shot_id})"
+    )
+
+
 def _sound_label(shot: Shot, audio: render_commands.ClipAudio | None) -> str:
     """What a shot's sound was, for the render's record."""
+    if shot.placeholder is not None:
+        return "none (a placeholder)"
     if shot.voice == story_render_plan.VOICE_TAKE:
         return "dropped (the take is the voice)"
     if shot.voice == story_render_plan.VOICE_CLIP:
         return "clip voice"
+    if shot.graphic_id is not None:
+        return "none (a graphic)"
     return "clip" if audio is not None else "none in the clip"
 
 

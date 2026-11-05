@@ -19,6 +19,11 @@ lives in `services/story_pipeline_targets.py`.
 - **Scope (PHASE-040).** A run is of scope `all` (everything that is not up to date, including
   what was never made) or `out_of_date` (only what exists and is out of date, plus what those
   regenerations make necessary; anything else is "left alone"). See `plan_step`.
+- **Scenes (SCN-004).** A run may be limited to some scenes (`RunOptions.scenes`). It then looks
+  only at the targets of those scenes, makes the story-wide work that is missing (never what is
+  only out of date), makes no music and no full video, and ends with a render of each scene
+  (the step `scene_render`). `remake_from` names one step whose targets in those scenes are made
+  again once, even when they are up to date.
 - **Overwrites.** Some targets hold what the user chose or wrote (a library character, a
   hand-written relation, a hand-picked narrator voice). The run replaces them only when the user
   allowed it once at the start (`confirm_overwrite`).
@@ -38,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Job, Project
 from app.jobs import phases, store
+from app.services import discovery
 from app.services import review_points as review_rules
 
 JOB_TYPE: Final = store.PIPELINE_RUN_TYPE
@@ -66,6 +72,17 @@ class StoryPipelineError(ValueError):
 # --- The steps ------------------------------------------------------------------------------
 
 
+StepKind = Literal["story", "scene", "cross"]
+# SCN-010 (§4.1 of Scene_pipeline_implementation_phases.md): how a step waits.
+# - story: for whole steps (a step starts when every step it needs is complete).
+# - scene: a scene's targets wait only for the same scene's targets of the steps they need.
+# - cross: like a scene step, but a target reads several scenes (the views of a place) and waits
+#   for each of them.
+STORY: Final[StepKind] = "story"
+SCENE: Final[StepKind] = "scene"
+CROSS: Final[StepKind] = "cross"
+
+
 @dataclass(frozen=True)
 class Step:
     key: str
@@ -75,6 +92,11 @@ class Step:
     # True when the step does its work in the run itself and makes no job, so the steps after it
     # can be looked at in the same poll.
     inline: bool = False
+    # How the step waits (SCN-010). A step that is not "story" is part of the scene lanes.
+    kind: StepKind = STORY
+    # The needs of a lane step that are waited for as whole steps, like a story-wide need: every
+    # scene must be done there. The other needs of a lane step are waited for scene by scene.
+    whole: tuple[str, ...] = ()
 
 
 # The order is a valid order to look at the steps in: each comes after the steps it needs.
@@ -102,8 +124,9 @@ STEPS: Final[tuple[Step, ...]] = (
         "scene_definitions",
         "Define the scenes",
         ("character_definitions", "environment_definitions"),
+        kind=SCENE,
     ),
-    Step("events", "Extract the events", ("scene_definitions",)),
+    Step("events", "Extract the events", ("scene_definitions",), kind=SCENE),
     # MUSIC-006: the story's musical identity. Skipped as complete when the project's music is
     # switched off.
     Step("music_bible", "Write the Music Bible", ("events",)),
@@ -115,28 +138,47 @@ STEPS: Final[tuple[Step, ...]] = (
         "scene_staging",
         "Stage the scenes",
         ("scene_definitions", "events", "environment_definitions"),
+        kind=SCENE,
     ),
+    # SCN-010: the views of a place are planned from every scene set there, so a place waits for
+    # each of its scenes to be staged (scene by scene), and every scene's place must be known
+    # first (the whole of the scene definitions).
     Step(
         "environment_views",
         "Plan and draw the views of each place",
-        ("scene_staging",),
+        ("scene_staging", "scene_definitions"),
+        kind=CROSS,
+        whole=("scene_definitions",),
     ),
     Step(
         "look_state_images",
         "Draw the looks and states",
         ("resolution", "character_images", "environment_definitions", "environment_views"),
     ),
-    Step("speech_units", "Plan the speech", ("events",), inline=True),
-    Step("speech_synthesis", "Speak the lines", ("speech_units", "voices")),
+    Step("speech_units", "Plan the speech", ("events",), inline=True, kind=SCENE),
+    Step("speech_synthesis", "Speak the lines", ("speech_units", "voices"), kind=SCENE),
     # An explainer's captions and callouts follow the spoken words (EXPLAINER-007). Nothing
     # after it waits for it yet; the render will (EXPLAINER-008).
-    Step("word_timings", "Time the words", ("speech_synthesis",)),
+    Step("word_timings", "Time the words", ("speech_synthesis",), kind=SCENE),
     # EXPLAINER-009: the callouts an explainer shows on the picture. They are written from the
     # speech units alone (times are estimated), so the step does not wait for the voices.
     # Skipped as complete for a story and for an explainer with callouts off. Nothing after it
     # waits for it yet; the render will (EXPLAINER-010).
     Step("callout_plan", "Plan the callouts", ("speech_units",)),
-    Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging")),
+    # EXG-002: the one look every graphic of a continuous explainer with graphics on shares. It
+    # is written from the Story Bible alone. Skipped as complete for any other project. Nothing
+    # after it waits for it yet; the graphics will (EXG-005).
+    Step("graphic_theme", "Design the graphics look", ("story_bible",)),
+    Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging"), kind=SCENE),
+    # EXG-004: the brief of each graphic shot the cut planner chose, written from the shot's words
+    # and the sentences around them. Skipped as complete for any project that is not a continuous
+    # explainer with graphics on. A project with graphics on but no graphic shot has no targets.
+    Step("graphic_briefs", "Write the graphic briefs", ("shot_plans",), kind=SCENE),
+    # EXG-005: both versions of each graphic shot, a generated component and a block scene,
+    # drawn to an exact clip. It needs the briefs and the video's theme. Skipped as complete for
+    # any project that is not a continuous explainer with graphics on. The music placement and
+    # the render wait for it (EXG-007): a graphic shot is a clip of the timeline.
+    Step("graphics", "Make the graphics", ("graphic_briefs", "graphic_theme"), kind=SCENE),
     # MUSIC-008: where score, ambience, hits and silence go. It needs every scene's timeline and
     # runs beside the shot definitions (QM-16, option b). Skipped as complete when music is off.
     Step("music_plan", "Plan the music", ("shot_plans", "music_bible")),
@@ -144,6 +186,7 @@ STEPS: Final[tuple[Step, ...]] = (
         "shot_definitions",
         "Define the shots",
         ("shot_plans", "resolution", "environment_views"),
+        kind=SCENE,
     ),
     # MUSIC-009: the exact detail of each cue and its prompts, then an audit of all prompts. A cue
     # may send the plan back once (a revision target in this step). Skipped when music is off.
@@ -155,24 +198,106 @@ STEPS: Final[tuple[Step, ...]] = (
     # MUSIC-010: a recording (a take) of each prompt of each cue, checked, and the first that
     # passes selected. A target for each item. Skipped when music is off.
     Step("music_generation", "Generate the music", ("music_cues",)),
-    Step("shot_continuity", "Check shot continuity", ("shot_definitions",)),
+    Step("shot_continuity", "Check shot continuity", ("shot_definitions",), kind=SCENE),
     Step(
         "references",
         "Choose the references",
         ("shot_continuity", "look_state_images"),
+        kind=SCENE,
     ),
-    Step("generation_requests", "Plan the generation requests", ("references",), inline=True),
-    Step("prompts", "Compile the shot prompts", ("generation_requests",)),
-    Step("shot_generation", "Generate the clips", ("prompts",)),
+    Step(
+        "generation_requests",
+        "Plan the generation requests",
+        ("references",),
+        inline=True,
+        kind=SCENE,
+    ),
+    Step("prompts", "Compile the shot prompts", ("generation_requests",), kind=SCENE),
+    Step("shot_generation", "Generate the clips", ("prompts",), kind=SCENE),
+    # SCN-004, SCN-010: the render of each scene: the end of its lane. A run of some scenes
+    # renders those scenes only. It waits for the callout plan (a scene render refuses while
+    # one is wanted and not current) and for every shot plan (the scene's start time on the
+    # story's timeline is the sum of the scenes before it).
+    Step(
+        "scene_render",
+        "Render the scenes",
+        ("shot_generation", "graphics", "callout_plan", "shot_plans"),
+        kind=SCENE,
+        whole=("shot_plans",),
+    ),
     # MUSIC-011: the exact place of every selected music take on the render's own timeline. It
     # needs the takes of the music and of the shots. Skipped as complete when music is off.
     # The render waits for it (MUSIC-012): it mixes the placed music in.
-    Step("music_placement", "Place the music", ("music_generation", "shot_generation")),
-    Step("render", "Render the video", ("shot_generation", "music_placement")),
+    # EXG-007: both also wait for the graphics, whose videos are shots of the timeline.
+    Step(
+        "music_placement",
+        "Place the music",
+        ("music_generation", "shot_generation", "graphics"),
+    ),
+    Step("render", "Render the video", ("shot_generation", "music_placement", "graphics")),
 )
 
 STEP_KEYS: Final = tuple(step.key for step in STEPS)
 STEP_LABELS: Final = {step.key: step.label for step in STEPS}
+STEPS_BY_KEY: Final = {step.key: step for step in STEPS}
+
+
+def is_lane_step(step: Step) -> bool:
+    """Whether a step is part of the scene lanes (per scene or across scenes). Pure."""
+    return step.kind != STORY
+
+
+def hard_needs(step: Step) -> tuple[str, ...]:
+    """The needs that must be complete, for every scene, before a step is looked at. A story-wide
+    step waits for all its needs. A lane step waits for its story-wide needs and for the needs
+    named in `whole`; the others are waited for scene by scene (`lane_needs`). Pure.
+    """
+    if not is_lane_step(step):
+        return step.needs
+    return tuple(
+        key for key in step.needs if key in step.whole or not is_lane_step(STEPS_BY_KEY[key])
+    )
+
+
+def lane_needs(step: Step) -> tuple[str, ...]:
+    """The needs of a lane step that are waited for scene by scene. Pure."""
+    if not is_lane_step(step):
+        return ()
+    hard = set(hard_needs(step))
+    return tuple(key for key in step.needs if key not in hard)
+
+
+def lane_steps() -> tuple[Step, ...]:
+    """The steps of the scene lanes, in the order of `STEPS`."""
+    return tuple(step for step in STEPS if is_lane_step(step))
+
+
+# SCN-004: the steps a run of some scenes does not look at. The music is planned and placed for
+# the whole story, and the full video is rendered from all of it (S-2, S-8).
+SCENE_RUN_SKIPS: Final[frozenset[str]] = frozenset(
+    {
+        "music_bible",
+        "music_themes",
+        "music_plan",
+        "music_cues",
+        "music_generation",
+        "music_placement",
+        "render",
+    }
+)
+# SCN-004: the steps a scene run can make again from, once, although they are up to date. Each
+# stage's own start function makes a new version for a target that is up to date; the choosing of
+# references and the generation requests do not (they skip it), and a clip needs its chain, so
+# neither is offered.
+REMAKE_STEPS: Final[tuple[str, ...]] = (
+    "scene_definitions",
+    "events",
+    "scene_staging",
+    "speech_units",
+    "shot_plans",
+    "shot_definitions",
+    "prompts",
+)
 
 
 def _check_graph() -> None:
@@ -186,6 +311,11 @@ def _check_graph() -> None:
         unknown = [key for key in step.needs if key not in seen]
         if unknown:
             raise ValueError(f"step {step.key} needs {unknown}, not before it")
+        stray = [key for key in step.whole if key not in step.needs]
+        if stray:
+            raise ValueError(f"step {step.key} lists {stray} as whole, but does not need them")
+        if step.whole and step.kind == STORY:
+            raise ValueError(f"step {step.key} is story-wide: it waits for whole steps anyway")
         seen.add(step.key)
 
 
@@ -193,7 +323,9 @@ _check_graph()
 
 
 def _check_review_points() -> None:
-    """Every step a review point names exists, and no step is in two review points."""
+    """Every step a review point names exists, no step is in two review points, and a review
+    point held scene by scene has only steps of the scene lanes.
+    """
     seen: set[str] = set()
     for point in review_rules.REVIEW_POINTS:
         for key in point.steps:
@@ -201,10 +333,25 @@ def _check_review_points() -> None:
                 raise ValueError(f"review point {point.key} names the unknown step {key}")
             if key in seen:
                 raise ValueError(f"step {key} is in two review points")
+            if point.per_scene and not is_lane_step(STEPS_BY_KEY[key]):
+                raise ValueError(f"review point {point.key} is per scene, but {key} is not")
             seen.add(key)
 
 
 _check_review_points()
+
+
+def _check_scene_run_steps() -> None:
+    """The steps of a scene run exist, and a step to remake from is not skipped."""
+    for name, keys in (("SCENE_RUN_SKIPS", SCENE_RUN_SKIPS), ("REMAKE_STEPS", REMAKE_STEPS)):
+        unknown = [key for key in keys if key not in STEP_KEYS]
+        if unknown:
+            raise ValueError(f"{name} names the unknown step {unknown[0]}")
+    if SCENE_RUN_SKIPS & set(REMAKE_STEPS):
+        raise ValueError("a step cannot be both skipped and remade in a scene run")
+
+
+_check_scene_run_steps()
 
 
 # --- What the user chose when starting ------------------------------------------------------
@@ -223,12 +370,21 @@ class RunOptions:
     # The keys of the project's review points that the run stops at (PHASE-041). Copied from the
     # project when the run starts, so changing the settings does not change a run that is going.
     review_points: frozenset[str] = frozenset()
+    # The ids of the scenes the run is limited to (SCN-004). Empty: the whole story.
+    scenes: frozenset[str] = frozenset()
+    # The step whose targets in those scenes are made again once. Only with scenes.
+    remake_from: str | None = None
 
     @classmethod
     def from_input(cls, value: object) -> RunOptions:
         data: dict[str, Any] = value if isinstance(value, dict) else {}
         keys = data.get("pause_after")
         points = data.get("review_points")
+        chosen = data.get("scenes")
+        scenes = frozenset(
+            item for item in (chosen if isinstance(chosen, list) else []) if isinstance(item, str)
+        )
+        remake = data.get("remake_from")
         return cls(
             pause_after=frozenset(
                 key for key in (keys if isinstance(keys, list) else []) if key in STEP_KEYS
@@ -238,6 +394,8 @@ class RunOptions:
             review_points=frozenset(
                 review_rules.normalize(points if isinstance(points, list) else [])
             ),
+            scenes=scenes,
+            remake_from=remake if scenes and remake in REMAKE_STEPS else None,
         )
 
 
@@ -279,6 +437,66 @@ class Target:
     # again. Set by `plan_step`, never by an adapter. The stage's start function is then given
     # consent to replace it, because rejecting it is what asks for that.
     redo: bool = False
+    # The scenes a target that belongs to several scenes is for (a place the views of which are
+    # planned from the scenes set there). Empty for any other target (SCN-004).
+    scenes: tuple[str, ...] = ()
+    # The scene run asked for this target to be made again although it is done. Set by
+    # `plan_step`, never by an adapter. Unlike `redo`, the user's consent is still needed.
+    remake: bool = False
+
+
+def target_scenes(target: Target) -> tuple[str, ...]:
+    """The scenes a target belongs to: its own scene, or the scenes it reads. None for a
+    story-wide target. Pure.
+    """
+    if target.group is not None:
+        return (target.group,)
+    return target.scenes
+
+
+@dataclass(frozen=True)
+class Open:
+    """The scenes a step of the scene lanes is not finished for (SCN-010). `everything` also
+    covers the targets that belong to no scene, and a step the run has not got to yet.
+    """
+
+    scenes: frozenset[str] = frozenset()
+    everything: bool = False
+
+    @property
+    def is_open(self) -> bool:
+        return self.everything or bool(self.scenes)
+
+    def has(self, scene_id: str) -> bool:
+        return self.everything or scene_id in self.scenes
+
+    def __or__(self, other: Open) -> Open:
+        return Open(self.scenes | other.scenes, self.everything or other.everything)
+
+
+CLOSED: Final = Open()
+EVERYTHING: Final = Open(everything=True)
+
+
+def union_open(opens: Collection[Open]) -> Open:
+    """The scenes open in any of `opens`. Pure."""
+    result = CLOSED
+    for item in opens:
+        result = result | item
+    return result
+
+
+def reachable(target: Target, upstream: Open) -> bool:
+    """Whether a target of a lane step may be started now: nothing it comes after is still open
+    for its scene (for each of its scenes, when it reads several). A target of no scene waits
+    until nothing upstream is open at all. Pure.
+    """
+    if upstream.everything:
+        return False
+    scenes = target_scenes(target)
+    if not scenes:
+        return not upstream.scenes
+    return not any(scene_id in upstream.scenes for scene_id in scenes)
 
 
 @dataclass(frozen=True)
@@ -308,6 +526,8 @@ class Problem:
     label: str
     tries: int
     message: str
+    # The scenes the target belongs to (SCN-010): what a problem holds back in the lanes.
+    scenes: tuple[str, ...] = ()
 
     def text(self) -> str:
         message = self.message if self.message.endswith((".", "!", "?")) else f"{self.message}."
@@ -334,6 +554,13 @@ class StepPlan:
     warnings: list[str] = field(default_factory=list)
     # Targets the `out_of_date` scope leaves as they are. They are not in `done` or `total`.
     left_alone: int = 0
+    # The scenes this step is not finished for, from its own targets (SCN-010). The step's
+    # whole openness also includes what is open upstream.
+    unfinished: Open = CLOSED
+    # The scenes with work going on in this step, or about to start (SCN-010).
+    busy: frozenset[str] = frozenset()
+    # Targets that wait for the same scene's upstream and were not looked at (SCN-010).
+    upstream_waiting: int = 0
 
     @property
     def complete(self) -> bool:
@@ -360,6 +587,28 @@ def consent_message(consent: str) -> str:
     )
 
 
+def is_story_wide(target: Target) -> bool:
+    """Whether a target belongs to no scene in particular (a character, the Story Bible, the
+    project). Pure.
+    """
+    return target.group is None and not target.scenes
+
+
+def in_run_scenes(target: Target, scenes: Collection[str]) -> bool:
+    """Whether a run limited to `scenes` looks at a target at all (SCN-004). Pure.
+
+    With no scenes the run is of the whole story. Otherwise it looks at the targets of those
+    scenes, the targets of a place that one of them is set in, and the story-wide targets.
+    """
+    if not scenes:
+        return True
+    if target.group is not None:
+        return target.group in scenes
+    if target.scenes:
+        return any(scene_id in scenes for scene_id in target.scenes)
+    return True
+
+
 def in_scope(
     target: Target, options: RunOptions, made_upstream: bool, groups: set[str | None]
 ) -> bool:
@@ -369,10 +618,16 @@ def in_scope(
     being worked on, or one that was never made but that the run's own work upstream makes
     necessary (`made_upstream`) in a group that already has an output (a new shot of a scene
     that was planned again). Everything else is left alone.
+
+    A run of some scenes (SCN-004) makes story-wide work that is missing, but leaves alone
+    what exists and is out of date: that changes more than the scenes it was started for. The
+    stages of the scenes then say so (their upstream is out of date) instead of making it.
     """
+    if options.scenes and is_story_wide(target) and target.stale and not target.active:
+        return False
     if options.scope == SCOPE_ALL:
         return True
-    if target.stale or target.active or target.settling or target.redo:
+    if target.stale or target.active or target.settling or target.redo or target.remake:
         return True
     return made_upstream and not target.existing and target.group in groups
 
@@ -385,14 +640,21 @@ def plan_step(
     options: RunOptions,
     made_upstream: bool = False,
     rejected: Collection[str] = (),
+    remake: bool = False,
+    upstream: Open | None = None,
 ) -> StepPlan:
     """What to do now about a step. Pure.
 
     For each target that is not done, in this order: leave it alone when the scope says so; wait
-    when work is in progress for it; wait when a target it waits for is not done yet; wait while
-    the stage's own follow-on work settles; report it when it needs consent that was not given,
-    when nothing can be made for it, or when it has had `MAX_TRIES`; otherwise create the next
-    job.
+    when work is in progress for it; wait when its scene is still open upstream (`upstream`,
+    SCN-010); wait when a target it waits for is not done yet; wait while the stage's own
+    follow-on work settles; report it when it needs consent that was not given, when nothing can
+    be made for it, or when it has had `MAX_TRIES`; otherwise create the next job.
+
+    `upstream` is what is still open in the lane steps this step comes after, and the scenes held
+    back by a review. A target whose scene is open there is neither made nor reported: it is
+    counted in `upstream_waiting`, and its scene stays open in `StepPlan.unfinished`. None: no
+    scene lanes (every need is complete).
 
     `made_upstream` is whether the run has made work in a step this one needs (scope
     `out_of_date` only).
@@ -400,20 +662,25 @@ def plan_step(
     `rejected` holds the keys of the targets the user rejected at a review point (PHASE-041).
     Such a target is not done until it has been made again: while nothing was started for it
     (`tries` is 0), while work is in progress for it, and while its newest job failed.
+
+    A run of some scenes (`options.scenes`, SCN-004) looks only at the targets of those scenes
+    (`in_run_scenes`). With `remake` (the step the run was told to remake from) every done
+    target of a scene is made again in the same way, but unlike a rejected target it still needs
+    the user's consent to replace what the user wrote.
     """
+    targets = [target for target in view.targets if in_run_scenes(target, options.scenes)]
     pending: list[Target] = []
-    for target in view.targets:
+    for target in targets:
+        again = target.active or not tries.get(target.key, 0) or target.last_error is not None
         if not target.done:
             pending.append(target)
-        elif target.key in rejected and (
-            target.active or not tries.get(target.key, 0) or target.last_error is not None
-        ):
+        elif target.key in rejected and again:
             pending.append(replace(target, done=False, redo=True))
+        elif remake and not is_story_wide(target) and again:
+            pending.append(replace(target, done=False, remake=True))
     # The groups that already have an output (a done or an out-of-date target, or one that is
     # being worked on): what "the same scene already has shots" is judged by.
-    groups = {
-        target.group for target in view.targets if target.done or target.stale or target.active
-    }
+    groups = {target.group for target in targets if target.done or target.stale or target.active}
     left_alone = [
         target for target in pending if not in_scope(target, options, made_upstream, groups)
     ]
@@ -425,26 +692,39 @@ def plan_step(
     problems: list[Problem] = []
     progressing: set[str] = set()
     following: list[Target] = []
+    upstream_waiting = 0
 
     for target in pending:
         tried = tries.get(target.key, 0)
+        scenes = target_scenes(target)
         if target.active:
             waiting += 1
             progressing.add(target.key)
+        elif upstream is not None and not reachable(target, upstream):
+            upstream_waiting += 1
         elif any(key in pending_keys for key in target.waits_for):
             following.append(target)
         elif target.settling:
             waiting += 1
             progressing.add(target.key)
         elif target.block is not None:
-            problems.append(Problem(step.key, target.key, target.label, tried, target.block))
-        elif target.consent is not None and not options.confirm_overwrite:
             problems.append(
-                Problem(step.key, target.key, target.label, tried, consent_message(target.consent))
+                Problem(step.key, target.key, target.label, tried, target.block, scenes)
+            )
+        elif target.consent is not None and not options.confirm_overwrite and not target.redo:
+            problems.append(
+                Problem(
+                    step.key,
+                    target.key,
+                    target.label,
+                    tried,
+                    consent_message(target.consent),
+                    scenes,
+                )
             )
         elif tried >= MAX_TRIES:
             message = exhausted_message(tried, errors.get(target.key) or target.last_error)
-            problems.append(Problem(step.key, target.key, target.label, tried, message))
+            problems.append(Problem(step.key, target.key, target.label, tried, message, scenes))
         else:
             creates.append(target)
             progressing.add(target.key)
@@ -458,7 +738,10 @@ def plan_step(
         # Otherwise the one it waits for is reported, and counting this one as going on would
         # keep the run alive for ever.
 
-    pending_count = len(view.targets) - len(left_alone)
+    pending_count = len(targets) - len(left_alone)
+    unfinished_scenes = frozenset(
+        scene_id for target in pending for scene_id in target_scenes(target)
+    )
     return StepPlan(
         done=pending_count - len(pending),
         total=pending_count,
@@ -467,6 +750,16 @@ def plan_step(
         problems=problems,
         warnings=list(view.warnings),
         left_alone=len(left_alone),
+        unfinished=Open(
+            unfinished_scenes, everything=any(not target_scenes(target) for target in pending)
+        ),
+        busy=frozenset(
+            scene_id
+            for target in pending
+            if target.key in progressing
+            for scene_id in target_scenes(target)
+        ),
+        upstream_waiting=upstream_waiting,
     )
 
 
@@ -530,6 +823,18 @@ def new_output() -> dict[str, Any]:
         # True after Continue: the next look reads the steps that were complete again, so what
         # was edited during the pause is seen.
         "recheck": False,
+        # SCN-010: step key -> the scenes the run has made work for in it. A scene that the run
+        # made nothing for in a review point passes the point without waiting.
+        "made_in": {},
+        # SCN-010: review point key -> the scenes that have passed it (approved, or nothing was
+        # made for them there). Only the points held scene by scene.
+        "scene_reviewed": {},
+        # SCN-010: scene id -> the review point the scene waits at for the user.
+        "scene_review_at": {},
+        # SCN-010: where every scene stands, in story order (see `lane_summary`).
+        "lanes": [],
+        # SCN-010: how many of the answers to scene reviews in the run's input are applied.
+        "answers_applied": 0,
     }
 
 
@@ -567,7 +872,39 @@ def read_output(value: object) -> dict[str, Any]:
         else {}
     )
     output["recheck"] = output.get("recheck") is True
+    output["made_in"] = _scene_lists(output.get("made_in"), STEP_KEYS)
+    output["scene_reviewed"] = _scene_lists(
+        output.get("scene_reviewed"), review_rules.REVIEW_POINT_KEYS
+    )
+    waiting = output.get("scene_review_at")
+    output["scene_review_at"] = (
+        {
+            scene_id: point
+            for scene_id, point in waiting.items()
+            if isinstance(scene_id, str) and point in review_rules.POINTS_BY_KEY
+        }
+        if isinstance(waiting, dict)
+        else {}
+    )
+    lanes = output.get("lanes")
+    lane_list = lanes if isinstance(lanes, list) else []
+    output["lanes"] = [item for item in lane_list if isinstance(item, dict)]
+    applied = output.get("answers_applied")
+    output["answers_applied"] = (
+        applied if isinstance(applied, int) and not isinstance(applied, bool) else 0
+    )
     return output
+
+
+def _scene_lists(value: object, keys: Collection[str]) -> dict[str, list[str]]:
+    """A stored map from a step or point key to scene ids, with anything else dropped."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: [scene_id for scene_id in scenes if isinstance(scene_id, str)]
+        for key, scenes in value.items()
+        if key in keys and isinstance(scenes, list)
+    }
 
 
 def complete_keys(output: Mapping[str, Any]) -> set[str]:
@@ -599,6 +936,12 @@ def record_try(output: dict[str, Any], step_key: str, target_key: str, started: 
         output["errors"][step_key][target_key] = _short(started.error)
     else:
         output["errors"][step_key].pop(target_key, None)
+        # SCN-010: the scenes the run has made work for, to know which scenes have anything to
+        # review at a review point.
+        made = output["made_in"].setdefault(step_key, [])
+        for scene_id in target_scenes(started.target):
+            if scene_id not in made:
+                made.append(scene_id)
 
 
 def add_warnings(output: dict[str, Any], warnings: Sequence[str]) -> None:
@@ -610,11 +953,19 @@ def add_warnings(output: dict[str, Any], warnings: Sequence[str]) -> None:
 def phase_of(
     output: Mapping[str, Any],
     running: Sequence[tuple[str, int, int]],
-    scope: Scope = SCOPE_ALL,
+    options: RunOptions,
 ) -> str:
     """The phase label of the run: how many steps are complete and what is going on."""
     text = phases.pipeline_progress(len(complete_keys(output)), len(STEPS), running)
-    return f"Regenerating what is out of date: {text}" if scope == SCOPE_OUT_OF_DATE else text
+    waiting = len(output.get("scene_review_at") or {})
+    if waiting:
+        text = f"{text}; {waiting} {'scene' if waiting == 1 else 'scenes'} waiting for your review"
+    if options.scenes:
+        count = len(options.scenes)
+        text = f"{count} {'scene' if count == 1 else 'scenes'}: {text}"
+    return (
+        f"Regenerating what is out of date: {text}" if options.scope == SCOPE_OUT_OF_DATE else text
+    )
 
 
 # --- Starting, continuing and stopping a run ------------------------------------------------
@@ -653,6 +1004,25 @@ def start_block(project: Project, active: Sequence[Job]) -> str | None:
     return None
 
 
+async def scene_items(session: AsyncSession, project_id: int) -> list[dict[str, Any]]:
+    """The scenes of the newest list of scenes (`id`, `index`, `title`, ...), in story order.
+    Empty when the project has no list yet.
+    """
+    row = await discovery.latest(session, "scenes", project_id)
+    content = getattr(row, "content", None)
+    items = content.get("scenes") if isinstance(content, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict) and isinstance(item.get("id"), str)]
+
+
+def scene_label(item: Mapping[str, Any]) -> str:
+    """ "Scene 3: The cellar", the way a run names a scene."""
+    index = item.get("index")
+    title = item.get("title") or item.get("id") or ""
+    return f"Scene {index}: {title}" if index is not None else f"Scene {title}"
+
+
 async def start_run(
     session: AsyncSession,
     project: Project,
@@ -660,10 +1030,15 @@ async def start_run(
     pause_after: Sequence[str],
     confirm_overwrite: bool,
     scope: Scope = SCOPE_ALL,
+    scenes: Sequence[str] = (),
+    remake_from: str | None = None,
 ) -> tuple[Job, bool]:
     """Queues a run, and commits. Returns `(job, created)`: a run that is already waiting or
     running is returned as it is (`created` False), with the choices it was started with.
-    Raises StoryPipelineError for an unknown step or when a run cannot start now.
+    Raises StoryPipelineError for an unknown step or scene or when a run cannot start now.
+
+    `scenes` (SCN-004) limits the run to those scenes (their ids); `remake_from` is the step
+    whose targets in them are made again once (one of `REMAKE_STEPS`, and only with scenes).
 
     Whether the user has allowed the overwrites is decided by the caller (`confirmations`).
     """
@@ -672,6 +1047,22 @@ async def start_run(
     unknown = [key for key in pause_after if key not in STEP_KEYS]
     if unknown:
         raise StoryPipelineError(f"There is no step {', '.join(repr(key) for key in unknown)}.")
+    if remake_from is not None:
+        if remake_from not in REMAKE_STEPS:
+            raise StoryPipelineError(f"A scene cannot be made again from the step {remake_from!r}.")
+        if not scenes:
+            raise StoryPipelineError("Choose a scene to make again from a step.")
+    # In story order, without repeats.
+    chosen = set(scenes)
+    in_order = [
+        item["id"] for item in await scene_items(session, project.id) if item["id"] in chosen
+    ]
+    missing = sorted(chosen - set(in_order))
+    if missing:
+        raise StoryPipelineError(
+            f"There is no scene {', '.join(repr(key) for key in missing)} in the newest list "
+            "of scenes."
+        )
     existing = await active_run(session, project.id)
     if existing is not None:
         return existing, False
@@ -693,6 +1084,9 @@ async def start_run(
             "review_points": review_rules.normalize(
                 project.review_points if isinstance(project.review_points, list) else []
             ),
+            # SCN-004: the scenes the run is limited to (none: the whole story).
+            "scenes": in_order,
+            "remake_from": remake_from,
         },
     )
     return job, created
@@ -737,13 +1131,94 @@ async def continue_run(
     if not await store.save_progress(
         session,
         run.id,
-        phase=phase_of(output, [], RunOptions.from_input(run.input).scope),
+        phase=phase_of(output, [], RunOptions.from_input(run.input)),
         output=output,
     ):
         await session.rollback()
         raise StoryPipelineError("The run is no longer going.")
     await session.commit()
     return run
+
+
+async def answer_scene_review(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    rejected: Mapping[str, Sequence[str]] | None = None,
+) -> Job:
+    """Records the user's answer to the review a scene waits at (SCN-010), and commits. The run
+    goes on while it waits, and saves its whole state at every look, so an answer written there
+    could be overwritten. It is added to the run's `input` (which the run never writes) and the
+    run applies it at its next look (`apply_scene_answers`).
+
+    With nothing rejected the scene passes the point and goes on. Rejected targets of the
+    point's steps are made again, and the scene waits at the same point once more. Raises
+    StoryPipelineError when the project has no run, or the scene is not waiting at a review.
+    """
+    run = await active_run(session, project.id)
+    if run is None:
+        raise StoryPipelineError("There is no run going on for this project.")
+    output = read_output(run.output)
+    review = output["scene_review_at"].get(scene_id)
+    point = review_rules.POINTS_BY_KEY.get(review) if review is not None else None
+    if point is None:
+        raise StoryPipelineError("This scene is not waiting for a review.")
+    wanted = {step: list(dict.fromkeys(keys)) for step, keys in (rejected or {}).items() if keys}
+    foreign = [step for step in wanted if step not in point.steps]
+    if foreign:
+        raise StoryPipelineError(
+            f"The step {foreign[0]!r} is not part of this review point, so nothing in it can be "
+            "rejected."
+        )
+    stored: dict[str, Any] = copy.deepcopy(run.input) if isinstance(run.input, dict) else {}
+    answers = stored.get("scene_answers")
+    stored["scene_answers"] = [
+        *(answers if isinstance(answers, list) else []),
+        {"scene": scene_id, "rejected": wanted},
+    ]
+    if not await store.update_input(session, run.id, stored):
+        await session.rollback()
+        raise StoryPipelineError("The run is no longer going.")
+    return run
+
+
+def apply_scene_answers(output: dict[str, Any], answers: object) -> bool:
+    """Applies the answers users gave to scene reviews that the run has not applied yet (changes
+    `output` in place). Returns whether anything changed. Pure.
+
+    An answer for a scene that does not wait at a review any more is ignored (it was answered
+    twice). With nothing rejected the scene passes its point; the rejected targets are made
+    again. Either way the run looks at the steps that were complete again (`recheck`).
+    """
+    items = answers if isinstance(answers, list) else []
+    applied = int(output["answers_applied"])
+    changed = False
+    for answer in items[applied:]:
+        scene_id = answer.get("scene") if isinstance(answer, dict) else None
+        if not isinstance(scene_id, str):
+            continue
+        point = review_rules.POINTS_BY_KEY.get(output["scene_review_at"].get(scene_id, ""))
+        if point is None:
+            continue
+        rejected = answer.get("rejected")
+        wanted = {
+            step: [key for key in keys if isinstance(key, str)]
+            for step, keys in (rejected if isinstance(rejected, dict) else {}).items()
+            if step in point.steps and isinstance(keys, list)
+        }
+        del output["scene_review_at"][scene_id]
+        if any(wanted.values()):
+            _reject_targets(output, {step: keys for step, keys in wanted.items() if keys})
+        else:
+            passed = output["scene_reviewed"].setdefault(point.key, [])
+            if scene_id not in passed:
+                passed.append(scene_id)
+        changed = True
+    if len(items) != applied:
+        output["answers_applied"] = len(items)
+    if changed:
+        output["recheck"] = True
+    return changed
 
 
 def _leave_review(output: dict[str, Any], review: str, rejected: Mapping[str, list[str]]) -> None:
@@ -761,6 +1236,11 @@ def _leave_review(output: dict[str, Any], review: str, rejected: Mapping[str, li
             output["reviewed"].append(review)
         return
     # The point stays unreviewed: the run waits here again once the targets are made again.
+    _reject_targets(output, rejected)
+
+
+def _reject_targets(output: dict[str, Any], rejected: Mapping[str, list[str]]) -> None:
+    """Gives the rejected targets their tries back, so the run makes them again."""
     for step, keys in rejected.items():
         known = output["rejected"].setdefault(step, [])
         known.extend(key for key in keys if key not in known)
@@ -768,6 +1248,120 @@ def _leave_review(output: dict[str, Any], review: str, rejected: Mapping[str, li
             output["tries"][step].pop(key, None)
             output["errors"][step].pop(key, None)
         output["steps"][step]["status"] = "running"
+
+
+# --- Review points held scene by scene (SCN-010) --------------------------------------------
+
+
+def settle_scene_reviews(
+    options: RunOptions,
+    scene_ids: Sequence[str],
+    opens: Mapping[str, Open],
+    output: dict[str, Any],
+) -> bool:
+    """Brings the per-scene review points up to date (changes `output` in place). Returns whether
+    anything changed.
+
+    For each enabled point held scene by scene, and each scene that has not passed it: while any
+    step of the point is still open for the scene, the scene is not waiting. Once none is, the
+    scene waits for the user (`scene_review_at`) if the run made anything for it in the point's
+    steps, and otherwise passes at once (it was all up to date), as a whole run does.
+
+    `opens` is what is open in each step; a step missing from it has not been reached, so it is
+    open for everything.
+    """
+    changed = False
+    for point in review_rules.REVIEW_POINTS:
+        if not point.per_scene or point.key not in options.review_points:
+            continue
+        passed = output["scene_reviewed"].setdefault(point.key, [])
+        for scene_id in scene_ids:
+            if scene_id in passed:
+                continue
+            if any(opens.get(key, EVERYTHING).has(scene_id) for key in point.steps):
+                if output["scene_review_at"].get(scene_id) == point.key:
+                    del output["scene_review_at"][scene_id]
+                    changed = True
+                continue
+            made = any(scene_id in output["made_in"].get(key, ()) for key in point.steps)
+            if made:
+                if output["scene_review_at"].get(scene_id) != point.key:
+                    output["scene_review_at"][scene_id] = point.key
+                    changed = True
+            else:
+                passed.append(scene_id)
+                output["scene_review_at"].pop(scene_id, None)
+                changed = True
+    return changed
+
+
+def held_scenes(
+    step: Step, options: RunOptions, scene_ids: Collection[str], output: Mapping[str, Any]
+) -> frozenset[str]:
+    """The scenes a step must not start for yet because they have not passed the review of a
+    step it needs (SCN-010). The point the step belongs to does not hold it. Pure.
+    """
+    own = review_rules.point_of(step.key)
+    held: set[str] = set()
+    for point in review_rules.REVIEW_POINTS:
+        if not point.per_scene or point.key not in options.review_points:
+            continue
+        if own is not None and point.key == own.key:
+            continue
+        if not set(point.steps) & set(step.needs):
+            continue
+        passed = set(output["scene_reviewed"].get(point.key, ()))
+        held.update(scene_id for scene_id in scene_ids if scene_id not in passed)
+    return frozenset(held)
+
+
+def all_scenes_passed(
+    point_key: str, scene_ids: Collection[str], output: Mapping[str, Any]
+) -> bool:
+    """Whether every scene has passed a point held scene by scene (SCN-010). Pure."""
+    passed = set(output["scene_reviewed"].get(point_key, ()))
+    return all(scene_id in passed for scene_id in scene_ids)
+
+
+def lane_summary(
+    scene_ids: Sequence[str],
+    opens: Mapping[str, Open],
+    busy: Collection[str],
+    stuck: Collection[str],
+    output: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Where every scene stands in the lanes, in the order given (SCN-010). Pure.
+
+    `status` is `review` (waits for the user), `done` (every lane step is complete for it),
+    `going` (work is in progress for it), `problem` (nothing is, and something it needs was
+    reported) or `waiting`. `step` is the first lane step still open for the scene.
+    """
+    steps = lane_steps()
+    rows: list[dict[str, Any]] = []
+    for scene_id in scene_ids:
+        open_steps = [step for step in steps if opens.get(step.key, EVERYTHING).has(scene_id)]
+        review = output["scene_review_at"].get(scene_id)
+        if review is not None:
+            status = "review"
+        elif not open_steps:
+            status = "done"
+        elif scene_id in busy:
+            status = "going"
+        elif scene_id in stuck:
+            status = "problem"
+        else:
+            status = "waiting"
+        rows.append(
+            {
+                "scene": scene_id,
+                "status": status,
+                "step": open_steps[0].key if open_steps else None,
+                "review": review,
+                "done": len(steps) - len(open_steps),
+                "total": len(steps),
+            }
+        )
+    return rows
 
 
 async def cancel_queued_children(session: AsyncSession, run: Job) -> int:

@@ -94,6 +94,7 @@ class _Input:
                 "exchange": shot["shot"].get("rapid_exchange") is True,
                 "staging": shot.get("staging"),
                 "explainer": shot.get("explainer") is True,
+                "inner_place": shot.get("inner_place"),
             }
             for shot in self.shots
             if shot["shot_id"] in self.cut["editable_shots"]
@@ -117,6 +118,7 @@ def _valid_shot(shot: Any) -> bool:
         and isinstance(shot.get("read_definition_id"), int)
         and isinstance(shot.get("inputs"), dict)
         and (shot.get("staging") is None or isinstance(shot.get("staging"), dict))
+        and (shot.get("inner_place") is None or isinstance(shot.get("inner_place"), dict))
     )
 
 
@@ -243,6 +245,8 @@ class RepairShotCutHandler(JobHandler):
                     "speech": shot["speech"],
                     "specification": shot["specification"],
                     "staging": shot.get("staging"),
+                    # SCN-007: only for a shot inside a place within the scene's main place.
+                    **({"inner_place": shot["inner_place"]} if shot.get("inner_place") else {}),
                 }
                 for shot in read.shots
             ],
@@ -383,6 +387,14 @@ class RepairShotCutHandler(JobHandler):
         try:
             async with SessionLocal() as session:
                 check = await shot_continuity.queue_check_if_ready(session, project_id, scene_id)
+            if check is None:
+                # Nothing more will be repaired here (a repair that failed or changed nothing),
+                # so the scene that continues straight from this one can go on (SCN-012). It
+                # waits by itself while anything still runs for this scene.
+                async with SessionLocal() as session:
+                    check = await shot_continuity.queue_following_check(
+                        session, project_id, scene_id
+                    )
         except Exception:
             _logger.exception("job %d: the continuity check could not be queued", job_id)
             return

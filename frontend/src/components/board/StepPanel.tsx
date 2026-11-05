@@ -99,7 +99,17 @@ const StoryRenderPanel = lazyNamed(() => import("../story/StoryRenderPanel"), "S
 const MusicBiblePanel = lazyNamed(() => import("../music/MusicBiblePanel"), "MusicBiblePanel");
 const MusicThemesPanel = lazyNamed(() => import("../music/MusicThemesPanel"), "MusicThemesPanel");
 const MusicPlanPanel = lazyNamed(() => import("../music/MusicPlanPanel"), "MusicPlanPanel");
+const ThumbnailsPanel = lazyNamed(() => import("../story/ThumbnailsPanel"), "ThumbnailsPanel");
 const CalloutPlanPanel = lazyNamed(() => import("../story/CalloutPlanPanel"), "CalloutPlanPanel");
+const GraphicThemePanel = lazyNamed(
+  () => import("../story/GraphicThemePanel"),
+  "GraphicThemePanel",
+);
+const GraphicBriefsPanel = lazyNamed(
+  () => import("../story/GraphicBriefsPanel"),
+  "GraphicBriefsPanel",
+);
+const GraphicsPanel = lazyNamed(() => import("../story/GraphicsPanel"), "GraphicsPanel");
 const MusicCuesPanel = lazyNamed(() => import("../music/MusicCuesPanel"), "MusicCuesPanel");
 const MusicTakesPanel = lazyNamed(() => import("../music/MusicTakesPanel"), "MusicTakesPanel");
 const MusicPlacementPanel = lazyNamed(
@@ -134,6 +144,8 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         );
       case "run":
         return <StoryPipelinePanel projectId={projectId} />;
+      case "thumbnail":
+        return <ThumbnailsPanel projectId={projectId} />;
       case "out_of_date":
         return <StalenessPanel projectId={projectId} />;
       case "story_bible":
@@ -190,6 +202,12 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <SpeechUnitsPanel projectId={projectId} />;
       case "callout_plan":
         return <CalloutPlanPanel projectId={projectId} />;
+      case "graphic_theme":
+        return <GraphicThemePanel projectId={projectId} />;
+      case "graphic_briefs":
+        return <GraphicBriefsPanel projectId={projectId} />;
+      case "graphics":
+        return <GraphicsPanel projectId={projectId} />;
       case "music_bible":
         return <MusicBiblePanel projectId={projectId} hasStory={hasStory} />;
       case "music_themes":
@@ -215,8 +233,14 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <ShotPromptsPanel projectId={projectId} />;
       case "shot_generation":
         return <ShotTakesPanel projectId={projectId} />;
+      case "scene_render":
       case "render":
-        return <StoryRenderPanel projectId={projectId} />;
+        return (
+          <StoryRenderPanel
+            projectId={projectId}
+            isExplainer={project.kind === "explainer"}
+          />
+        );
       default:
         return (
           <Stack gap="xs" align="flex-start">

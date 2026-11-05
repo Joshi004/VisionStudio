@@ -68,10 +68,12 @@ class DiscoveryHandler(JobHandler):
         model: str,
         library_cast: object,
         explainer: bool = False,
+        presenter_staging: str | None = None,
     ) -> dict[str, Any]:
         """The request body sent to the model. Characters and environments by default.
         `library_cast` is the cast the job was started with (PHASE-048); scenes ignore it.
-        `explainer` is true for an explainer project (EXPLAINER-003).
+        `explainer` is true for an explainer project (EXPLAINER-003). `presenter_staging` is
+        the owner's text for how an explainer's presenter is placed; scenes ignore it.
         """
         return writer.build_request(
             cast(writer.Kind, self.kind),
@@ -80,6 +82,7 @@ class DiscoveryHandler(JobHandler):
             model=model,
             cast=library_cast if isinstance(library_cast, list) else None,
             explainer=explainer,
+            presenter_staging=presenter_staging,
         )
 
     def check(
@@ -161,6 +164,9 @@ class DiscoveryHandler(JobHandler):
             cast_sha256 = None
 
         explainer = job_input.get("project_kind") == KIND_EXPLAINER
+        presenter_staging = job_input.get("presenter_staging")
+        if not isinstance(presenter_staging, str):
+            presenter_staging = None
         fixed = job_input.get("fixed_content")
         warnings: list[str] = []
         record: dict[str, Any]
@@ -188,7 +194,9 @@ class DiscoveryHandler(JobHandler):
             }
         else:
             await self._phase(job_id, phases.PREPARING_PROMPT)
-            body = self.build_body(story, bible_content, target.model, library_cast, explainer)
+            body = self.build_body(
+                story, bible_content, target.model, library_cast, explainer, presenter_staging
+            )
             job_input.update(
                 instructions_sha256=llm_call.instructions_sha256(body),
                 server_url=docker_mapped(target.base_url),

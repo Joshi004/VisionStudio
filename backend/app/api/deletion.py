@@ -8,8 +8,8 @@
   for `/lab/environments/{id}`: the projects that use the item are listed first, and are flagged
   (not changed) when it is deleted.
 - `GET /lab/samples/{kind}/{id}/deletion-preview` and `DELETE /lab/samples/{kind}/{id}`: one
-  sample of a lab (an image run, a video run, a speech, a music run or an Audio video test). It is
-  refused while something still uses it, and the preview lists where.
+  sample of a lab (an image run, a video run, a speech, a music run, an Audio video test or a
+  Graphics run). It is refused while something still uses it, and the preview lists where.
 
 Every delete can also clean up the GPU server (`purge_server`, off unless the caller asks): the
 jobs behind what was deleted are purged on the server after the answer is sent, best effort
@@ -42,7 +42,9 @@ router = APIRouter()
 _MAX_ID: Final = 2**63 - 1
 LibraryId = Annotated[int, Path(ge=1, le=_MAX_ID)]
 ItemId = Annotated[int, Field(strict=True, ge=1, le=_MAX_ID)]
-LabSampleKind = Literal["image_run", "video_run", "voice_run", "music_run", "av_test"]
+LabSampleKind = Literal[
+    "image_run", "video_run", "voice_run", "music_run", "av_test", "graphic_run"
+]
 
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No such project or library item."}}
 _BUSY = {
@@ -133,6 +135,8 @@ class LabSampleDeletionPreviewOut(BaseModel):
     label: str
     # Where it is still used, by name. Not empty means the delete is refused.
     used_by: list[str]
+    # What goes with it, by name: the character takes that made it.
+    also_deletes: list[str]
     blocked_reason: str | None
 
 
@@ -355,6 +359,7 @@ async def get_lab_sample_deletion_preview(
         sample_id=result.sample_id,
         label=result.label,
         used_by=result.used_by,
+        also_deletes=result.also_deletes,
         blocked_reason=result.blocked_reason,
     )
 

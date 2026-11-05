@@ -23,6 +23,8 @@ export type ShotDefinitionEntry =
 export type ShotDefinitionContent =
   components["schemas"]["ShotDefinitionContentOut"];
 export type ShotStaging = components["schemas"]["ShotStagingOut"];
+/** The place inside the scene's main place a shot is inside, with its views (SCN-007). */
+export type ShotInnerPlace = components["schemas"]["ShotInnerPlaceOut"];
 export type ShotDefinitionsRun =
   components["schemas"]["ShotDefinitionsRunManyOut"];
 export type ShotDefinitionInput = components["schemas"]["ShotDefinitionIn"];

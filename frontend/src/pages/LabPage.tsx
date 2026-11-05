@@ -4,11 +4,16 @@ import { Navigate, useNavigate, useParams } from "react-router";
 
 import { CharacterLabPanel } from "../components/characterLab/CharacterLabPanel";
 import { EnvironmentLabPanel } from "../components/environmentLab/EnvironmentLabPanel";
+import { GraphicsLabPanel } from "../components/lab/GraphicsLabPanel";
 import { ImageLabPanel } from "../components/lab/ImageLabPanel";
 import { LabLibraryDrawer, type LibraryActions } from "../components/lab/LabLibraryDrawer";
 import { VideoLabPanel } from "../components/lab/VideoLabPanel";
 import { MusicLabPanel } from "../components/lab/MusicLabPanel";
 import { VoiceLabPanel } from "../components/lab/VoiceLabPanel";
+import {
+  DEFAULT_FORM as DEFAULT_GRAPHICS_FORM,
+  type GraphicsLabFormState,
+} from "../components/graphicsLab/graphicsLabView";
 import { DEFAULT_EDIT_FORM, type MusicEditFormState } from "../components/musicLab/musicEditView";
 import { DEFAULT_FORM as DEFAULT_MUSIC_FORM, type MusicLabFormState } from "../components/musicLab/musicLabView";
 import { DEFAULT_FORM as DEFAULT_IMAGE_FORM, type LabFormState } from "../components/imageLab/labView";
@@ -30,6 +35,7 @@ const TABS = [
   { value: "video", label: "Video" },
   { value: "voice", label: "Voice" },
   { value: "music", label: "Music" },
+  { value: "graphics", label: "Graphics" },
 ] as const;
 
 type LabTab = (typeof TABS)[number]["value"];
@@ -43,12 +49,12 @@ function isLabTab(value: string | undefined): value is LabTab {
 /**
  * One place for everything that is tried by hand and belongs to no project: the library of
  * characters (Characters), the library of environments (Environments), and the four labs it
- * is made of (Image, Video, Voice, Music).
+ * is made of (Image, Video, Voice, Music), and the Graphics lab (graphics drawn by code).
  *
  * The tab is in the address (`/lab/characters`), so a tab can be linked to. The Image, Video,
- * Voice and Music forms are kept here, so changing tabs never loses what you typed, and so the
- * library can fill a form of another tab: a picture found in the library becomes a clip's first
- * frame, a speech or a clip is loaded back into its form. The Characters tab keeps nothing
+ * Voice, Music and Graphics forms are kept here, so changing tabs never loses what you typed,
+ * and so the library can fill a form of another tab: a picture found in the library becomes a
+ * clip's first frame, a speech or a clip is loaded back into its form. The Characters tab keeps nothing
  * here: a character, its looks and what was made with it live on the server, and the open
  * character is in the address (`?character=`).
  */
@@ -61,6 +67,7 @@ export function LabPage() {
   const [voiceForm, setVoiceForm] = useState<VoiceLabFormState>(DEFAULT_VOICE_FORM);
   const [musicForm, setMusicForm] = useState<MusicLabFormState>(DEFAULT_MUSIC_FORM);
   const [musicEditForm, setMusicEditForm] = useState<MusicEditFormState>(DEFAULT_EDIT_FORM);
+  const [graphicsForm, setGraphicsForm] = useState<GraphicsLabFormState>(DEFAULT_GRAPHICS_FORM);
 
   if (!isLabTab(tab)) {
     return <Navigate to={`/lab/${DEFAULT_TAB}`} replace />;
@@ -102,8 +109,8 @@ export function LabPage() {
           <Text size="sm" c="dimmed" maw={760}>
             Try things by hand. Nothing here belongs to a project. Keep a library of characters
             and make pictures, speech and clips with them, keep a library of places, or try the
-            image, video, voice and music models on their own. The library holds every picture, voice,
-            speech and clip, and can send them to a tab.
+            image, video, voice and music models on their own, or try making graphics with code. The
+            library holds every picture, voice, speech and clip, and can send them to a tab.
           </Text>
         </Stack>
         <Button variant="default" onClick={() => setLibraryOpen(true)}>
@@ -143,6 +150,9 @@ export function LabPage() {
             editForm={musicEditForm}
             onEditFormChange={setMusicEditForm}
           />
+        </Tabs.Panel>
+        <Tabs.Panel value="graphics" pt="md">
+          <GraphicsLabPanel form={graphicsForm} onFormChange={setGraphicsForm} />
         </Tabs.Panel>
       </Tabs>
 

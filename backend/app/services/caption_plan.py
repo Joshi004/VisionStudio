@@ -4,6 +4,9 @@ Pure: no I/O, no clock. `story_render_plan.build_plan` gives `build_captions` ev
 story with the time of each of its script words (`speech_word_timing`, EXPLAINER-007), and gets
 back the **caption groups** that are frozen in the timeline (`timeline["captions"]`). The render
 job reads them back with `parse_track` and `services/caption_ass.py` writes them as an ASS file.
+The track is built for every explainer and carries a `burned` flag (CAP-001): the render draws
+the groups on the picture only when it is true, and a track with no flag was burned.
+Each word also keeps its script text (`raw`, CAP-003) for the SRT file; older tracks have none.
 
 **Text** (`caption_text`): upper case, with sentence punctuation removed. Apostrophes, hyphens
 inside a word, `%`, `$` and the points of numbers such as "3.5" and "1,000" stay.
@@ -86,6 +89,9 @@ class CaptionWord:
     text: str
     start_ms: int
     end_ms: int
+    # The word as the script has it, with its casing and punctuation, for the SRT file (CAP-003).
+    # None in a track from before CAP-003.
+    raw: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,8 +106,13 @@ class CaptionGroup:
 
 @dataclass(frozen=True)
 class CaptionTrack:
+    """The frozen caption track. `burned` is whether the render draws it on the picture (CAP-001);
+    a track with no `burned` recorded is from before that and was burned.
+    """
+
     style: CaptionStyle
     groups: tuple[CaptionGroup, ...]
+    burned: bool = True
 
 
 @dataclass(frozen=True)
@@ -187,6 +198,7 @@ class _Word:
     text: str
     start_s: float
     end_s: float
+    raw: str
     break_after: bool = False
 
 
@@ -201,7 +213,7 @@ def _clean_words(words: Sequence[tuple[str, float, float]]) -> list[_Word]:
             if cleaned:
                 cleaned[-1].break_after = True
             continue
-        cleaned.append(_Word(text, start_s, end_s, break_after=_ends_sentence(raw)))
+        cleaned.append(_Word(text, start_s, end_s, raw=raw, break_after=_ends_sentence(raw)))
     return cleaned
 
 
@@ -279,6 +291,7 @@ def build_captions(
                         word.text,
                         unit.start_ms + _ms(word.start_s),
                         unit.start_ms + _ms(word.end_s),
+                        raw=word.raw,
                     )
                     for word in part
                 )
@@ -333,7 +346,7 @@ def _fit_words(
     fitted: list[CaptionWord] = []
     for index, word in enumerate(words):
         following = starts[index + 1] if index + 1 < len(words) else end_ms
-        fitted.append(CaptionWord(word.text, starts[index], following))
+        fitted.append(CaptionWord(word.text, starts[index], following, raw=word.raw))
     return tuple(fitted)
 
 
@@ -384,9 +397,21 @@ def hide_during(
 # --- Recording and reading back -------------------------------------------------------------
 
 
-def track_dict(style: CaptionStyle, groups: Sequence[CaptionGroup]) -> dict[str, Any]:
-    """The caption track as it is frozen in the timeline (JSON)."""
+def _word_dict(word: CaptionWord) -> dict[str, Any]:
+    entry: dict[str, Any] = {"text": word.text, "start_ms": word.start_ms, "end_ms": word.end_ms}
+    if word.raw is not None:
+        entry["raw"] = word.raw
+    return entry
+
+
+def track_dict(
+    style: CaptionStyle, groups: Sequence[CaptionGroup], *, burned: bool
+) -> dict[str, Any]:
+    """The caption track as it is frozen in the timeline (JSON). `burned` says whether the render
+    draws it on the picture.
+    """
     return {
+        "burned": burned,
         "style": {
             "layout": style.layout,
             "play_res_x": style.play_res_x,
@@ -408,10 +433,7 @@ def track_dict(style: CaptionStyle, groups: Sequence[CaptionGroup]) -> dict[str,
                 "audio_id": group.audio_id,
                 "start_ms": group.start_ms,
                 "end_ms": group.end_ms,
-                "words": [
-                    {"text": word.text, "start_ms": word.start_ms, "end_ms": word.end_ms}
-                    for word in group.words
-                ],
+                "words": [_word_dict(word) for word in group.words],
             }
             for group in groups
         ],
@@ -477,14 +499,20 @@ def _style_of(raw: object) -> CaptionStyle:
     return style
 
 
+def _word_of(raw: dict[str, Any]) -> CaptionWord:
+    script_text = raw.get("raw")  # optional: a track from before CAP-003 has none
+    return CaptionWord(
+        _text(raw.get("text")),
+        _whole(raw.get("start_ms")),
+        _whole(raw.get("end_ms")),
+        raw=None if script_text is None else _text(script_text),
+    )
+
+
 def _group_of(raw: object) -> CaptionGroup:
     if not isinstance(raw, dict) or not isinstance(raw.get("words"), list):
         raise CaptionError("bad group")
-    words = tuple(
-        CaptionWord(_text(w.get("text")), _whole(w.get("start_ms")), _whole(w.get("end_ms")))
-        for w in raw["words"]
-        if isinstance(w, dict)
-    )
+    words = tuple(_word_of(w) for w in raw["words"] if isinstance(w, dict))
     group = CaptionGroup(
         scene_id=_text(raw.get("scene_id")),
         unit_id=_text(raw.get("unit_id")),
@@ -512,7 +540,11 @@ def parse_track(raw: object) -> CaptionTrack | None:
         return None
     if not isinstance(raw, dict) or not isinstance(raw.get("groups"), list):
         raise CaptionError("bad track")
+    burned = raw.get("burned", True)  # a track from before CAP-001 was burned in
+    if not isinstance(burned, bool):
+        raise CaptionError("bad burned flag")
     return CaptionTrack(
         style=_style_of(raw.get("style")),
         groups=tuple(_group_of(group) for group in raw["groups"]),
+        burned=burned,
     )

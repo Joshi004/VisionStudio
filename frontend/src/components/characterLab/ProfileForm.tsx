@@ -28,12 +28,15 @@ import {
   type EraKind,
   type ProfileFormState,
 } from "./characterLabView";
+import { FillFromPhoto } from "./FillFromPhoto";
 
 type ProfileFormProps = {
   /** The character to edit, or null to make a new one. */
   character: LibraryCharacter | null;
   /** Called with the saved character. `created` is true for a new one. */
   onSaved: (character: LibraryCharacter, created: boolean) => void;
+  /** Called with the Image lab id of a photo the owner used to fill the form. */
+  onPhoto?: (imageId: number) => void;
 };
 
 function counter(text: string, limit: number): string {
@@ -45,7 +48,7 @@ function counter(text: string, limit: number): string {
  * required. The appearance is what every picture is drawn from, so it describes the body and
  * the features that never change, not the clothes (the outfit has its own box).
  */
-export function ProfileForm({ character, onSaved }: ProfileFormProps) {
+export function ProfileForm({ character, onSaved, onPhoto }: ProfileFormProps) {
   const [form, setForm] = useState<ProfileFormState>(() =>
     character === null ? DEFAULT_PROFILE : profileFromCharacter(character),
   );
@@ -60,6 +63,18 @@ export function ProfileForm({ character, onSaved }: ProfileFormProps) {
   function update(changes: Partial<ProfileFormState>) {
     setSaved(false);
     setForm((current) => ({ ...current, ...changes }));
+  }
+
+  /** Puts what the model read from a photo in the boxes that are still empty. */
+  function fillFromPhoto(fields: Record<string, string>) {
+    setSaved(false);
+    setForm((current) => ({
+      ...current,
+      appearance: current.appearance.trim() === "" ? (fields.appearance ?? "") : current.appearance,
+      outfit: current.outfit.trim() === "" ? (fields.outfit ?? "") : current.outfit,
+      personality:
+        current.personality.trim() === "" ? (fields.personality ?? "") : current.personality,
+    }));
   }
 
   function save() {
@@ -89,6 +104,9 @@ export function ProfileForm({ character, onSaved }: ProfileFormProps) {
       }}
     >
       <Stack gap="md">
+        {character === null && (
+          <FillFromPhoto mode="character" onFilled={fillFromPhoto} onPhoto={onPhoto} />
+        )}
         <TextInput
           label="Name"
           required

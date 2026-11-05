@@ -17,11 +17,16 @@ The stored form, `for_shot`'s result, is plain JSON: it is put on a job's input 
 ```
 {"characters": {"<id>": {"zone", "posture", "faces", "screen_side", "background_side"}},
  "axis": {"between", "camera_half", "note"}, "group_side": "...",
+ "presence": {"present": [...], "away": [...]},
  "views": [{"id", "name", "side", "framing", "zone", "description", "allowed_for": [...]}]}
 ```
 
 `allowed_for` lists the ids of the characters the view may stand behind and `"group"` when it may
 stand behind a shot of the whole group.
+
+`presence` (SCN-006) says who is in the place during the shot (`present`) and who is not
+(`away`). It is left out when the scene's staging has none (it was written before SCN-006), so
+such a shot keeps the staging, and the hash of it, that it was made against.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ ESTABLISHING: Final = "establishing"
 GROUP: Final = "group"
 # A shot of one of these sizes shows the group and the place, even when it names a character.
 _GROUP_SIZES: Final = ("wide", "extreme_wide")
+# SCN-006: a shot of one of these sizes, framed on the group, must show everyone who is present.
+GROUP_SHOT_SIZES: Final = ("medium_wide", "wide", "extreme_wide")
 
 
 def establishing_view(master_view: str | None) -> dict[str, Any]:
@@ -91,11 +98,17 @@ def for_shot(
     # Left out when nobody is off screen, so a shot made before the field existed keeps the
     # staging it was judged against.
     off_screen = staging.get("off_screen") or []
+    presence = scene_staging_writer.presence_at(staging, scene_event_ids, shot_event_ids)
     return {
         "characters": characters,
         **({"off_screen": off_screen} if off_screen else {}),
         "axis": staging["axis"],
         "group_side": staging["group_side"],
+        **(
+            {"presence": {"present": presence[0], "away": presence[1]}}
+            if presence is not None
+            else {}
+        ),
         "views": shown,
     }
 
@@ -118,6 +131,20 @@ def view_key(
     ):
         return focus.strip()
     return GROUP
+
+
+def is_group_shot(
+    composition: dict[str, Any], visible_ids: list[str], staging: dict[str, Any], *, exchange: bool
+) -> bool:
+    """Whether the shot is framed on the group and wide enough to show everyone: a medium-wide,
+    wide or extreme-wide shot that is not a single of one character (SCN-006). A rapid exchange
+    is never one.
+    """
+    return (
+        not exchange
+        and composition.get("shot_size") in GROUP_SHOT_SIZES
+        and view_key(composition, visible_ids, staging, exchange=exchange) == GROUP
+    )
 
 
 def allowed_view_ids(staging: dict[str, Any], key: str) -> list[str]:
@@ -182,6 +209,8 @@ def planner_block(staging: dict[str, Any], names: dict[str, str]) -> dict[str, A
             {key: move[key] for key in ("after_event_id", "character_id", "zone")}
             for move in staging["moves"]
         ],
+        # SCN-006: who arrives or leaves; left out when nobody does.
+        **({"presence": staging["presence"]} if staging.get("presence") else {}),
     }
 
 

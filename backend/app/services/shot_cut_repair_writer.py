@@ -68,6 +68,12 @@ cut; "after_state", how they are at the start of what comes after it; "problem",
 line up; "editable_shots", the shots you may change; and "frozen", the edges you must not \
 change, each as a shot id and an "edge" that is "start" or "end".
 
+When the cut's "before" is "previous_scene", the cut is from the LAST SHOT of the scene before, \
+given as "previous_shot" with the "time" and "environment_state" of both scenes, into the \
+first shot of this scene, which continues straight from it. That shot is already filmed as it \
+is: never change it, and make the first shot start exactly where it ends (who is in frame, \
+where they are, what they hold, their pose and state, the light).
+
 Rules:
 - Decide which of the editable shots to change, and how. Change as little as is needed for the \
 two states to follow each other at the cut: the same pose, position, state of mind and \
@@ -109,7 +115,12 @@ or music.
 the screen, what is behind them) and the "views" that may stand behind it. Never change where \
 a character stands or which side of the screen they are on: the repair changes poses, gazes, \
 actions and states only; keep the shot's "composition.view" unless the shot is a single and \
-its view is no longer allowed.
+its view is no longer allowed. When a shot's "staging" has "presence", a medium-wide, wide or \
+extreme-wide shot framed on the group must list every id in its "present" list in "characters", \
+and no shot shows anyone in its "away" list.
+- A shot under SHOTS that has "inner_place" is inside that place within the scene's main place \
+(a car in a garage), not inside ENVIRONMENT: keep it there, and "composition.view" is one "id" \
+from that inner place's "views" (it has no "staging").
 - At least one editable shot must change.
 - Do not write a shot's duration or its dialogue: they are filled in for you.
 
@@ -135,9 +146,10 @@ def build_request(
 
     `scene` is `{index, id, title, description}`; `cut` is `{id, before, after, before_state,
     after_state, problem, editable_shots, frozen}`; `shots` has, for each shot on the sides of
-    the cut in order, `{shot, events, speech, specification, staging}` (the skeleton with its
-    length and place, the events and speech it shows, its newest specification, and where
-    its characters stand with the views allowed behind it); `characters` and
+    the cut in order, `{shot, events, speech, specification, staging[, inner_place]}` (the
+    skeleton with its length and place, the events and speech it shows, its newest
+    specification, and where its characters stand with the views allowed behind it, or the
+    inner place it is inside with that place's views); `characters` and
     `environment` are as for `shot_definition_writer.build_request`.
     """
     parts = [
@@ -228,6 +240,8 @@ def check_answer(
                 exchange=shot.get("exchange") is True,
                 staging=shot.get("staging"),
                 explainer=shot.get("explainer") is True,
+                check_presence=True,
+                inner_place=shot.get("inner_place"),
                 warnings=warnings,
             )
         except ValueError as exc:

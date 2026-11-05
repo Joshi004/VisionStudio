@@ -48,7 +48,7 @@ from app.jobs.gpu_job import (
 from app.jobs.handlers import MODEL_TRANSCRIPTION, JobHandler, PollContext
 from app.providers import gpu_server, transcriber
 from app.providers.gpu_server import GpuCallError
-from app.services import dialogue_check, shot_takes, take_validation
+from app.services import dialogue_check, gpu_priority, shot_takes, take_validation
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -80,6 +80,7 @@ class CheckTakeDialogueHandler(JobHandler):
             base_url = await settings_service.get_str(session, TRANSCRIPTION_URL_KEY)
             partition = await settings_service.get_str(session, PARTITION_KEY)
             clip_path = take.path if take is not None else None
+            priority = await gpu_priority.level_for(session, job)  # SCN-002
             await session.commit()
 
         if take is None or clip_path is None:
@@ -102,7 +103,9 @@ class CheckTakeDialogueHandler(JobHandler):
                 await note_uploading(job_id, phases.UPLOADING_CLIP_FOR_TRANSCRIPT)
                 remote_asset_id = await gpu_server.upload_file(base_url, path, filename, CLIP_MIME)
                 await self._phase(job_id, phases.SUBMITTING)
-                provider_job_id = await transcriber.submit(base_url, remote_asset_id, partition)
+                provider_job_id = await transcriber.submit(
+                    base_url, remote_asset_id, partition, priority
+                )
                 break
             except GpuCallError as exc:
                 if exc.kind == "server_error" and not retried_server_error:
@@ -127,7 +130,7 @@ class CheckTakeDialogueHandler(JobHandler):
                 "remote_asset_id": remote_asset_id,
             },
             "endpoint": transcriber.TRANSCRIBE_PATH,
-            "body": transcriber.build_body(remote_asset_id, partition),
+            "body": transcriber.build_body(remote_asset_id, partition, priority),
         }
         async with SessionLocal() as session:
             await store.mark_submitted(session, job_id, provider_job_id, submitted)
@@ -253,22 +256,38 @@ class CheckTakeDialogueHandler(JobHandler):
             threshold = await settings_service.get_int(
                 session, settings_service.DIALOGUE_MATCH_THRESHOLD_KEY
             )
-            result = dialogue_check.compare(lines, spoken, threshold)
-            take.dialogue_check = result.to_json(
-                lines, spoken, threshold=threshold, checked_at=utcnow()
+            # SCN-009: a shot with no lines is checked for silence, not for words.
+            result = (
+                dialogue_check.compare(lines, spoken, threshold)
+                if lines
+                else dialogue_check.compare_silent(spoken)
             )
+            stored = result.to_json(lines, spoken, threshold=threshold, checked_at=utcnow())
+            # A report on an older silent take is shown, but never blocks the take and is never
+            # retried (`kind` None): the owner decides.
+            report_only = recorded.get(shot_takes.REPORT_ONLY_KEY) is True
+            if report_only:
+                stored["report_only"] = True
+                stored["kind"] = None
+            take.dialogue_check = stored
             output: dict[str, Any] = {
                 "take_id": take.id,
                 "take_number": take.take_number,
                 "processing_time": _processing_time(body),
                 "check": {
                     "passed": result.passed,
+                    "mode": result.mode,
+                    "report_only": report_only,
+                    "outcome": result.outcome,
+                    "rule": result.rule,
                     "similarity": result.similarity,
                     "threshold": threshold,
                     "problems": [problem.code for problem in result.problems],
                 },
             }
-            if result.passed:
+            if report_only:
+                pass  # a report never changes the selection and never starts a retry
+            elif result.passed:
                 # Only a clip that passed its technical check is ever sent here, but the
                 # selection rule is kept in one place and never trusts that. A take that
                 # already has a `selected_at` (made before this phase, or chosen by the user)
@@ -294,10 +313,14 @@ class CheckTakeDialogueHandler(JobHandler):
             await session.commit()
 
         _logger.info(
-            "job %d: dialogue of take %s checked: passed=%s similarity=%s%% (needed %s%%)",
+            "job %d: speech of take %s checked (%s%s): passed=%s outcome=%s similarity=%s%% "
+            "(needed %s%%)",
             job.id,
             take_id,
+            result.mode,
+            ", report only" if report_only else "",
             result.passed,
+            result.outcome,
             result.similarity,
             threshold,
         )

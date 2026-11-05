@@ -44,6 +44,7 @@ from app.jobs.gpu_job import (
 from app.jobs.handlers import MODEL_IMAGE, JobHandler, PollContext
 from app.providers import image_generator
 from app.providers.gpu_server import GpuCallError
+from app.services import gpu_priority
 from app.services.storage import StorageError, get_storage
 
 _logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class RemoteImageHandler(JobHandler):
         *,
         endpoint: str = image_generator.GENERATE_PATH,
         build_body: BuildBody | None = None,
+        priority: int | None = None,
     ) -> None:
         """Submits the request to `endpoint`. The server's job id is saved the moment the submit
         answers, with nothing that can fail in between (ANALYSIS.md Section 3.3). `recorded` is
@@ -104,6 +106,8 @@ class RemoteImageHandler(JobHandler):
                     body, uploads = await build_body()
                     if not await self._is_running(job_id):
                         return  # cancelled while uploading: nothing was submitted
+                # The server's priority (SCN-002). The body that is recorded is the one sent.
+                body = gpu_priority.with_priority(body, priority)
                 await self._phase(job_id, phases.SUBMITTING)
                 provider_job_id = await image_generator.submit(base_url, body, endpoint)
                 break
@@ -125,7 +129,7 @@ class RemoteImageHandler(JobHandler):
                 await self._give_up_starting(job_id, exc)
                 return
 
-        submitted = {**recorded, **uploads, "server_url": docker_mapped(base_url)}
+        submitted = {**recorded, **uploads, "body": body, "server_url": docker_mapped(base_url)}
         async with SessionLocal() as session:
             saved = await store.mark_submitted(session, job_id, provider_job_id, submitted)
         if not saved:

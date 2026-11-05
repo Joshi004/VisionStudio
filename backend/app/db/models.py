@@ -44,6 +44,7 @@ class Project(Base):
         ),
         CheckConstraint("kind IN ('story', 'explainer')", name="kind_valid"),
         CheckConstraint("voice_track IN ('lines', 'continuous')", name="voice_track_valid"),
+        CheckConstraint("caption_mode IN ('burned', 'ytt')", name="caption_mode_valid"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -72,11 +73,15 @@ class Project(Base):
     # matters while `music_enabled` is on; changing it makes the render out of date, not the
     # placement.
     ambience_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
-    # Whether an explainer's render draws word-synced captions, and whether it draws callouts
-    # (EXPLAINER-007). Only read for an explainer, at render time, so they can be changed at
-    # any time.
-    captions: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # CAP-001. How an explainer's captions are delivered: `burned` (drawn on the picture) or
+    # `ytt` (a caption file, nothing drawn). Whether it draws callouts (EXPLAINER-007). Only
+    # read for an explainer, at render time, so they can be changed at any time.
+    caption_mode: Mapped[str] = mapped_column(default="burned", server_default=text("'burned'"))
     callouts: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # The words of the story the owner suggests a graphic for: `[{id, start, end, text}]`, with
+    # `start` and `end` character positions in `script_text`. Only for a continuous explainer
+    # with graphics on. NULL means none. See `services/graphic_suggestions`.
+    graphic_suggestions: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
     # FLOW-002. Chosen when the project is created and never changed: `lines` (each line is its
     # own speech) or `continuous` (one voice take per scene, the picture cut on top of it). Only
     # an explainer can be `continuous`; a story is always `lines`.
@@ -85,6 +90,26 @@ class Project(Base):
     # explainer (at most 500 characters). NULL means the Story Bible's narration style, or the
     # default. Can be changed at any time.
     presenter_delivery: Mapped[str | None] = mapped_column(default=None)
+    # The owner's text for how an explainer's presenter is placed and moves on camera (at most
+    # 500 characters). NULL means the presenter stands. Can be changed at any time.
+    presenter_staging: Mapped[str | None] = mapped_column(default=None)
+    # The owner's text for what an explainer's presenter wears (at most 300 characters). It is
+    # resolved into one named look for every scene. NULL means the presenter's default outfit.
+    # Can be changed at any time.
+    presenter_outfit: Mapped[str | None] = mapped_column(default=None)
+    # The saved outfit (a `character_named_look` of the presenter) the presenter wears in every
+    # scene, picked in the Character Lab's list. NULL means the typed `presenter_outfit` or the
+    # default outfit. Never set together with `presenter_outfit`. Can be changed at any time.
+    # `use_alter`: `character_named_look.origin_project_id` points back here, the intended cycle.
+    presenter_named_look_id: Mapped[int | None] = mapped_column(
+        ForeignKey("character_named_look.id", ondelete="SET NULL", use_alter=True), default=None
+    )
+    # EXG-001. Whether a continuous explainer gets graphic shots (EG-1). Chosen when the project
+    # is created and never changed; only an explainer with a continuous voice can have it on.
+    graphics: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # SCN-002. The scene the owner pushed to the front of the GPU server's queue (its id in the
+    # scene discovery). Its clips are sent with the most urgent priority. NULL: none is pushed.
+    pushed_scene_id: Mapped[str | None] = mapped_column(default=None)
 
 
 class Asset(Base):
@@ -142,7 +167,11 @@ class Job(Base):
         # the rewrite of a rejected take's prompt, since revision 0069, and the placement of the
         # music on the timeline, since revision 0070, and the preview of a music mix, since revision
         # 0071, and the timing of a speech's words, since revision 0073, and the callout plan,
-        # since revision 0074.
+        # since revision 0074, and the two Audio video lab jobs, since revision 0075, and the six
+        # Graphics lab jobs, since revision 0079, and the five explainer graphics jobs, since
+        # revision 0080, and the reading of a reference photo, since revision 0083, and the render
+        # of one scene, since revision 0085, and the writing of thumbnail concepts, since
+        # revision 0086.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -158,7 +187,14 @@ class Job(Base):
             "'write_music_theme_prompt', 'write_music_plan', 'write_music_cue', "
             "'audit_music_cues', 'rewrite_music_prompt', 'place_music', "
             "'preview_music_mix', 'time_speech_words', 'write_callout_plan', "
-            "'time_lab_speech_words', 'render_av_test')",
+            "'time_lab_speech_words', 'render_av_test', "
+            "'write_lab_graphic_brief', 'write_lab_graphic_template_spec', "
+            "'write_lab_graphic_block_scene', 'write_lab_graphic_component', "
+            "'render_lab_graphic', 'time_lab_graphic_words', "
+            "'write_graphic_theme', 'write_shot_graphic_brief', "
+            "'write_shot_graphic_component', 'write_shot_graphic_scene', "
+            "'render_shot_graphic', 'describe_photo', 'render_scene', "
+            "'write_thumbnail_concepts')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1109,6 +1145,43 @@ class StoryRender(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
+class SceneRender(Base):
+    """One finished render of one scene's video (SCN-003, migration 0085).
+
+    Like `StoryRender`, the row is made only when a `render_scene` job succeeds, in the same
+    transaction that finishes it, and a stored render is never changed or deleted. Renders are
+    numbered from 1 for each `(project_id, scene_id)`; `scene_id` is the slug id of the scene in
+    the project's scene discovery. `inputs` holds the frozen timeline the job rendered (the scene
+    starts at frame 0), `levels` what was measured and changed. Whether a render is out of date is
+    worked out on every read, never stored.
+    """
+
+    __tablename__ = "scene_render"
+    __table_args__ = (
+        UniqueConstraint("project_id", "scene_id", "render_number"),
+        Index("idx_scene_render_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    render_number: Mapped[int]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    levels: Mapped[Any] = mapped_column(JSON)
+    path: Mapped[str]
+    size_bytes: Mapped[int]
+    sha256: Mapped[str]
+    width: Mapped[int | None] = mapped_column(default=None)
+    height: Mapped[int | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    duration_s: Mapped[float | None] = mapped_column(default=None)
+    audio: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
 class SpeechUnits(Base):
     """One version of one scene's plan of speech units (PHASE-018, `Path_ahead.md` Section 19).
 
@@ -1244,6 +1317,210 @@ class ShotVoiceSource(Base):
     scene_id: Mapped[str]
     shot_id: Mapped[str]
     shot_plan_id: Mapped[int] = mapped_column(ForeignKey("shot_plan.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class GraphicTheme(Base):
+    """One version of the theme every graphic of a project uses (EXG-001, revision 0080).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run or
+    edit is a new row with the next `version`, and a stored row is never changed. `inputs` holds
+    the Story Bible it was written from, so staleness is worked out on read. `content` is
+    `{theme, reason, notes}`.
+    """
+
+    __tablename__ = "graphic_theme"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_graphic_theme_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ThumbnailConcepts(Base):
+    """One version of the thumbnail concepts of a project (migration 0086).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run or
+    edit is a new row with the next `version`, and a stored row is never changed. `inputs` holds
+    the Story Bible (and the render, when frames were used) it was written from, so staleness is
+    worked out on read. `content` is `{concepts: [...]}`.
+    """
+
+    __tablename__ = "thumbnail_concepts"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_thumbnail_concepts_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class Thumbnail(Base):
+    """One thumbnail picture made from one concept of one concept version (migration 0086).
+
+    `lab_run_id` is the Image lab run that makes the picture and `background_image_id` the lab
+    image it made. `path` is the finished PNG (the picture with the headline drawn on it) under
+    the project's media folder, NULL until the picture exists. `headline` and `text_area` start
+    as the concept's and the owner may change the headline later. At most one thumbnail of a
+    project is `chosen`.
+    """
+
+    __tablename__ = "thumbnails"
+    __table_args__ = (
+        Index("idx_thumbnails_project", "project_id"),
+        Index("idx_thumbnails_lab_run", "lab_run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    concept_version: Mapped[int]
+    concept_index: Mapped[int]
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    background_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
+    path: Mapped[str | None] = mapped_column(default=None)
+    width: Mapped[int | None] = mapped_column(default=None)
+    height: Mapped[int | None] = mapped_column(default=None)
+    headline: Mapped[str]
+    text_area: Mapped[str]
+    chosen: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotGraphicBrief(Base):
+    """One version of the brief of one graphic shot (EXG-001, revision 0080).
+
+    The same provenance shape as `ShotDefinition`: every run is a new row with the next `version`
+    of that shot, and a stored row is never changed. `scene_id` is the scene's slug id and
+    `shot_id` the shot's id in that scene's shot plan; `shot_plan_id` is the plan the brief was
+    written for. `inputs` holds the plan, the skeleton hash, the context and its hash, and the
+    take and timing used. `content` is the brief.
+    """
+
+    __tablename__ = "shot_graphic_brief"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "scene_id", "shot_id", "version"),
+        Index("idx_shot_graphic_brief_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    # The shot plan row this was written for. NULL when that row was deleted.
+    shot_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_plan.id", ondelete="SET NULL"), default=None
+    )
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotGraphic(Base):
+    """One attempt of one engine for the brief of a graphic shot (EXG-001, revision 0080).
+
+    `engine` is `generated_component` or `remotion_blocks`. `attempt` counts the attempts of one
+    engine for a brief from 1, and nothing is replaced. `input` is what the engine draws from
+    (the component code or the block scene), `input_job_id` the model call that wrote it and
+    `repair_of` the attempt a repaired component was made from. `inputs` records the resolved
+    brief and the theme version the attempt was made with. The row is made when its model call
+    is queued, so `input`, `inputs` and the video columns are NULL until they are written.
+    `failed_outright` is set on the newest attempt of a component that has no video and that
+    nothing more will be tried for (EXG-006); the rule of EXG-007 then uses the blocks.
+    """
+
+    __tablename__ = "shot_graphic"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
+        ),
+        UniqueConstraint("brief_id", "engine", "attempt"),
+        Index("idx_shot_graphic_brief_engine", "brief_id", "engine"),
+        Index("idx_shot_graphic_project_scene", "project_id", "scene_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    brief_id: Mapped[int] = mapped_column(ForeignKey("shot_graphic_brief.id", ondelete="CASCADE"))
+    engine: Mapped[str]
+    attempt: Mapped[int]
+    repair_of: Mapped[int | None] = mapped_column(
+        ForeignKey("shot_graphic.id", ondelete="SET NULL"), default=None
+    )
+    input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    input_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    render_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    media_path: Mapped[str | None] = mapped_column(default=None)
+    frame_count: Mapped[int | None] = mapped_column(default=None)
+    metrics: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+    failed_outright: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ShotGraphicChoice(Base):
+    """The version of a graphic shot the owner chose (EXG-001, revision 0080).
+
+    One row per shot, like `ShotVoiceSource`. It names the brief it was set on and counts only
+    while that brief is the shot's current one, so a new brief puts the shot back on the rule.
+    """
+
+    __tablename__ = "shot_graphic_choice"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
+        ),
+        UniqueConstraint("project_id", "scene_id", "shot_id"),
+        Index("idx_shot_graphic_choice_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scene_id: Mapped[str]
+    shot_id: Mapped[str]
+    brief_id: Mapped[int] = mapped_column(ForeignKey("shot_graphic_brief.id", ondelete="CASCADE"))
+    engine: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
@@ -2413,6 +2690,13 @@ class CharacterNamedLook(Base):
         ForeignKey("character_look.id", ondelete="SET NULL"), default=None
     )
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    # An outfit as the Character Lab shows it. `note` is a short text (at most 120 characters)
+    # that helps pick the outfit. `deleted_at` is set when the author deletes it: the row stays,
+    # so what points at it still reads and its slug is never reused, but it is no longer
+    # offered, resolved to or frozen into a new version. `updated_at` is the last edit.
+    note: Mapped[str | None] = mapped_column(default=None)
+    deleted_at: Mapped[datetime | None] = mapped_column(default=None)
+    updated_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class EnvironmentState(Base):
@@ -2699,3 +2983,104 @@ class AvLabSegment(Base):
     take_id: Mapped[int | None] = mapped_column(
         ForeignKey("character_take.id", ondelete="SET NULL"), default=None
     )
+
+
+class LabGraphicRun(Base):
+    """One line of an explainer script the Graphics lab makes graphics for (GFX-002, revision
+    0079). It belongs to no project.
+
+    The owner types only `line_text` and an `orientation` (and, from GFX-004, picks a saved
+    `voice_id`). Everything else is filled by the later phases: the speech (`speech_run_id`) and
+    the time of every word (`timing_job_id`, `timing`) by GFX-004, the director's `brief`
+    (`brief_job_id`) and the `resolved` brief that code works out from it (the frame count, the
+    number texts, the theme, the safe area) by GFX-003, and `trial_case_key` by the trial batch
+    (GFX-012). Asking the director again makes a new run, so a brief never changes under the
+    renders made from it. What a run is doing is worked out on every read from the jobs and the
+    stored fields; only `last_error` is stored, for a failure that no job holds.
+    """
+
+    __tablename__ = "lab_graphic_run"
+    __table_args__ = (
+        CheckConstraint("orientation IN ('landscape', 'portrait')", name="orientation_valid"),
+        Index("idx_lab_graphic_run_created", "created_at"),
+        Index("idx_lab_graphic_run_trial_case", "trial_case_key"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    line_text: Mapped[str]
+    orientation: Mapped[str]
+    # The saved voice that speaks the line, and the Voice lab speech that was made (GFX-004).
+    voice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice.id", ondelete="SET NULL"), default=None
+    )
+    speech_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_voice_run.id", ondelete="SET NULL"), default=None
+    )
+    # The `time_lab_graphic_words` job and the times of the line's words (GFX-004).
+    timing_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    timing: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The `write_lab_graphic_brief` job and the brief it wrote (GFX-003).
+    brief_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    brief: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The resolved brief that every engine's input is checked against (GFX-003).
+    resolved: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # The case of the trial batch this run belongs to (GFX-012).
+    trial_case_key: Mapped[str | None] = mapped_column(default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+
+
+class LabGraphicRender(Base):
+    """One engine's attempt at a Graphics lab run (GFX-002, revision 0079).
+
+    `engine` is one of the four engines. `input` is what the engine draws from (the template
+    spec, the block scene or the component code) and `input_job_id` the model call that wrote it;
+    the two template engines share one spec but have a render each. `attempt` counts the renders
+    of one engine of a run from 1: asking the model again, or rendering again, adds one.
+    `repeat_of` names the render a "render again" was made from, with the same input and no
+    model call. `render_job_id` and `media_path` (under `media/lab/`) are the render and its
+    video, `metrics` and `warnings` what was measured, and `verdict` and `note` what the owner
+    decided after watching.
+    """
+
+    __tablename__ = "lab_graphic_render"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('remotion_templates', 'python_templates', 'remotion_blocks', "
+            "'generated_component')",
+            name="engine_valid",
+        ),
+        CheckConstraint(
+            "verdict IS NULL OR verdict IN ('good', 'usable', 'bad')", name="verdict_valid"
+        ),
+        UniqueConstraint("run_id", "engine", "attempt"),
+        Index("idx_lab_graphic_render_run_engine", "run_id", "engine"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    run_id: Mapped[int] = mapped_column(ForeignKey("lab_graphic_run.id", ondelete="CASCADE"))
+    engine: Mapped[str]
+    attempt: Mapped[int]
+    input_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    repeat_of: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_graphic_render.id", ondelete="SET NULL"), default=None
+    )
+    render_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    # The finished video, NULL until the render job has stored it.
+    media_path: Mapped[str | None] = mapped_column(default=None)
+    metrics: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    # What a person decided after watching: good, usable or bad. NULL until then.
+    verdict: Mapped[str | None] = mapped_column(default=None)
+    note: Mapped[str | None] = mapped_column(default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)

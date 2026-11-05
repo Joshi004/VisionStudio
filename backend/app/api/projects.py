@@ -15,12 +15,13 @@ from datetime import datetime
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ErrorResponse
-from app.db.models import Project
+from app.db.models import CharacterNamedLook, Project
 from app.db.session import SessionDep
+from app.services import graphic_suggestions as graphic_suggestions_service
 from app.services import projects as projects_service
 from app.services import review_points as review_points_service
 from app.services import story_length as story_length_service
@@ -32,6 +33,7 @@ Orientation = Literal["landscape", "portrait"]
 SpeechMode = Literal["both", "no_dialogue", "no_narration"]
 ProjectKind = Literal["story", "explainer"]
 VoiceTrack = Literal["lines", "continuous"]
+CaptionMode = Literal["burned", "ytt"]
 
 # SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
 _MAX_PROJECT_ID = 2**63 - 1
@@ -51,18 +53,28 @@ class ProjectCreate(BaseModel):
     kind: ProjectKind = "story"
     presenter_character_id: StrictInt | None = None
     set_environment_id: StrictInt | None = None
-    # Word-synced captions and callouts (EXPLAINER-007). Only an explainer keeps them.
-    captions: StrictBool = True
+    # How captions are delivered (CAP-001) and callouts (EXPLAINER-007). Only an explainer keeps
+    # them.
+    caption_mode: CaptionMode = "burned"
     callouts: StrictBool = True
     # How an explainer's speech is made (FLOW-002). Left out, an explainer gets `continuous`. A
     # story is always `lines`. The delivery text is for a continuous explainer only.
     voice_track: VoiceTrack | None = None
     presenter_delivery: StrictStr | None = None
+    # Graphic shots (EXG-001). Left out, a continuous explainer gets them on and every other
+    # project off. Asking for them on any other project is refused.
+    graphics: StrictBool | None = None
+    # How an explainer's presenter is placed and moves on camera. Only for an explainer.
+    presenter_staging: StrictStr | None = None
+    # What an explainer's presenter wears. Only for an explainer.
+    presenter_outfit: StrictStr | None = None
+    # Or one of the presenter's saved outfits (Character Lab). Not together with the text.
+    presenter_named_look_id: StrictInt | None = None
 
 
 class ProjectUpdate(BaseModel):
-    """Only the fields that are sent are changed. The orientation, the speech mode, the kind and
-    the voice track cannot be changed.
+    """Only the fields that are sent are changed. The orientation, the speech mode, the kind,
+    the voice track and the graphics setting cannot be changed.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -80,12 +92,18 @@ class ProjectUpdate(BaseModel):
     music_enabled: StrictBool | None = None
     # Whether a render includes the beds and point sounds (MUSIC-012). Can be changed at any time.
     ambience_enabled: StrictBool | None = None
-    # Whether an explainer's render draws captions, and callouts (EXPLAINER-007). Only an
-    # explainer can change them, at any time.
-    captions: StrictBool | None = None
+    # How an explainer's captions are delivered (CAP-001), and whether it draws callouts
+    # (EXPLAINER-007). Only an explainer can change them, at any time.
+    caption_mode: CaptionMode | None = None
     callouts: StrictBool | None = None
     # The text that steers a continuous explainer's voice (FLOW-002). Null or blank clears it.
     presenter_delivery: StrictStr | None = None
+    # How an explainer's presenter is placed and moves on camera. Null or blank clears it.
+    presenter_staging: StrictStr | None = None
+    # What an explainer's presenter wears. Null or blank clears it.
+    presenter_outfit: StrictStr | None = None
+    # One of the presenter's saved outfits. Null clears it. Not together with the text.
+    presenter_named_look_id: StrictInt | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -94,6 +112,35 @@ class ProjectSummary(BaseModel):
     orientation: Orientation
     created_at: datetime
     has_script: bool
+
+
+class GraphicSuggestionIn(BaseModel):
+    """Words of the story the owner suggests a graphic for: `start` and `end` are character
+    positions in the story (`end` not included) and `text` is the story between them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: StrictInt
+    end: StrictInt
+    text: StrictStr
+
+
+class GraphicSuggestionsSet(BaseModel):
+    """The whole list of suggestions. Sent again, it replaces the one before."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    suggestions: list[GraphicSuggestionIn] = Field(
+        max_length=graphic_suggestions_service.MAX_SUGGESTIONS
+    )
+
+
+class GraphicSuggestionOut(BaseModel):
+    id: str
+    start: int
+    end: int
+    text: str
 
 
 class StoryLengthOut(BaseModel):
@@ -125,14 +172,30 @@ class ProjectDetail(BaseModel):
     music_enabled: bool
     # Whether a render includes the beds and point sounds. On by default.
     ambience_enabled: bool
-    # Whether an explainer gets word-synced captions, and callouts. On by default. A story
-    # never reads them.
-    captions: bool
+    # How an explainer's captions are delivered: `burned` (drawn on the picture, the default) or
+    # `ytt` (a caption file). Whether it gets callouts. A story never reads them.
+    caption_mode: CaptionMode
     callouts: bool
     # How the speech is made: `lines` for a story and for an explainer made before FLOW-002.
     voice_track: VoiceTrack
     # The owner's voice text for a continuous explainer. Null when there is none.
     presenter_delivery: str | None
+    # The owner's text for how an explainer's presenter is placed and moves. Null when there is
+    # none: the presenter stands.
+    presenter_staging: str | None
+    # The owner's text for what an explainer's presenter wears. Null when there is none: the
+    # presenter wears their default outfit.
+    presenter_outfit: str | None
+    # The saved outfit of the presenter (a Character Lab outfit) in place of the text, or None.
+    presenter_named_look_id: int | None
+    # That outfit's name and whether it was deleted since (a deleted one still applies to this
+    # project), or None.
+    presenter_named_look_name: str | None
+    presenter_named_look_deleted: bool
+    # Whether a continuous explainer gets graphic shots (EXG-001). Off for every other project.
+    graphics: bool
+    # The words of the story the owner suggests a graphic for, in story order. Empty when none.
+    graphic_suggestions: list[GraphicSuggestionOut]
     story_length: StoryLengthOut
 
 
@@ -156,15 +219,30 @@ def _voice_track(project: Project) -> VoiceTrack:
     return cast(VoiceTrack, project.voice_track)
 
 
+def _caption_mode(project: Project) -> CaptionMode:
+    # The database CHECK constraint keeps this to the two allowed values.
+    return cast(CaptionMode, project.caption_mode)
+
+
 def _review_points(project: Project) -> list[ReviewPointKey]:
     # Stored normalized, but read defensively: only known keys are ever returned.
     stored = project.review_points if isinstance(project.review_points, list) else []
     return cast(list[ReviewPointKey], review_points_service.normalize(stored))
 
 
+def _graphic_suggestions(project: Project) -> list[GraphicSuggestionOut]:
+    stored = project.graphic_suggestions if isinstance(project.graphic_suggestions, list) else []
+    return [GraphicSuggestionOut(**entry) for entry in stored]
+
+
 async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
     policy = await story_length_service.read_story_length_policy(session)
     length = story_length_service.story_length(project.script_text, policy)
+    picked = (
+        await session.get(CharacterNamedLook, project.presenter_named_look_id)
+        if project.presenter_named_look_id is not None
+        else None
+    )
     return ProjectDetail(
         id=project.id,
         name=project.name,
@@ -181,10 +259,17 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         review_points=_review_points(project),
         music_enabled=project.music_enabled,
         ambience_enabled=project.ambience_enabled,
-        captions=project.captions,
+        caption_mode=_caption_mode(project),
         callouts=project.callouts,
         voice_track=_voice_track(project),
         presenter_delivery=project.presenter_delivery,
+        presenter_staging=project.presenter_staging,
+        presenter_outfit=project.presenter_outfit,
+        presenter_named_look_id=project.presenter_named_look_id,
+        presenter_named_look_name=picked.name if picked is not None else None,
+        presenter_named_look_deleted=picked is not None and picked.deleted_at is not None,
+        graphics=project.graphics,
+        graphic_suggestions=_graphic_suggestions(project),
         story_length=StoryLengthOut(
             word_count=length.word_count,
             estimated_seconds=length.estimated_seconds,
@@ -245,10 +330,14 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             body.kind,
             body.presenter_character_id,
             body.set_environment_id,
-            body.captions,
+            body.caption_mode,
             body.callouts,
             body.voice_track,
             body.presenter_delivery,
+            body.graphics,
+            presenter_staging=body.presenter_staging,
+            presenter_outfit=body.presenter_outfit,
+            presenter_named_look_id=body.presenter_named_look_id,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
@@ -275,6 +364,27 @@ async def update_project(
     try:
         project = await projects_service.update_project(
             session, project, body.model_dump(exclude_unset=True)
+        )
+    except projects_service.ProjectValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return await _detail(session, project)
+
+
+@router.put(
+    "/projects/{project_id}/graphic-suggestions",
+    response_model=ProjectDetail,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def set_graphic_suggestions(
+    project_id: int, body: GraphicSuggestionsSet, session: SessionDep
+) -> ProjectDetail:
+    """Replaces the words of the story marked as a suggested graphic. Only for an explainer with
+    a continuous voice and graphics on. A suggestion is a hint: the shot planner may decline it.
+    """
+    project = await load_project(session, project_id)
+    try:
+        project = await projects_service.set_graphic_suggestions(
+            session, project, [entry.model_dump() for entry in body.suggestions]
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

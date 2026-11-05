@@ -51,6 +51,11 @@ DIALOGUE_SETTLE_S: Final = 0.5
 _DECIMALS: Final = 3
 _TOLERANCE: Final = 1e-6
 
+# The type of a cut shot that is a chart, diagram or text card drawn by code (EXG-003). Its clip
+# is not made by H3, so its length is its own frames plus one spare frame.
+GRAPHIC_SHOT_TYPE: Final = "graphic"
+_GRAPHIC_SPARE_FRAMES: Final = 1
+
 Severity = Literal["flagged", "blocking"]
 
 OUTSIDE_TARGET: Final = "outside_target"
@@ -77,7 +82,9 @@ class ShotSpan:
     end_s: float
     # Only on the timeline of a cut plan (FLOW-006): the frames of the clip made for the shot,
     # the shortest H3 length (`17n + 5`) that covers it. The shot is not moved onto it (F-6): the
-    # render trims the extra frames. None for every other timeline.
+    # render trims the extra frames. A graphic shot (EXG-003) has its own frame count plus one
+    # spare frame instead, because code draws it at exactly that length. None for every other
+    # timeline.
     clip_frames: int | None = None
 
 
@@ -356,7 +363,8 @@ def build_cut_timeline(
       it;
     - the take sits at the scene's start plus the lead-in, so each unit sits at the lead-in plus
       its place in the take. The units carried by a shot are the ones the plan lists;
-    - each shot gets the length of the clip made for it (`ShotSpan.clip_frames`);
+    - each shot gets the length of the clip made for it (`ShotSpan.clip_frames`); a graphic shot
+      (EXG-003) gets its own frames plus one spare frame;
     - the scene ends where its last shot ends;
     - the only problem reported is a shot outside the hard bounds (blocking). The planning
       target, and the checks of speech carried by a shot, do not apply: the voice is one take
@@ -370,12 +378,17 @@ def build_cut_timeline(
     for position, shot in enumerate(shots):
         start = 0.0 if position == 0 else round(lead_in_s + float(shot["start_s"]), _DECIMALS)
         end = round(lead_in_s + float(shot["end_s"]), _DECIMALS)
+        frames = target_frames(start, end, H3_FPS)
         spans.append(
             ShotSpan(
                 shot_id=shot["id"],
                 start_s=start,
                 end_s=end,
-                clip_frames=h3_num_frames(target_frames(start, end, H3_FPS)),
+                clip_frames=(
+                    frames + _GRAPHIC_SPARE_FRAMES
+                    if shot.get("type") == GRAPHIC_SHOT_TYPE
+                    else h3_num_frames(frames)
+                ),
             )
         )
         length = round(end - start, _DECIMALS)

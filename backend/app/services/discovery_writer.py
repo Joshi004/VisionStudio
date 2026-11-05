@@ -90,7 +90,10 @@ into short films. You read one complete story and list its reusable environments
 An environment is a place where the story happens and that a film would have to build and show \
 again whenever the story returns to it (for example a building, a room, a street). Leave out a \
 place that is only mentioned and never shown. A room inside a larger place is its own environment \
-when the story spends time in it (for example "Arjun's Apartment" and "Arjun's Bedroom").
+when the story spends time in it (for example "Arjun's Apartment" and "Arjun's Bedroom"). \
+A vehicle, a lift, a booth or another small enclosed space that people are inside while the \
+story spends time there (for example a car, a lift cabin) is its own environment, not part of \
+the place it stands in.
 
 {_COMMON_RULES}
 
@@ -101,12 +104,16 @@ Answer with one JSON object only, in exactly this form: {{"environments": [{{"id
 # of an explainer that was not given a set. It lists exactly one place.
 EXPLAINER_ENVIRONMENTS_PROMPT: Final = f"""You are the art director of a studio that turns \
 written explainer scripts into short videos. A presenter explains the script on camera. You read \
-one complete script and design the one studio where the presenter stands to explain it.
+one complete script and design the one studio where the presenter speaks to explain it.
 
 List exactly ONE environment: the presenter's studio or set, a place that suits the script's \
 topic, audience and tone and the StoryBible's visual style (for example a bright modern desk and \
 screen setup for a technology topic, or a calm office for a finance topic). Do not list the \
 places, objects or scenes that the script merely talks about: those are shown by other shots.
+
+When the user message holds PRESENTER STAGING, it is the owner's choice of how the presenter is \
+placed and moves on camera (for example seated at a desk). Design the studio so that it has what \
+the staging needs, such as a desk and a chair, and say so in its "description".
 
 {_COMMON_RULES}
 - List exactly one item.
@@ -167,7 +174,8 @@ def build_body(
     """The request body of a discovery call: `instructions` are the system message, and the
     StoryBible and the raw story are the user message. Scene discovery
     (`services/scene_discovery_writer.py`) builds its request with this too. `cast_section`, when
-    given, is the text of the cast (heading and JSON), placed between the StoryBible and the story.
+    given, is a data section (heading and text), such as the cast, placed between the StoryBible
+    and the story.
     """
     cast_part = f"{cast_section}\n\n" if cast_section else ""
     user_message = (
@@ -200,6 +208,7 @@ def build_request(
     model: str,
     cast: list[dict[str, Any]] | None = None,
     explainer: bool = False,
+    presenter_staging: str | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
@@ -208,9 +217,22 @@ def build_request(
     user message lists it and the instructions explain `library_id`; without one, the request
     is the same as it was before the cast existed. `explainer` (EXPLAINER-003) asks for the one
     studio of an explainer; the characters of an explainer are never asked for.
+    `presenter_staging` is the explainer owner's text for how the presenter is placed; it adds
+    `PRESENTER STAGING` to the studio's request.
     """
     if explainer and kind == "environments":
-        return build_body(EXPLAINER_ENVIRONMENTS_PROMPT, story_text, bible_content, model=model)
+        staging_section = (
+            f"PRESENTER STAGING (plain text from the owner):\n{presenter_staging}"
+            if presenter_staging
+            else None
+        )
+        return build_body(
+            EXPLAINER_ENVIRONMENTS_PROMPT,
+            story_text,
+            bible_content,
+            model=model,
+            cast_section=staging_section,
+        )
     if not cast:
         return build_body(_PROMPTS[kind], story_text, bible_content, model=model)
     cast_section = f"{_CAST_HEADINGS[kind]}:\n{json.dumps(cast, ensure_ascii=False, indent=2)}"

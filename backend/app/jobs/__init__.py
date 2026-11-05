@@ -13,7 +13,7 @@
   `define_environment.py`, `define_scene.py`, `extract_events.py`,
   `resolve_looks_states.py`, `synthesize_speech_unit.py`, `plan_shots.py`, `define_shot.py`,
   `check_shot_continuity.py`, `repair_shot_cut.py`, `compile_shot_prompt.py`, `generate_shot.py`,
-  `render_story.py`, `check_shot_takes.py`, `check_take_dialogue.py`,
+  `render_story.py`, `render_scene.py`, `check_shot_takes.py`, `check_take_dialogue.py`,
   `select_shot_references.py`), the run of the whole story pipeline (`story_pipeline.py`)
   and the environment library
   (`write_environment_prompt.py`), the Music Bible (`write_music_bible.py`) and the music themes
@@ -23,7 +23,12 @@
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
   (`write_callout_plan.py`), and the Audio video lab of a character (`time_lab_speech_words.py`,
-  `render_av_test.py`).
+  `render_av_test.py`), and the brief and the word timing of a Graphics lab run
+  (`write_lab_graphic_brief.py`, `time_lab_graphic_words.py`), the template spec of a Graphics lab
+  run (`write_lab_graphic_template_spec.py`), the block scene of a Graphics lab run
+  (`write_lab_graphic_block_scene.py`), the generated component of a Graphics lab run
+  (`write_lab_graphic_component.py`) and the video of a Graphics lab render
+  (`render_lab_graphic.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -53,6 +58,7 @@ def register_handlers() -> None:
     from app.jobs.define_environment import DefineEnvironmentHandler
     from app.jobs.define_scene import DefineSceneHandler
     from app.jobs.define_shot import DefineShotHandler
+    from app.jobs.describe_photo import DescribePhotoHandler
     from app.jobs.design_voice import DesignVoiceHandler
     from app.jobs.discover_characters import DiscoverCharactersHandler
     from app.jobs.discover_environments import DiscoverEnvironmentsHandler
@@ -69,6 +75,9 @@ def register_handlers() -> None:
     from app.jobs.plan_shots import PlanShotsHandler
     from app.jobs.preview_music_mix import PreviewMusicMixHandler
     from app.jobs.render_av_test import RenderAvTestHandler
+    from app.jobs.render_lab_graphic import RenderLabGraphicHandler
+    from app.jobs.render_scene import RenderSceneHandler
+    from app.jobs.render_shot_graphic import RenderShotGraphicHandler
     from app.jobs.render_story import RenderStoryHandler
     from app.jobs.repair_shot_cut import RepairShotCutHandler
     from app.jobs.resolve_looks_states import ResolveLooksStatesHandler
@@ -77,6 +86,7 @@ def register_handlers() -> None:
     from app.jobs.stage_scene import StageSceneHandler
     from app.jobs.story_pipeline import StoryPipelineHandler
     from app.jobs.synthesize_speech_unit import SynthesizeSpeechUnitHandler
+    from app.jobs.time_lab_graphic_words import TimeLabGraphicWordsHandler
     from app.jobs.time_lab_speech_words import TimeLabSpeechWordsHandler
     from app.jobs.time_speech_words import TimeSpeechWordsHandler
     from app.jobs.write_callout_plan import WriteCalloutPlanHandler
@@ -84,13 +94,22 @@ def register_handlers() -> None:
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
     from app.jobs.write_environment_view_prompt import WriteEnvironmentViewPromptHandler
+    from app.jobs.write_graphic_theme import WriteGraphicThemeHandler
+    from app.jobs.write_lab_graphic_block_scene import WriteLabGraphicBlockSceneHandler
+    from app.jobs.write_lab_graphic_brief import WriteLabGraphicBriefHandler
+    from app.jobs.write_lab_graphic_component import WriteLabGraphicComponentHandler
+    from app.jobs.write_lab_graphic_template_spec import WriteLabGraphicTemplateSpecHandler
     from app.jobs.write_lab_music_prompt import WriteLabMusicPromptHandler
     from app.jobs.write_lab_video_prompt import WriteLabVideoPromptHandler
     from app.jobs.write_music_bible import WriteMusicBibleHandler
     from app.jobs.write_music_cue import WriteMusicCueHandler
     from app.jobs.write_music_plan import WriteMusicPlanHandler
     from app.jobs.write_music_theme_prompt import WriteMusicThemePromptHandler
+    from app.jobs.write_shot_graphic_brief import WriteShotGraphicBriefHandler
+    from app.jobs.write_shot_graphic_component import WriteShotGraphicComponentHandler
+    from app.jobs.write_shot_graphic_scene import WriteShotGraphicSceneHandler
     from app.jobs.write_story_bible import WriteStoryBibleHandler
+    from app.jobs.write_thumbnail_concepts import WriteThumbnailConceptsHandler
 
     handlers.register(GenerateLabVideoHandler())
     handlers.register(WriteLabVideoPromptHandler())
@@ -100,6 +119,7 @@ def register_handlers() -> None:
     handlers.register(GenerateLabImageHandler())
     handlers.register(WriteCharacterLookPromptHandler())
     handlers.register(WriteCharacterTakePromptHandler())
+    handlers.register(DescribePhotoHandler())
     handlers.register(WriteStoryBibleHandler())
     handlers.register(DiscoverCharactersHandler())
     handlers.register(DiscoverEnvironmentsHandler())
@@ -120,6 +140,7 @@ def register_handlers() -> None:
     handlers.register(CompileShotPromptHandler())
     handlers.register(GenerateShotHandler())
     handlers.register(RenderStoryHandler())
+    handlers.register(RenderSceneHandler())
     handlers.register(CheckShotTakesHandler())
     handlers.register(StoryPipelineHandler())
     handlers.register(CheckTakeDialogueHandler())
@@ -139,3 +160,15 @@ def register_handlers() -> None:
     handlers.register(WriteCalloutPlanHandler())
     handlers.register(TimeLabSpeechWordsHandler())
     handlers.register(RenderAvTestHandler())
+    handlers.register(WriteLabGraphicBriefHandler())
+    handlers.register(TimeLabGraphicWordsHandler())
+    handlers.register(WriteLabGraphicTemplateSpecHandler())
+    handlers.register(WriteLabGraphicBlockSceneHandler())
+    handlers.register(WriteLabGraphicComponentHandler())
+    handlers.register(RenderLabGraphicHandler())
+    handlers.register(WriteGraphicThemeHandler())
+    handlers.register(WriteShotGraphicBriefHandler())
+    handlers.register(WriteShotGraphicComponentHandler())
+    handlers.register(WriteShotGraphicSceneHandler())
+    handlers.register(RenderShotGraphicHandler())
+    handlers.register(WriteThumbnailConceptsHandler())

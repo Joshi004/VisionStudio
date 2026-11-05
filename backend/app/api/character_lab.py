@@ -71,6 +71,7 @@ from app.jobs.store import JobRow
 from app.services import (
     character_library,
     character_looks,
+    character_outfits,
     character_takes,
     character_versions,
     image_lab,
@@ -715,7 +716,10 @@ async def list_named_looks(character_id: CharacterId, session: SessionDep) -> li
         raise _missing(f"There is no character {character_id}.")
     statement = (
         select(CharacterNamedLook)
-        .where(CharacterNamedLook.character_id == character_id)
+        .where(
+            CharacterNamedLook.character_id == character_id,
+            CharacterNamedLook.deleted_at.is_(None),
+        )
         .order_by(CharacterNamedLook.id)
         .execution_options(populate_existing=True)
     )
@@ -736,6 +740,266 @@ async def list_named_looks(character_id: CharacterId, session: SessionDep) -> li
             )
         )
     return out
+
+
+# --- A character's outfits ---------------------------------------------------------------------
+
+OutfitSource = Literal["ai", "manual", "default"]
+PicturesStatus = Literal["none", "in_progress", "ready", "failed"]
+OutfitId = Annotated[int, Path(ge=1, le=_MAX_ID)]
+
+
+class OutfitProjectOut(BaseModel):
+    project_id: int
+    project_name: str
+
+
+class OutfitOut(BaseModel):
+    """One outfit of a character. The first of the list is the character's default outfit: it
+    has no `id`, cannot be edited here or deleted, and its pictures are the current look's.
+    """
+
+    id: int | None
+    slug: str
+    name: str
+    # A short text that helps to pick the outfit when a project is made.
+    note: str | None
+    # What is worn: the text the pictures are drawn from.
+    description: str
+    source: OutfitSource
+    is_default: bool
+    created_at: datetime | None
+    updated_at: datetime | None
+    # The project whose resolution made the outfit, while that project still exists.
+    made_for: OutfitProjectOut | None
+    # The projects that use it now.
+    used_by: list[OutfitProjectOut]
+    pictures_status: PicturesStatus
+    # The pictures were made from another description than the outfit has now.
+    pictures_out_of_date: bool
+    # The finished pictures, in the lab's shape. None until they are made.
+    look: LookOut | None
+    # Why pictures cannot be made now (None when they can, and for the default outfit).
+    blocked_reason: str | None
+    # Whether this outfit's pictures are the character's current look (it is the default now).
+    is_default_now: bool = False
+
+
+class OutfitIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: StrictStr
+    note: StrictStr | None = None
+    description: StrictStr
+
+
+class OutfitPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: StrictStr | None = None
+    note: StrictStr | None = None
+    description: StrictStr | None = None
+
+
+def _project_out(ref: character_outfits.ProjectRef) -> OutfitProjectOut:
+    return OutfitProjectOut(project_id=ref.project_id, project_name=ref.project_name)
+
+
+async def _outfit_out(session: AsyncSession, entry: character_outfits.OutfitEntry) -> OutfitOut:
+    record = entry.record
+    return OutfitOut(
+        id=record.id,
+        slug=record.slug,
+        name=record.name,
+        note=record.note,
+        description=record.description,
+        source=typing_cast(OutfitSource, record.source),
+        is_default=False,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        made_for=_project_out(entry.made_for) if entry.made_for is not None else None,
+        used_by=[_project_out(ref) for ref in entry.used_by],
+        pictures_status=entry.pictures,
+        pictures_out_of_date=entry.pictures_out_of_date,
+        look=await look_out(session, entry.look) if entry.look is not None else None,
+        blocked_reason=entry.blocked_reason,
+        is_default_now=entry.is_default_now,
+    )
+
+
+async def _default_outfit_out(session: AsyncSession, character: LibraryCharacter) -> OutfitOut:
+    look = (
+        await session.get(CharacterLook, character.current_look_id)
+        if character.current_look_id is not None
+        else None
+    )
+    ready = look is not None and look.status == "ready"
+    return OutfitOut(
+        id=None,
+        slug=character_outfits.DEFAULT_SLUG,
+        name="Default outfit",
+        note=None,
+        description=character.outfit or "",
+        source="default",
+        is_default=True,
+        created_at=None,
+        updated_at=None,
+        made_for=None,
+        used_by=[],
+        pictures_status="ready" if ready else "none",
+        pictures_out_of_date=False,
+        look=await look_out(session, look) if look is not None and ready else None,
+        blocked_reason=None,
+    )
+
+
+async def _outfits_out(session: AsyncSession, character_id: int) -> list[OutfitOut]:
+    character = await character_library.get_character(session, character_id)
+    if character is None:
+        raise _missing(f"There is no character {character_id}.")
+    entries = await character_outfits.list_outfits(session, character_id)
+    return [
+        await _default_outfit_out(session, character),
+        *[await _outfit_out(session, entry) for entry in entries],
+    ]
+
+
+async def _outfit_out_by_id(session: AsyncSession, outfit_id: int) -> OutfitOut:
+    record = await character_outfits.get_outfit(session, outfit_id)
+    if record is None or record.deleted_at is not None:
+        raise _missing(f"There is no outfit {outfit_id}.")
+    for entry in await character_outfits.list_outfits(session, record.character_id):
+        if entry.record.id == outfit_id:
+            return await _outfit_out(session, entry)
+    raise _missing(f"There is no outfit {outfit_id}.")
+
+
+@router.get(
+    "/lab/characters/{character_id}/outfits",
+    response_model=list[OutfitOut],
+    responses=_NOT_FOUND,
+)
+async def list_outfits(character_id: CharacterId, session: SessionDep) -> list[OutfitOut]:
+    """The character's outfits: its default outfit first, then every saved outfit that is not
+    deleted, oldest first. Each says which project made it, which projects use it, and where
+    its pictures stand.
+    """
+    return await _outfits_out(session, character_id)
+
+
+@router.post(
+    "/lab/characters/{character_id}/outfits",
+    response_model=OutfitOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def create_outfit(
+    character_id: CharacterId, body: OutfitIn, session: SessionDep
+) -> OutfitOut:
+    """Saves a new outfit. Its pictures are made on request (`POST /lab/outfits/{id}/pictures`)."""
+    if await character_library.get_character(session, character_id) is None:
+        raise _missing(f"There is no character {character_id}.")
+    try:
+        record = await character_outfits.create_outfit(
+            session,
+            character_id,
+            name=body.name,
+            note=body.note,
+            description=body.description,
+        )
+    except character_outfits.OutfitError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return await _outfit_out_by_id(session, record.id)
+
+
+@router.patch(
+    "/lab/outfits/{outfit_id}",
+    response_model=OutfitOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def edit_outfit(outfit_id: OutfitId, body: OutfitPatch, session: SessionDep) -> OutfitOut:
+    """Changes an outfit's name, note or description (a blank note clears it). No picture and no
+    project changes: a new description only makes the pictures out of date.
+    """
+    sent = body.model_fields_set
+    if not sent:
+        raise _unprocessable("Send at least one field to change.")
+    if ("name" in sent and body.name is None) or (
+        "description" in sent and body.description is None
+    ):
+        raise _unprocessable("The name and the description cannot be empty.")
+    record = await character_outfits.get_outfit(session, outfit_id)
+    if record is None or record.deleted_at is not None:
+        raise _missing(f"There is no outfit {outfit_id}.")
+    try:
+        await character_outfits.update_outfit(
+            session,
+            outfit_id,
+            name=body.name,
+            note=body.note,
+            description=body.description,
+            change_note="note" in sent,
+        )
+    except character_outfits.OutfitError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return await _outfit_out_by_id(session, outfit_id)
+
+
+@router.delete(
+    "/lab/outfits/{outfit_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=_NOT_FOUND,
+)
+async def delete_outfit(outfit_id: OutfitId, session: SessionDep) -> None:
+    """Deletes an outfit from the lists. No project changes: its pictures and every version of
+    the character that froze them stay, so a story that used it keeps it.
+    """
+    try:
+        await character_outfits.delete_outfit(session, outfit_id)
+    except character_outfits.OutfitError as exc:
+        raise _missing(str(exc)) from exc
+
+
+@router.post(
+    "/lab/outfits/{outfit_id}/pictures",
+    response_model=OutfitOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def make_outfit_pictures(outfit_id: OutfitId, session: SessionDep) -> OutfitOut:
+    """Makes the outfit's pictures (or makes them again from its description now): an edit of
+    the front picture of the character's current look, then the other four angles. The
+    pictures that exist stay until the new ones are ready.
+    """
+    record = await character_outfits.get_outfit(session, outfit_id)
+    if record is None or record.deleted_at is not None:
+        raise _missing(f"There is no outfit {outfit_id}.")
+    try:
+        await character_outfits.start_pictures(session, outfit_id)
+    except character_outfits.OutfitError as exc:
+        raise _unprocessable(str(exc)) from exc
+    dispatcher.nudge()
+    return await _outfit_out_by_id(session, outfit_id)
+
+
+@router.post(
+    "/lab/outfits/{outfit_id}/make-default",
+    response_model=list[OutfitOut],
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def make_outfit_default(outfit_id: OutfitId, session: SessionDep) -> list[OutfitOut]:
+    """Makes the outfit the character's default: its text becomes the profile outfit and its
+    pictures the current look. The pictures that were the default are kept as a saved outfit.
+    No project's pin moves. Answers with the character's outfits.
+    """
+    record = await character_outfits.get_outfit(session, outfit_id)
+    if record is None or record.deleted_at is not None:
+        raise _missing(f"There is no outfit {outfit_id}.")
+    try:
+        await character_outfits.make_default(session, outfit_id)
+    except character_outfits.OutfitError as exc:
+        raise _unprocessable(str(exc)) from exc
+    return await _outfits_out(session, record.character_id)
 
 
 # --- The projects that use a character (read-only) ---------------------------------------------
@@ -993,6 +1257,44 @@ async def start_audition_line(character_id: CharacterId, session: SessionDep) ->
         job = await character_library.start_audition_line(session, character_id)
     except character_library.CharacterLibraryError as exc:
         raise _unprocessable(str(exc)) from exc
+    dispatcher.nudge()
+    summary = _job_summary(job)
+    assert summary is not None  # the job was just created
+    return summary
+
+
+class PhotoDescribeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # `character` fills a new character's appearance, outfit and personality; `outfit` fills a
+    # new outfit's description, name and note.
+    mode: Literal["character", "outfit"]
+
+
+@router.post(
+    "/lab/photos/{lab_image_id}/describe",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={404: {"model": ErrorResponse, "description": "No photo has this id."}},
+)
+async def describe_photo(
+    lab_image_id: Annotated[int, Path(ge=1, le=_MAX_ID)],
+    body: PhotoDescribeIn,
+    session: SessionDep,
+) -> JobSummary:
+    """Starts the job that reads a photo (one uploaded to the Image lab) with the vision model
+    and writes the text of a new character or of a new outfit. Each click is a paid call, so
+    none is merged into an earlier one. Follow the job; its `output.fields` holds the text.
+    """
+    if await session.get(LabImage, lab_image_id) is None:
+        raise _missing(f"There is no photo {lab_image_id}.")
+    job, _created = await store.create_job(
+        session,
+        project_id=None,
+        type="describe_photo",
+        provider="llm",
+        input={"lab_image_id": lab_image_id, "mode": body.mode},
+        dedupe=False,
+    )
     dispatcher.nudge()
     summary = _job_summary(job)
     assert summary is not None  # the job was just created

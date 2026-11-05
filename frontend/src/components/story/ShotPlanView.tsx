@@ -94,6 +94,16 @@ export function ShotPlanView({
                   Rapid exchange
                 </Badge>
               )}
+              {shot.place != null && (
+                <Badge
+                  variant="light"
+                  color="teal"
+                  style={{ flexShrink: 0, textTransform: "none" }}
+                  title="This shot happens inside a place within the scene's main place (a car in a garage)"
+                >
+                  {`Inside: ${shot.place}`}
+                </Badge>
+              )}
               <Text size="sm" style={{ wordBreak: "break-word" }}>
                 {shot.description}
               </Text>

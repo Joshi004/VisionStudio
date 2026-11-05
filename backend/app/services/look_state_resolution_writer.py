@@ -71,7 +71,8 @@ A request has an "id", the "subject_id" of the character (for a look) or the env
 state) it is for, the "text" that was asked for, and the scenes that asked for it. The CATALOG \
 lists, for each subject that has a request, its "default" (how it looks when nothing special is \
 asked, with the description) and the "named" looks or states it already has, each with an "id", \
-a "name" and a "description".
+a "name", a "description" and sometimes a "note" (a few words the owner wrote to tell it apart). \
+A subject may also list "unavailable_ids": ids it can no longer use.
 
 Decide, for every request, ONE of these:
 - "default": the request describes the subject as it is by default (for example "daytime" for a \
@@ -86,7 +87,8 @@ Rules:
 entry. Requests that differ in meaning (for example "night" and "after the fire") get separate \
 entries. Never merge across subjects, and never use an id of another subject.
 - A new "id" is short, lowercase letters, digits and underscores only, starts with a letter, at \
-most 40 characters, is not "{DEFAULT}", and is not an id that subject already has.
+most 40 characters, is not "{DEFAULT}", and is not an id that subject already has (its "named" ids \
+and its "unavailable_ids").
 - A new "name" is a short readable name (at most {NAME_MAX_CHARS} characters). A new \
 "description" says in one line (at most {DESCRIPTION_MAX_CHARS} characters) what is different \
 from the default, written so that a picture can be made from it: for a look, the clothing and \
@@ -194,6 +196,16 @@ def collect_requests(
 # --- The call ------------------------------------------------------------------------------
 
 
+def _model_named(named: dict[str, Any]) -> dict[str, Any]:
+    """One existing look or state as the model sees it. The note is shown only when there is
+    one.
+    """
+    shown = {"id": named["id"], "name": named["name"], "description": named["description"]}
+    if named.get("note"):
+        shown["note"] = named["note"]
+    return shown
+
+
 def _model_catalog(catalog: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
     """The catalog as the model sees it: no database ids."""
     return {
@@ -202,10 +214,8 @@ def _model_catalog(catalog: dict[str, list[dict[str, Any]]]) -> dict[str, list[d
                 "subject_id": subject["subject_id"],
                 "name": subject["name"],
                 "default": subject["default"],
-                "named": [
-                    {"id": named["id"], "name": named["name"], "description": named["description"]}
-                    for named in subject["named"]
-                ],
+                "named": [_model_named(named) for named in subject["named"]],
+                **({"unavailable_ids": subject["reserved"]} if subject.get("reserved") else {}),
             }
             for subject in subjects
         ]
@@ -284,8 +294,11 @@ def _check_new(
     warnings: list[str] | None,
 ) -> list[dict[str, str]]:
     """The new entries under `key`, checked against the subjects of their kind."""
+    # An id of a deleted outfit stays taken, so it can never name a different one.
     known = {
-        subject["subject_id"]: {named["id"] for named in subject["named"]} for subject in subjects
+        subject["subject_id"]: {named["id"] for named in subject["named"]}
+        | set(subject.get("reserved") or [])
+        for subject in subjects
     }
     checked: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -464,7 +477,12 @@ def build_content(
         )
         looks: list[dict[str, Any]] = []
         for entry in item["looks"]:
-            look, look_id, look_how = resolve(LOOK, entry["subject_id"], entry["request_id"])
+            fixed = entry.get("fixed")
+            if isinstance(fixed, dict):
+                # The owner picked this outfit: no request was made for it.
+                look, look_id, look_how = fixed["look"], fixed["look_id"], "reuse"
+            else:
+                look, look_id, look_how = resolve(LOOK, entry["subject_id"], entry["request_id"])
             looks.append(
                 {
                     "character_id": entry["subject_id"],

@@ -30,6 +30,7 @@ twice (`services/look_state_resolution_writer.py`).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Any, Final, cast
@@ -41,8 +42,11 @@ from app.db.models import (
     CharacterNamedLook,
     EnvironmentState,
     Job,
+    LibraryCharacter,
+    LibraryCharacterVersion,
     LookStateResolution,
     Project,
+    ProjectCharacterLink,
     SceneDiscovery,
     StoryBible,
 )
@@ -50,12 +54,14 @@ from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
     character_definitions,
+    character_looks,
     discovery,
     environment_definitions,
     scene_definitions,
     story_bible,
 )
 from app.services import look_state_resolution_writer as writer
+from app.services.project_kinds import KIND_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -98,6 +104,12 @@ class _Loaded:
     characters: dict[str, _Subject]
     environments: dict[str, _Subject]
     blocked_reason: str | None
+    # What an explainer's presenter wears in every scene, when the owner wrote it; None for a
+    # story.
+    presenter_outfit: str | None = None
+    # Or the saved outfit (a named look of the presenter) the owner picked: the presenter wears
+    # it in every scene, with no model matching. None when none was picked, and for a story.
+    presenter_pick: CharacterNamedLook | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +238,11 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
             library_id=env_entry.entry.info.link.environment_id,
             default=_default_state(env_profile),
         )
+    pick = (
+        await session.get(CharacterNamedLook, project.presenter_named_look_id)
+        if project.kind == KIND_EXPLAINER and project.presenter_named_look_id is not None
+        else None
+    )
     return _Loaded(
         story=story,
         bible=bible,
@@ -234,7 +251,21 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         characters=characters,
         environments=environments,
         blocked_reason=_blocked_reason(story, bible, scenes, entries),
+        presenter_outfit=project.presenter_outfit if project.kind == KIND_EXPLAINER else None,
+        presenter_pick=pick,
     )
+
+
+def _with_outfit(definition: dict[str, Any], outfit: str | None) -> dict[str, Any]:
+    """The definition with every character of the scene asking for `outfit` as their look. An
+    explainer's scene has one character, the presenter. Unchanged when `outfit` is None.
+    """
+    if outfit is None:
+        return definition
+    looks = {**definition["character_looks"]}
+    for character_id in definition["characters"]:
+        looks[character_id] = outfit
+    return {**definition, "character_looks": looks}
 
 
 def _scene_inputs(loaded: _Loaded) -> list[dict[str, Any]]:
@@ -244,11 +275,39 @@ def _scene_inputs(loaded: _Loaded) -> list[dict[str, Any]]:
             "scene_id": entry.item["id"],
             "index": entry.item["index"],
             "title": entry.item["title"],
-            "definition": entry.definition,
+            "definition": _with_outfit(
+                entry.definition,
+                # A picked outfit asks for nothing: it is fixed after the requests are collected.
+                writer.DEFAULT if loaded.presenter_pick is not None else loaded.presenter_outfit,
+            ),
         }
         for entry in loaded.scene_entries
         if entry.definition is not None
     ]
+
+
+def _fix_presenter_outfit(loaded: _Loaded, plan: list[dict[str, Any]]) -> None:
+    """Fixes every look of the plan to the saved outfit the owner picked, so the model is not
+    asked about it. Raises LookStateResolutionError when the outfit is not the character's.
+    """
+    pick = loaded.presenter_pick
+    assert pick is not None
+    for item in plan:
+        for entry in item["looks"]:
+            subject = loaded.characters.get(entry["subject_id"])
+            if subject is not None and subject.library_id != pick.character_id:
+                raise LookStateResolutionError(
+                    f"The saved outfit '{pick.name}' belongs to another character than "
+                    f"{subject.name}. Choose one of {subject.name}'s outfits."
+                )
+            entry["text"] = pick.description
+            entry["fixed"] = {"look": pick.slug, "look_id": pick.id}
+
+
+def _outfit_sha256(outfit: str | None) -> str | None:
+    if outfit is None:
+        return None
+    return hashlib.sha256(outfit.encode("utf-8")).hexdigest()
 
 
 async def _catalog(
@@ -281,9 +340,28 @@ async def _catalog(
                     "library_id": subject.library_id,
                     "default": subject.default,
                     "named": await _named_records(session, kind, subject.library_id),
+                    # Ids of deleted outfits: they stay taken (`character_outfits`).
+                    "reserved": (
+                        await _deleted_slugs(session, subject.library_id)
+                        if kind == writer.LOOK
+                        else []
+                    ),
                 }
             )
     return {"looks": looks, "states": states}
+
+
+async def _deleted_slugs(session: AsyncSession, character_id: int) -> list[str]:
+    """The slugs of the character's deleted outfits, which no new look may take."""
+    found = await session.execute(
+        select(CharacterNamedLook.slug)
+        .where(
+            CharacterNamedLook.character_id == character_id,
+            CharacterNamedLook.deleted_at.is_not(None),
+        )
+        .order_by(CharacterNamedLook.id)
+    )
+    return list(found.scalars().all())
 
 
 async def _named_records(session: AsyncSession, kind: str, library_id: int) -> list[dict[str, Any]]:
@@ -291,15 +369,25 @@ async def _named_records(session: AsyncSession, kind: str, library_id: int) -> l
     first.
     """
     if kind == writer.LOOK:
+        # A deleted outfit is not offered, so the model never reuses it.
         look_rows = (
             await session.execute(
                 select(CharacterNamedLook)
-                .where(CharacterNamedLook.character_id == library_id)
+                .where(
+                    CharacterNamedLook.character_id == library_id,
+                    CharacterNamedLook.deleted_at.is_(None),
+                )
                 .order_by(CharacterNamedLook.id)
             )
         ).scalars()
         return [
-            {"id": r.slug, "record_id": r.id, "name": r.name, "description": r.description}
+            {
+                "id": r.slug,
+                "record_id": r.id,
+                "name": r.name,
+                "description": r.description,
+                "note": r.note,
+            }
             for r in look_rows
         ]
     state_rows = (
@@ -359,7 +447,15 @@ def _inputs(
                     "name": subject.name,
                 }
             )
-    return {"story_sha256": story_bible.story_sha256(story), "artifacts": artifacts}
+    inputs: dict[str, Any] = {
+        "story_sha256": story_bible.story_sha256(story),
+        "artifacts": artifacts,
+    }
+    if loaded.presenter_outfit is not None:
+        inputs["presenter_outfit"] = {"sha256": _outfit_sha256(loaded.presenter_outfit)}
+    if loaded.presenter_pick is not None:
+        inputs["presenter_named_look"] = {"id": loaded.presenter_pick.id}
+    return inputs
 
 
 async def start_run(session: AsyncSession, project: Project) -> Job:
@@ -374,6 +470,8 @@ async def start_run(session: AsyncSession, project: Project) -> Job:
     assert story is not None and bible is not None and scenes is not None  # blocked otherwise
 
     plan, requests = writer.collect_requests(_scene_inputs(loaded))
+    if loaded.presenter_pick is not None:
+        _fix_presenter_outfit(loaded, plan)
     for item in plan:
         for subject_id, subjects, word in [
             (item["environment"]["subject_id"], loaded.environments, "environment"),
@@ -494,6 +592,7 @@ async def save_resolution(
     )
     session.add(row)
     await session.flush()
+    await _pin_existing_outfits(session, project_id, row.content)
     _logger.info(
         "job %d: looks and states resolved for project %d, version %d (%d new looks, %d new "
         "states)",
@@ -504,6 +603,68 @@ async def save_resolution(
         len(checked["new_states"]),
     )
     return row
+
+
+async def _pin_existing_outfits(
+    session: AsyncSession, project_id: int, content: dict[str, Any]
+) -> None:
+    """Moves the project's pin of a character to the character's newest version when an outfit
+    the resolution reuses already has its pictures but the pinned version does not hold them
+    (it was made in the Character Lab, or for another project, after the pin). Without this
+    the shots would not find the outfit's pictures. Flushes; the caller commits.
+    """
+    wanted: dict[str, set[int]] = {}
+    for scene in content["scenes"]:
+        for look in scene["looks"]:
+            if look["how"] == "reuse" and look["look_id"] is not None:
+                wanted.setdefault(look["character_id"], set()).add(look["look_id"])
+    for discovery_id, record_ids in wanted.items():
+        link = (
+            (
+                await session.execute(
+                    select(ProjectCharacterLink).where(
+                        ProjectCharacterLink.project_id == project_id,
+                        ProjectCharacterLink.discovery_id == discovery_id,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        character = await session.get(LibraryCharacter, link.character_id) if link else None
+        if link is None or character is None:
+            continue
+        pinned = (
+            (
+                await session.execute(
+                    select(LibraryCharacterVersion).where(
+                        LibraryCharacterVersion.character_id == character.id,
+                        LibraryCharacterVersion.version == link.pinned_version,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        frozen = (
+            {entry.get("named_look_id") for entry in (pinned.named_looks or [])}
+            if pinned
+            else set()
+        )
+        rows = await session.execute(
+            select(CharacterNamedLook.id).where(
+                CharacterNamedLook.id.in_(record_ids),
+                CharacterNamedLook.look_id.is_not(None),
+            )
+        )
+        if any(record_id not in frozen for record_id in rows.scalars()):
+            await character_looks.pin_new_version(
+                session,
+                project_id=project_id,
+                discovery_id=discovery_id,
+                character=character,
+                job_id=None,
+            )
 
 
 # --- Reading the state --------------------------------------------------------------------
@@ -604,6 +765,19 @@ def _out_of_date_reasons(
         what = "character" if is_character else "environment"
         if subject is None or subject.library_id != artifact.get("id"):
             reasons.append(f"{name} is now linked to a different {what}, or not linked.")
+
+    recorded_pick = inputs.get("presenter_named_look")
+    recorded_pick_id = recorded_pick.get("id") if isinstance(recorded_pick, dict) else None
+    current_pick_id = loaded.presenter_pick.id if loaded.presenter_pick is not None else None
+    if recorded_pick_id != current_pick_id:
+        reasons.append("The presenter's saved outfit changed since the looks were resolved.")
+
+    recorded_outfit = inputs.get("presenter_outfit")
+    recorded_outfit_sha = (
+        recorded_outfit.get("sha256") if isinstance(recorded_outfit, dict) else None
+    )
+    if recorded_outfit_sha != _outfit_sha256(loaded.presenter_outfit):
+        reasons.append("The presenter outfit changed since the looks were resolved.")
     return reasons
 
 

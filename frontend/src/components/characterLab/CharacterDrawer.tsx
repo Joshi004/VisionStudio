@@ -28,6 +28,8 @@ function DrawerBody({ characterId, initialStep, onCreated, onClose }: DrawerBody
   // A new character gets its id when its profile is saved, and the drawer goes on to its look.
   const [id, setId] = useState<number | null>(characterId);
   const [active, setActive] = useState<DrawerStep>(initialStep);
+  // The photo a new character was filled in from, offered again on the look step.
+  const [photoId, setPhotoId] = useState<number | null>(null);
   const character = useLibraryCharacter(id);
 
   /** A step that needs the saved character: waits for it, or says why it cannot be shown. */
@@ -68,6 +70,7 @@ function DrawerBody({ characterId, initialStep, onCreated, onClose }: DrawerBody
             <ProfileForm
               key={character.data?.id ?? "new"}
               character={character.data ?? null}
+              onPhoto={setPhotoId}
               onSaved={(saved, created) => {
                 if (created) {
                   setId(saved.id);
@@ -79,7 +82,7 @@ function DrawerBody({ characterId, initialStep, onCreated, onClose }: DrawerBody
           )}
         </Stepper.Step>
         <Stepper.Step label="Look" description="Five pictures">
-          {showStepContent(character.data && <LookPicker character={character.data} />)}
+          {showStepContent(character.data && <LookPicker character={character.data} photoImageId={photoId} />)}
         </Stepper.Step>
         <Stepper.Step label="Voice" description="Optional">
           {showStepContent(character.data && <VoiceAudition character={character.data} />)}

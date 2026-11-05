@@ -20,6 +20,9 @@ from app.api import (
     environment_views,
     generation_requests,
     gpu,
+    graphic_briefs,
+    graphic_theme,
+    graphics_lab,
     health,
     image_lab,
     jobs,
@@ -38,11 +41,13 @@ from app.api import (
     projects,
     scene_definitions,
     scene_events,
+    scene_renders,
     scene_staging,
     scenes,
     settings,
     shot_continuity,
     shot_definitions,
+    shot_graphics,
     shot_plans,
     shot_prompts,
     shot_references,
@@ -54,6 +59,7 @@ from app.api import (
     story_pipeline,
     story_renders,
     story_voices,
+    thumbnails,
     video_lab,
     voice_lab,
 )
@@ -66,6 +72,9 @@ api_router.include_router(music_bible.router, tags=["music-bible"])
 api_router.include_router(music_themes.router, tags=["music-themes"])
 api_router.include_router(music_plan.router, tags=["music-plan"])
 api_router.include_router(callout_plan.router, tags=["callout-plan"])
+api_router.include_router(graphic_theme.router, tags=["graphic-theme"])
+api_router.include_router(graphic_briefs.router, tags=["graphic-briefs"])
+api_router.include_router(thumbnails.router, tags=["thumbnails"])
 api_router.include_router(music_cues.router, tags=["music-cues"])
 api_router.include_router(music_takes.router, tags=["music-takes"])
 api_router.include_router(music_placement.router, tags=["music-placement"])
@@ -84,6 +93,7 @@ api_router.include_router(image_lab.router, tags=["image-lab"])
 api_router.include_router(video_lab.router, tags=["video-lab"])
 api_router.include_router(voice_lab.router, tags=["voice-lab"])
 api_router.include_router(music_lab.router, tags=["music-lab"])
+api_router.include_router(graphics_lab.router, tags=["graphics-lab"])
 api_router.include_router(character_lab.router, tags=["character-lab"])
 api_router.include_router(av_lab.router, tags=["av-lab"])
 api_router.include_router(environment_lab.router, tags=["environment-lab"])
@@ -97,6 +107,7 @@ api_router.include_router(look_state_resolution.router, tags=["look-state-resolu
 api_router.include_router(look_state_images.router, tags=["look-state-images"])
 api_router.include_router(speech_units.router, tags=["speech-units"])
 api_router.include_router(speech_audio.router, tags=["speech-audio"])
+api_router.include_router(shot_graphics.router, tags=["shot-graphics"])
 api_router.include_router(shot_plans.router, tags=["shot-plans"])
 api_router.include_router(shot_definitions.router, tags=["shot-definitions"])
 api_router.include_router(shot_continuity.router, tags=["shot-continuity"])
@@ -105,6 +116,7 @@ api_router.include_router(generation_requests.router, tags=["generation-requests
 api_router.include_router(shot_prompts.router, tags=["shot-prompts"])
 api_router.include_router(shot_takes.router, tags=["shot-takes"])
 api_router.include_router(story_renders.router, tags=["story-renders"])
+api_router.include_router(scene_renders.router, tags=["scene-renders"])
 api_router.include_router(story_pipeline.router, tags=["story-pipeline"])
 api_router.include_router(pipeline_board.router, tags=["pipeline-board"])
 api_router.include_router(project_cast.router, tags=["project-cast"])

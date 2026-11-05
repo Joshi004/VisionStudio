@@ -45,6 +45,7 @@ from app.services import (
     discovery,
     duration_policy,
     event_extraction_writer,
+    graphic_suggestions,
     h3_lengths,
     provenance,
     scene_definition_writer,
@@ -206,6 +207,9 @@ class _Loaded:
     # `clocks` holds the take's timed words by scene id. Empty for every other project.
     continuous: bool
     clocks: dict[str, take_timings.TakeClock]
+    # The words of the story the owner suggests a graphic for (`project.graphic_suggestions`).
+    # Empty unless the project has graphics on.
+    suggestions: list[dict[str, Any]]
 
 
 # --- Loading ------------------------------------------------------------------------------
@@ -245,7 +249,29 @@ async def _load(session: AsyncSession, project: Project) -> _Loaded:
         blocked_reason=policy_problem or audio.blocked_reason,
         continuous=word_timings.times_takes(project),
         clocks=await take_timings.scene_clocks(session, project),
+        suggestions=(
+            list(project.graphic_suggestions)
+            if project.graphics and isinstance(project.graphic_suggestions, list)
+            else []
+        ),
     )
+
+
+def _scene_suggestions(
+    loaded: _Loaded, item: dict[str, Any], words: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The graphic suggestions that cover words of this scene's take: `[{id, text, words}]`,
+    the positions (from 0) counted in `words`. Empty when there are none. They are placed with
+    the scene's position in the story, so they are left out when the story is no longer the one
+    the scenes were found in (the plan is out of date then, and says so).
+    """
+    story = loaded.story
+    if not loaded.suggestions or story is None:
+        return []
+    start, end = item["start"], item["end"]
+    if story[start:end] != item["text"]:
+        return []
+    return graphic_suggestions.take_suggestions(item["text"], start, words, loaded.suggestions)
 
 
 def _unit_problems(scene: speech_synthesis.SceneAudio) -> list[str]:
@@ -260,11 +286,15 @@ def _unit_problems(scene: speech_synthesis.SceneAudio) -> list[str]:
 
 
 def _chosen(definition: dict[str, Any]) -> list[tuple[str, str]]:
-    """What a scene definition chose, as `(kind, discovery id)`: its environment, then its
-    characters.
+    """What a scene definition chose, as `(kind, discovery id)`: its environment, the places
+    inside it (SCN-007), then its characters.
     """
     return [
         (ENVIRONMENT_DEFINITION_KIND, definition["environment_id"]),
+        *(
+            (ENVIRONMENT_DEFINITION_KIND, place["environment_id"])
+            for place in definition.get("inner_places", [])
+        ),
         *((CHARACTER_DEFINITION_KIND, character) for character in definition["characters"]),
     ]
 
@@ -366,6 +396,9 @@ class _Prepared:
     chosen_characters: list[tuple[str, str]]
     environment_key: tuple[str, str]
     inputs: dict[str, Any]
+    # SCN-007: the places inside the scene's main place, as the planner reads them. Empty for
+    # a scene with none.
+    inner_places: list[dict[str, Any]]
     # A continuous explainer's take as the cut planning reads it: `{seconds, words, spans}`.
     # None for every other project.
     take: dict[str, Any] | None = None
@@ -441,7 +474,18 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
     chosen_characters = [
         (CHARACTER_DEFINITION_KIND, character_id) for character_id in definition["characters"]
     ]
-    chosen = [environment_key, *chosen_characters]
+    inner_keys = [
+        (ENVIRONMENT_DEFINITION_KIND, place["environment_id"])
+        for place in definition.get("inner_places", [])
+    ]
+    chosen = [environment_key, *inner_keys, *chosen_characters]
+    inner_places = [
+        {
+            **_for_model(loaded.current[key]),
+            "relation": place["relation"],
+        }
+        for key, place in zip(inner_keys, definition.get("inner_places", []), strict=True)
+    ]
 
     units: list[dict[str, Any]] = []
     infos: list[scene_timeline.UnitInfo] = []
@@ -454,6 +498,10 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         assert clock.timing is not None and clock.audio.duration_s is not None
         units, infos = _take_units(scene, clock)
         take = _take_input(clock)
+        marked = _scene_suggestions(loaded, item, take["words"])
+        if marked:
+            # Only a scene with marked words has the key, so every other job is as it was.
+            take["suggestions"] = marked
         audio_artifacts.append(
             {
                 "kind": SPEECH_TAKE_KIND,
@@ -489,11 +537,17 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
                 }
             )
 
+    suggestions_hash = graphic_suggestions.fingerprint(
+        take["suggestions"] if take is not None and "suggestions" in take else []
+    )
     inputs = {
         "project_id": project.id,
         "scene_id": item["id"],
         "story_sha256": story_bible.story_sha256(story),
         "scene_text_sha256": event_extraction_writer.scene_text_sha256(item["text"]),
+        # Only a scene with marked words has this key. A plan without it is current when the
+        # scene has none (see `_suggestion_reasons`).
+        **({"graphic_suggestions_sha256": suggestions_hash} if suggestions_hash else {}),
         "artifacts": [
             {"kind": STORY_BIBLE_KIND, "id": bible.id, "version": bible.version},
             {
@@ -527,6 +581,7 @@ def _prepare(project: Project, loaded: _Loaded, scene: speech_synthesis.SceneAud
         infos=infos,
         chosen_characters=chosen_characters,
         environment_key=environment_key,
+        inner_places=inner_places,
         inputs=inputs,
         take=take,
     )
@@ -589,6 +644,8 @@ async def _queue(
                 _for_model(loaded.current[key]) for key in prepared.chosen_characters
             ],
             "environment": _for_model(loaded.current[prepared.environment_key]),
+            # Only for a scene with places inside its main place (SCN-007).
+            **({"inner_places": prepared.inner_places} if prepared.inner_places else {}),
             "staging": _staging_for_planner(loaded, item["id"], prepared),
             "events": prepared.events,
             "units": prepared.units,
@@ -600,6 +657,9 @@ async def _queue(
                 {
                     "take": prepared.take,
                     "longest_shot_seconds": duration_policy.longest_cut_shot_s(policy),
+                    # EXG-003: only for a project with graphics on, so every other job is
+                    # exactly what it was.
+                    **({"graphics": True} if project.graphics else {}),
                 }
                 if prepared.take is not None
                 else {}
@@ -858,6 +918,21 @@ def _take_reasons(row: ShotPlan, clock: take_timings.TakeClock | None) -> list[s
     return []
 
 
+def _suggestion_reasons(
+    row: ShotPlan, loaded: _Loaded, item: dict[str, Any], clock: take_timings.TakeClock | None
+) -> list[str]:
+    """Why a cut plan no longer fits the graphic suggestions of its scene. A plan made before
+    suggestions existed records none, which is the same as a scene with none. A take that is not
+    ready has no words to place them on, so it gives no reason here.
+    """
+    if not isinstance(row.inputs, dict) or clock is None or not clock.words:
+        return []
+    now = graphic_suggestions.fingerprint(_scene_suggestions(loaded, item, clock.words))
+    if row.inputs.get("graphic_suggestions_sha256") == now:
+        return []
+    return ["The graphic suggestions for this scene changed since these shots were planned."]
+
+
 def _out_of_date_reasons(
     row: ShotPlan,
     loaded: _Loaded,
@@ -912,7 +987,9 @@ def _out_of_date_reasons(
     # line are told by their own generation request.
     if loaded.continuous:
         # The shots start on the words of the take, so a take made or timed again is a change.
-        reasons.extend(_take_reasons(row, loaded.clocks.get(scene.scene.item["id"])))
+        clock = loaded.clocks.get(scene.scene.item["id"])
+        reasons.extend(_take_reasons(row, clock))
+        reasons.extend(_suggestion_reasons(row, loaded, scene.scene.item, clock))
     else:
         now = {item.unit["id"]: item for item in scene.units}
         reasons.extend(_audio_reasons(row, loaded.policy, now))
@@ -1368,6 +1445,8 @@ async def save_manual(
             prepared.events,
             prepared.units,
             speech_mode=prompt_mode(project),
+            inner_place_ids=[place["id"] for place in prepared.inner_places],
+            main_place_id=prepared.environment_key[1],
         )
     except ValueError as exc:
         raise ShotPlansError(str(exc)) from exc

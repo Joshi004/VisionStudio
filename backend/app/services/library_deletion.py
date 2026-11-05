@@ -42,6 +42,7 @@ from app.db.models import (
     EnvironmentViewState,
     GenerationRequest,
     Job,
+    LabGraphicRender,
     LabImage,
     LabMusicRun,
     LabMusicSource,
@@ -59,6 +60,7 @@ from app.db.models import (
     ProjectEnvironmentLink,
     ProjectMissingLibraryItem,
     ShotReferenceManifest,
+    Thumbnail,
     Voice,
 )
 from app.jobs import store
@@ -561,6 +563,7 @@ IMAGE_ID_COLUMNS: Final[tuple[Any, ...]] = (
     EnvironmentState.reference_image_id,
     EnvironmentView.reference_image_id,
     EnvironmentViewState.reference_image_id,
+    Thumbnail.background_image_id,
 )
 
 
@@ -604,6 +607,7 @@ async def path_in_use(session: AsyncSession, path: str) -> bool:
         CharacterReference.cutout_path,
         AvLabTest.mixed_path,
         AvLabTest.tts_path,
+        LabGraphicRender.media_path,
     ):
         found = await session.execute(select(exists().where(column == path)))
         if found.scalar():

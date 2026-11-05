@@ -287,8 +287,10 @@ async def _look_item(
         status = "unavailable"
 
     reasons: list[str] = []
+    made_for_it = look is not None and look.named_look_id == named.id
     if (
         status == "ready"
+        and made_for_it
         and look is not None
         and look.reference_image_id is not None
         and front is not None
@@ -297,6 +299,16 @@ async def _look_item(
         reasons.append(
             f"The canonical picture of {use.subject_id} was replaced since this look was made."
         )
+    if status == "ready" and made_for_it and look is not None and look.prompt is not None:
+        # The outfit was edited in the Character Lab after these pictures were made.
+        try:
+            expected = prompts.look_edit_prompt(named.description).strip()
+        except ValueError:
+            expected = look.prompt.strip()
+        if look.prompt.strip() != expected:
+            reasons.append(
+                f"The description of '{named.name}' changed since these pictures were made."
+            )
 
     stage: Stage | None = None
     if progress is not None and progress.stage == "making_master":
@@ -606,13 +618,19 @@ async def state(session: AsyncSession, project: Project) -> ImagesState:
     for use in uses:
         item: ImageItem | None = None
         if use.kind == LOOK and use.record_id in named_looks:
+            named = named_looks[use.record_id]
+            made = newest_looks.get(use.record_id)
+            if made is None and named.look_id is not None:
+                # Pictures no run was made for (the character's earlier default, kept as an
+                # outfit) are the outfit's own.
+                made = await session.get(CharacterLook, named.look_id)
             item = await _look_item(
                 session,
                 use,
-                named_looks[use.record_id],
+                named,
                 by_character.get(use.subject_id),
                 characters.fronts.get(use.subject_id),
-                newest_looks.get(use.record_id),
+                made,
             )
         elif use.kind == STATE and use.record_id in states:
             item = await _state_item(

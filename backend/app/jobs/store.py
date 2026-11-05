@@ -41,6 +41,19 @@ VOICE_LAB_NAME = "Voice lab"
 IMAGE_LAB_NAME = "Image lab"
 CHARACTER_LAB_NAME = "Character lab"
 MUSIC_LAB_NAME = "Music lab"
+GRAPHICS_LAB_NAME = "Graphics lab"
+
+# The job types of the Graphics lab (GFX-002 made them, one phase writes each handler).
+GRAPHICS_LAB_JOB_TYPES = frozenset(
+    {
+        "write_lab_graphic_brief",
+        "write_lab_graphic_template_spec",
+        "write_lab_graphic_block_scene",
+        "write_lab_graphic_component",
+        "render_lab_graphic",
+        "time_lab_graphic_words",
+    }
+)
 
 # Job types that can be cancelled while they run, because the server has a cancel for them.
 REMOTE_CANCEL_TYPES = frozenset({"lab_video", "lab_image", "generate_shot", "lab_music"})
@@ -537,10 +550,16 @@ def owner_name(job: Job, project_name: str | None) -> str:
         return project_name
     if job.type == "lab_voice":
         return VOICE_LAB_NAME
-    if job.type in ("write_character_look_prompt", "write_character_take_prompt"):
+    if job.type in (
+        "write_character_look_prompt",
+        "write_character_take_prompt",
+        "describe_photo",
+    ):
         return CHARACTER_LAB_NAME
     if job.type in ("lab_music", "write_lab_music_prompt"):
         return MUSIC_LAB_NAME
+    if job.type in GRAPHICS_LAB_JOB_TYPES:
+        return GRAPHICS_LAB_NAME
     return IMAGE_LAB_NAME if job.type == "lab_image" else NO_PROJECT_NAME
 
 

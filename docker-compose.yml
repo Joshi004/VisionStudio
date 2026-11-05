@@ -4,6 +4,9 @@ services:
     build: ./backend
     env_file: .env
     volumes: [data:/data]
+    # The default network (the GPU server, the paid API) and the internal one the motion service
+    # is on. The backend does not wait for `motion`: the lab only needs it for a render.
+    networks: [default, motion_net]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
@@ -11,6 +14,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+      start_interval: 2s
+  # The Graphics lab's renderer (GFX-005): Remotion and headless Chrome. It also runs the code a
+  # model writes (GFX-010), so it is locked down: no internet (the only network is `internal`),
+  # no volume and no secrets (no env_file), a read-only root with a tmpfs for its work, no Linux
+  # capabilities, a non-root user, and limits on CPU, memory and processes.
+  motion:
+    build:
+      context: ./motion
+      # The same font files the backend uses (G-11), copied in at build time.
+      additional_contexts:
+        fonts: ./backend/app/assets/fonts
+    networks: [motion_net]
+    read_only: true
+    tmpfs: ["/tmp:size=1g,mode=1777"]
+    # Chrome needs more shared memory than Docker's 64 MB default.
+    shm_size: 1g
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+    cpus: 4
+    mem_limit: 4g
+    pids_limit: 512
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
       start_interval: 2s
   frontend:
     build: ./frontend
@@ -26,5 +58,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+networks:
+  # No route to the internet: only the backend and the motion service are on it.
+  motion_net:
+    internal: true
 volumes:
   data:

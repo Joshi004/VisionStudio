@@ -92,6 +92,25 @@ export function SceneDefinitionView({
 }: {
   definition: SceneDefinition;
 }) {
+  const placeRows: Rows = [
+    ["Environment", definition.environment_id],
+    ["State requested", definition.environment_state],
+  ];
+  // Places inside the main place (a car in a garage), only when the scene has any.
+  const innerPlaces = definition.inner_places ?? [];
+  if (innerPlaces.length > 0) {
+    placeRows.push([
+      "Inside it",
+      innerPlaces.map((place) => `${place.environment_id} (${place.relation})`).join(", "),
+    ]);
+  }
+  if (definition.continues_previous === true) {
+    placeRows.push(["Follows", "Continues straight from the previous scene"]);
+  }
+  placeRows.push(
+    ["Time of day", definition.time.time_of_day],
+    ["Lighting", definition.time.lighting_state],
+  );
   return (
     <Stack gap="sm">
       <Section
@@ -102,15 +121,7 @@ export function SceneDefinitionView({
           ["After", definition.story_context.after],
         ]}
       />
-      <Section
-        title="Place and time"
-        rows={[
-          ["Environment", definition.environment_id],
-          ["State requested", definition.environment_state],
-          ["Time of day", definition.time.time_of_day],
-          ["Lighting", definition.time.lighting_state],
-        ]}
-      />
+      <Section title="Place and time" rows={placeRows} />
       <Characters definition={definition} />
       <Section
         title="Mood"

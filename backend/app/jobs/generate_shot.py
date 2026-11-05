@@ -143,10 +143,13 @@ class GenerateShotHandler(GenerateLabVideoHandler):
                 take.audio = audio
                 take.validation = validation
                 if validation["passed"]:
-                    if await shot_takes.dialogue_lines(session, take):
+                    if shot_takes.checks_speech(
+                        take, await shot_takes.dialogue_lines(session, take)
+                    ):
                         # A take with dialogue is selected only after its speech has been
-                        # checked (PHASE-031). The check is queued in this transaction, so the
-                        # take is never seen as "not checked" without a job making it.
+                        # checked (PHASE-031), and so is a silent take with a sound track, which
+                        # must have no words (SCN-009). The check is queued in this transaction,
+                        # so the take is never seen as "not checked" without a job making it.
                         await shot_takes.queue_dialogue_check(session, take, commit=False)
                         queued_dialogue_check = True
                     elif not await shot_takes.chosen_since(session, take):

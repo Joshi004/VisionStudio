@@ -21,6 +21,12 @@ export const PROJECT_KINDS: {
   },
 ];
 
+/** The most characters an explainer's presenter staging text may have. */
+export const STAGING_MAX_CHARS = 500;
+
+/** The most characters an explainer's presenter outfit text may have. */
+export const OUTFIT_MAX_CHARS = 300;
+
 export function isProjectKind(value: string): value is ProjectKind {
   return PROJECT_KINDS.some((option) => option.value === value);
 }

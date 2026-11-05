@@ -69,6 +69,11 @@ FRAMING_OF_SIZE: Final = {
     "extreme_wide": "wide",
 }
 
+# SCN-006: the most people one shot can show, because the video model takes at most 9 reference
+# pictures and the place is always one of them (`reference_selection` keeps the same room). A
+# group shot with more people present than this is not checked for who is left out.
+MAX_PEOPLE_IN_SHOT: Final = 8
+
 # The most characters each text field of the specification may have.
 VISUAL_STORY_MAX_CHARS: Final = 300
 EXPRESSION_MAX_CHARS: Final = 240
@@ -156,7 +161,13 @@ neighbouring shots are given so that this one fits between them.
 shot shows and what it means.
 - "characters": one entry for each character who is VISIBLE in this shot, with the id exactly as \
 listed in CHARACTERS IN THE SCENE. Use an empty list when nobody is visible. A character who is \
-only heard, or who is not in this shot, gets no entry. "expression" (at most \
+only heard, or who is not in this shot, gets no entry. Never show a person who is not a \
+character of the scene (no extras, guests, diners, staff or passers-by): only the characters you \
+list are in the picture. In a medium-wide, wide or extreme-wide shot framed on the group, list \
+EVERY character who is in the place at that moment, even one who does nothing in the shot (a \
+shot of the place with nobody in it keeps "characters" empty): when STAGING AT THIS SHOT has \
+"presence", those are the ids in its "present" list, and nobody in its "away" list is ever \
+shown. "expression" (at most \
 {EXPRESSION_MAX_CHARS} characters), "pose" (at most {POSE_MAX_CHARS}) and "gaze" (at most \
 {GAZE_MAX_CHARS}) are short phrases saying how that character looks, how they stand or sit, and \
 where they look. Keep each character's appearance consistent with the look given for them.
@@ -190,11 +201,18 @@ same place, the same people and no jump.
 characters (write "silence" when there is none). "sound_events" lists the distinct sounds that \
 happen in this shot, each at most {SOUND_EVENT_MAX_CHARS} characters, at most {MAX_SOUND_EVENTS}, \
 and may be empty. Do not include spoken words, narration or music here: the speech is supplied \
-separately, and music is added to the whole film later.
+separately, and music is added to the whole film later. Write no voice of any kind in "ambient" \
+or "sound_events" (no conversation, chatter, murmur, whisper, laughter, shouting or phone voice, \
+even far away or muffled): the video model makes up words for a voice it has no line for. A \
+voice with no line of speech is written as the sound of its source (a door slams, cutlery clinks, \
+a phone's speaker crackles faintly) or left out.
 - Do not write the shot's id, its duration or its dialogue: they are filled in for you.
 - When SPEECH lists a line of dialogue, the shot must make sense of it: its speaker is shown \
 speaking, or is stated to be unseen. Narration is heard over the shot and is not spoken by \
-anyone in it.
+anyone in it. Only the speakers of the lines in SPEECH talk in this shot: everyone else who is \
+visible listens with the mouth closed. When SPEECH lists no line, nobody in the shot talks, \
+explains, asks, answers or whispers, in any field: a moment where the story has someone speak \
+but gives no line is shown through a listener or as a silent reaction, with no words.
 - When the SHOT has "rapid_exchange" set to true, it is a quick back-and-forth between two \
 characters inside one shot, and the video cuts between them as each speaks. Both speakers are \
 VISIBLE, so both get an entry in "characters". "composition" is the opening two-shot that shows \
@@ -231,11 +249,11 @@ type): {_ANSWER_FORM}"""
 # An explainer (EXPLAINER-004): the presenter is visible only in a shot that carries their line.
 _EXPLAINER_NOTE: Final = """This is an explainer with one presenter. When SPEECH lists a line of \
 dialogue, the shot shows the presenter speaking it to the camera: the presenter is the only \
-entry in "characters", looks straight into the lens, stands in the set and is framed from the \
-chest up or closer, and the camera is steady. When SPEECH lists only narration, or nothing, the \
-shot is B-roll that illustrates the words: "characters" is an empty list, the picture does not \
-show the presenter or the set, and it holds no written words, labels, captions, logos, charts or \
-diagrams. Describe B-roll as something a camera could film, in the style of the StoryBible."""
+entry in "characters", looks straight into the lens, is placed in the set as the presenter \
+staging rule below says, and the camera is steady. When SPEECH lists only narration, or nothing, \
+the shot is B-roll that illustrates the words: "characters" is an empty list, the picture does \
+not show the presenter or the set, and it holds no written words, labels, captions, logos, charts \
+or diagrams. Describe B-roll as something a camera could film, in the style of the StoryBible."""
 
 
 # A continuous explainer (FLOW-005): the shots are cut on top of one voice recording, so a
@@ -244,24 +262,59 @@ _CONTINUOUS_NOTE: Final = """This is an explainer with one presenter, and the sh
 top of one continuous voice recording, so the words of a shot may begin or end in the middle of \
 a sentence. When SPEECH lists words of the presenter (kind "dialogue"), the shot is a presenter \
 shot: it shows the presenter speaking those words to the camera. The presenter is the only entry \
-in "characters", looks straight into the lens, stands in the set and is framed from the chest up \
-or closer, and the camera is steady. Do not describe the thought as starting or finishing in \
+in "characters", looks straight into the lens, is placed in the set as the presenter staging rule \
+below says, and the camera is steady. Do not describe the thought as starting or finishing in \
 this shot. When SPEECH lists only narration, the shot is B-roll that illustrates the words: \
 "characters" is an empty list, the picture does not show the presenter or the set, and it holds \
 no written words, labels, captions, logos, charts or diagrams. Describe B-roll as something a \
 camera could film, in the style of the StoryBible."""
 
+# Part of every explainer's instructions, whether the project has a staging text or not, so the
+# instructions do not change from request to request.
+_STAGING_RULE: Final = """Presenter staging: when the user message holds PRESENTER STAGING, it \
+is the owner's choice of how the presenter is placed and moves on camera (for example seated at a \
+desk and still). Follow it in every presenter shot: write the presenter's "pose", the "action" \
+and the "continuity_start" and "continuity_end" so that they agree with it, the same way in every \
+presenter shot. When it asks for little or no movement, the presenter only speaks, with small \
+natural movements of the face and head, and does not stand up, walk or change position. It never \
+changes the other rules: the presenter is still the only one on camera and looks into the lens, \
+the camera stays steady, and B-roll still never shows the presenter. Frame a presenter shot from \
+the chest up or closer; when PRESENTER STAGING needs more of the set to be seen (such as a desk or \
+a chair), the shot may be "medium_close_up" or "medium", never wider. Without PRESENTER STAGING, \
+the presenter stands in the set and is framed from the chest up or closer."""
 
-def instructions(explainer: bool = False, continuous: bool = False) -> str:
+
+# SCN-007: a shot inside a place within the scene's main place (a car parked in a garage). Only
+# such a shot gets the note, so the instructions of every other shot are what they were.
+_INNER_PLACE_NOTE: Final = """This shot happens INSIDE a place within the scene's main place. \
+ENVIRONMENT is that place (a car, a lift, a booth), and its "inside_of" names the main place it \
+stands in, with that place's state and how ENVIRONMENT stands in it ("relation"). The people are \
+inside ENVIRONMENT: describe its enclosure first (roof, pillars, windows, dashboard, door \
+panels, whatever it has), and let the main place appear only through the windows or openings of \
+ENVIRONMENT, never around or above the people. No zones or screen sides are staged for this \
+shot, so there is no STAGING AT THIS SHOT and you write none. VIEWS lists the views of \
+ENVIRONMENT: "composition.view" is exactly one "id" from VIEWS, the part of the place seen \
+behind the shot, and any of them may be chosen. "environment_state" says what is true of \
+ENVIRONMENT in this shot."""
+
+
+def instructions(
+    explainer: bool = False, continuous: bool = False, inner_place: bool = False
+) -> str:
     """The system message: the same for every project except an explainer's, which has a note
-    added after the rules (the note of a continuous explainer is its own).
+    added after the rules (the note of a continuous explainer is its own). `inner_place`
+    (SCN-007) adds the note of a shot inside a place within the scene's main place.
     """
+    if inner_place and not explainer:
+        marker = "\n\n" + length_rule(LIMITS)
+        head, tail = _INSTRUCTIONS.split(marker, 1)
+        return f"{head}\n\n{_INNER_PLACE_NOTE}{marker}{tail}"
     if not explainer:
         return _INSTRUCTIONS
     note = _CONTINUOUS_NOTE if continuous else _EXPLAINER_NOTE
     marker = "\n\n" + length_rule(LIMITS)
     head, tail = _INSTRUCTIONS.split(marker, 1)
-    return f"{head}\n\n{note}{marker}{tail}"
+    return f"{head}\n\n{note}\n\n{_STAGING_RULE}{marker}{tail}"
 
 
 def build_request(
@@ -281,9 +334,15 @@ def build_request(
     staging: dict[str, Any] | None = None,
     explainer: bool = False,
     continuous: bool = False,
+    presenter_staging: str | None = None,
+    inner_place: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The exact request body sent to the model. It is stored on the job
     (`job.input.request`), so nothing about the call is hidden from the job record.
+
+    `inner_place` (SCN-007) is set for a shot inside a place within the scene's main place
+    (`shot_definitions._inner_place`): `environment` is then that place, with `inside_of`, and
+    `VIEWS` lists its views; there is no `staging`.
 
     `feedback` is the user's note on the earlier specification of this shot (PHASE-038): it adds
     `PREVIOUS SPECIFICATION` (see `previous_specification`) and `USER FEEDBACK` as data blocks.
@@ -301,6 +360,8 @@ def build_request(
 
     `explainer` adds the explainer note to the instructions (EXPLAINER-004). `continuous` (a
     continuous explainer's cut-based shot, FLOW-005) makes it the note of the cut-based shots.
+    `presenter_staging` is the explainer owner's text for how the presenter is placed and moves;
+    it adds `PRESENTER STAGING` as a data block.
     """
     parts = [
         "STORY BIBLE (JSON):\n" + json.dumps(bible_content, ensure_ascii=False, indent=2),
@@ -316,12 +377,21 @@ def build_request(
     ]
     if staging is not None:
         parts += staging_blocks(staging)
+    elif inner_place is not None:
+        parts.append(
+            "VIEWS (JSON):\n" + json.dumps(inner_place["views"], ensure_ascii=False, indent=2)
+        )
+    if explainer and presenter_staging:
+        parts.append("PRESENTER STAGING (plain text from the owner):\n" + presenter_staging)
     if feedback is not None:
         parts += user_feedback.blocks(feedback, "PREVIOUS SPECIFICATION")
     return {
         "model": model,
         "messages": [
-            {"role": "system", "content": instructions(explainer, continuous)},
+            {
+                "role": "system",
+                "content": instructions(explainer, continuous, inner_place is not None),
+            },
             {"role": "user", "content": "\n\n".join(parts)},
         ],
         "max_tokens": MAX_TOKENS,
@@ -342,6 +412,7 @@ def staging_blocks(staging: dict[str, Any]) -> list[str]:
         "axis": staging["axis"],
         "group_side": staging["group_side"],
         **({"off_screen": staging["off_screen"]} if staging.get("off_screen") else {}),
+        **({"presence": staging["presence"]} if staging.get("presence") is not None else {}),
     }
     return [
         "STAGING AT THIS SHOT (JSON):\n" + json.dumps(placed, ensure_ascii=False, indent=2),
@@ -551,6 +622,62 @@ def _view(
     return view
 
 
+def _inner_view(raw_composition: dict[str, Any], inner_place: dict[str, Any]) -> str:
+    """SCN-007: the view of the place behind a shot inside an inner place, checked to be one of
+    that place's views. Raises ValueError.
+    """
+    value = raw_composition.get("view")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('The "composition.view" was missing: choose an id from VIEWS.')
+    view = value.strip()
+    allowed = [item["id"] for item in inner_place["views"]]
+    if view not in allowed:
+        raise ValueError(
+            f'The "composition.view" was "{view[:40]}", which is not a view of '
+            f"{inner_place['name']}. The views are: {', '.join(allowed)}."
+        )
+    return view
+
+
+def _check_presence(
+    characters: list[dict[str, str]],
+    composition: dict[str, str],
+    staging: dict[str, Any],
+    *,
+    exchange: bool,
+) -> None:
+    """SCN-006: a shot never shows someone who is not in the place at that time, and a shot
+    framed on the group (`shot_staging.is_group_shot`) and showing people shows everyone who is
+    there. Raises ValueError,
+    naming the characters, so the model can answer again. Nothing is checked when the staging
+    says nothing about presence (it was written before SCN-006), and a group with more people
+    than a shot can show is not checked for who is missing.
+    """
+    presence = staging.get("presence")
+    if not isinstance(presence, dict):
+        return
+    shown = [character["id"] for character in characters]
+    away = [item for item in shown if item in presence["away"]]
+    if away:
+        raise ValueError(
+            f"{', '.join(away)} {'is' if len(away) == 1 else 'are'} not in the place during this "
+            'shot (see "presence" of STAGING AT THIS SHOT), so they must not be in "characters".'
+        )
+    present = presence["present"]
+    if len(present) > MAX_PEOPLE_IN_SHOT:
+        return
+    # A shot of the place with nobody in it (an empty "characters") is not a shot of the group.
+    if not shown or not shot_staging.is_group_shot(composition, shown, staging, exchange=exchange):
+        return
+    missing = [item for item in present if item not in shown]
+    if missing:
+        raise ValueError(
+            f"This shot is framed on the group ({composition['shot_size']}), so it must show "
+            'everyone who is in the place, but "characters" has no entry for: '
+            f"{', '.join(missing)}. Add them, or frame the shot on one character."
+        )
+
+
 def _check_explainer_characters(
     characters: list[dict[str, str]], dialogue: list[dict[str, str]]
 ) -> None:
@@ -580,6 +707,8 @@ def check_answer(
     exchange: bool = False,
     staging: dict[str, Any] | None = None,
     explainer: bool = False,
+    check_presence: bool = False,
+    inner_place: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """The answer checked and cleaned, as the specification that is stored. Raises ValueError,
@@ -598,6 +727,15 @@ def check_answer(
 
     `explainer` is true for an explainer project (EXPLAINER-004): a shot with a line of dialogue
     shows exactly its speaker, the presenter, and any other shot (B-roll) shows no character.
+
+    `check_presence` (SCN-006) is true for a model's answer: with a `staging` that has `presence`,
+    the shot must not show anyone who is away, and a shot framed on the group must show everyone
+    who is present (`_check_presence`). It is false for a specification the owner edits, who may
+    hide someone on purpose. A rapid exchange and an explainer are never checked.
+
+    `inner_place` (SCN-007) is set for a shot inside a place within the scene's main place: its
+    `composition.view` must be one of the place's views, and the content records the place's id
+    as `place`. Such a shot has no `staging`.
 
     `shot_id`, `scene_id`, `duration` and `audio_intent.dialogue` are set here from what code
     knows and are never read from the model. `scene_character_ids` are the ids of the scene's
@@ -634,11 +772,18 @@ def check_answer(
         shot_composition["view"] = _view(
             composition, shot_composition, characters, staging, exchange=exchange
         )
+        if check_presence and not exchange and not explainer:
+            _check_presence(characters, shot_composition, staging, exchange=exchange)
         characters = shot_staging.apply_to_characters(characters, staging)
+    elif inner_place is not None:
+        shot_composition["view"] = _inner_view(composition, inner_place)
 
     return {
         "shot_id": shot_id,
         "scene_id": scene_id,
+        # Written only for a shot inside an inner place, so every other specification is stored
+        # as before.
+        **({"place": inner_place["id"]} if inner_place is not None else {}),
         "duration": round(duration, _DURATION_DECIMALS),
         "visual_story": _text(
             answer, "visual_story", "visual_story", VISUAL_STORY_MAX_CHARS, warnings

@@ -46,7 +46,7 @@ from app.jobs.handlers import MODEL_H3, MODEL_LTX
 from app.jobs.remote_video import RemoteVideoHandler
 from app.providers import video_generator
 from app.providers.gpu_server import GpuCallError
-from app.services import ffmpeg, frame_images, speech_audio, video_lab
+from app.services import ffmpeg, frame_images, gpu_priority, speech_audio, video_lab
 from app.services.frame_counts import H3_FPS
 from app.services.storage import StorageError, TempFile, get_storage
 
@@ -236,6 +236,9 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
                 await session.commit()
                 return
             base_url = await settings_service.get_str(session, GPU_URL_KEY)
+            # The server's priority (SCN-002), worked out now so a push that happened while the
+            # job waited, and the scene's place in the story, are both taken into account.
+            priority = await gpu_priority.level_for(session, job)
             await session.commit()
 
         plan = _plan(job.input)
@@ -246,7 +249,7 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
         if plan.endpoint == video_generator.H3_AUDIO_TO_VIDEO_PATH and not plan.references:
             await self._fail(job_id, "The reference pictures of this run are missing.")
             return
-        await self._upload_and_submit_run(job, base_url, plan)
+        await self._upload_and_submit_run(job, base_url, plan, priority)
 
     async def _frame_png(self, plan: _LabPlan, ref: video_lab.FirstFrameRef, name: str) -> Path:
         """A frame fitted to the run's size, as a lossless PNG in the temp folder. `name` is
@@ -389,7 +392,9 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
         remote_id = await video_generator.upload_audio(base_url, path, filename, audio.mime)
         return filename, remote_id
 
-    async def _upload_and_submit_run(self, job: Job, base_url: str, plan: _LabPlan) -> None:
+    async def _upload_and_submit_run(
+        self, job: Job, base_url: str, plan: _LabPlan, priority: int | None = None
+    ) -> None:
         """Uploads the first frame (when there is one) and submits. The server's job id is
         saved the moment the submit answers, with nothing that can fail in between.
 
@@ -452,6 +457,7 @@ class GenerateLabVideoHandler(RemoteVideoHandler):
                     uploads.append({"filename": filename, "remote_asset_id": audio_remote_id})
                 if not await self._is_running(job.id):
                     return  # cancelled while uploading: nothing was submitted
+                body = gpu_priority.with_priority(body, priority)
                 await self._phase(job.id, phases.SUBMITTING)
                 answer = await video_generator.submit(base_url, plan.endpoint, body)
                 break

@@ -202,6 +202,10 @@ class VideoProbe:
     duration_s: float | None
     # The first audio stream, or None when the clip has no sound.
     audio: AudioStream | None
+    # The video stream's codec (`h264`) and pixel format (`yuv420p`), None when ffprobe did not say
+    # (the Graphics lab's render job checks them, GFX-005).
+    codec_name: str | None = None
+    pix_fmt: str | None = None
 
 
 async def probe_video(path: Path, *, timeout_s: float = 120.0) -> VideoProbe | None:
@@ -258,6 +262,42 @@ async def decode_problem(path: Path, *, timeout_s: float = 300.0) -> str | None:
     first_line = stderr.splitlines()[0] if stderr else ""
     _logger.info("ffmpeg decode exit code %s: %s", result.returncode, stderr[:_STDERR_LOG_CHARS])
     return first_line[:200] or f"ffmpeg exited with code {result.returncode}."
+
+
+async def frame_md5s(path: Path, *, timeout_s: float = 120.0) -> list[str] | None:
+    """The MD5 of every decoded frame of the first video stream, in order (`-f framemd5`). Two
+    videos have the same pictures when their lists are equal; a sound track does not matter,
+    because only the video stream is read. Returns None when FFmpeg cannot read the file or
+    cannot run. Never raises. (The Graphics lab's Render again compares two files with it.)
+    """
+    args = [
+        "-v",
+        "error",
+        "-nostdin",
+        "-i",
+        file_input(path),
+        "-map",
+        "0:v:0",
+        "-f",
+        "framemd5",
+        "-",
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not hash the frames of a clip: %s", exc)
+        return None
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")[:_STDERR_LOG_CHARS]
+        _logger.info("ffmpeg framemd5 exit code %s: %s", result.returncode, stderr.strip())
+        return None
+    hashes: list[str] = []
+    for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        # `stream, dts, pts, duration, size, md5`
+        hashes.append(line.rsplit(",", 1)[-1].strip())
+    return hashes
 
 
 async def extract_frame(
@@ -349,6 +389,8 @@ def _parse_video_probe(data: Any) -> VideoProbe | None:
         frame_count=frame_count,
         duration_s=_number(video.get("duration")) or format_duration,
         audio=audio,
+        codec_name=video.get("codec_name") if isinstance(video.get("codec_name"), str) else None,
+        pix_fmt=video.get("pix_fmt") if isinstance(video.get("pix_fmt"), str) else None,
     )
 
 

@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from app.core.urls import docker_mapped
@@ -66,7 +66,7 @@ from app.services import (
     user_feedback,
 )
 from app.services.llm_target import STORY_MODEL_KEY
-from app.services.projects import PROMPT_MODES, SPEECH_BOTH
+from app.services.projects import PROMPT_MODES, SPEECH_BOTH, SPEECH_EXPLAINER
 
 _logger = logging.getLogger(__name__)
 
@@ -99,11 +99,16 @@ class _Input:
     feedback: user_feedback.Feedback | None = None
     # The scene's staging for the planner (PHASE-054); None on a job queued before it.
     staging: dict[str, Any] | None = None
+    # SCN-007: the places inside the scene's main place; empty for a scene with none.
+    inner_places: list[dict[str, Any]] = field(default_factory=list)
     # A continuous explainer's take (FLOW-005): `{seconds, words, spans}`. When it is set, the
     # shots are cut on its words (`cut_planning_writer`); every other job leaves it out.
     take: dict[str, Any] | None = None
     # The longest a cut shot may be (FLOW-006); a job queued before it used H3's own limit.
     longest_shot_seconds: float = cut_planning_writer.MAX_SHOT_S
+    # The project has graphics on (EXG-003): the cut planner may plan graphic shots. Only a cut
+    # plan's job carries it; every other job reads False.
+    graphics: bool = False
 
 
 def _is_take(value: Any) -> bool:
@@ -128,6 +133,27 @@ def _is_take(value: Any) -> bool:
             and isinstance(span.get("first_word"), int)
             and isinstance(span.get("last_word"), int)
             for span in value["spans"]
+        )
+        and _is_suggestions(value.get("suggestions"))
+    )
+
+
+def _is_suggestions(value: Any) -> bool:
+    """Whether `value` is the take's optional list of suggested graphics, as `shot_plans` writes
+    it: absent, or `[{id, text, words}]` with the positions of the take's words.
+    """
+    return value is None or (
+        isinstance(value, list)
+        and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("id"), str)
+            and isinstance(entry.get("text"), str)
+            and isinstance(entry.get("words"), list)
+            and all(
+                isinstance(position, int) and not isinstance(position, bool)
+                for position in entry["words"]
+            )
+            for entry in value
         )
     )
 
@@ -167,13 +193,21 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
     feedback_ok, feedback = user_feedback.read(job_input.get("feedback"))
     speech_mode = job_input.get("speech_mode", SPEECH_BOTH)
     staging = job_input.get("staging")
+    inner_places = job_input.get("inner_places", [])
     take = job_input.get("take")
     longest = job_input.get("longest_shot_seconds", cut_planning_writer.MAX_SHOT_S)
     if isinstance(longest, bool) or not isinstance(longest, int | float) or longest <= 0:
         return None
+    graphics = job_input.get("graphics", False)
+    if not isinstance(graphics, bool):
+        return None
     if not replan_ok or not feedback_ok or not (staging is None or isinstance(staging, dict)):
         return None
     if take is not None and not _is_take(take):
+        return None
+    if not isinstance(inner_places, list) or not all(
+        isinstance(place, dict) and isinstance(place.get("id"), str) for place in inner_places
+    ):
         return None
     if (
         speech_mode not in PROMPT_MODES
@@ -215,8 +249,10 @@ def _read_input(job_input: dict[str, Any]) -> _Input | None:
         speech_mode=speech_mode,
         feedback=feedback,
         staging=staging,
+        inner_places=inner_places,
         take=take,
         longest_shot_seconds=float(longest),
+        graphics=graphics,
     )
 
 
@@ -257,12 +293,16 @@ class PlanShotsHandler(JobHandler):
         warnings: list[str],
         speech_mode: str,
         cut: tuple[dict[str, Any], int, float] | None = None,
+        graphics: bool = False,
+        inner_places: list[dict[str, Any]] | None = None,
+        main_place_id: str | None = None,
     ) -> tuple[str | None, dict[str, Any] | None]:
         """Reads one answer: `(None, content)` when it can be stored, else `(why not, None)`.
         What had to be cut from a usable answer is put in `warnings` (replacing earlier ones).
 
         `cut` is `(take, shortest shot, longest shot)` in seconds for a continuous explainer: its
         answer is checked by `cut_planning_writer`, the shots starting on words (FLOW-005).
+        `graphics` lets that check accept graphic shots (EXG-003).
         """
         if result.finish_reason == "length":
             return "The model's answer was cut off because it reached the token limit.", None
@@ -271,11 +311,18 @@ class PlanShotsHandler(JobHandler):
             answer = shot_planning_writer.parse_answer(result.content)
             if cut is not None:
                 content = cut_planning_writer.check_answer(
-                    answer, scene_id, events, units, cut[0], cut[1], found, cut[2]
+                    answer, scene_id, events, units, cut[0], cut[1], found, cut[2], graphics
                 )
             else:
                 content = shot_planning_writer.check_answer(
-                    answer, scene_id, events, units, found, speech_mode
+                    answer,
+                    scene_id,
+                    events,
+                    units,
+                    found,
+                    speech_mode,
+                    [place["id"] for place in inner_places or []],
+                    main_place_id,
                 )
         except ValueError as exc:
             return str(exc), None
@@ -334,6 +381,7 @@ class PlanShotsHandler(JobHandler):
                 feedback=read.feedback,
                 staging=read.staging,
                 longest_shot_seconds=read.longest_shot_seconds,
+                graphics=read.graphics,
             )
         else:
             body = shot_planning_writer.build_request(
@@ -359,6 +407,7 @@ class PlanShotsHandler(JobHandler):
                 feedback=read.feedback,
                 speech_mode=read.speech_mode,
                 staging=read.staging,
+                inner_places=read.inner_places,
             )
         job_input.update(
             instructions_sha256=llm_call.instructions_sha256(body),
@@ -386,6 +435,9 @@ class PlanShotsHandler(JobHandler):
                     if read.take is not None
                     else None
                 ),
+                read.graphics,
+                read.inner_places,
+                read.environment.get("id"),
             ),
             timeout_s=REQUEST_TIMEOUT_S,
         )
@@ -396,6 +448,28 @@ class PlanShotsHandler(JobHandler):
                 f"The shots of the scene '{title}' could not be planned: {outcome.failure}",
             )
             return
+
+        # SCN-008: runs of short lines between two people become rapid exchanges. Only a model's
+        # answer is merged (a plan saved by hand never is), and never a cut plan or an explainer.
+        exchanges_merged = 0
+        if read.take is None and read.speech_mode != SPEECH_EXPLAINER:
+            seconds = {info.id: info.seconds for info in _unit_infos(read.units, read.inputs)}
+            content, exchanges_merged = shot_planning_writer.merge_exchanges(
+                content,
+                read.units,
+                seconds,
+                read.staging,
+                read.target_min_seconds,
+                read.events,
+                warnings,
+            )
+            if exchanges_merged:
+                _logger.info(
+                    "job %d: %d runs of short lines in scene '%s' made rapid exchanges",
+                    job_id,
+                    exchanges_merged,
+                    scene_id,
+                )
 
         await self._phase(job_id, phases.SAVING_SHOT_PLAN)
         async with SessionLocal() as session:
@@ -437,6 +511,7 @@ class PlanShotsHandler(JobHandler):
                 "scene_id": scene_id,
                 "version": row.version,
                 "shots": len(content["shots"]),
+                "exchanges_merged": exchanges_merged,
                 "timeline_problems": problems,
                 "seconds": round(time.monotonic() - started, 1),
             }

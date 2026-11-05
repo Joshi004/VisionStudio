@@ -132,6 +132,59 @@ export function useGenerateSceneShots(projectId: number) {
   });
 }
 
+export type PushScene = components["schemas"]["PushSceneOut"];
+
+/**
+ * Pushes one scene to the front of the GPU server's queue (SCN-002). It starts no clip: the
+ * clips of the scene are sent first, and those already waiting on the server are moved up.
+ */
+export function usePushScene(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sceneId: string) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/shot-takes/{scene_id}/push",
+        { params: { path: { project_id: projectId, scene_id: sceneId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not push the scene to the front (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/** Ends the push: the scene's clips go back to their place in story order. */
+export function useStopPush(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error, response } = await api.DELETE(
+        "/api/projects/{project_id}/shot-takes/push",
+        { params: { path: { project_id: projectId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not stop pushing the scene (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
 /** Starts the job that makes one more take of one shot (Generate or Regenerate). */
 export function useGenerateOneShot(projectId: number) {
   const queryClient = useQueryClient();
@@ -243,6 +296,66 @@ export function useSetVoiceSource(projectId: number) {
  * "Check takes": starts the local job that checks the clips made before the checks existed. It
  * starts no generation, so it costs seconds and no remote server time.
  */
+export type RescoreDialogue = components["schemas"]["RescoreDialogueOut"];
+
+/**
+ * Judges every failed dialogue check of the project again from its stored transcript (SCN-001).
+ * It starts no clip and no job, so there is no job to poll: the lists just refresh.
+ */
+export function useRescoreDialogue(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/shot-takes/rescore-dialogue",
+        { params: { path: { project_id: projectId } } },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not score the dialogue again (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
+/**
+ * Queues a speech check for each selected silent take made before the check existed (SCN-009),
+ * in one scene or, with no scene, in the whole project. Each is a short GPU transcription. The
+ * result is a report: the take stays selected and nothing is made again.
+ */
+export function useCheckSilentSpeech(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sceneId: string | null) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/shot-takes/check-silent-speech",
+        {
+          params: { path: { project_id: projectId } },
+          body: { scene_id: sceneId },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not start the speech check (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () => refreshAfterRun(queryClient, projectId),
+  });
+}
+
 export function useCheckShotTakes(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({

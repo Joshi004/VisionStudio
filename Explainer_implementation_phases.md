@@ -239,6 +239,8 @@ Checked on throwaway data: migration `0073` up, down and up again, and `alembic 
 
 **Status:** Done (code). The playback and phone checks are still the owner's (see the completion notes).
 
+> **Note (CAP-001, `Captions_ytt_implementation_phases.md`):** the `captions` switch of this phase is now `project.caption_mode` (`burned` or `ytt`). Wherever this phase says "`captions` on", read "`caption_mode` is `burned`". The caption track is now built for every explainer and frozen with a `burned` flag; the render burns it in only when `burned` is true.
+
 **Objective.** When `captions` is on, the rendered explainer shows word-synced captions, with the word being spoken highlighted.
 
 **Current state.**

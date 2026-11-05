@@ -1,5 +1,5 @@
-"""Deleting one sample of a lab: an image run, a video run, a speech, a piece of music or an
-Audio video test.
+"""Deleting one sample of a lab: an image run, a video run, a speech, a piece of music, an
+Audio video test or a Graphics run.
 
 A sample is deleted for good, with its file, but only when nothing else uses it. Anything that
 does (a character's look, a saved voice, a take, a project's music, another run that was started
@@ -14,9 +14,19 @@ while removing a file is logged and never raised, because the database is alread
 The jobs behind a sample stay in the Activity list. Their ids are read first when the user asks
 for the GPU server to be cleaned too (`services/server_cleanup.py`).
 
+A character take that made the sample (its picture, its last frame, its speech or its clip) is
+not a place that uses it: the take goes with it, and `preview` says so. Except a take that is a
+clip of an Audio video test (the test needs it), or a take whose clip would stay behind without it
+(the clip is deleted first, which deletes the take). The other runs of a deleted take stay in
+their labs.
+
 An Audio video test is the exception to "nothing uses it": it owns its clips (the takes of its
 parts and their video runs), its two rendered videos, its speech and the slices of it. These go
 with it, except for a speech or a slice that a copy of the test still uses.
+
+A Graphics run is the other exception (GFX-002). Its renders belong to it (they go with it, and
+so does each render's video), and nothing else uses it. The speech and the saved voice it may name
+belong to the Voice lab and stay.
 """
 
 from __future__ import annotations
@@ -26,7 +36,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -43,6 +53,8 @@ from app.db.models import (
     EnvironmentViewState,
     GenerationRequest,
     Job,
+    LabGraphicRender,
+    LabGraphicRun,
     LabImage,
     LabMusicRun,
     LabMusicTrialCase,
@@ -59,6 +71,7 @@ from app.db.models import (
     MusicThemeVersion,
     Project,
     ShotReferenceManifest,
+    Thumbnail,
     Voice,
 )
 from app.jobs import store
@@ -68,8 +81,15 @@ from app.services.storage import Storage, StorageError
 
 _logger = logging.getLogger(__name__)
 
-Kind = Literal["image_run", "video_run", "voice_run", "music_run", "av_test"]
-KINDS: Final[tuple[Kind, ...]] = ("image_run", "video_run", "voice_run", "music_run", "av_test")
+Kind = Literal["image_run", "video_run", "voice_run", "music_run", "av_test", "graphic_run"]
+KINDS: Final[tuple[Kind, ...]] = (
+    "image_run",
+    "video_run",
+    "voice_run",
+    "music_run",
+    "av_test",
+    "graphic_run",
+)
 
 # An owner of a row that uses a sample: what it is (`character`, `environment`, `project`,
 # `take`, `av_test` or `voice`) and its id.
@@ -103,6 +123,8 @@ class Preview:
     sample_id: int
     label: str
     used_by: list[str]
+    # What goes with it, by name: the character takes that made it.
+    also_deletes: list[str]
     blocked_reason: str | None
 
 
@@ -114,6 +136,9 @@ class _Inspection:
     # purges.
     job_ids: set[int] = field(default_factory=set)
     running: bool = False
+    # The character takes that made the sample, deleted with it, and their names.
+    takes: list[CharacterTake] = field(default_factory=list)
+    also_deletes: list[str] = field(default_factory=list)
 
     @property
     def blocked_reason(self) -> str | None:
@@ -162,6 +187,7 @@ _OWNERS: Final[dict[Any, tuple[str, Any]]] = {
     CharacterTake: ("take", CharacterTake.id),
     AvLabTest: ("av_test", AvLabTest.id),
     AvLabSegment: ("av_test", AvLabSegment.test_id),
+    LabGraphicRun: ("graphic_run", LabGraphicRun.id),
     LibraryEnvironmentVersion: ("environment", LibraryEnvironmentVersion.environment_id),
     EnvironmentReferenceCandidate: (
         "environment",
@@ -190,6 +216,7 @@ _OWNERS: Final[dict[Any, tuple[str, Any]]] = {
     ),
     Voice: ("voice", Voice.id),
     LabVoiceRun: ("project", LabVoiceRun.project_id),
+    Thumbnail: ("project", Thumbnail.project_id),
 }
 
 
@@ -268,6 +295,8 @@ async def _name(session: AsyncSession, kind: str, owner_id: int) -> str:
         take = await session.get(CharacterTake, owner_id)
         owner = await session.get(LibraryCharacter, take.character_id) if take else None
         return f"A take of character '{owner.name}'" if owner else f"Character take {owner_id}"
+    if kind == "graphic_run":
+        return f"Graphics run {owner_id}"
     return f"Audio-video test {owner_id}"
 
 
@@ -292,19 +321,75 @@ async def _any_active(session: AsyncSession, job_ids: set[int]) -> bool:
     return active.first() is not None
 
 
+# --- The character takes that made a sample --------------------------------------------------
+
+
+@dataclass
+class _MakerTakes:
+    """The character takes that made a sample, sorted into those that go with it and those that
+    keep it from being deleted.
+    """
+
+    takes: list[CharacterTake] = field(default_factory=list)
+    also_deletes: list[str] = field(default_factory=list)
+    used_by: list[str] = field(default_factory=list)
+    # The jobs of every step of these takes: while one is running, nothing is deleted.
+    job_ids: set[int] = field(default_factory=set)
+
+
+async def _take_job_ids(session: AsyncSession, take: CharacterTake) -> set[int]:
+    job_ids = {take.prompt_job_id} if take.prompt_job_id is not None else set()
+    steps: tuple[tuple[Any, int | None], ...] = (
+        (LabRun, take.image_run_id),
+        (LabRun, take.last_frame_run_id),
+        (LabVoiceRun, take.voice_run_id),
+        (LabVideoRun, take.video_run_id),
+    )
+    for model, run_id in steps:
+        if run_id is not None:
+            job_ids |= await _ids(session, model.job_id, model.id == run_id)
+    return job_ids
+
+
+async def _maker_takes(session: AsyncSession, condition: Any, *, is_clip: bool) -> _MakerTakes:
+    """The takes that match `condition` (the takes that made the sample). `is_clip`: the sample
+    is the take's clip, so no clip of the take is left behind when the take goes.
+    """
+    rows = await session.execute(select(CharacterTake).where(condition).order_by(CharacterTake.id))
+    found = _MakerTakes()
+    for take in rows.scalars():
+        found.job_ids |= await _take_job_ids(session, take)
+        test_ids = await _ids(session, AvLabSegment.test_id, AvLabSegment.take_id == take.id)
+        if test_ids:
+            found.used_by += [f"Audio-video test {test_id}" for test_id in sorted(test_ids)]
+        elif not is_clip and take.video_run_id is not None:
+            found.used_by.append(f"Video lab run {take.video_run_id}")
+        else:
+            character = await session.get(LibraryCharacter, take.character_id)
+            owner = f"'{character.name}'" if character else str(take.character_id)
+            words = take.dialogue or take.action or take.output
+            found.takes.append(take)
+            found.also_deletes.append(f"The take of character {owner}: {_snippet(words)}")
+    return found
+
+
+def _unique(names: list[str]) -> list[str]:
+    return list(dict.fromkeys(names))
+
+
 # --- Looking at a sample ---------------------------------------------------------------------
 
 # The columns that name an image run itself (the columns that name its pictures are
-# `library_deletion.IMAGE_ID_COLUMNS` and `IMAGE_JSON_COLUMNS`).
+# `library_deletion.IMAGE_ID_COLUMNS` and `IMAGE_JSON_COLUMNS`). A take that made the run is not
+# here: it goes with the run (`_maker_takes`).
 _IMAGE_RUN_COLUMNS: Final[tuple[Any, ...]] = (
     CharacterLookCandidate.lab_run_id,
     CharacterReference.lab_run_id,
-    CharacterTake.image_run_id,
-    CharacterTake.last_frame_run_id,
     EnvironmentReferenceCandidate.lab_run_id,
     EnvironmentState.lab_run_id,
     EnvironmentView.lab_run_id,
     EnvironmentViewState.lab_run_id,
+    Thumbnail.lab_run_id,
 )
 
 
@@ -338,43 +423,50 @@ async def _inspect_image_run(session: AsyncSession, run_id: int) -> _Inspection:
         )
         used_by += [f"Video lab run {other}" for other in video_runs]
 
+    makers = await _maker_takes(
+        session,
+        or_(CharacterTake.image_run_id == run_id, CharacterTake.last_frame_run_id == run_id),
+        is_clip=False,
+    )
     job_ids = {run.job_id} if run.job_id is not None else set()
     return _Inspection(
         label=f"Image run {run.id}: {_snippet(run.prompt)}",
-        used_by=used_by,
+        used_by=_unique(used_by + makers.used_by),
         job_ids=job_ids,
-        running=await _any_active(session, job_ids),
+        running=await _any_active(session, job_ids | makers.job_ids),
+        takes=makers.takes,
+        also_deletes=makers.also_deletes,
     )
-
-
-async def _take_names(session: AsyncSession, take_ids: set[int]) -> list[str]:
-    return await _names(session, {("take", take_id) for take_id in take_ids})
 
 
 async def _inspect_video_run(session: AsyncSession, run_id: int) -> _Inspection:
     run = await session.get(LabVideoRun, run_id)
     if run is None:
         raise SampleNotFoundError(f"There is no video run {run_id}.")
-    take_ids = await _ids(session, CharacterTake.id, CharacterTake.video_run_id == run_id)
+    makers = await _maker_takes(session, CharacterTake.video_run_id == run_id, is_clip=True)
     job_ids = {run.job_id} if run.job_id is not None else set()
     return _Inspection(
         label=f"Video run {run.id}: {_snippet(run.prompt)}",
-        used_by=await _take_names(session, take_ids),
+        used_by=makers.used_by,
         job_ids=job_ids,
-        running=await _any_active(session, job_ids),
+        running=await _any_active(session, job_ids | makers.job_ids),
+        takes=makers.takes,
+        also_deletes=makers.also_deletes,
     )
 
 
 async def _voice_run_uses(session: AsyncSession, run_id: int) -> list[str]:
-    """Where a speech is used. A saved voice shares the speech's file, so it counts."""
+    """Where a speech is used. A saved voice shares the speech's file, so it counts. A take
+    that made the speech is not counted here (`_maker_takes`).
+    """
     owners: set[Owner] = set()
     owners |= await _owners_of(session, Voice.lab_voice_run_id, Voice.lab_voice_run_id == run_id)
-    owners |= await _owners_of(
-        session, CharacterTake.voice_run_id, CharacterTake.voice_run_id == run_id
-    )
     owners |= await _owners_of(session, AvLabTest.voice_run_id, AvLabTest.voice_run_id == run_id)
     owners |= await _owners_of(
         session, AvLabSegment.slice_run_id, AvLabSegment.slice_run_id == run_id
+    )
+    owners |= await _owners_of(
+        session, LabGraphicRun.speech_run_id, LabGraphicRun.speech_run_id == run_id
     )
     owners |= await _owners_of_json(session, CharacterTake.audio_input, "voice_runs", {run_id})
     owners |= await _owners_of(session, LabVoiceRun.project_id, LabVoiceRun.id == run_id)
@@ -394,12 +486,16 @@ async def _inspect_voice_run(session: AsyncSession, run_id: int) -> _Inspection:
     run = await session.get(LabVoiceRun, run_id)
     if run is None:
         raise SampleNotFoundError(f"There is no speech {run_id}.")
+    used_by = await _voice_run_uses(session, run_id)
+    makers = await _maker_takes(session, CharacterTake.voice_run_id == run_id, is_clip=False)
     job_ids = {run.job_id} if run.job_id is not None else set()
     return _Inspection(
         label=f"Speech {run.id}: {_snippet(run.text)}",
-        used_by=await _voice_run_uses(session, run_id),
+        used_by=_unique(used_by + makers.used_by),
         job_ids=job_ids,
-        running=await _any_active(session, job_ids),
+        running=await _any_active(session, job_ids | makers.job_ids),
+        takes=makers.takes,
+        also_deletes=makers.also_deletes,
     )
 
 
@@ -484,6 +580,26 @@ async def _inspect_av_test(session: AsyncSession, test_id: int) -> _Inspection:
     )
 
 
+async def _inspect_graphic_run(session: AsyncSession, run_id: int) -> _Inspection:
+    run = await session.get(LabGraphicRun, run_id)
+    if run is None:
+        raise SampleNotFoundError(f"There is no Graphics run {run_id}.")
+    renders = await session.execute(
+        select(LabGraphicRender).where(LabGraphicRender.run_id == run_id)
+    )
+    job_ids = {run.brief_job_id, run.timing_job_id}
+    for render in renders.scalars():
+        job_ids |= {render.input_job_id, render.render_job_id}
+    if run.speech_run_id is not None:
+        job_ids |= await _ids(session, LabVoiceRun.job_id, LabVoiceRun.id == run.speech_run_id)
+    job_ids.discard(None)
+    return _Inspection(
+        label=f"Graphics run {run.id}: {_snippet(run.line_text)}",
+        job_ids=job_ids,
+        running=await _any_active(session, job_ids),
+    )
+
+
 async def _inspect(session: AsyncSession, kind: Kind, sample_id: int) -> _Inspection:
     if kind == "image_run":
         return await _inspect_image_run(session, sample_id)
@@ -493,6 +609,8 @@ async def _inspect(session: AsyncSession, kind: Kind, sample_id: int) -> _Inspec
         return await _inspect_voice_run(session, sample_id)
     if kind == "music_run":
         return await _inspect_music_run(session, sample_id)
+    if kind == "graphic_run":
+        return await _inspect_graphic_run(session, sample_id)
     return await _inspect_av_test(session, sample_id)
 
 
@@ -505,6 +623,7 @@ async def preview(session: AsyncSession, kind: str, sample_id: int) -> Preview:
         sample_id=sample_id,
         label=found.label,
         used_by=found.used_by,
+        also_deletes=found.also_deletes,
         blocked_reason=found.blocked_reason,
     )
 
@@ -550,6 +669,35 @@ async def _remove_music_run(session: AsyncSession, run_id: int) -> list[str]:
     return [run.path] if run.path else []
 
 
+async def _remove_graphic_run(session: AsyncSession, run_id: int) -> list[str]:
+    """Deletes the run and its renders, and returns the videos they stored. The speech of the
+    run's voice goes with it once nothing else uses it (a copy made by Ask again shares it).
+    """
+    run = await session.get(LabGraphicRun, run_id)
+    if run is None:
+        return []
+    speech_id = run.speech_run_id
+    renders = await session.execute(
+        select(LabGraphicRender).where(LabGraphicRender.run_id == run_id)
+    )
+    paths: list[str] = []
+    for render in renders.scalars():
+        if render.media_path:
+            paths.append(render.media_path)
+        await session.delete(render)
+    await session.flush()
+    await session.delete(run)
+    await session.flush()
+    if speech_id is not None:
+        used = await _voice_run_uses(session, speech_id)
+        made_by_takes = await _ids(
+            session, CharacterTake.id, CharacterTake.voice_run_id == speech_id
+        )
+        if not used and not made_by_takes:
+            paths += await _remove_voice_run(session, speech_id)
+    return paths
+
+
 async def _remove_av_test(session: AsyncSession, test_id: int) -> list[str]:
     test = await session.get(AvLabTest, test_id)
     if test is None:
@@ -572,7 +720,9 @@ async def _remove_av_test(session: AsyncSession, test_id: int) -> list[str]:
     if speech_id is not None:
         speech_ids.add(speech_id)
     for run_id in sorted(speech_ids):
-        if not await _voice_run_uses(session, run_id):
+        used = await _voice_run_uses(session, run_id)
+        made_by_takes = await _ids(session, CharacterTake.id, CharacterTake.voice_run_id == run_id)
+        if not used and not made_by_takes:
             paths += await _remove_voice_run(session, run_id)
     return paths
 
@@ -586,6 +736,8 @@ async def _remove_rows(session: AsyncSession, kind: Kind, sample_id: int) -> lis
         return await _remove_voice_run(session, sample_id)
     if kind == "music_run":
         return await _remove_music_run(session, sample_id)
+    if kind == "graphic_run":
+        return await _remove_graphic_run(session, sample_id)
     return await _remove_av_test(session, sample_id)
 
 
@@ -620,9 +772,12 @@ async def delete(
         raise SampleBlockedError(f"{found.label} cannot be deleted: {found.blocked_reason}{places}")
 
     plan = await server_cleanup.make_plan(session, found.job_ids) if purge_server else None
+    for take in found.takes:
+        await session.delete(take)
+    await session.flush()
     paths = await _remove_rows(session, checked, sample_id)
     await session.commit()
-    _logger.info("%s %d deleted", checked, sample_id)
+    _logger.info("%s %d deleted, with %d take(s)", checked, sample_id, len(found.takes))
 
     try:
         await _remove_files(session, storage, paths)

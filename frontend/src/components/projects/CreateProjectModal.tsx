@@ -18,7 +18,10 @@ import { useLibraryCharacters } from "../../api/characterLab";
 import { useLibraryEnvironments } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
-import { PROJECT_KINDS, isProjectKind } from "./projectKinds";
+import { PresenterOutfitField } from "./PresenterOutfitField";
+import { CAPTION_MODES, isCaptionMode } from "./captionModes";
+import type { CaptionMode } from "./captionModes";
+import { PROJECT_KINDS, STAGING_MAX_CHARS, isProjectKind } from "./projectKinds";
 import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
 import type { SpeechMode } from "./speechModes";
@@ -125,10 +128,14 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<ProjectKind>("story");
   const [presenterId, setPresenterId] = useState<string | null>(null);
   const [setId, setSetId] = useState<string | null>(null);
-  const [captions, setCaptions] = useState(true);
+  const [captionMode, setCaptionMode] = useState<CaptionMode>("burned");
   const [callouts, setCallouts] = useState(true);
   const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
   const [delivery, setDelivery] = useState("");
+  const [staging, setStaging] = useState("");
+  const [outfit, setOutfit] = useState("");
+  const [outfitId, setOutfitId] = useState<number | null>(null);
+  const [graphics, setGraphics] = useState(true);
   const [name, setName] = useState("");
 
   const canCreate =
@@ -147,12 +154,18 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         kind,
         presenter_character_id: explainer && presenterId !== null ? Number(presenterId) : null,
         set_environment_id: explainer && setId !== null ? Number(setId) : null,
-        captions: explainer ? captions : true,
+        caption_mode: explainer ? captionMode : "burned",
         callouts: explainer ? callouts : true,
         // A story sends neither: it is always "lines" and has no delivery text.
         voice_track: explainer ? voiceTrack : undefined,
         presenter_delivery:
           explainer && voiceTrack === "continuous" && delivery.trim() !== "" ? delivery : undefined,
+        presenter_staging: explainer && staging.trim() !== "" ? staging : undefined,
+        presenter_outfit:
+          explainer && outfitId === null && outfit.trim() !== "" ? outfit : undefined,
+        presenter_named_look_id: explainer && outfitId !== null ? outfitId : undefined,
+        // Only a continuous explainer can have graphics; any other project leaves it out.
+        graphics: explainer && voiceTrack === "continuous" ? graphics : undefined,
       },
       {
         onSuccess: (project) => {
@@ -267,8 +280,32 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
             <PresenterFields
               presenterId={presenterId}
               setId={setId}
-              onPresenter={setPresenterId}
+              onPresenter={(value) => {
+                setPresenterId(value);
+                // The saved outfits belong to the presenter, so a pick does not carry over.
+                setOutfitId(null);
+              }}
               onSet={setSetId}
+            />
+            <Textarea
+              label="Presenter staging (optional)"
+              description="How the presenter is placed and moves on camera, for example: seated at a desk, hands on the desk, little movement. Left empty, the presenter stands. You can change it later in the project settings."
+              value={staging}
+              onChange={(event) => setStaging(event.currentTarget.value)}
+              maxLength={STAGING_MAX_CHARS}
+              autosize
+              minRows={2}
+              maxRows={6}
+            />
+            <PresenterOutfitField
+              key={presenterId ?? "none"}
+              characterId={presenterId === null ? null : Number(presenterId)}
+              pickedId={outfitId}
+              text={outfit}
+              onChange={(value) => {
+                setOutfitId(value.pickedId);
+                setOutfit(value.text);
+              }}
             />
             <Radio.Group
               label="6. Voice"
@@ -308,16 +345,44 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
                 maxRows={6}
               />
             )}
+            {voiceTrack === "continuous" && (
+              <Switch
+                label="Graphics"
+                description="Charts, diagrams and text cards drawn by code and timed to the presenter's words, for numbers, comparisons, steps and lists. It cannot be changed later."
+                checked={graphics}
+                onChange={(event) => setGraphics(event.currentTarget.checked)}
+              />
+            )}
             <Stack gap="xs">
               <Text size="sm" fw={500}>
                 7. Captions and callouts
               </Text>
-              <Switch
+              <Radio.Group
                 label="Captions"
-                description="Words appear on screen as the presenter speaks them."
-                checked={captions}
-                onChange={(event) => setCaptions(event.currentTarget.checked)}
-              />
+                description="The words are timed to the presenter's voice either way."
+                value={captionMode}
+                onChange={(value) => {
+                  if (isCaptionMode(value)) {
+                    setCaptionMode(value);
+                  }
+                }}
+              >
+                <Stack mt="xs" gap="xs">
+                  {CAPTION_MODES.map((option) => (
+                    <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                      <Group wrap="nowrap" align="flex-start">
+                        <Radio.Indicator />
+                        <Stack gap={2}>
+                          <Text fw={500}>{option.label}</Text>
+                          <Text size="sm" c="dimmed">
+                            {option.description}
+                          </Text>
+                        </Stack>
+                      </Group>
+                    </Radio.Card>
+                  ))}
+                </Stack>
+              </Radio.Group>
               <Switch
                 label="Callouts"
                 description="Short on-screen highlights, such as key ideas and numbers."

@@ -14,6 +14,18 @@ export type RenderTake = components["schemas"]["RenderTakeOut"];
 export type RenderWarning = components["schemas"]["RenderWarningOut"];
 
 /**
+ * The address of a caption file of a render: YouTube's file (CAP-002) or a plain SRT (CAP-003).
+ * The file is written when it is asked for, so this is a plain link: the browser downloads it.
+ */
+export function captionFileUrl(
+  projectId: number,
+  renderNumber: number,
+  format: "ytt" | "srt",
+): string {
+  return `/api/projects/${projectId}/story-renders/${renderNumber}/captions.${format}`;
+}
+
+/**
  * The story-render query of a project. It starts with the shot takes' key, so whatever
  * refreshes those (generating a clip, selecting a take) refreshes this too: the video is made
  * from the selected takes.

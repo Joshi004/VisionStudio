@@ -169,7 +169,8 @@ async def _named_looks_part(
 ) -> list[dict[str, Any]]:
     """The pictures of the character's named looks (PHASE-017) a snapshot freezes, sorted by
     slug. Only a named look whose look is ready is frozen: while one is being redone its entry
-    is carried forward from the newest version, as the current look's is.
+    is carried forward from the newest version, as the current look's is. A deleted outfit
+    (`deleted_at`) is only carried forward, never newly frozen.
     """
     statement = (
         select(CharacterNamedLook)
@@ -182,6 +183,11 @@ async def _named_looks_part(
     }
     entries: list[dict[str, Any]] = []
     for named in (await session.execute(statement)).scalars().all():
+        if named.deleted_at is not None and named.slug not in carried:
+            # A deleted outfit is never added to a version. One the newest version already
+            # froze is carried on, so a project that pins a later version keeps the pictures
+            # its scenes use (deleting an outfit never changes a project).
+            continue
         look = await session.get(CharacterLook, named.look_id) if named.look_id else None
         if look is None:
             continue

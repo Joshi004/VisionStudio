@@ -10,9 +10,21 @@ one click (PHASE-030).
   exists and is out of date, and what those regenerations make necessary, PHASE-040;
   422 when nothing is out of date). A run that is already waiting or running is returned and
   no second one is made. 409 while there are targets to replace and `confirm_overwrite` is false.
+  `scenes` (SCN-004) limits the run to those scenes (their ids): it makes only their targets and
+  the story-wide work that is missing, no music and no full video, and ends with a render of each
+  scene. `remake_from` (a step of `remake_steps`, only with scenes) makes that step's targets in
+  those scenes again once, although they are up to date. A run of exactly one scene also pushes
+  that scene to the front of the GPU server's queue (SCN-002). `GET` takes the same two choices
+  as query parameters, so that `confirmations` are the ones that run would need.
 - `POST .../continue` lets a paused run go on. A run waiting at a review point (PHASE-041) takes
   the optional body `rejected` (`{step, target}` pairs): those targets are made again and the
   run waits at the same review point once more.
+
+- In a run of several scenes (SCN-010) each scene goes through the per-scene steps on its own, and
+  `run.lanes` says where each one stands. The review points of per-scene steps (`scenes`,
+  `staging`, `shot_plans`, `shots`) hold one scene at a time: `scene_reviews` lists the scenes
+  that wait, and `POST .../scene-review/{scene_id}` approves one or rejects some of its targets
+  (`rejected`, as for `continue`). The other scenes go on meanwhile.
 
 The review points are the project's own setting (`PATCH /api/projects/{id}`); a run copies them
 when it starts. `GET` lists them and, while a run waits at one, what there is to review.
@@ -23,10 +35,11 @@ have not started. The answers never return ORM objects.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,10 +49,17 @@ from app.api.projects import load_project
 from app.db.models import Job, Project
 from app.db.session import SessionDep
 from app.jobs import dispatcher, store
-from app.services import review_points, staleness, story_pipeline, story_pipeline_targets
+from app.services import (
+    gpu_priority,
+    review_points,
+    staleness,
+    story_pipeline,
+    story_pipeline_targets,
+)
 from app.services.story_pipeline import StepStatus
 
 router = APIRouter()
+_logger = logging.getLogger(__name__)
 
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No such project."}}
 _NOT_ALLOWED = {
@@ -61,6 +81,8 @@ _UNCONFIRMED = {
 _MAX_NAMED: int = 5
 # The most targets one answer at a review point may reject (a shot per target is the biggest).
 _MAX_REJECTED: int = 500
+# The most scenes one run may be limited to.
+_MAX_SCENES: int = 200
 
 
 class PipelineStepOut(BaseModel):
@@ -91,6 +113,35 @@ class PipelineProblemOut(BaseModel):
     message: str
 
 
+class PipelineSceneOut(BaseModel):
+    """A scene a run is limited to."""
+
+    id: str
+    index: int | None
+    title: str
+
+
+LaneStatus = Literal["waiting", "going", "review", "problem", "done"]
+
+
+class PipelineLaneOut(BaseModel):
+    """Where one scene stands in the scene lanes of a run (SCN-010)."""
+
+    scene_id: str
+    index: int | None
+    title: str
+    status: LaneStatus
+    # The first lane step still open for the scene, or None when the scene is done.
+    step: str | None
+    step_label: str | None
+    # The review point the scene waits at, while its status is `review`.
+    review: str | None
+    review_label: str | None
+    # How many of the lane steps are complete for the scene, of how many.
+    done: int
+    total: int
+
+
 class PipelineRunOut(BaseModel):
     job_id: int
     status: JobStatus
@@ -113,8 +164,15 @@ class PipelineRunOut(BaseModel):
     review_at: str | None
     # What the run makes: everything that is not up to date, or only what is out of date.
     scope: Literal["all", "out_of_date"]
+    # The scenes the run is limited to, in story order (SCN-004). Empty: the whole story.
+    scenes: list[PipelineSceneOut]
+    # The step the run makes again in those scenes, or None.
+    remake_from: str | None
     # How many jobs the run has made so far (a stage that does its work in the run adds none).
     jobs_made: int
+    # Where every scene of the run stands in the scene lanes, in story order (SCN-010). Empty
+    # before the run has a list of scenes.
+    lanes: list[PipelineLaneOut]
 
 
 class PipelineConfirmationOut(BaseModel):
@@ -155,12 +213,26 @@ class ReviewOut(BaseModel):
     steps: list[ReviewStepOut]
 
 
+class SceneReviewOut(BaseModel):
+    """What one scene waits for the user to review (SCN-010): the review point held scene by
+    scene, and the targets of that scene in its steps.
+    """
+
+    scene: PipelineSceneOut
+    key: review_points.ReviewPointKey
+    label: str
+    steps: list[ReviewStepOut]
+
+
 class StoryPipelineOut(BaseModel):
     steps: list[PipelineStepOut]
     # The review points a project can enable, in the order of the pipeline.
     review_points: list[ReviewPointOut]
     # What there is to review, while the newest run waits at a review point. None otherwise.
     review: ReviewOut | None
+    # The scenes of the newest run that wait at a review point of their own, in story order
+    # (SCN-010). The run goes on for the other scenes.
+    scene_reviews: list[SceneReviewOut]
     # The newest run, whatever its status. None when the project never had one.
     run: PipelineRunOut | None
     can_start: bool
@@ -173,6 +245,8 @@ class StoryPipelineOut(BaseModel):
     regenerate_confirmations: list[PipelineConfirmationOut]
     # How many jobs each target gets per step in one run.
     max_tries: int
+    # The steps a run of some scenes can make again from, in the order of the pipeline.
+    remake_steps: list[PipelineStepOut]
 
 
 class PipelineRunBody(BaseModel):
@@ -185,6 +259,12 @@ class PipelineRunBody(BaseModel):
     confirm_overwrite: bool = False
     # `out_of_date`: regenerate only what exists and is out of date (PHASE-040).
     scope: Literal["all", "out_of_date"] = "all"
+    # SCN-004: limit the run to these scenes (their ids). Empty: the whole story.
+    scenes: list[Annotated[str, Field(max_length=64)]] = Field(
+        default_factory=list, max_length=_MAX_SCENES
+    )
+    # SCN-004: make this step again in those scenes, although it is up to date.
+    remake_from: Annotated[str, Field(max_length=64)] | None = None
 
 
 class PipelineRunStartedOut(BaseModel):
@@ -201,8 +281,34 @@ class PipelineContinueBody(BaseModel):
     rejected: list[RejectedTarget] = Field(default_factory=list, max_length=_MAX_REJECTED)
 
 
+class SceneReviewBody(BaseModel):
+    # Targets of the scene the user rejected: they are made again. None: the scene is approved.
+    rejected: list[RejectedTarget] = Field(default_factory=list, max_length=_MAX_REJECTED)
+
+
 def _steps_out() -> list[PipelineStepOut]:
     return [PipelineStepOut(key=step.key, label=step.label) for step in story_pipeline.STEPS]
+
+
+def _remake_steps_out() -> list[PipelineStepOut]:
+    return [
+        PipelineStepOut(key=step.key, label=step.label)
+        for step in story_pipeline.STEPS
+        if step.key in story_pipeline.REMAKE_STEPS
+    ]
+
+
+def _scenes_out(scenes: list[dict[str, Any]], chosen: frozenset[str]) -> list[PipelineSceneOut]:
+    """The scenes of a run's choice, in story order."""
+    return [
+        PipelineSceneOut(
+            id=item["id"],
+            index=item["index"] if isinstance(item.get("index"), int) else None,
+            title=str(item.get("title") or item["id"]),
+        )
+        for item in scenes
+        if item["id"] in chosen
+    ]
 
 
 def _review_points_out() -> list[ReviewPointOut]:
@@ -218,31 +324,20 @@ def _review_at_of(run: Job) -> str | None:
 
 
 async def _review_out(
-    session: AsyncSession, project: Project, review_at: str | None
+    session: AsyncSession,
+    project: Project,
+    review_at: str | None,
+    options: story_pipeline.RunOptions,
 ) -> ReviewOut | None:
     """What the user can approve or reject at the review point the run waits at."""
     point = review_points.POINTS_BY_KEY.get(review_at) if review_at is not None else None
     if point is None:
         return None
-    steps = await story_pipeline_targets.review_targets(session, project, point.key)
-    return ReviewOut(
-        key=point.key,
-        label=point.label,
-        steps=[
-            ReviewStepOut(
-                key=item.step_key,
-                label=item.step_label,
-                targets=[
-                    ReviewTargetOut(key=target.key, label=target.label or item.step_label)
-                    for target in item.targets
-                ],
-            )
-            for item in steps
-        ],
-    )
+    steps = await story_pipeline_targets.review_targets(session, project, point.key, options)
+    return ReviewOut(key=point.key, label=point.label, steps=_review_step_outs(steps))
 
 
-def _run_out(job: Job) -> PipelineRunOut:
+def _run_out(job: Job, scenes: list[dict[str, Any]]) -> PipelineRunOut:
     output = story_pipeline.read_output(job.output)
     options = story_pipeline.RunOptions.from_input(job.input)
     active = job.status in store.ACTIVE_STATUSES
@@ -273,8 +368,101 @@ def _run_out(job: Job) -> PipelineRunOut:
         review_points=review_points.normalize(options.review_points),
         review_at=output["review_at"] if active else None,
         scope=options.scope,
+        scenes=_scenes_out(scenes, options.scenes),
+        remake_from=options.remake_from,
         jobs_made=len(output["job_ids"]),
+        lanes=_lanes_out(output["lanes"], scenes),
     )
+
+
+def _lanes_out(rows: list[dict[str, Any]], scenes: list[dict[str, Any]]) -> list[PipelineLaneOut]:
+    """The stored lane rows of a run, named with their scene (SCN-010)."""
+    by_id = {item["id"]: item for item in scenes}
+    lanes: list[PipelineLaneOut] = []
+    for row in rows:
+        scene_id = row.get("scene")
+        item = by_id.get(scene_id) if isinstance(scene_id, str) else None
+        if item is None:
+            continue
+        step = row.get("step") if row.get("step") in story_pipeline.STEP_LABELS else None
+        review = row.get("review") if row.get("review") in review_points.POINTS_BY_KEY else None
+        status_text = row.get("status")
+        lanes.append(
+            PipelineLaneOut(
+                scene_id=item["id"],
+                index=item["index"] if isinstance(item.get("index"), int) else None,
+                title=str(item.get("title") or item["id"]),
+                status=cast(
+                    LaneStatus,
+                    status_text
+                    if status_text in ("waiting", "going", "review", "problem", "done")
+                    else "waiting",
+                ),
+                step=step,
+                step_label=story_pipeline.STEP_LABELS[step] if step is not None else None,
+                review=review,
+                review_label=review_points.POINTS_BY_KEY[review].label if review else None,
+                done=_count(row.get("done")),
+                total=_count(row.get("total")),
+            )
+        )
+    return lanes
+
+
+def _review_step_outs(steps: list[story_pipeline_targets.ReviewStep]) -> list[ReviewStepOut]:
+    return [
+        ReviewStepOut(
+            key=item.step_key,
+            label=item.step_label,
+            targets=[
+                ReviewTargetOut(key=target.key, label=target.label or item.step_label)
+                for target in item.targets
+            ],
+        )
+        for item in steps
+    ]
+
+
+async def _scene_reviews_out(
+    session: AsyncSession,
+    project: Project,
+    run: Job | None,
+    scenes: list[dict[str, Any]],
+) -> list[SceneReviewOut]:
+    """The scenes that wait at a review point of their own, each with its own targets, in story
+    order (SCN-010). Each point is read once for all its scenes.
+    """
+    if run is None or run.status not in store.ACTIVE_STATUSES:
+        return []
+    waiting: dict[str, str] = story_pipeline.read_output(run.output)["scene_review_at"]
+    options = story_pipeline.RunOptions.from_input(run.input)
+    read: dict[str, list[story_pipeline_targets.ReviewStep]] = {}
+    reviews: list[SceneReviewOut] = []
+    for item in scenes:
+        point = review_points.POINTS_BY_KEY.get(waiting.get(item["id"], ""))
+        if point is None:
+            continue
+        if point.key not in read:
+            read[point.key] = await story_pipeline_targets.review_targets(
+                session, project, point.key, options
+            )
+        mine = [
+            story_pipeline_targets.ReviewStep(
+                step.step_key,
+                step.step_label,
+                [t for t in step.targets if item["id"] in story_pipeline.target_scenes(t)],
+            )
+            for step in read[point.key]
+        ]
+        reviews.append(
+            SceneReviewOut(
+                scene=_scenes_out([item], frozenset({item["id"]}))[0],
+                key=point.key,
+                label=point.label,
+                steps=_review_step_outs(mine),
+            )
+        )
+    return reviews
 
 
 def _count(value: Any) -> int:
@@ -298,7 +486,17 @@ def _problem_out(problem: Any) -> PipelineProblemOut:
     response_model=StoryPipelineOut,
     responses=_NOT_FOUND,
 )
-async def get_story_pipeline(project_id: int, session: SessionDep) -> StoryPipelineOut:
+async def get_story_pipeline(
+    project_id: int,
+    session: SessionDep,
+    scenes: Annotated[
+        list[Annotated[str, Field(max_length=64)]], Query(max_length=_MAX_SCENES)
+    ] = [],  # noqa: B006
+    remake_from: Annotated[str | None, Query(max_length=64)] = None,
+) -> StoryPipelineOut:
+    """The panel's state. `scenes` and `remake_from` are what a run would be started with, so
+    `confirmations` say what that run would replace (SCN-004).
+    """
     project = await load_project(session, project_id)
     run = await store.latest_job(session, project.id, story_pipeline.JOB_TYPE)
     running = run is not None and run.status in store.ACTIVE_STATUSES
@@ -309,20 +507,39 @@ async def get_story_pipeline(project_id: int, session: SessionDep) -> StoryPipel
             project, await story_pipeline.active_jobs(session, project.id)
         )
     # Reading what a run would replace is heavy (it reads five stages): only when it is of use.
+    chosen = _choice(scenes, remake_from)
     pending = (
-        [] if blocked is not None else await story_pipeline_targets.confirmations(session, project)
+        []
+        if blocked is not None
+        else await story_pipeline_targets.confirmations(session, project, chosen)
     )
     review_at = _review_at_of(run) if run is not None and running else None
+    run_options = (
+        story_pipeline.RunOptions.from_input(run.input)
+        if run is not None
+        else story_pipeline.RunOptions()
+    )
+    scene_items = await story_pipeline.scene_items(session, project.id) if run is not None else []
     return StoryPipelineOut(
         steps=_steps_out(),
         review_points=_review_points_out(),
-        review=await _review_out(session, project, review_at),
-        run=_run_out(run) if run is not None else None,
+        review=await _review_out(session, project, review_at, run_options),
+        scene_reviews=await _scene_reviews_out(session, project, run, scene_items),
+        run=_run_out(run, scene_items) if run is not None else None,
         can_start=blocked is None,
         start_block=blocked,
         confirmations=[_confirmation_out(item) for item in pending],
         regenerate_confirmations=[_confirmation_out(item) for item in pending if item.stale],
         max_tries=story_pipeline.MAX_TRIES,
+        remake_steps=_remake_steps_out(),
+    )
+
+
+def _choice(scenes: list[str], remake_from: str | None) -> story_pipeline.RunOptions:
+    """The options a run started with these choices would have (what `confirmations` needs)."""
+    return story_pipeline.RunOptions(
+        scenes=frozenset(scenes),
+        remake_from=remake_from if scenes and remake_from in story_pipeline.REMAKE_STEPS else None,
     )
 
 
@@ -330,6 +547,16 @@ def _confirmation_out(item: story_pipeline_targets.Confirmation) -> PipelineConf
     return PipelineConfirmationOut(
         step=item.step_key, step_label=item.step_label, target=item.target, reason=item.reason
     )
+
+
+async def _nothing_out_of_date(session: AsyncSession, project: Project, scenes: set[str]) -> bool:
+    """Whether there is nothing for a run of scope `out_of_date` to make: nothing is out of
+    date in the project, or in the chosen scenes when there are some.
+    """
+    overview = await staleness.overview(session, project)
+    if not scenes:
+        return overview.count == 0
+    return not any(item.scene_id in scenes for group in overview.groups for item in group.items)
 
 
 def _unconfirmed_message(
@@ -366,6 +593,14 @@ async def run_story_pipeline(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"There is no step {', '.join(repr(key) for key in unknown)}.",
         )
+    scenes = set(body.scenes)
+    if body.remake_from is not None and (
+        body.remake_from not in story_pipeline.REMAKE_STEPS or not scenes
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A scene can only be made again from a step of the list, and the run needs a scene.",
+        )
     if await story_pipeline.active_run(session, project.id) is None:
         blocked = story_pipeline.start_block(
             project, await story_pipeline.active_jobs(session, project.id)
@@ -374,27 +609,42 @@ async def run_story_pipeline(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, blocked)
         if (
             body.scope == story_pipeline.SCOPE_OUT_OF_DATE
-            and (await staleness.overview(session, project)).count == 0
+            and body.remake_from is None
+            and await _nothing_out_of_date(session, project, scenes)
         ):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                "Nothing is out of date, so there is nothing to regenerate.",
+                "Nothing is out of date in the chosen scenes, so there is nothing to regenerate."
+                if scenes
+                else "Nothing is out of date, so there is nothing to regenerate.",
             )
-        pending = await story_pipeline_targets.confirmations(session, project)
+        pending = await story_pipeline_targets.confirmations(
+            session, project, _choice(body.scenes, body.remake_from)
+        )
         if body.scope == story_pipeline.SCOPE_OUT_OF_DATE:
             pending = [item for item in pending if item.stale]
         if pending and not body.confirm_overwrite:
             raise HTTPException(status.HTTP_409_CONFLICT, _unconfirmed_message(pending))
     try:
-        job, _created = await story_pipeline.start_run(
+        job, created = await story_pipeline.start_run(
             session,
             project,
             pause_after=body.pause_after,
             confirm_overwrite=body.confirm_overwrite,
             scope=body.scope,
+            scenes=body.scenes,
+            remake_from=body.remake_from,
         )
     except story_pipeline.StoryPipelineError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    if created and len(scenes) == 1:
+        # The owner asked for this scene now (SCN-002): its clips go to the front of the queue.
+        # Done before the nudge, so the first clips are sent at level 1.
+        (scene_id,) = scenes
+        try:
+            await gpu_priority.push_scene(session, project, scene_id)
+        except gpu_priority.PushError:
+            _logger.warning("scene '%s' of project %d could not be pushed", scene_id, project.id)
     dispatcher.nudge()
     return PipelineRunStartedOut(job_id=job.id)
 
@@ -420,8 +670,54 @@ async def continue_story_pipeline(
     return PipelineRunStartedOut(job_id=job.id)
 
 
+@router.post(
+    "/projects/{project_id}/story-pipeline/scene-review/{scene_id}",
+    response_model=PipelineRunStartedOut,
+    responses={**_NOT_FOUND, **_NOT_ALLOWED},
+)
+async def answer_scene_review(
+    project_id: int,
+    scene_id: Annotated[str, Path(max_length=64)],
+    session: SessionDep,
+    body: SceneReviewBody | None = None,
+) -> PipelineRunStartedOut:
+    """Answers the review one scene waits at (SCN-010). The run goes on for the other scenes.
+    The targets in `rejected` are made again and the scene waits at the same review point once
+    more; with none, the scene is approved and goes on. 422 when the scene is not waiting.
+    """
+    project = await load_project(session, project_id)
+    run = await story_pipeline.active_run(session, project.id)
+    review_at = (
+        story_pipeline.read_output(run.output)["scene_review_at"].get(scene_id)
+        if run is not None
+        else None
+    )
+    if run is None or review_at is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "This scene is not waiting for a review."
+        )
+    rejected = await _check_rejected(
+        session,
+        project,
+        body.rejected if body is not None else [],
+        point_key=review_at,
+        scene_id=scene_id,
+    )
+    try:
+        job = await story_pipeline.answer_scene_review(session, project, scene_id, rejected)
+    except story_pipeline.StoryPipelineError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return PipelineRunStartedOut(job_id=job.id)
+
+
 async def _check_rejected(
-    session: AsyncSession, project: Project, rejected: list[RejectedTarget]
+    session: AsyncSession,
+    project: Project,
+    rejected: list[RejectedTarget],
+    *,
+    point_key: str | None = None,
+    scene_id: str | None = None,
 ) -> dict[str, list[str]]:
     """The rejected targets by step, each checked against what the review point lists. 422 for
     one that is not there, naming it.
@@ -433,7 +729,9 @@ async def _check_rejected(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "There is no run going on for this project."
         )
-    review_at = _review_at_of(run)
+    # A scene waiting at its own review point (SCN-010) names the point and the scene; the run's
+    # own review point is the one the whole run waits at.
+    review_at = point_key if point_key is not None else _review_at_of(run)
     if review_at is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -441,7 +739,13 @@ async def _check_rejected(
         )
     listed = {
         item.step_key: item
-        for item in await story_pipeline_targets.review_targets(session, project, review_at)
+        for item in await story_pipeline_targets.review_targets(
+            session,
+            project,
+            review_at,
+            story_pipeline.RunOptions.from_input(run.input),
+            scene_id,
+        )
     }
     found: dict[str, list[str]] = {}
     for entry in rejected:

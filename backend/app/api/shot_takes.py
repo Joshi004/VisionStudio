@@ -9,9 +9,16 @@
   be pressed. Out of date is worked out on every read.
 - `POST .../check` ("Check takes") starts the local job that checks the clips made before the
   checks existed. It starts no generation.
+- `POST .../rescore-dialogue` ("Score dialogue again", SCN-001) judges every failed dialogue check
+  again from its stored transcript, with no GPU work and no new job, and answers what changed.
+- `POST .../check-silent-speech` (SCN-009) queues a speech check for each selected silent take made
+  before the check existed, in one scene or the whole project. The result is a report only.
 - `POST .../run` ("Generate all") starts one job for every shot, in every scene, whose prompt is
   compiled and current and that has no current take and is not already being generated.
-- `POST .../{scene_id}/run` starts the jobs for the shots of one scene.
+- `POST .../{scene_id}/run` starts the jobs for the shots of one scene, and pushes the scene to the
+  front of the GPU server's queue.
+- `POST .../{scene_id}/push` and `DELETE .../push` (SCN-002) push one scene to the front of the
+  server's queue, and end the push. Neither starts a generation.
 - `POST .../{scene_id}/{shot_id}/run` starts one more take of one shot (Generate or Regenerate).
 - `PUT .../{scene_id}/{shot_id}/voice-source` (FLOW-008) sets which voice a presenter shot of a
   continuous explainer is heard with in the render: `take` (the default) or `clip`. It only makes
@@ -57,7 +64,7 @@ from app.api.scene_filter import (
 from app.db.models import Asset, Job
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import shot_takes, shot_voice_sources, storage
+from app.services import gpu_priority, shot_takes, shot_voice_sources, storage
 from app.services.shot_takes import SceneEntry, ShotEntry, TakeEntry
 
 _logger = logging.getLogger(__name__)
@@ -80,9 +87,39 @@ TakeState = Literal["generating", "checking_dialogue", "ready", "failed"]
 PromptStatus = Literal["not_compiled", "compiled", "out_of_date"]
 # `presenter` is the type of a shot of a continuous explainer that shows the presenter (FLOW-005).
 ShotType = Literal[
-    "establishing", "action", "reaction", "dialogue", "insert", "transition", "presenter"
+    "establishing",
+    "action",
+    "reaction",
+    "dialogue",
+    "insert",
+    "transition",
+    "presenter",
+    "graphic",
 ]
 ProblemKind = Literal["clip", "plan"]
+DialogueOutcome = Literal[
+    "matched",
+    "close_match",
+    "not_verifiable",
+    "mismatch",
+    "no_speech",
+    # SCN-009: words heard outside the time of the lines, and the two results of a shot with no
+    # dialogue (no words heard, or words heard).
+    "extra_speech",
+    "silent",
+    "speech_heard",
+]
+DialogueMode = Literal["dialogue", "silent"]
+_DIALOGUE_OUTCOMES = (
+    "matched",
+    "close_match",
+    "not_verifiable",
+    "mismatch",
+    "no_speech",
+    "extra_speech",
+    "silent",
+    "speech_heard",
+)
 VoiceSource = Literal["take", "clip"]
 
 
@@ -128,6 +165,18 @@ class TakeDialogueOut(BaseModel):
     checked_at: datetime | None
     # True when the check failed and the user selected the take anyway.
     accepted: bool
+    # SCN-001: what kind of answer the check gave, and the matching step at which it passed
+    # (`exact`, `numbers`, `spelling`, `homophones`, `short_line`, `not_verifiable`; None when it
+    # failed). `close_match` is a pass under the short-line rule, and `not_verifiable` a pass
+    # because nothing was heard on a line too slight to check.
+    outcome: DialogueOutcome = "matched"
+    rule: str | None = None
+    # SCN-009: `dialogue` (the words of the lines were compared) or `silent` (a shot with no
+    # dialogue, checked for words); the words heard outside every line's time (not fillers);
+    # and whether this is a report on an older take, which never changes the selection.
+    mode: DialogueMode = "dialogue"
+    extra_text: str = ""
+    report_only: bool = False
 
 
 AnchorUse = Literal["first_frame", "reference"]
@@ -184,6 +233,12 @@ class ShotTakeOut(BaseModel):
     anchor: TakeAnchorOut | None = None
     # The version of the shot prompt this take was made from, or None (PHASE-038).
     prompt_version: int | None = None
+    # SCN-009: the take's speech is judged (it has lines, or it is a silent take that is checked
+    # for words), so it waits for its check before it is selected.
+    checks_speech: bool = False
+    # SCN-009: the selected take of a shot with no dialogue, made before the speech check existed,
+    # that "Check silent takes for speech" can report on.
+    can_audit_speech: bool = False
 
 
 class TakeShotSkeletonOut(BaseModel):
@@ -213,6 +268,9 @@ class ShotTakesEntryOut(BaseModel):
     # FLOW-008: the voice a presenter shot of a continuous explainer is heard with in the render,
     # the scene's voice take or its clip's own sound. None for every other shot.
     voice_source: VoiceSource | None = None
+    # SCN-001: the shot failed and its two newest takes heard the same words, so no more takes
+    # are made by themselves. The owner listens and uses a take anyway, or changes the prompt.
+    needs_review: bool = False
 
 
 class SceneShotTakesOut(BaseModel):
@@ -238,6 +296,27 @@ class ShotTakesOut(BaseModel):
     check_job: DiscoveryJobOut | None
     # The most automatic retries a failed clip gets (0 means none).
     max_retries: int
+    # SCN-001: how many takes have a failed dialogue check that "Score dialogue again" can judge.
+    rescorable_count: int = 0
+    # SCN-009: how many selected silent takes have no speech check (made before it existed).
+    silent_unchecked_count: int = 0
+    # SCN-002: the scene pushed to the front of the GPU server's queue, or None.
+    pushed_scene_id: str | None = None
+
+
+class PushSceneOut(BaseModel):
+    """What a push (or "Stop pushing") did to the clips of the scene that already wait on the
+    GPU server. Clips not yet sent take the new level when they are sent.
+    """
+
+    # The scene pushed (or, after a stop, the scene that was pushed). None when none was.
+    scene_id: str | None
+    # Clips whose priority on the server was changed.
+    changed: int
+    # Clips that had already started (or were gone): nothing to change.
+    already_running: int
+    # Clips whose change the server did not answer. They keep their old level.
+    not_reached: int
 
 
 class ShotTakesSkippedOut(BaseModel):
@@ -264,6 +343,36 @@ class SelectedTakeOut(BaseModel):
 
 class ShotTakesCheckOut(BaseModel):
     job_id: int
+
+
+class CheckSilentSpeechIn(BaseModel):
+    """SCN-009: the scene to check, or none for the whole project."""
+
+    scene_id: DiscoveryId | None = None
+
+
+class CheckSilentSpeechOut(BaseModel):
+    """The speech checks queued for older silent takes. Each is a short GPU transcription."""
+
+    job_ids: list[int]
+
+
+class RescoredTakeOut(BaseModel):
+    scene_id: str
+    shot_id: str
+    take_number: int
+
+
+class RescoreDialogueOut(BaseModel):
+    """What "Score dialogue again" did (SCN-001): no clip was made and no job was queued."""
+
+    # How many failed dialogue checks were judged again.
+    rescored: int
+    # How many of them pass now, by the matching step at which they passed.
+    now_passing_by_rule: dict[str, int]
+    still_failing: int
+    # The takes that became their shot's selected take.
+    selected: list[RescoredTakeOut]
 
 
 class VoiceSourceIn(BaseModel):
@@ -301,13 +410,29 @@ def _validation_out(validation: dict[str, Any] | None) -> TakeValidationOut | No
     )
 
 
+def _dialogue_outcome(result: dict[str, Any], problems: list[Any]) -> DialogueOutcome:
+    """The outcome a check recorded. A check made before SCN-001 recorded none: a pass is
+    `matched`, and a failure is told by its problem code.
+    """
+    stored = result.get("outcome")
+    if stored in _DIALOGUE_OUTCOMES:
+        return cast(DialogueOutcome, stored)
+    if result.get("passed") is True:
+        return "matched"
+    codes = [problem.get("code") for problem in problems if isinstance(problem, dict)]
+    return "no_speech" if "no_speech" in codes else "mismatch"
+
+
 def _dialogue_check_out(result: dict[str, Any] | None) -> TakeDialogueOut | None:
     if result is None:
         return None
     checked_at = result.get("checked_at")
     similarity = result.get("similarity")
     threshold = result.get("threshold")
+    problems = result.get("problems", [])
     return TakeDialogueOut(
+        outcome=_dialogue_outcome(result, problems),
+        rule=result.get("rule") if isinstance(result.get("rule"), str) else None,
         passed=result.get("passed") is True,
         similarity=float(similarity) if isinstance(similarity, int | float) else 0.0,
         threshold=threshold if isinstance(threshold, int) else 0,
@@ -319,6 +444,9 @@ def _dialogue_check_out(result: dict[str, Any] | None) -> TakeDialogueOut | None
         heard_text=str(result.get("heard_text", "")),
         checked_at=datetime.fromisoformat(checked_at) if isinstance(checked_at, str) else None,
         accepted=result.get("accepted_at") is not None,
+        mode="silent" if result.get("mode") == "silent" else "dialogue",
+        extra_text=str(result.get("extra_text", "")),
+        report_only=result.get("report_only") is True,
     )
 
 
@@ -373,6 +501,8 @@ def _take_out(entry: TakeEntry, frame_urls: dict[int, str]) -> ShotTakeOut:
         dialogue_job=_job_out(entry.dialogue_job),
         anchor=_anchor_out(entry, frame_urls),
         prompt_version=shot_takes.prompt_version_of(row),
+        checks_speech=entry.checks_speech,
+        can_audit_speech=entry.can_audit_speech,
     )
 
 
@@ -396,6 +526,7 @@ def _shot_out(entry: ShotEntry, frame_urls: dict[int, str]) -> ShotTakesEntryOut
         blocked_reason=entry.blocked_reason,
         continues_from=entry.continues_from,
         voice_source=cast(VoiceSource | None, entry.voice_source),
+        needs_review=entry.needs_review,
     )
 
 
@@ -484,6 +615,9 @@ async def get_shot_takes(
         unchecked_count=result.unchecked_count,
         check_job=_job_out(result.check_job),
         max_retries=result.max_retries,
+        rescorable_count=result.rescorable_count,
+        silent_unchecked_count=result.silent_unchecked_count,
+        pushed_scene_id=project.pushed_scene_id,
     )
 
 
@@ -504,6 +638,54 @@ async def check_takes(project_id: int, session: SessionDep) -> ShotTakesCheckOut
         raise _refused(exc) from exc
     dispatcher.nudge()
     return ShotTakesCheckOut(job_id=job.id)
+
+
+@router.post(
+    "/projects/{project_id}/shot-takes/rescore-dialogue",
+    response_model=RescoreDialogueOut,
+    responses=_NOT_FOUND,
+)
+async def rescore_dialogue(project_id: int, session: SessionDep) -> RescoreDialogueOut:
+    """Judges every failed dialogue check of the project again from the words it recorded as
+    heard, with the current matching rules (SCN-001). Nothing is transcribed, no clip is made and
+    no job is queued. A shot with no selected take gets its newest take that passes now.
+    """
+    project = await load_project(session, project_id)
+    report = await shot_takes.rescore_dialogue(session, project)
+    return RescoreDialogueOut(
+        rescored=report.rescored,
+        now_passing_by_rule=report.now_passing_by_rule,
+        still_failing=report.still_failing,
+        selected=[
+            RescoredTakeOut(scene_id=scene_id, shot_id=shot_id, take_number=number)
+            for scene_id, shot_id, number in report.selected
+        ],
+    )
+
+
+@router.post(
+    "/projects/{project_id}/shot-takes/check-silent-speech",
+    response_model=CheckSilentSpeechOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def check_silent_speech(
+    project_id: int, session: SessionDep, body: CheckSilentSpeechIn | None = None
+) -> CheckSilentSpeechOut:
+    """Queues a speech check for each selected take of a shot with no dialogue that was made
+    before the check existed, in one scene or in the whole project (SCN-009). Each is a short
+    GPU transcription and starts only from this call. The result is a report: the take stays
+    selected and no retry is queued. 422 when no take needs it.
+    """
+    project = await load_project(session, project_id)
+    try:
+        jobs = await shot_takes.start_silent_speech_check(
+            session, project, body.scene_id if body is not None else None
+        )
+    except shot_takes.ShotTakesError as exc:
+        raise _refused(exc) from exc
+    dispatcher.nudge()
+    return CheckSilentSpeechOut(job_ids=[job.id for job in jobs])
 
 
 @router.post(
@@ -544,8 +726,54 @@ async def run_scene(
     except shot_takes.ShotTakesError as exc:
         raise _refused(exc) from exc
     if started.job_ids:
+        # The owner asked for this scene now (SCN-002): its clips go to the front of the
+        # server's queue. Done before the nudge, so the new jobs are sent at level 1.
+        try:
+            await gpu_priority.push_scene(session, project, scene_id)
+        except gpu_priority.PushError:
+            _logger.warning("scene '%s' of project %d could not be pushed", scene_id, project.id)
         dispatcher.nudge()
     return _run_many_out(started)
+
+
+def _push_out(report: gpu_priority.PushReport) -> PushSceneOut:
+    return PushSceneOut(
+        scene_id=report.scene_id,
+        changed=report.changed,
+        already_running=report.already_running,
+        not_reached=report.not_reached,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/shot-takes/{scene_id}/push",
+    response_model=PushSceneOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def push_scene(project_id: int, scene_id: DiscoveryId, session: SessionDep) -> PushSceneOut:
+    """Pushes one scene to the front of the GPU server's queue (SCN-002): its clips are sent
+    with the most urgent priority, and the ones already waiting on the server are changed. A
+    scene pushed before goes back to its place in story order. Starts no generation.
+    """
+    project = await load_project(session, project_id)
+    try:
+        report = await gpu_priority.push_scene(session, project, scene_id)
+    except gpu_priority.PushError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return _push_out(report)
+
+
+@router.delete(
+    "/projects/{project_id}/shot-takes/push",
+    response_model=PushSceneOut,
+    responses=_NOT_FOUND,
+)
+async def stop_push(project_id: int, session: SessionDep) -> PushSceneOut:
+    """Ends the push: the scene's clips go back to their place in story order. Does nothing
+    when no scene is pushed.
+    """
+    project = await load_project(session, project_id)
+    return _push_out(await gpu_priority.stop_push(session, project))
 
 
 @router.post(
