@@ -2424,6 +2424,11 @@ async def _evaluate_scene_render(
         active = _active(scene.job)
         newest = scene.renders[0] if scene.renders else None
         done = newest is not None and newest.status == scene_renders.STATUS_CURRENT and not active
+        if not options.scenes and newest is not None and newest.final_music_only and not active:
+            # SCN-013: once the final music is placed, a scene render made before it (with
+            # provisional music, or none) is kept in a run of the whole story. The full video
+            # has the final music; "Render scene" makes this one again.
+            done = True
         if not options.scenes and not done and not active and not scene.can_render:
             # In a run of the whole story the scene render is a convenience at the end of the
             # lane: a scene that cannot be rendered must not stop the run from finishing (the

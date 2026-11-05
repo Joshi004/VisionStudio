@@ -27,7 +27,7 @@ from app.api.projects import load_project
 from app.db.models import Job, SceneRender, StoryRender
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import storage, story_renders
+from app.services import scene_renders, storage, story_renders
 from app.services.story_renders import RenderEntry
 
 router = APIRouter()
@@ -151,6 +151,18 @@ class StoryRenderOut(BaseModel):
     job: DiscoveryJobOut | None
 
 
+class SceneChangeOut(BaseModel):
+    """A scene of the newest full render that differs from its newest scene render (SCN-013)."""
+
+    scene_id: str
+    scene_index: int
+    title: str
+    # False when the scene has no scene render at all (then `reasons` is empty).
+    has_scene_render: bool
+    # What differs, one sentence each. Music, captions, callouts and the mix are not compared.
+    reasons: list[str]
+
+
 class StoryRendersOut(BaseModel):
     can_render: bool
     # Why Render may not be pressed, or None.
@@ -168,6 +180,9 @@ class StoryRendersOut(BaseModel):
     # The newest render job, whatever its status.
     job: DiscoveryJobOut | None
     renders: list[StoryRenderOut]
+    # The scenes of the newest render that differ from their newest scene render, in story
+    # order. Empty when there is no render yet.
+    changed_scenes: list[SceneChangeOut]
 
 
 class StoryRenderRunOut(BaseModel):
@@ -309,6 +324,11 @@ def _render_out(entry: RenderEntry) -> StoryRenderOut:
 async def get_story_renders(project_id: int, session: SessionDep) -> StoryRendersOut:
     project = await load_project(session, project_id)
     result = await story_renders.state(session, project)
+    changes: list[scene_renders.SceneChange] = []
+    if result.renders and isinstance(result.renders[0].row.inputs, dict):
+        changes = await scene_renders.changed_scenes(
+            session, project.id, result.renders[0].row.inputs
+        )
     return StoryRendersOut(
         can_render=result.can_render,
         blocked_reason=result.blocked_reason,
@@ -324,6 +344,16 @@ async def get_story_renders(project_id: int, session: SessionDep) -> StoryRender
         ambience_enabled=result.ambience_enabled,
         job=job_out(result.job),
         renders=[_render_out(entry) for entry in result.renders],
+        changed_scenes=[
+            SceneChangeOut(
+                scene_id=change.scene_id,
+                scene_index=change.index,
+                title=change.title,
+                has_scene_render=change.has_render,
+                reasons=change.reasons,
+            )
+            for change in changes
+        ],
     )
 
 

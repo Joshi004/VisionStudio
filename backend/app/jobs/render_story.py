@@ -157,6 +157,10 @@ class Shot:
     graphic_id: int | None = None
     # Only in a scene render: the shot has no clip, so `path` is empty and a frame is drawn.
     placeholder: Placeholder | None = None
+    # SCN-013: a longer fade of the clip's own sound at the edge of a scene (the first shot fades
+    # in, the last fades out). None: the usual fade.
+    fade_in_s: float | None = None
+    fade_out_s: float | None = None
 
     @property
     def label(self) -> str:
@@ -285,6 +289,19 @@ def _number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)
+
+
+def _parse_fade(entry: dict[str, Any], key: str) -> float | None:
+    """A shot's longer fade at a scene's edge (SCN-013), or None when the timeline has none (a
+    timeline made before the phase). A value that is there must be a positive number.
+    """
+    raw = entry.get(key)
+    if raw is None:
+        return None
+    value = _number(raw)
+    if value is None or value <= 0:
+        raise RenderFailed(_CHANGED_MESSAGE)
+    return value
 
 
 def _windows(value: object) -> tuple[tuple[float, float], ...] | None:
@@ -570,6 +587,10 @@ def parse_timeline(recorded: object) -> Timeline:
         index = _whole(entry.get("scene_index"))
         duck, bed_duck = _windows(entry.get("duck")), _windows(entry.get("bed_duck"))
         voice_of_shot, window = entry.get("voice"), _parse_voice_window(entry.get("voice_window"))
+        fade_in, fade_out = (
+            _parse_fade(entry, "sound_fade_in_s"),
+            _parse_fade(entry, "sound_fade_out_s"),
+        )
         scene_id, shot_id, path = entry.get("scene_id"), entry.get("shot_id"), entry.get("path")
         # A placeholder (a scene render) has neither take, graphic nor file.
         placeholder = _parse_placeholder(entry.get("placeholder"))
@@ -622,6 +643,8 @@ def parse_timeline(recorded: object) -> Timeline:
                 window,
                 graphic_id,
                 placeholder,
+                fade_in,
+                fade_out,
             )
         )
     if sum(shot.frames for shot in shots) != total:
@@ -1227,7 +1250,8 @@ def clip_audio(
                 timeline.shot_target_lufs,
                 timeline.max_boost_db,
             ),
-            fade_s=timeline.voice_fade_s,
+            fade_in_s=timeline.voice_fade_s,
+            fade_out_s=timeline.voice_fade_s,
         )
     if audio is None:
         return None
@@ -1243,6 +1267,8 @@ def clip_audio(
         bed_duck_windows=shot.bed_duck,
         bed_duck_db=timeline.bed_shot_duck_db,
         bed_duck_ramp_s=timeline.bed_shot_ramp_s,
+        fade_in_s=shot.fade_in_s if shot.fade_in_s is not None else render_commands.FADE_S,
+        fade_out_s=shot.fade_out_s if shot.fade_out_s is not None else render_commands.FADE_S,
     )
 
 

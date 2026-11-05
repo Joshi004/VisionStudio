@@ -19,6 +19,7 @@ import {
   useRenderStory,
   useStoryRenders,
   type StoryRender,
+  type StoryRenders,
 } from "../../api/storyRenders";
 import { formatBytes, formatDateTime } from "../../format";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
@@ -87,6 +88,38 @@ function masterText(master: NonNullable<StoryRender["master"]>): string {
       ? "not measured"
       : `${master.final_lufs.toFixed(1)} LUFS, true peak ${master.final_true_peak_dbtp.toFixed(1)} dBTP`;
   return `${reached} (target ${master.target_lufs} LUFS, ceiling ${master.true_peak_db} dBTP)`;
+}
+
+/**
+ * The scenes of the newest render that differ from their newest scene render (SCN-013), and the
+ * scenes that have no scene render at all (on one line). Music is not compared: a scene
+ * render's music is cut to its window and may be provisional.
+ */
+function ChangedScenes({ scenes }: { scenes: StoryRenders["changed_scenes"] }) {
+  const different = scenes.filter((scene) => scene.has_scene_render);
+  const missing = scenes.filter((scene) => !scene.has_scene_render);
+  if (scenes.length === 0) {
+    return null;
+  }
+  return (
+    <Stack gap={2}>
+      {different.length > 0 && (
+        <Text size="xs" fw={500}>
+          Scenes that differ from their scene renders
+        </Text>
+      )}
+      {different.map((scene) => (
+        <Text key={scene.scene_id} size="xs" c="yellow.8">
+          Scene {scene.scene_index}: {scene.title}. {scene.reasons.join(" ")}
+        </Text>
+      ))}
+      {missing.length > 0 && (
+        <Text size="xs" c="dimmed">
+          No scene render: scene {missing.map((scene) => scene.scene_index).join(", ")}.
+        </Text>
+      )}
+    </Stack>
+  );
 }
 
 /** One render in the list: its status, why it is out of date, and what it was made from. */
@@ -275,6 +308,7 @@ export function StoryRenderPanel({ projectId }: StoryRenderPanelProps) {
                 {note}
               </Text>
             ))}
+            <ChangedScenes scenes={data?.changed_scenes ?? []} />
           </Stack>
         )}
 

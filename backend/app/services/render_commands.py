@@ -68,9 +68,11 @@ class ClipAudio:
     bed_duck_windows: tuple[tuple[float, float], ...] = ()
     bed_duck_db: float = 0.0
     bed_duck_ramp_s: float = 0.0
-    # The fade at both ends of the sound. A presenter clip whose own voice is used in place of
-    # the take fades over the crossfade of the voice layer (FLOW-008).
-    fade_s: float = FADE_S
+    # The fade at each end of the sound. A presenter clip whose own voice is used in place of
+    # the take fades over the crossfade of the voice layer (FLOW-008). The first and the last
+    # shot of a scene fade longer at the scene's edge (SCN-013).
+    fade_in_s: float = FADE_S
+    fade_out_s: float = FADE_S
 
 
 def clip_gain_db(volume: float, voice_lufs: float | None, clip_lufs: float | None) -> float:
@@ -181,7 +183,8 @@ def shot_sound_graph(audio: ClipAudio | None, samples: int) -> str:
     # first). The fade-out is placed there, not at the padded end: a fade on the silence
     # would leave a click where the real sound stops.
     available = scene_s if audio.duration_s is None else min(audio.duration_s, scene_s)
-    fade = min(audio.fade_s, available / 2)
+    fade_in = min(audio.fade_in_s, available / 2)
+    fade_out = min(audio.fade_out_s, available / 2)
     steps = [
         *stereo_filters(audio.channels),
         f"aresample={SAMPLE_RATE}",
@@ -199,8 +202,8 @@ def shot_sound_graph(audio: ClipAudio | None, samples: int) -> str:
             else []
         ),
         f"atrim=end={available:.6f}",
-        f"afade=t=in:st=0:d={fade:.6f}",
-        f"afade=t=out:st={available - fade:.6f}:d={fade:.6f}",
+        f"afade=t=in:st=0:d={fade_in:.6f}",
+        f"afade=t=out:st={available - fade_out:.6f}:d={fade_out:.6f}",
         f"apad=whole_len={samples}",
         f"atrim=end_sample={samples}",
         f"aformat=sample_fmts=s16:sample_rates={SAMPLE_RATE}:channel_layouts=stereo",

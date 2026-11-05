@@ -77,6 +77,9 @@ JOB_TYPE: Final = "render_story"
 Status = Literal["current", "out_of_date"]
 
 _ALREADY_RENDERING: Final = "A render is already being made."
+# SCN-013: the reason of a render made with no music, once the music has been placed. A scene
+# render of a full run that has only this reason is kept (the full render has the final music).
+MUSIC_PLACED_SINCE: Final = "Music has been placed since this video was made."
 
 
 class StoryRendersError(ValueError):
@@ -620,7 +623,7 @@ def music_reasons(
         else:
             reasons.append("The music of this video is no longer part of the story.")
     elif used is None and source is not None:
-        reasons.append("Music has been placed since this video was made.")
+        reasons.append(MUSIC_PLACED_SINCE)
     elif used is not None and source is not None:
         if used.get("placement_id") != source.placement_id:
             reasons.append(

@@ -12731,6 +12731,22 @@ export interface components {
             /** Seam S */
             seam_s: number | null;
         };
+        /**
+         * SceneChangeOut
+         * @description A scene of the newest full render that differs from its newest scene render (SCN-013).
+         */
+        SceneChangeOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Scene Index */
+            scene_index: number;
+            /** Title */
+            title: string;
+            /** Has Scene Render */
+            has_scene_render: boolean;
+            /** Reasons */
+            reasons: string[];
+        };
         /** SceneContinuityOut */
         SceneContinuityOut: {
             /** Id */
@@ -15721,6 +15737,8 @@ export interface components {
             job: components["schemas"]["DiscoveryJobOut"] | null;
             /** Renders */
             renders: components["schemas"]["StoryRenderOut"][];
+            /** Changed Scenes */
+            changed_scenes: components["schemas"]["SceneChangeOut"][];
         };
         /**
          * StoryVoiceEntryOut

@@ -62,6 +62,9 @@ STATUS_OUT_OF_DATE: Final = "out_of_date"
 
 _ALREADY_RENDERING: Final = "A render of this scene is already being made."
 _NO_SUCH_SCENE: Final = "The story has no such scene."
+# SCN-013: the reason of a render made with provisional music, once the final placement exists.
+FINAL_MUSIC_SINCE: Final = "The final music placement was made since this video was made."
+_FINAL_MUSIC_REASONS: Final = frozenset({FINAL_MUSIC_SINCE, story_renders.MUSIC_PLACED_SINCE})
 # The scene's place in the story may differ by this much before a render is out of date for it.
 _START_TOLERANCE_S: Final = 0.0005
 
@@ -79,6 +82,9 @@ class SceneRenderEntry:
     status: str
     # Why the render is out of date, one sentence each. Empty when it is current.
     reasons: list[str]
+    # SCN-013: it is out of date only because the final music placement exists now. A full run
+    # keeps such a render (the full video has the final music).
+    final_music_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -257,7 +263,7 @@ def _music_reasons(recorded: dict[str, Any], context: _Context) -> list[str]:
         )
     reasons: list[str] = []
     if music.final_current:
-        reasons.append("The final music placement was made since this video was made.")
+        reasons.append(FINAL_MUSIC_SINCE)
     elif not context.project.music_enabled:
         reasons.append("Music has been switched off since this video was made.")
     elif music.provisional_inputs is None:
@@ -449,6 +455,7 @@ async def state(session: AsyncSession, project: Project) -> SceneRendersState:
                     job=jobs_by_id.get(row.job_id) if row.job_id is not None else None,
                     status=STATUS_OUT_OF_DATE if reasons else STATUS_CURRENT,
                     reasons=reasons,
+                    final_music_only=bool(reasons) and set(reasons) <= _FINAL_MUSIC_REASONS,
                 )
             )
         timeline = planned.plan.timeline if planned.plan is not None else None
@@ -572,3 +579,141 @@ async def save_scene_render(
     session.add(row)
     await session.flush()
     return row
+
+
+# --- Scenes that differ from their scene renders (SCN-013) ----------------------------------
+
+
+@dataclass(frozen=True)
+class SceneChange:
+    """A scene of the newest full render that no longer matches its newest scene render."""
+
+    scene_id: str
+    index: int
+    title: str
+    # False when the scene has no scene render at all (then `reasons` is empty).
+    has_render: bool
+    reasons: list[str]
+
+
+def _by_scene(items: object, scene_id: str) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict) and item.get("scene_id") == scene_id]
+
+
+def _take_text(shot: dict[str, Any]) -> str:
+    graphic = shot.get("graphic")
+    if isinstance(graphic, dict):
+        return f"graphic {graphic.get('id')}"
+    if isinstance(shot.get("placeholder"), dict):
+        return "a placeholder"
+    return f"take {shot.get('take_number')}"
+
+
+def compare_scene(
+    scene_id: str, index: object, full: dict[str, Any], scene: dict[str, Any]
+) -> list[str]:
+    """Why a scene of the full render's frozen timeline differs from the same scene in a scene
+    render's frozen timeline, one sentence each. Music, captions, callouts and the mix are left
+    out: a scene render's music is cut to its window and may be provisional. Pure.
+    """
+    reasons: list[str] = []
+    label = f"scene {index}"
+
+    full_scene = next(iter(_by_scene(full.get("scenes"), scene_id)), {})
+    then_scene = next(iter(_by_scene(scene.get("scenes"), scene_id)), {})
+    if full_scene.get("plan_id") != then_scene.get("plan_id"):
+        reasons.append(f"The shots of {label} were planned again after its scene render was made.")
+
+    then_shots = {shot.get("shot_id"): shot for shot in _by_scene(scene.get("shots"), scene_id)}
+    full_shots = _by_scene(full.get("shots"), scene_id)
+    for shot in full_shots:
+        shot_id = shot.get("shot_id")
+        before = then_shots.pop(shot_id, None)
+        if before is None:
+            reasons.append(f"The shot {shot_id} of {label} is not in its scene render.")
+        elif isinstance(before.get("placeholder"), dict):
+            reasons.append(f"The shot {shot_id} of {label} was a placeholder in its scene render.")
+        elif before.get("take_id") != shot.get("take_id") or before.get("graphic") != shot.get(
+            "graphic"
+        ):
+            reasons.append(
+                f"The shot {shot_id} of {label} uses {_take_text(shot)} "
+                f"(its scene render showed {_take_text(before)})."
+            )
+        elif before.get("voice") != shot.get("voice"):
+            reasons.append(f"The sound of the shot {shot_id} of {label} was switched.")
+        elif before.get("frames") != shot.get("frames"):
+            reasons.append(
+                f"The shot {shot_id} of {label} is {shot.get('frames')} frames long "
+                f"(its scene render showed {before.get('frames')})."
+            )
+    for shot_id in then_shots:
+        reasons.append(f"The shot {shot_id} of {label} is no longer in the video.")
+
+    # The speeches of the narration. A line played for a placeholder (`stand_in`) is a dialogue
+    # unit: it is not narration in the full render.
+    def speeches(timeline: dict[str, Any]) -> dict[Any, Any]:
+        return {
+            unit.get("unit_id"): unit.get("audio_id")
+            for unit in _by_scene(timeline.get("narration"), scene_id)
+            if not unit.get("stand_in")
+        }
+
+    full_speech, then_speech = speeches(full), speeches(scene)
+    for unit_id, audio_id in full_speech.items():
+        if then_speech.get(unit_id) != audio_id:
+            reasons.append(f"The line {unit_id} of {label} was made again.")
+    for unit_id in then_speech:
+        if unit_id not in full_speech:
+            reasons.append(f"The line {unit_id} of {label} is no longer in the video.")
+    return reasons
+
+
+async def changed_scenes(
+    session: AsyncSession, project_id: int, full: dict[str, Any]
+) -> list[SceneChange]:
+    """The scenes of a full render (its frozen timeline `full`) that differ from their newest
+    scene render, in story order. Reads only the newest scene render of each scene. A scene with
+    no scene render is listed with `has_render` False. Worked out on every read; nothing is
+    stored.
+    """
+    scenes = [item for item in full.get("scenes") or [] if isinstance(item, dict)]
+    newest = (
+        select(
+            SceneRender.scene_id.label("scene_id"),
+            func.max(SceneRender.render_number).label("number"),
+        )
+        .where(SceneRender.project_id == project_id)
+        .group_by(SceneRender.scene_id)
+        .subquery()
+    )
+    statement = (
+        select(SceneRender)
+        .join(
+            newest,
+            (SceneRender.scene_id == newest.c.scene_id)
+            & (SceneRender.render_number == newest.c.number),
+        )
+        .where(SceneRender.project_id == project_id)
+        .execution_options(populate_existing=True)
+    )
+    rows = {row.scene_id: row for row in (await session.execute(statement)).scalars()}
+    changes: list[SceneChange] = []
+    for item in scenes:
+        scene_id = item.get("scene_id")
+        if not isinstance(scene_id, str):
+            continue
+        row = rows.get(scene_id)
+        raw_index = item.get("index")
+        index = raw_index if isinstance(raw_index, int) else 0
+        title = str(item.get("title") or "")
+        if row is None:
+            changes.append(SceneChange(scene_id, index, title, has_render=False, reasons=[]))
+            continue
+        inputs = row.inputs if isinstance(row.inputs, dict) else {}
+        reasons = compare_scene(scene_id, index, full, inputs)
+        if reasons:
+            changes.append(SceneChange(scene_id, index, title, has_render=True, reasons=reasons))
+    return changes

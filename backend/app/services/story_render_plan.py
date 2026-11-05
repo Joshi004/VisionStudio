@@ -150,6 +150,11 @@ PLACEHOLDER_GRAPHIC_TOO_SHORT: Final = "Graphic too short"
 # tuned by ear).
 SCENE_MUSIC_FADE_S: Final = 0.5
 
+# SCN-013: the clip's own sound of the first shot of a scene fades in, and that of its last shot
+# fades out, over this long at most (a starting value, not yet tuned by ear), so the ambience of
+# one scene does not switch to the next one's abruptly. Never into a line of dialogue.
+SCENE_CUT_FADE_S: Final = 0.15
+
 
 class RenderPlanError(ValueError):
     """The story cannot be rendered now. The message is meant to be shown to the user."""
@@ -372,6 +377,43 @@ def slice_windows(
     return sliced
 
 
+def scene_edge_fades(
+    shots: list[dict[str, Any]], dialogue_spans: Sequence[tuple[float, float]]
+) -> None:
+    """Gives the first and the last shot of every scene a longer fade of the clip's own sound at
+    the scene's edge (`sound_fade_in_s`, `sound_fade_out_s`, in seconds). Only a shot that plays
+    its clip's sound (no graphic, no placeholder, not a presenter shot of a continuous explainer)
+    gets them. A fade is `SCENE_CUT_FADE_S`, or shorter when a line of dialogue of the shot is
+    closer to the edge, and never shorter than the usual fade. `shots` is the whole timeline, in
+    order; a scene render has one scene, so its edges are those of the full render. Changes the
+    entries in place.
+    """
+    edges: dict[str, tuple[int, int]] = {}
+    for position, entry in enumerate(shots):
+        scene_id = entry["scene_id"]
+        first = edges[scene_id][0] if scene_id in edges else position
+        edges[scene_id] = (first, position)
+    for first, last in edges.values():
+        for position, is_start in ((first, True), (last, False)):
+            entry = shots[position]
+            if (
+                entry.get("voice") is not None
+                or entry.get("graphic") is not None
+                or entry.get("placeholder") is not None
+                or not entry.get("has_audio")
+            ):
+                continue
+            start_s, end_s = entry["start_ms"] / _MS_PER_S, entry["end_ms"] / _MS_PER_S
+            inside = [span for span in dialogue_spans if span[0] < end_s and span[1] > start_s]
+            if is_start:
+                gap = min((span[0] - start_s for span in inside), default=SCENE_CUT_FADE_S)
+                key = "sound_fade_in_s"
+            else:
+                gap = min((end_s - span[1] for span in inside), default=SCENE_CUT_FADE_S)
+                key = "sound_fade_out_s"
+            entry[key] = round(max(render_commands.FADE_S, min(SCENE_CUT_FADE_S, gap)), 3)
+
+
 def merge_spans(spans: Sequence[tuple[float, float]], gap_s: float) -> list[tuple[float, float]]:
     """The spans in order, with two made one when they overlap or are less than `gap_s` apart."""
     merged: list[tuple[float, float]] = []
@@ -426,6 +468,7 @@ def constants(mix: MixSettings | None = None) -> dict[str, float]:
         "bed_shot_duck_db": float(mix.bed_shot_duck_db),
         "bed_shot_ramp_s": BED_SHOT_RAMP_S,
         "voice_fade_s": VOICE_FADE_S,
+        "scene_cut_fade_s": SCENE_CUT_FADE_S,
         "master_lufs": float(mix.loudness_lufs),
         "master_true_peak_db": float(mix.true_peak_db),
         "master_lra": MASTER_LRA,
@@ -1191,6 +1234,8 @@ def _build(
             (shot_entry["start_frame"] + shot_entry["frames"]) / fps,
             DUCK_RAMP_S,
         )
+
+    scene_edge_fades(shots, dialogue_spans)
 
     voice_entry: dict[str, Any] | None = None
     if continuous:
