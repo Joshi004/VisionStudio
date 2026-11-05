@@ -170,6 +170,11 @@ SAVING_CALLOUT_PLAN: Final = "saving the callout plan"
 # `write_graphic_theme` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 SAVING_GRAPHIC_THEME: Final = "saving the graphics look"
 
+# --- Running: the thumbnail concepts ------------------------------------------------------
+# `write_thumbnail_concepts` also uses PREPARING_PROMPT and `asking_model` from above (one call).
+TAKING_FRAMES: Final = "taking frames from the video"
+SAVING_THUMBNAIL_CONCEPTS: Final = "saving the thumbnail ideas"
+
 # --- Running: the Graphics lab brief (GFX-003) -------------------------------------------
 # `write_lab_graphic_brief` also uses PREPARING_PROMPT and `asking_model` from above (one call).
 # `write_shot_graphic_brief` (EXG-004) uses the same three phases, one call per graphic shot.

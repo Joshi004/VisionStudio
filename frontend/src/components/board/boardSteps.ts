@@ -41,6 +41,7 @@ export const WORKSPACE_ITEMS: readonly { key: string; label: string }[] = [
   { key: "story_text", label: "Story text" },
   { key: "cast", label: "Cast" },
   { key: "run", label: "Run the whole story" },
+  { key: "thumbnail", label: "Thumbnail" },
   { key: "out_of_date", label: "What is out of date" },
 ];
 

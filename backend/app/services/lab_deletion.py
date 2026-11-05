@@ -71,6 +71,7 @@ from app.db.models import (
     MusicThemeVersion,
     Project,
     ShotReferenceManifest,
+    Thumbnail,
     Voice,
 )
 from app.jobs import store
@@ -215,6 +216,7 @@ _OWNERS: Final[dict[Any, tuple[str, Any]]] = {
     ),
     Voice: ("voice", Voice.id),
     LabVoiceRun: ("project", LabVoiceRun.project_id),
+    Thumbnail: ("project", Thumbnail.project_id),
 }
 
 
@@ -387,6 +389,7 @@ _IMAGE_RUN_COLUMNS: Final[tuple[Any, ...]] = (
     EnvironmentState.lab_run_id,
     EnvironmentView.lab_run_id,
     EnvironmentViewState.lab_run_id,
+    Thumbnail.lab_run_id,
 )
 
 

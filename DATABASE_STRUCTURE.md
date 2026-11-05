@@ -3775,6 +3775,76 @@ CREATE TABLE scene_render (
 CREATE INDEX idx_scene_render_project_scene ON scene_render (project_id, scene_id);
 ```
 
+### 4.80 `thumbnail_concepts`
+
+*Added with the thumbnail flow (migration `0086`).* One version of the four thumbnail concepts of a project. It follows Section 2.1: every run or edit is a new row with the next `version`, and a stored row is never changed. `source` is `ai` (the `write_thumbnail_concepts` job, a vision-model call; Section 5) or `manual` (the owner edited the concepts and saved). `inputs` is `{"artifacts": [{"kind": "story_bible", "id", "version"}, {"kind": "story_render", "id"}?], "feedback"?}`: the render is there only when frames were sent to the model. A version is **out of date** when the newest Story Bible is not the recorded one, or a newer story render exists than the recorded one (worked out on read in `services/thumbnail_concepts.py`; nothing is stored). `content` is `{"concepts": [4 items]}`; each concept is `{label, idea, composition, background, mood, headline, text_area, people: [{id, look, expression, pose}], people_reason}`.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `version` | INTEGER | NOT NULL | — | 1, 2, 3 ... (the highest plus 1) |
+| `source` | TEXT | NOT NULL | — | `ai` or `manual` |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote it; NULL for a manual version. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What it was written from |
+| `content` | JSON | NOT NULL | — | The concepts |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE thumbnail_concepts (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    source      TEXT NOT NULL,
+    job_id      INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs      JSON NOT NULL,
+    content     JSON NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_thumbnail_concepts_source_valid CHECK (source IN ('ai', 'manual')),
+    CONSTRAINT uq_thumbnail_concepts_project_id UNIQUE (project_id, version)
+);
+CREATE INDEX idx_thumbnail_concepts_project ON thumbnail_concepts (project_id);
+```
+
+### 4.81 `thumbnails`
+
+*Added with the thumbnail flow (migration `0086`).* One thumbnail picture made from one concept of one concept version. The owner's "Make images" press adds one row per ticked concept and starts one Image lab run for each (`lab_run_id`): text to image when the concept has no people, the edit endpoint with the people's look pictures when it has. When the picture is stored, `services/thumbnails.on_thumbnail_image_stored` sets `background_image_id` and draws the headline on it (`services/thumbnail_compose.py`), storing the finished PNG under `media/{project_id}/` (`path`, no `asset` row). `headline` and `text_area` start as the concept's; changing the headline draws the picture again with no GPU work. At most one thumbnail of a project is `chosen`. A thumbnail is out of date when its concept version is (worked out on read). The model's own picture stays in `media/lab/` like every other pipeline picture.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `concept_version` | INTEGER | NOT NULL | — | The `thumbnail_concepts.version` it was made from (not a foreign key) |
+| `concept_index` | INTEGER | NOT NULL | — | The concept's place in that version, from 0 |
+| `lab_run_id` | INTEGER, FK → `lab_run.id` | NULL | — | The run that makes the picture. `ON DELETE SET NULL` |
+| `background_image_id` | INTEGER, FK → `lab_image.id` | NULL | — | The picture the run made; NULL until it is stored. `ON DELETE SET NULL` |
+| `path` | TEXT | NULL | — | The finished PNG; NULL until it is drawn |
+| `width`, `height` | INTEGER | NULL | — | Size of the finished PNG |
+| `headline` | TEXT | NOT NULL | — | The text drawn on the picture (may be empty) |
+| `text_area` | TEXT | NOT NULL | — | Where the headline goes: `left`, `right`, `top`, `bottom`, `top_left`, `top_right`, `bottom_left` or `bottom_right` |
+| `chosen` | BOOLEAN | NOT NULL | `0` | The project's chosen thumbnail |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE thumbnails (
+    id                  INTEGER PRIMARY KEY,
+    project_id          INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    concept_version     INTEGER NOT NULL,
+    concept_index       INTEGER NOT NULL,
+    lab_run_id          INTEGER REFERENCES lab_run(id) ON DELETE SET NULL,
+    background_image_id INTEGER REFERENCES lab_image(id) ON DELETE SET NULL,
+    path                TEXT,
+    width               INTEGER,
+    height              INTEGER,
+    headline            TEXT NOT NULL,
+    text_area           TEXT NOT NULL,
+    chosen              BOOLEAN NOT NULL DEFAULT 0,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_thumbnails_project ON thumbnails (project_id);
+CREATE INDEX idx_thumbnails_lab_run ON thumbnails (lab_run_id);
+```
+
 ---
 
 ## 5. JSON column shapes

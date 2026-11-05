@@ -165,7 +165,8 @@ class Job(Base):
         # since revision 0074, and the two Audio video lab jobs, since revision 0075, and the six
         # Graphics lab jobs, since revision 0079, and the five explainer graphics jobs, since
         # revision 0080, and the reading of a reference photo, since revision 0083, and the render
-        # of one scene, since revision 0085.
+        # of one scene, since revision 0085, and the writing of thumbnail concepts, since
+        # revision 0086.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -187,7 +188,8 @@ class Job(Base):
             "'render_lab_graphic', 'time_lab_graphic_words', "
             "'write_graphic_theme', 'write_shot_graphic_brief', "
             "'write_shot_graphic_component', 'write_shot_graphic_scene', "
-            "'render_shot_graphic', 'describe_photo', 'render_scene')",
+            "'render_shot_graphic', 'describe_photo', 'render_scene', "
+            "'write_thumbnail_concepts')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1339,6 +1341,70 @@ class GraphicTheme(Base):
     )
     inputs: Mapped[Any] = mapped_column(JSON)
     content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class ThumbnailConcepts(Base):
+    """One version of the thumbnail concepts of a project (migration 0086).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run or
+    edit is a new row with the next `version`, and a stored row is never changed. `inputs` holds
+    the Story Bible (and the render, when frames were used) it was written from, so staleness is
+    worked out on read. `content` is `{concepts: [...]}`.
+    """
+
+    __tablename__ = "thumbnail_concepts"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai', 'manual')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_thumbnail_concepts_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    # The job that produced it. NULL for a manual version.
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class Thumbnail(Base):
+    """One thumbnail picture made from one concept of one concept version (migration 0086).
+
+    `lab_run_id` is the Image lab run that makes the picture and `background_image_id` the lab
+    image it made. `path` is the finished PNG (the picture with the headline drawn on it) under
+    the project's media folder, NULL until the picture exists. `headline` and `text_area` start
+    as the concept's and the owner may change the headline later. At most one thumbnail of a
+    project is `chosen`.
+    """
+
+    __tablename__ = "thumbnails"
+    __table_args__ = (
+        Index("idx_thumbnails_project", "project_id"),
+        Index("idx_thumbnails_lab_run", "lab_run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    concept_version: Mapped[int]
+    concept_index: Mapped[int]
+    lab_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_run.id", ondelete="SET NULL"), default=None
+    )
+    background_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lab_image.id", ondelete="SET NULL"), default=None
+    )
+    path: Mapped[str | None] = mapped_column(default=None)
+    width: Mapped[int | None] = mapped_column(default=None)
+    height: Mapped[int | None] = mapped_column(default=None)
+    headline: Mapped[str]
+    text_area: Mapped[str]
+    chosen: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
