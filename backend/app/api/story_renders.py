@@ -6,7 +6,10 @@
   was made from, the loudness that was applied, and whether it is `current` or `out_of_date` (and
   why). Out of date is worked out on every read.
 - `POST .../run` ("Render") starts the `render_story` job with the timeline as it is now. If a
-  render is already waiting or running, that job is returned and no second one is made.
+  render is already waiting or running, that   job is returned and no second one is made.
+- `GET .../{render_number}/captions.ytt` and `.../captions.srt` write a finished render's caption
+  track as a YouTube caption file or a plain subtitle file (CAP-002, CAP-003). They are written
+  when asked for and never stored.
 
 A render is stored only when it succeeds (`services/story_renders.py`). The answers never return
 ORM objects.
@@ -14,23 +17,32 @@ ORM objects.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.discovery import DiscoveryJobOut
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
 from app.api.projects import load_project
-from app.db.models import Job, SceneRender, StoryRender
+from app.db.models import Job, Project, SceneRender, StoryRender
 from app.db.session import SessionDep
 from app.jobs import dispatcher
-from app.services import scene_renders, storage, story_renders
+from app.services import caption_plan, scene_renders, storage, story_renders
+from app.services.caption_srt import srt_document
+from app.services.caption_ytt import ytt_document
 from app.services.story_renders import RenderEntry
 
 router = APIRouter()
+
+# A download's file name keeps only these; the project name is cut to this many characters.
+_NOT_SAFE = re.compile(r"[^a-z0-9]+")
+_SLUG_MAX = 60
 
 _NOT_FOUND = {404: {"model": ErrorResponse, "description": "No such project."}}
 _INVALID = {
@@ -147,6 +159,10 @@ class StoryRenderOut(BaseModel):
     narration: RenderNarrationOut | None
     music: RenderMusicOut | None
     master: RenderMasterOut | None
+    # Whether the render has a caption track, so caption files can be downloaded (CAP-002).
+    caption_file_available: bool
+    # Whether the render draws its captions on the picture. False when it has no track.
+    captions_burned: bool
     created_at: datetime
     job: DiscoveryJobOut | None
 
@@ -292,8 +308,16 @@ def master_out(row: StoryRender | SceneRender) -> RenderMasterOut | None:
     )
 
 
+def _recorded_captions(row: StoryRender) -> dict[str, Any] | None:
+    """The caption track the render recorded, as stored (not read), or None."""
+    timeline = row.inputs if isinstance(row.inputs, dict) else {}
+    captions = timeline.get("captions")
+    return captions if isinstance(captions, dict) else None
+
+
 def _render_out(entry: RenderEntry) -> StoryRenderOut:
     row = entry.row
+    captions = _recorded_captions(row)
     return StoryRenderOut(
         id=row.id,
         render_number=row.render_number,
@@ -311,6 +335,9 @@ def _render_out(entry: RenderEntry) -> StoryRenderOut:
         narration=narration_out(row),
         music=music_out(row),
         master=master_out(row),
+        caption_file_available=captions is not None,
+        # A track with no `burned` key is from before CAP-001 and was burned.
+        captions_burned=captions is not None and captions.get("burned", True) is True,
         created_at=row.created_at,
         job=job_out(entry.job),
     )
@@ -374,3 +401,100 @@ async def run_render(project_id: int, session: SessionDep) -> StoryRenderRunOut:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
     return StoryRenderRunOut(job_id=job.id)
+
+
+def _file_stem(project: Project, render_number: int) -> str:
+    """A file name for a download, from the project's name and the render number. Only letters,
+    digits and hyphens are kept, so it needs no escaping in a header.
+    """
+    ascii_name = unicodedata.normalize("NFKD", project.name).encode("ascii", "ignore").decode()
+    slug = _NOT_SAFE.sub("-", ascii_name.lower()).strip("-")[:_SLUG_MAX].strip("-")
+    return f"{slug or f'project-{project.id}'}-render-{render_number}"
+
+
+async def _render_track(
+    session: AsyncSession, project: Project, render_number: int
+) -> caption_plan.CaptionTrack:
+    """The caption track a finished render recorded. Raises 404 when the render does not exist
+    or has no track, and 422 when the recorded track cannot be read.
+    """
+    row = await story_renders.find_render(session, project.id, render_number)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such render.")
+    try:
+        track = caption_plan.parse_track(_recorded_captions(row))
+    except caption_plan.CaptionError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"The caption track of this render cannot be read: {exc}.",
+        ) from exc
+    if track is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "This render has no caption track. Render it again to get caption files.",
+        )
+    return track
+
+
+@router.get(
+    "/projects/{project_id}/story-renders/{render_number}/captions.ytt",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/xml": {"schema": {"type": "string"}}},
+            "description": "The YouTube caption file (YTT) of the render.",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "No such project or render, or the render has no caption track.",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "The caption track recorded with the render cannot be read.",
+        },
+    },
+)
+async def get_captions_ytt(project_id: int, render_number: int, session: SessionDep) -> Response:
+    """The render's caption track as a YouTube caption file, written now from the frozen track
+    (nothing is stored). It has the words and timing of the burned-in captions.
+    """
+    project = await load_project(session, project_id)
+    track = await _render_track(session, project, render_number)
+    filename = f"{_file_stem(project, render_number)}.ytt"
+    return Response(
+        content=ytt_document(track).encode("utf-8"),
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/projects/{project_id}/story-renders/{render_number}/captions.srt",
+    response_class=Response,
+    responses={
+        200: {
+            "content": {"application/x-subrip": {"schema": {"type": "string"}}},
+            "description": "The subtitle file (SRT) of the render.",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "No such project or render, or the render has no caption track.",
+        },
+        422: {
+            "model": ErrorResponse,
+            "description": "The caption track recorded with the render cannot be read.",
+        },
+    },
+)
+async def get_captions_srt(project_id: int, render_number: int, session: SessionDep) -> Response:
+    """The render's caption track as a plain SRT file, written now from the frozen track (nothing
+    is stored). Its lines are sentence-sized, in the script's own casing and punctuation.
+    """
+    project = await load_project(session, project_id)
+    track = await _render_track(session, project, render_number)
+    filename = f"{_file_stem(project, render_number)}.srt"
+    return Response(
+        content=srt_document(track).encode("utf-8"),
+        media_type="application/x-subrip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

@@ -5133,6 +5133,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/story-renders/{render_number}/captions.ytt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Captions Ytt
+         * @description The render's caption track as a YouTube caption file, written now from the frozen track
+         *     (nothing is stored). It has the words and timing of the burned-in captions.
+         */
+        get: operations["get_captions_ytt_api_projects__project_id__story_renders__render_number__captions_ytt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/story-renders/{render_number}/captions.srt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Captions Srt
+         * @description The render's caption track as a plain SRT file, written now from the frozen track (nothing
+         *     is stored). Its lines are sentence-sized, in the script's own casing and punctuation.
+         */
+        get: operations["get_captions_srt_api_projects__project_id__story_renders__render_number__captions_srt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/scene-renders": {
         parameters: {
             query?: never;
@@ -15970,6 +16012,10 @@ export interface components {
             narration: components["schemas"]["RenderNarrationOut"] | null;
             music: components["schemas"]["RenderMusicOut"] | null;
             master: components["schemas"]["RenderMasterOut"] | null;
+            /** Caption File Available */
+            caption_file_available: boolean;
+            /** Captions Burned */
+            captions_burned: boolean;
             /**
              * Created At
              * Format: date-time
@@ -28721,6 +28767,88 @@ export interface operations {
                 };
             };
             /** @description The story cannot be rendered now: a scene's shots are not ready, a shot has no clip, or a clip or a speech file is missing or too short. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_captions_ytt_api_projects__project_id__story_renders__render_number__captions_ytt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                render_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The YouTube caption file (YTT) of the render. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xml": string;
+                };
+            };
+            /** @description No such project or render, or the render has no caption track. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caption track recorded with the render cannot be read. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_captions_srt_api_projects__project_id__story_renders__render_number__captions_srt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                render_number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subtitle file (SRT) of the render. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-subrip": string;
+                };
+            };
+            /** @description No such project or render, or the render has no caption track. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caption track recorded with the render cannot be read. */
             422: {
                 headers: {
                     [name: string]: unknown;

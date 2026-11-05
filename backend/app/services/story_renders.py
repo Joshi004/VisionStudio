@@ -821,6 +821,16 @@ async def _all_renders(session: AsyncSession, project_id: int) -> list[StoryRend
     return list((await session.execute(statement)).scalars())
 
 
+async def find_render(
+    session: AsyncSession, project_id: int, render_number: int
+) -> StoryRender | None:
+    """The finished render of a project with this number, or None."""
+    statement = select(StoryRender).where(
+        StoryRender.project_id == project_id, StoryRender.render_number == render_number
+    )
+    return (await session.execute(statement)).scalar_one_or_none()
+
+
 async def _jobs_of(session: AsyncSession, rows: list[StoryRender]) -> dict[int, Job]:
     ids = {row.job_id for row in rows if row.job_id is not None}
     if not ids:

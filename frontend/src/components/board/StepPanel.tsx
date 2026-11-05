@@ -235,7 +235,12 @@ export function StepPanel({ stepKey, project }: StepPanelProps) {
         return <ShotTakesPanel projectId={projectId} />;
       case "scene_render":
       case "render":
-        return <StoryRenderPanel projectId={projectId} />;
+        return (
+          <StoryRenderPanel
+            projectId={projectId}
+            isExplainer={project.kind === "explainer"}
+          />
+        );
       default:
         return (
           <Stack gap="xs" align="flex-start">

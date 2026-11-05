@@ -314,7 +314,10 @@ export function ProjectPage() {
             <MusicPlacementPanel projectId={project.id} />
           </CollapsiblePanel>
           <CollapsiblePanel panelKey="story_render" title="Final render">
-            <StoryRenderPanel projectId={project.id} />
+            <StoryRenderPanel
+              projectId={project.id}
+              isExplainer={project.kind === "explainer"}
+            />
           </CollapsiblePanel>
           <StageList />
         </>
