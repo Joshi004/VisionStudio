@@ -197,7 +197,7 @@ def _plan_scene(context: _Context, scene: story_render_plan.SceneSource) -> _Sce
     highlight = callouts.accent if callouts is not None else caption_plan.HIGHLIGHT_COLOUR
     captions = (
         caption_plan.style_for(project.out_width, project.out_height, highlight)
-        if story_renders.captions_wanted(project)
+        if story_renders.captions_built(project)
         else None
     )
 
@@ -210,6 +210,7 @@ def _plan_scene(context: _Context, scene: story_render_plan.SceneSource) -> _Sce
             mix=context.mix,
             music=music,
             captions=captions,
+            captions_burned=story_renders.captions_burned(project),
             callouts=callouts,
         )
 
@@ -366,8 +367,7 @@ def _scene_reasons(
             reasons.append(f"{unit_label} was made again since this video was made.")
 
     reasons.extend(_music_reasons(recorded, context))
-    if isinstance(recorded.get("captions"), dict) != story_renders.captions_wanted(context.project):
-        reasons.append("The captions setting has changed since this video was made.")
+    reasons.extend(story_renders.caption_reasons(recorded, context.project))
     reasons.extend(
         story_renders.callout_reasons(
             recorded,

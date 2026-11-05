@@ -1565,8 +1565,9 @@ async def _start_speech_synthesis(
 async def _evaluate_word_timings(
     session: AsyncSession, project: Project, options: RunOptions
 ) -> StepView:
-    # Only an explainer with captions or callouts on needs the time of each word. For any other
-    # project the step has one target that is already done, so a run reports it as skipped.
+    # Only an explainer needs the time of each word (its caption track is always frozen). For
+    # any other project the step has one target that is already done, so a run reports it as
+    # skipped.
     if not word_timings.wanted(project):
         return StepView([Target(PROJECT_KEY, "", True)])
     state = await speech_synthesis.state(session, project)

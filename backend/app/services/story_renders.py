@@ -54,6 +54,7 @@ from app.services import (
     caption_plan,
     cut_planning_writer,
     graphic_theme,
+    projects,
     provenance,
     scene_timeline,
     shot_graphics,
@@ -145,11 +146,18 @@ def _recorded_audio(plan_inputs: Any) -> dict[str, dict[str, Any]]:
     return recorded
 
 
-def captions_wanted(project: Project) -> bool:
-    """Whether the render draws captions: an explainer with its captions switch on. A story
-    never does (E-10).
+def captions_built(project: Project) -> bool:
+    """Whether the render has a caption track: every explainer does, whatever its caption mode
+    (CAP-001, C-2). A story never does (E-10).
     """
-    return project.kind == KIND_EXPLAINER and project.captions
+    return project.kind == KIND_EXPLAINER
+
+
+def captions_burned(project: Project) -> bool:
+    """Whether the render draws the caption track on the picture: an explainer in `burned` mode.
+    In `ytt` mode the track is only frozen, for the caption files.
+    """
+    return captions_built(project) and project.caption_mode == projects.CAPTION_BURNED
 
 
 def callouts_wanted(project: Project) -> bool:
@@ -161,9 +169,9 @@ async def caption_timings(
     session: AsyncSession, project: Project
 ) -> dict[int, SpeechWordTiming] | None:
     """The stored word timing of every speech of the project, by the speech's audio id, or None
-    when the render has neither captions nor callouts (a story is never read for timings).
+    when the project is not an explainer (a story is never read for timings).
     """
-    if not captions_wanted(project) and not callouts_wanted(project):
+    if not captions_built(project) and not callouts_wanted(project):
         return None
     rows = await session.execute(
         select(SpeechWordTiming)
@@ -536,9 +544,10 @@ def _plan_of(
             music=music,
             captions=(
                 caption_plan.style_for(project.out_width, project.out_height, highlight)
-                if captions and captions_wanted(project)
+                if captions and captions_built(project)
                 else None
             ),
+            captions_burned=captions_burned(project),
             callouts=callouts,
         )
     except story_render_plan.RenderPlanError as exc:
@@ -738,15 +747,28 @@ def _render_reasons(
         elif made.audio.id != unit.get("audio_id"):
             reasons.append(f"{label} was made again since this video was made.")
     reasons.extend(music_reasons(recorded, *music))
-    # The captions are burned into the picture, so a changed switch needs a new render.
-    if isinstance(recorded.get("captions"), dict) != captions_wanted(music[0]):
-        reasons.append("The captions setting has changed since this video was made.")
+    reasons.extend(caption_reasons(recorded, music[0]))
     reasons.extend(callout_reasons(recorded, callouts, wanted=callouts_wanted(music[0])))
     return reasons
 
 
 def _version_text(engine: object, attempt: object) -> str:
     return f"{shot_graphics.ENGINE_LABELS.get(str(engine), engine)}, attempt {attempt}"
+
+
+def caption_reasons(recorded: dict[str, Any], project: Project) -> list[str]:
+    """Why the captions of a render no longer fit the project's caption mode (CAP-001). Only the
+    picture matters: a render is wrong when it burned captions the project no longer wants, or
+    has none burned where the project now wants them. A render with no track, in `ytt` mode, is
+    right (it just has no caption files).
+    """
+    track = recorded.get("captions")
+    was_burned = isinstance(track, dict) and track.get("burned") is not False
+    if was_burned and project.caption_mode == projects.CAPTION_YTT:
+        return ["Captions are burned into this video, but the project now uses a caption file."]
+    if not was_burned and captions_burned(project):
+        return ["The project now burns captions into the video."]
+    return []
 
 
 def graphic_reasons(

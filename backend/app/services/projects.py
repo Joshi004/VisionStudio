@@ -44,6 +44,12 @@ SPEECH_MODES: Final = (SPEECH_BOTH, SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION)
 VOICE_LINES: Final = "lines"
 VOICE_CONTINUOUS: Final = "continuous"
 VOICE_TRACKS: Final = (VOICE_LINES, VOICE_CONTINUOUS)
+# How an explainer's captions are delivered (CAP-001). `burned`: drawn on the picture.
+# `ytt`: nothing is drawn; the captions come as a file. A story always stores `burned`.
+CAPTION_BURNED: Final = "burned"
+CAPTION_YTT: Final = "ytt"
+CAPTION_MODES: Final = (CAPTION_BURNED, CAPTION_YTT)
+CAPTION_MODE_MESSAGE: Final = "Captions must be burned into the video or a YouTube caption file."
 # The presenter delivery text is sent to the speech model as the take's instruction.
 DELIVERY_MAX_CHARS: Final = speech_synthesizer.INSTRUCTION_MAX_CHARS
 # How an explainer's presenter is placed and moves on camera, sent to the shot prompts.
@@ -115,7 +121,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "review_points": "Review points",
     "music_enabled": "Music",
     "ambience_enabled": "Ambience",
-    "captions": "Captions",
+    "caption_mode": "Captions",
     "callouts": "Callouts",
     "presenter_delivery": "Presenter delivery",
     "presenter_staging": "Presenter staging",
@@ -132,7 +138,7 @@ _NULLABLE_FIELDS: Final = frozenset(
     )
 )
 # The switches only an explainer has (EXPLAINER-007). They can be changed at any time.
-_EXPLAINER_SWITCHES: Final = frozenset(("captions", "callouts"))
+_EXPLAINER_SWITCHES: Final = frozenset(("caption_mode", "callouts"))
 
 
 class ProjectValidationError(ValueError):
@@ -193,6 +199,8 @@ def validate_project(project: Project) -> None:
     if project.script_text is not None and len(project.script_text) > SCRIPT_MAX_CHARS:
         raise ProjectValidationError(f"The story must be at most {SCRIPT_MAX_CHARS:,} characters.")
 
+    if project.caption_mode not in CAPTION_MODES:
+        raise ProjectValidationError(CAPTION_MODE_MESSAGE)
     if project.voice_track not in VOICE_TRACKS:
         raise ProjectValidationError("Voice must be lines or continuous.")
     if project.kind != KIND_EXPLAINER and project.voice_track != VOICE_LINES:
@@ -267,7 +275,7 @@ async def create_project(
     kind: str = KIND_STORY,
     presenter_character_id: int | None = None,
     set_environment_id: int | None = None,
-    captions: bool = True,
+    caption_mode: str = CAPTION_BURNED,
     callouts: bool = True,
     voice_track: str | None = None,
     presenter_delivery: str | None = None,
@@ -279,8 +287,8 @@ async def create_project(
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
 
-    `captions` and `callouts` (EXPLAINER-007) are kept only for an explainer. A story always
-    gets the defaults, and never reads them.
+    `caption_mode` (CAP-001) and `callouts` (EXPLAINER-007) are kept only for an explainer. A
+    story always gets the defaults, and never reads them.
 
     `voice_track` (FLOW-002) is `continuous` for an explainer unless it is sent as `lines`, and
     always `lines` for a story (a story that asks for `continuous` is refused).
@@ -301,6 +309,8 @@ async def create_project(
         raise ProjectValidationError("Orientation must be landscape or portrait.")
     if kind not in KINDS:
         raise ProjectValidationError("Kind must be story or explainer.")
+    if caption_mode not in CAPTION_MODES:
+        raise ProjectValidationError(CAPTION_MODE_MESSAGE)
     if voice_track is not None and voice_track not in VOICE_TRACKS:
         raise ProjectValidationError("Voice must be lines or continuous.")
     if kind == KIND_EXPLAINER:
@@ -357,7 +367,7 @@ async def create_project(
         review_points=[],
         music_enabled=True,
         ambience_enabled=True,
-        captions=captions if kind == KIND_EXPLAINER else True,
+        caption_mode=caption_mode if kind == KIND_EXPLAINER else CAPTION_BURNED,
         callouts=callouts if kind == KIND_EXPLAINER else True,
         voice_track=voice_track,
         presenter_delivery=delivery,
@@ -518,8 +528,8 @@ def _prepare_value(field: str, value: object) -> object:
         raise ProjectValidationError("Music must be on or off.")
     if field == "ambience_enabled" and not isinstance(value, bool):
         raise ProjectValidationError("Ambience must be on or off.")
-    if field == "captions" and not isinstance(value, bool):
-        raise ProjectValidationError("Captions must be on or off.")
+    if field == "caption_mode" and value not in CAPTION_MODES:
+        raise ProjectValidationError(CAPTION_MODE_MESSAGE)
     if field == "callouts" and not isinstance(value, bool):
         raise ProjectValidationError("Callouts must be on or off.")
     return value

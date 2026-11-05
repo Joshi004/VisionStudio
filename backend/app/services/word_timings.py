@@ -252,19 +252,17 @@ def align(text: str, spoken: Sequence[SpokenWord], duration_s: float, threshold:
 
 def times_takes(project: Project) -> bool:
     """Whether the project's scene takes get word timings (FLOW-004): a continuous explainer,
-    always, whatever its `captions` and `callouts` say, because the cut planning needs them.
+    always, because the cut planning needs them.
     """
     return project.kind == KIND_EXPLAINER and project.voice_track == projects.VOICE_CONTINUOUS
 
 
 def wanted(project: Project) -> bool:
-    """Whether the project's speeches get word timings: an explainer whose captions or callouts
-    are on, and a continuous explainer always (its takes are timed, FLOW-004). A story never
-    does.
+    """Whether the project's speeches get word timings: every explainer (its caption track is
+    always frozen, CAP-001, and a continuous explainer's takes are timed, FLOW-004). A story
+    never does.
     """
-    return project.kind == KIND_EXPLAINER and (
-        project.captions or project.callouts or times_takes(project)
-    )
+    return project.kind == KIND_EXPLAINER
 
 
 async def queue(
@@ -355,10 +353,7 @@ async def state(session: AsyncSession, project: Project) -> dict[int, TimingEntr
 async def start(session: AsyncSession, project: Project, audio_id: int) -> Job:
     """Queues the timing of one stored speech and commits. Raises WordTimingError."""
     if not wanted(project):
-        raise WordTimingError(
-            "Word timings are only made for an explainer with captions or callouts on, or one "
-            "that speaks in continuous takes."
-        )
+        raise WordTimingError("Word timings are only made for an explainer.")
     audio = await session.get(SpeechUnitAudio, audio_id)
     if audio is None or audio.project_id != project.id:
         raise WordTimingError("This speech does not exist.")

@@ -58,8 +58,7 @@ MUSIC_STEPS: Final = frozenset(
     }
 )
 
-# The step that is switched off for every project but an explainer with captions or callouts on
-# (EXPLAINER-007).
+# The step that is switched off for every project but an explainer (EXPLAINER-007, CAP-001).
 WORD_TIMINGS_STEP: Final = "word_timings"
 
 # The step that is switched off for every project but an explainer with callouts on

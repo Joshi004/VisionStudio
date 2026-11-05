@@ -44,6 +44,7 @@ class Project(Base):
         ),
         CheckConstraint("kind IN ('story', 'explainer')", name="kind_valid"),
         CheckConstraint("voice_track IN ('lines', 'continuous')", name="voice_track_valid"),
+        CheckConstraint("caption_mode IN ('burned', 'ytt')", name="caption_mode_valid"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -72,10 +73,10 @@ class Project(Base):
     # matters while `music_enabled` is on; changing it makes the render out of date, not the
     # placement.
     ambience_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
-    # Whether an explainer's render draws word-synced captions, and whether it draws callouts
-    # (EXPLAINER-007). Only read for an explainer, at render time, so they can be changed at
-    # any time.
-    captions: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # CAP-001. How an explainer's captions are delivered: `burned` (drawn on the picture) or
+    # `ytt` (a caption file, nothing drawn). Whether it draws callouts (EXPLAINER-007). Only
+    # read for an explainer, at render time, so they can be changed at any time.
+    caption_mode: Mapped[str] = mapped_column(default="burned", server_default=text("'burned'"))
     callouts: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
     # FLOW-002. Chosen when the project is created and never changed: `lines` (each line is its
     # own speech) or `continuous` (one voice take per scene, the picture cut on top of it). Only

@@ -32,6 +32,7 @@ Orientation = Literal["landscape", "portrait"]
 SpeechMode = Literal["both", "no_dialogue", "no_narration"]
 ProjectKind = Literal["story", "explainer"]
 VoiceTrack = Literal["lines", "continuous"]
+CaptionMode = Literal["burned", "ytt"]
 
 # SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
 _MAX_PROJECT_ID = 2**63 - 1
@@ -51,8 +52,9 @@ class ProjectCreate(BaseModel):
     kind: ProjectKind = "story"
     presenter_character_id: StrictInt | None = None
     set_environment_id: StrictInt | None = None
-    # Word-synced captions and callouts (EXPLAINER-007). Only an explainer keeps them.
-    captions: StrictBool = True
+    # How captions are delivered (CAP-001) and callouts (EXPLAINER-007). Only an explainer keeps
+    # them.
+    caption_mode: CaptionMode = "burned"
     callouts: StrictBool = True
     # How an explainer's speech is made (FLOW-002). Left out, an explainer gets `continuous`. A
     # story is always `lines`. The delivery text is for a continuous explainer only.
@@ -89,9 +91,9 @@ class ProjectUpdate(BaseModel):
     music_enabled: StrictBool | None = None
     # Whether a render includes the beds and point sounds (MUSIC-012). Can be changed at any time.
     ambience_enabled: StrictBool | None = None
-    # Whether an explainer's render draws captions, and callouts (EXPLAINER-007). Only an
-    # explainer can change them, at any time.
-    captions: StrictBool | None = None
+    # How an explainer's captions are delivered (CAP-001), and whether it draws callouts
+    # (EXPLAINER-007). Only an explainer can change them, at any time.
+    caption_mode: CaptionMode | None = None
     callouts: StrictBool | None = None
     # The text that steers a continuous explainer's voice (FLOW-002). Null or blank clears it.
     presenter_delivery: StrictStr | None = None
@@ -140,9 +142,9 @@ class ProjectDetail(BaseModel):
     music_enabled: bool
     # Whether a render includes the beds and point sounds. On by default.
     ambience_enabled: bool
-    # Whether an explainer gets word-synced captions, and callouts. On by default. A story
-    # never reads them.
-    captions: bool
+    # How an explainer's captions are delivered: `burned` (drawn on the picture, the default) or
+    # `ytt` (a caption file). Whether it gets callouts. A story never reads them.
+    caption_mode: CaptionMode
     callouts: bool
     # How the speech is made: `lines` for a story and for an explainer made before FLOW-002.
     voice_track: VoiceTrack
@@ -185,6 +187,11 @@ def _voice_track(project: Project) -> VoiceTrack:
     return cast(VoiceTrack, project.voice_track)
 
 
+def _caption_mode(project: Project) -> CaptionMode:
+    # The database CHECK constraint keeps this to the two allowed values.
+    return cast(CaptionMode, project.caption_mode)
+
+
 def _review_points(project: Project) -> list[ReviewPointKey]:
     # Stored normalized, but read defensively: only known keys are ever returned.
     stored = project.review_points if isinstance(project.review_points, list) else []
@@ -215,7 +222,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         review_points=_review_points(project),
         music_enabled=project.music_enabled,
         ambience_enabled=project.ambience_enabled,
-        captions=project.captions,
+        caption_mode=_caption_mode(project),
         callouts=project.callouts,
         voice_track=_voice_track(project),
         presenter_delivery=project.presenter_delivery,
@@ -285,7 +292,7 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             body.kind,
             body.presenter_character_id,
             body.set_environment_id,
-            body.captions,
+            body.caption_mode,
             body.callouts,
             body.voice_track,
             body.presenter_delivery,

@@ -40,9 +40,11 @@ the sound's own seconds (its time 0 is the first sample it plays):
 - *The video model's sound under a bed* (MD-17): the shot audio is lowered by a setting wherever a
   bed plays, never during a line of dialogue. The setting is 0 (off) until the owner tunes it.
 
-**Captions** (timeline version 3, EXPLAINER-008). For an explainer with captions on, `captions`
-holds the style and the caption groups made by `caption_plan.build_captions` from each speech's
-word timing (narration and dialogue alike), on the story's timeline. It is null otherwise.
+**Captions** (timeline version 3, EXPLAINER-008). For an explainer, `captions` holds the style and
+the caption groups made by `caption_plan.build_captions` from each speech's word timing (narration
+and dialogue alike), on the story's timeline, and `burned` (CAP-001): whether the render draws
+them on the picture. A track with no `burned` key is from before CAP-001 and was burned. It is
+null for a story.
 
 **Callouts** (timeline version 4, EXPLAINER-010). For an explainer with callouts on, `callouts`
 holds the style and every callout that is turned on in the current callout plan, each with its
@@ -234,7 +236,7 @@ class UnitSource:
     audio_id: int | None
     path: str | None
     file_exists: bool
-    # Only for an explainer whose captions are on: the word timing of the speech.
+    # Only for an explainer: the word timing of the speech.
     timing: WordTimingSource | None = None
     # The shots of the scene that carry the unit, in order (SCN-003: a line whose shots are all
     # placeholders is played from its own speech file).
@@ -837,14 +839,15 @@ def build_plan(
     mix: MixSettings | None = None,
     music: MusicSource | None = None,
     captions: caption_plan.CaptionStyle | None = None,
+    captions_burned: bool = True,
     callouts: callout_render.CalloutSource | None = None,
     measure: callout_render.Measure | None = None,
 ) -> RenderPlan:
     """The frozen timeline of a render and its warnings. Raises RenderPlanError with the reason
     when the story cannot be rendered now. `music` is None for a render without music, and
-    `captions` is None for a render without captions (a story, or an explainer with them off), and
-    `callouts` is None for a render without callouts. `measure` measures a callout's text (the
-    bundled font's by default).
+    `captions` is None for a render without a caption track (a story), `captions_burned` says
+    whether the render draws the track on the picture (CAP-001), and `callouts` is None for a
+    render without callouts. `measure` measures a callout's text (the bundled font's by default).
     """
     return _build(
         scenes,
@@ -854,6 +857,7 @@ def build_plan(
         mix=mix,
         music=music,
         captions=captions,
+        captions_burned=captions_burned,
         callouts=callouts,
         measure=measure,
         placeholders=False,
@@ -878,6 +882,7 @@ def build_timing_plan(
         mix=None,
         music=None,
         captions=None,
+        captions_burned=True,
         callouts=None,
         measure=None,
         placeholders=True,
@@ -895,6 +900,7 @@ def _build(
     mix: MixSettings | None,
     music: MusicSource | None,
     captions: caption_plan.CaptionStyle | None,
+    captions_burned: bool,
     callouts: callout_render.CalloutSource | None,
     measure: callout_render.Measure | None,
     placeholders: bool,
@@ -1291,7 +1297,7 @@ def _build(
         groups = caption_plan.hide_during(
             caption_plan.build_captions(timed_units, captions, total_ms), hidden
         )
-        captions_entry = caption_plan.track_dict(captions, groups)
+        captions_entry = caption_plan.track_dict(captions, groups, burned=captions_burned)
         captions_entry["estimated_units"] = estimated_units
         if estimated_units:
             warnings.append(
@@ -1456,6 +1462,7 @@ def build_scene_plan(
     mix: MixSettings | None = None,
     music: MusicSource | None = None,
     captions: caption_plan.CaptionStyle | None = None,
+    captions_burned: bool = True,
     callouts: callout_render.CalloutSource | None = None,
     measure: callout_render.Measure | None = None,
 ) -> RenderPlan:
@@ -1502,6 +1509,7 @@ def build_scene_plan(
         mix=mix,
         music=window_music,
         captions=captions,
+        captions_burned=captions_burned,
         callouts=callouts,
         measure=measure,
         placeholders=True,

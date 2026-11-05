@@ -6,6 +6,7 @@ import {
   Group,
   NumberInput,
   Paper,
+  Radio,
   Stack,
   Switch,
   Text,
@@ -17,6 +18,7 @@ import {
 import { useProjectCast } from "../../api/projectCast";
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
+import { CAPTION_MODES, isCaptionMode } from "./captionModes";
 import { PresenterOutfitField } from "./PresenterOutfitField";
 import { STAGING_MAX_CHARS, projectKindLabel } from "./projectKinds";
 import { speechModeLabel } from "./speechModes";
@@ -250,19 +252,39 @@ export function ProjectSettingsForm({
           <Paper withBorder p="md" radius="md">
             <Stack gap="xs">
               <Title order={4}>Captions and callouts</Title>
-              <Switch
-                label="Word-synced captions"
-                checked={draft.captions}
-                onChange={(event) => edit("captions", event.currentTarget.checked)}
-              />
+              <Radio.Group
+                label="Captions"
+                value={draft.caption_mode}
+                onChange={(value) => {
+                  if (isCaptionMode(value)) {
+                    edit("caption_mode", value);
+                  }
+                }}
+              >
+                <Stack mt="xs" gap="xs">
+                  {CAPTION_MODES.map((option) => (
+                    <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                      <Group wrap="nowrap" align="flex-start">
+                        <Radio.Indicator />
+                        <Stack gap={2}>
+                          <Text fw={500}>{option.label}</Text>
+                          <Text size="sm" c="dimmed">
+                            {option.description}
+                          </Text>
+                        </Stack>
+                      </Group>
+                    </Radio.Card>
+                  ))}
+                </Stack>
+              </Radio.Group>
               <Switch
                 label="Callouts"
                 checked={draft.callouts}
                 onChange={(event) => edit("callouts", event.currentTarget.checked)}
               />
               <Text size="xs" c="dimmed">
-                Both are drawn when the video is rendered, so they can be changed at any time
-                without making anything again.
+                Both apply when the video is rendered, so they can be changed at any time without
+                making anything again. A change marks the videos it no longer fits as out of date.
               </Text>
             </Stack>
           </Paper>

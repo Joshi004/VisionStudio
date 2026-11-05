@@ -19,6 +19,8 @@ import { useLibraryEnvironments } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
 import { PresenterOutfitField } from "./PresenterOutfitField";
+import { CAPTION_MODES, isCaptionMode } from "./captionModes";
+import type { CaptionMode } from "./captionModes";
 import { PROJECT_KINDS, STAGING_MAX_CHARS, isProjectKind } from "./projectKinds";
 import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
@@ -126,7 +128,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<ProjectKind>("story");
   const [presenterId, setPresenterId] = useState<string | null>(null);
   const [setId, setSetId] = useState<string | null>(null);
-  const [captions, setCaptions] = useState(true);
+  const [captionMode, setCaptionMode] = useState<CaptionMode>("burned");
   const [callouts, setCallouts] = useState(true);
   const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
   const [delivery, setDelivery] = useState("");
@@ -152,7 +154,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         kind,
         presenter_character_id: explainer && presenterId !== null ? Number(presenterId) : null,
         set_environment_id: explainer && setId !== null ? Number(setId) : null,
-        captions: explainer ? captions : true,
+        caption_mode: explainer ? captionMode : "burned",
         callouts: explainer ? callouts : true,
         // A story sends neither: it is always "lines" and has no delivery text.
         voice_track: explainer ? voiceTrack : undefined,
@@ -355,12 +357,32 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
               <Text size="sm" fw={500}>
                 7. Captions and callouts
               </Text>
-              <Switch
+              <Radio.Group
                 label="Captions"
-                description="Words appear on screen as the presenter speaks them."
-                checked={captions}
-                onChange={(event) => setCaptions(event.currentTarget.checked)}
-              />
+                description="The words are timed to the presenter's voice either way."
+                value={captionMode}
+                onChange={(value) => {
+                  if (isCaptionMode(value)) {
+                    setCaptionMode(value);
+                  }
+                }}
+              >
+                <Stack mt="xs" gap="xs">
+                  {CAPTION_MODES.map((option) => (
+                    <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                      <Group wrap="nowrap" align="flex-start">
+                        <Radio.Indicator />
+                        <Stack gap={2}>
+                          <Text fw={500}>{option.label}</Text>
+                          <Text size="sm" c="dimmed">
+                            {option.description}
+                          </Text>
+                        </Stack>
+                      </Group>
+                    </Radio.Card>
+                  ))}
+                </Stack>
+              </Radio.Group>
               <Switch
                 label="Callouts"
                 description="Short on-screen highlights, such as key ideas and numbers."

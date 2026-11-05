@@ -12035,10 +12035,11 @@ export interface components {
             /** Set Environment Id */
             set_environment_id?: number | null;
             /**
-             * Captions
-             * @default true
+             * Caption Mode
+             * @default burned
+             * @enum {string}
              */
-            captions: boolean;
+            caption_mode: "burned" | "ytt";
             /**
              * Callouts
              * @default true
@@ -12134,8 +12135,11 @@ export interface components {
             music_enabled: boolean;
             /** Ambience Enabled */
             ambience_enabled: boolean;
-            /** Captions */
-            captions: boolean;
+            /**
+             * Caption Mode
+             * @enum {string}
+             */
+            caption_mode: "burned" | "ytt";
             /** Callouts */
             callouts: boolean;
             /**
@@ -12231,8 +12235,8 @@ export interface components {
             music_enabled?: boolean | null;
             /** Ambience Enabled */
             ambience_enabled?: boolean | null;
-            /** Captions */
-            captions?: boolean | null;
+            /** Caption Mode */
+            caption_mode?: ("burned" | "ytt") | null;
             /** Callouts */
             callouts?: boolean | null;
             /** Presenter Delivery */

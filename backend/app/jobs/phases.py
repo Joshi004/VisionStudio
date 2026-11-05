@@ -298,8 +298,8 @@ PLACING_VOICE: Final = "placing the voice"
 PLACING_MUSIC_LAYERS: Final = "placing the music layers"
 MIXING_SOUND: Final = "mixing the sound"
 MEASURING_MIX: Final = "measuring the mix"
-# EXPLAINER-008, 010: only for an explainer with captions or callouts, before the final encode
-# burns them in.
+# EXPLAINER-008, 010: only for an explainer with burned captions or callouts, before the final
+# encode burns them in.
 WRITING_CAPTIONS: Final = "writing the captions and callouts"
 JOINING_STORY: Final = "joining the shots and encoding the video"
 CHECKING_STORY_VIDEO: Final = "checking the video"

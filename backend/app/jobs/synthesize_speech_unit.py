@@ -5,10 +5,10 @@ It is `SpeechHandler` (Breeze TTS on the GPU server), so the upload of the voice
 long text, the polling, the pre-emption retries and the resume after a restart are the shared
 ones. `store_result` stores the WAV under the project's media folder and fills in the
 `speech_unit_audio` row the job was queued with (`services/speech_synthesis.py`): the file, its
-checksum and the **measured** length, in one transaction with the finished job. For an explainer
-with captions or callouts on, the job that times the words of the speech is queued in that same
-transaction (`jobs/time_speech_words.py`, EXPLAINER-007). The same holds for the take of a scene
-of a continuous explainer, which is timed whatever captions and callouts say (FLOW-004).
+checksum and the **measured** length, in one transaction with the finished job. For an explainer,
+the job that times the words of the speech is queued in that same transaction
+(`jobs/time_speech_words.py`, EXPLAINER-007). The same holds for the take of a scene of a
+continuous explainer (FLOW-004).
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class SynthesizeSpeechUnitHandler(SpeechHandler):
                 row.sha256 = speech.temp.sha256
                 row.duration_s = speech.duration_s
                 row.sample_rate = speech.sample_rate
-                # An explainer with captions or callouts on needs the time of each word of
+                # An explainer needs the time of each word of
                 # this speech (EXPLAINER-007). The job is saved with the speech.
                 project = await session.get(Project, job.project_id)
                 # A scene's take (FLOW-003) is always timed in a continuous explainer, because

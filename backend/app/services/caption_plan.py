@@ -4,6 +4,8 @@ Pure: no I/O, no clock. `story_render_plan.build_plan` gives `build_captions` ev
 story with the time of each of its script words (`speech_word_timing`, EXPLAINER-007), and gets
 back the **caption groups** that are frozen in the timeline (`timeline["captions"]`). The render
 job reads them back with `parse_track` and `services/caption_ass.py` writes them as an ASS file.
+The track is built for every explainer and carries a `burned` flag (CAP-001): the render draws
+the groups on the picture only when it is true, and a track with no flag was burned.
 
 **Text** (`caption_text`): upper case, with sentence punctuation removed. Apostrophes, hyphens
 inside a word, `%`, `$` and the points of numbers such as "3.5" and "1,000" stay.
@@ -100,8 +102,13 @@ class CaptionGroup:
 
 @dataclass(frozen=True)
 class CaptionTrack:
+    """The frozen caption track. `burned` is whether the render draws it on the picture (CAP-001);
+    a track with no `burned` recorded is from before that and was burned.
+    """
+
     style: CaptionStyle
     groups: tuple[CaptionGroup, ...]
+    burned: bool = True
 
 
 @dataclass(frozen=True)
@@ -384,9 +391,14 @@ def hide_during(
 # --- Recording and reading back -------------------------------------------------------------
 
 
-def track_dict(style: CaptionStyle, groups: Sequence[CaptionGroup]) -> dict[str, Any]:
-    """The caption track as it is frozen in the timeline (JSON)."""
+def track_dict(
+    style: CaptionStyle, groups: Sequence[CaptionGroup], *, burned: bool
+) -> dict[str, Any]:
+    """The caption track as it is frozen in the timeline (JSON). `burned` says whether the render
+    draws it on the picture.
+    """
     return {
+        "burned": burned,
         "style": {
             "layout": style.layout,
             "play_res_x": style.play_res_x,
@@ -512,7 +524,11 @@ def parse_track(raw: object) -> CaptionTrack | None:
         return None
     if not isinstance(raw, dict) or not isinstance(raw.get("groups"), list):
         raise CaptionError("bad track")
+    burned = raw.get("burned", True)  # a track from before CAP-001 was burned in
+    if not isinstance(burned, bool):
+        raise CaptionError("bad burned flag")
     return CaptionTrack(
         style=_style_of(raw.get("style")),
         groups=tuple(_group_of(group) for group in raw["groups"]),
+        burned=burned,
     )

@@ -902,8 +902,13 @@ class RenderStoryHandler(JobHandler):
         norm, measured = await measure_master(timeline, premaster)
 
         # The captions and callouts of an explainer, as one ASS file the final encode burns in.
+        # A caption track that is not burned (CAP-001) stays in the timeline only.
         captions: tuple[Path, Path] | None = None
-        has_captions = timeline.captions is not None and bool(timeline.captions.groups)
+        has_captions = (
+            timeline.captions is not None
+            and timeline.captions.burned
+            and bool(timeline.captions.groups)
+        )
         has_callouts = timeline.callouts is not None and bool(timeline.callouts.entries)
         if has_captions or has_callouts:
             await self._phase(job_id, phases.WRITING_CAPTIONS)
@@ -1022,6 +1027,7 @@ class RenderStoryHandler(JobHandler):
             "captions": (
                 {
                     "layout": timeline.captions.style.layout,
+                    "burned": timeline.captions.burned,
                     "groups": len(timeline.captions.groups),
                     "words": sum(len(group.words) for group in timeline.captions.groups),
                 }
