@@ -176,7 +176,8 @@ class Job(Base):
         # Graphics lab jobs, since revision 0079, and the five explainer graphics jobs, since
         # revision 0080, and the reading of a reference photo, since revision 0083, and the render
         # of one scene, since revision 0085, and the writing of thumbnail concepts, since
-        # revision 0086, and the writing of the callout look, since revision 0089.
+        # revision 0086, and the writing of the callout look, since revision 0089, and the two
+        # callout component jobs, since revision 0090.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -199,7 +200,8 @@ class Job(Base):
             "'write_graphic_theme', 'write_shot_graphic_brief', "
             "'write_shot_graphic_component', 'write_shot_graphic_scene', "
             "'render_shot_graphic', 'describe_photo', 'render_scene', "
-            "'write_thumbnail_concepts', 'write_callout_look')",
+            "'write_thumbnail_concepts', 'write_callout_look', 'write_callout_component', "
+            "'render_callout_preview')",
             name="type_valid",
         ),
         CheckConstraint(

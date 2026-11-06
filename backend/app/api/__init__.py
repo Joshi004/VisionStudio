@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api import (
     av_lab,
+    callout_graphics,
     callout_look,
     callout_plan,
     character_definitions,
@@ -74,6 +75,7 @@ api_router.include_router(music_themes.router, tags=["music-themes"])
 api_router.include_router(music_plan.router, tags=["music-plan"])
 api_router.include_router(callout_plan.router, tags=["callout-plan"])
 api_router.include_router(callout_look.router, tags=["callout-look"])
+api_router.include_router(callout_graphics.router, tags=["callout-graphics"])
 api_router.include_router(graphic_theme.router, tags=["graphic-theme"])
 api_router.include_router(graphic_briefs.router, tags=["graphic-briefs"])
 api_router.include_router(thumbnails.router, tags=["thumbnails"])

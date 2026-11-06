@@ -334,7 +334,7 @@ def _times(callout: dict[str, Any], words: _Words, total_ms: int) -> _Placed:
 
 
 @dataclass(frozen=True)
-class _Zone:
+class Zone:
     """The area a callout may fill, in pixels: the middle and the width, and the top and bottom."""
 
     cx: float
@@ -345,16 +345,19 @@ class _Zone:
     centred: bool = False
 
 
-def _zone(kind: str, on_presenter: bool, layout: str, width: int, height: int) -> _Zone:
+def zone_box(kind: str, on_presenter: bool, layout: str, width: int, height: int) -> Zone:
+    """The zone a callout of this kind fills (public since CMO-003: the motion callouts are
+    drawn and checked at the zone's size).
+    """
     if kind == TYPE_SECTION_TITLE:
         share = 0.84 if layout == LAYOUT_PORTRAIT else 0.70
-        return _Zone(width / 2, width * share, height * 0.25, height * 0.75, centred=True)
+        return Zone(width / 2, width * share, height * 0.25, height * 0.75, centred=True)
     if layout == LAYOUT_PORTRAIT:
-        return _Zone(width / 2, width * 0.84, height * 0.12, height * 0.55)
+        return Zone(width / 2, width * 0.84, height * 0.12, height * 0.55)
     if on_presenter:
         cx = width * (0.74 if PRESENTER_SIDE == PRESENTER_RIGHT else 0.26)
-        return _Zone(cx, width * 0.40, height * 0.08, height * 0.40)
-    return _Zone(width / 2, width * 0.70, height * 0.08, height * 0.40)
+        return Zone(cx, width * 0.40, height * 0.08, height * 0.40)
+    return Zone(width / 2, width * 0.70, height * 0.08, height * 0.40)
 
 
 def _nominal_size(kind: str, layout: str, height: int) -> int:
@@ -426,7 +429,7 @@ def _block_height(lines: int, size: int) -> int:
 
 def _place(
     texts: Sequence[str],
-    zone: _Zone,
+    zone: Zone,
     nominal: int,
     *,
     max_lines: int,
@@ -489,7 +492,7 @@ def _layout(
     """The parts of a callout, with their places and sizes: one part for each line of text."""
     kind = placed.callout["type"]
     width, height = style.play_res_x, style.play_res_y
-    zone = _zone(kind, on_presenter, style.layout, width, height)
+    zone = zone_box(kind, on_presenter, style.layout, width, height)
     nominal = _nominal_size(kind, style.layout, height)
     texts = [spec.text for spec in placed.specs]
     several = len(texts) > 1

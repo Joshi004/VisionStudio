@@ -101,6 +101,9 @@ class CalloutLookState(BaseModel):
     # False unless the project is a continuous explainer with graphics and callouts on and the
     # callout style set to motion.
     wanted: bool
+    # Set when the newest version was written from an older graphics look. It is still current:
+    # the callouts are drawn from the same code with the new colours.
+    theme_note: str | None
 
 
 class CalloutLookRun(BaseModel):
@@ -155,6 +158,7 @@ async def _state(session: AsyncSession, project: Project) -> CalloutLookState:
         reasons=state.reasons,
         blocked_reason=state.blocked_reason,
         wanted=state.wanted,
+        theme_note=state.theme_note,
     )
 
 

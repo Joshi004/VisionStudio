@@ -57,6 +57,8 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   time_lab_graphic_words: "Graphics lab word timing",
   write_graphic_theme: "Graphics theme",
   write_callout_look: "Callout look",
+  write_callout_component: "Callout component",
+  render_callout_preview: "Callout preview",
   write_shot_graphic_brief: "Graphic brief",
   write_shot_graphic_component: "Graphic component",
   write_shot_graphic_scene: "Graphic block scene",

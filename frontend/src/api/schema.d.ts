@@ -461,6 +461,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/callout-graphics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Callout Graphics */
+        get: operations["get_callout_graphics_api_projects__project_id__callout_graphics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/callout-graphics/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Callout Graphics
+         * @description Makes what is missing for every callout that is turned on. A callout that has a current
+         *     preview, or whose component failed outright, is left alone. Refused with 422 when nothing can
+         *     be made for the project now.
+         */
+        post: operations["run_callout_graphics_api_projects__project_id__callout_graphics_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/callout-graphics/{callout_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Callout Graphic
+         * @description Makes what is missing for one callout. A callout whose graphics are being made is refused
+         *     with 422.
+         */
+        post: operations["run_callout_graphic_api_projects__project_id__callout_graphics__callout_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/callout-graphics/{callout_id}/{engine}/ask-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Callout Graphic Again
+         * @description A paid model call: makes one version again as a new attempt.
+         */
+        post: operations["ask_callout_graphic_again_api_projects__project_id__callout_graphics__callout_id___engine__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphic-theme/run": {
         parameters: {
             query?: never;
@@ -6038,6 +6118,146 @@ export interface components {
             /** Sides */
             sides?: components["schemas"]["CalloutSideIn"][] | null;
         };
+        /** CalloutGraphicAskRun */
+        CalloutGraphicAskRun: {
+            /** Job Id */
+            job_id: number;
+        };
+        /**
+         * CalloutGraphicAttemptOut
+         * @description One attempt of one version: what it draws from, the jobs, the preview and the checks.
+         */
+        CalloutGraphicAttemptOut: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Attempt */
+            attempt: number;
+            /** Current */
+            current: boolean;
+            /** Stage */
+            stage: ("writing" | "rendering") | null;
+            /** Input */
+            input: unknown | null;
+            input_job: components["schemas"]["JobSummary"] | null;
+            input_call: components["schemas"]["GraphicCallOut"] | null;
+            preview_job: components["schemas"]["JobSummary"] | null;
+            /** Url */
+            url: string | null;
+            /** Metrics */
+            metrics: unknown | null;
+            /** Warnings */
+            warnings: unknown | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Failed Outright */
+            failed_outright: boolean;
+            /** Rerender Of */
+            rerender_of: number | null;
+            /** Repair Of */
+            repair_of: number | null;
+        };
+        /** CalloutGraphicCalloutOut */
+        CalloutGraphicCalloutOut: {
+            /** Id */
+            id: string;
+            /** Type */
+            type: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Scene Id */
+            scene_id: string;
+            /** Unit Id */
+            unit_id: string;
+            /** Phrase */
+            phrase: string;
+            /** Texts */
+            texts: string[];
+            /** Estimated Start S */
+            estimated_start_s: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "working" | "ready" | "out_of_date" | "failed";
+            /** Reasons */
+            reasons: string[];
+            /** Last Error */
+            last_error: string | null;
+            /** Can Run */
+            can_run: boolean;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Length S */
+            length_s: number | null;
+            used: components["schemas"]["CalloutGraphicUsedOut"] | null;
+            /** Engines */
+            engines: components["schemas"]["CalloutGraphicEngineOut"][];
+        };
+        /** CalloutGraphicEngineOut */
+        CalloutGraphicEngineOut: {
+            /**
+             * Key
+             * @constant
+             */
+            key: "generated_component";
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "writing" | "rendering" | "ready" | "out_of_date" | "failed";
+            /** Failed Outright */
+            failed_outright: boolean;
+            /** Last Error */
+            last_error: string | null;
+            /** Attempts */
+            attempts: components["schemas"]["CalloutGraphicAttemptOut"][];
+        };
+        /**
+         * CalloutGraphicUsedOut
+         * @description What the story render draws for a callout. `box` is today's text box, for a callout whose
+         *     component failed outright.
+         */
+        CalloutGraphicUsedOut: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "generated_component" | "box";
+            /** Attempt Id */
+            attempt_id: number | null;
+            /** Attempt */
+            attempt: number | null;
+            /**
+             * Because
+             * @enum {string}
+             */
+            because: "chosen" | "default" | "component_failed";
+        };
+        /** CalloutGraphicsRun */
+        CalloutGraphicsRun: {
+            /** Job Ids */
+            job_ids: number[];
+        };
+        /** CalloutGraphicsStateOut */
+        CalloutGraphicsStateOut: {
+            /** Callouts */
+            callouts: components["schemas"]["CalloutGraphicCalloutOut"][];
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Wanted */
+            wanted: boolean;
+            /** Look Version */
+            look_version: number | null;
+            /** Look Current */
+            look_current: boolean;
+        };
         /** CalloutItemIn */
         CalloutItemIn: {
             /** Text */
@@ -6148,6 +6368,8 @@ export interface components {
             blocked_reason: string | null;
             /** Wanted */
             wanted: boolean;
+            /** Theme Note */
+            theme_note: string | null;
         };
         /** CalloutLookVersionOut */
         CalloutLookVersionOut: {
@@ -9266,7 +9488,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
             /**
              * Status
              * @enum {string}
@@ -9349,7 +9571,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
             /**
              * Kind
              * @enum {string}
@@ -9388,7 +9610,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
             /**
              * Status
              * @enum {string}
@@ -12240,7 +12462,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
             /** Running */
             running: number;
             /** Queued */
@@ -18747,6 +18969,169 @@ export interface operations {
             };
         };
     };
+    get_callout_graphics_api_projects__project_id__callout_graphics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalloutGraphicsStateOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_callout_graphics_api_projects__project_id__callout_graphics_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalloutGraphicsRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a motion callouts project, the callout plan or the callout look is missing, out of date or being written, no such callout, or the version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    run_callout_graphic_api_projects__project_id__callout_graphics__callout_id__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                callout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalloutGraphicsRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a motion callouts project, the callout plan or the callout look is missing, out of date or being written, no such callout, or the version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ask_callout_graphic_again_api_projects__project_id__callout_graphics__callout_id___engine__ask_again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                callout_id: string;
+                engine: "generated_component";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalloutGraphicAskRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a motion callouts project, the callout plan or the callout look is missing, out of date or being written, no such callout, or the version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     run_graphic_theme_api_projects__project_id__graphic_theme_run_post: {
         parameters: {
             query?: never;
@@ -21298,7 +21683,7 @@ export interface operations {
                 /** @description Only jobs with one of these statuses (repeat it). */
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
                 /** @description Only jobs of one of these types (repeat it). */
-                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look")[] | null;
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview")[] | null;
                 limit?: number;
                 offset?: number;
             };

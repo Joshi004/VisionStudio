@@ -111,16 +111,17 @@ def _string_end(code: str, start: int) -> int | None:
     return None if quote != "`" else len(code)
 
 
-def check_code(code: str) -> str:
+def check_code(code: str, *, max_chars: int = MAX_CODE_CHARS) -> str:
     """The component's code, or ValueError listing every rule it breaks (the reasons are fit for
-    the user and for the model's corrected retry).
+    the user and for the model's corrected retry). `max_chars` is the longest code allowed (a
+    callout's component is shorter than a graphic shot's).
     """
     if not code.strip():
         raise ValueError("The component code is empty.")
     reasons: list[str] = []
-    if len(code) > MAX_CODE_CHARS:
+    if len(code) > max_chars:
         reasons.append(
-            f"The code is {len(code):,} characters; the most allowed is {MAX_CODE_CHARS:,}. "
+            f"The code is {len(code):,} characters; the most allowed is {max_chars:,}. "
             "Write a shorter component."
         )
     text = strip_comments(code)
@@ -224,4 +225,28 @@ def text_warnings(texts: list[dict[str, Any]], line: str, resolved: dict[str, An
                 f"The text on screen at {int(entry['frame']) / fps:.1f} s shows the number "
                 f"{format_number(number)}, which the line does not say and no fact shows."
             )
+    return warnings[:MAX_WARNINGS]
+
+
+def part_number_warnings(code: str, texts: list[str]) -> list[str]:
+    """A warning for each number in the code that is also a number in the text of a callout's
+    parts: the component should show the text it is given, never type the number. A whole number
+    under 10 is skipped.
+    """
+    shown: set[Decimal] = set()
+    for text in texts:
+        shown |= {abs(number) for number in numbers_in(text)}
+    warnings: list[str] = []
+    seen: set[Decimal] = set()
+    for match in _NUMBER_LITERAL.finditer(strip_comments(code)):
+        number = _decimal(match.group(0))
+        if number is None or number in seen or number not in shown:
+            continue
+        if number < MIN_LITERAL and number == number.to_integral_value():
+            continue
+        seen.add(number)
+        warnings.append(
+            f"The code has the number {format_number(number)}, which a callout text shows. "
+            "Show the text of the part instead of typing the number."
+        )
     return warnings[:MAX_WARNINGS]

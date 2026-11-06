@@ -14,8 +14,11 @@ manual edit.
 `callouts` on and `callout_style` set to `motion`, and its graphics look must exist and be
 current.
 
-A look is out of date when the newest graphics look is not the one it was written from. A new
-look does not write any callout again: that is for the phases that make them.
+A look is out of date only when the graphics look is itself out of date. A newer graphics look
+leaves it current (CMO-003): the callouts are then drawn again from the same code with the new
+colours, and the state carries a `theme_note` saying the look was written from an older graphics
+look, so the owner may write it again. A look does not write any callout again: that is for the
+phases that make them.
 """
 
 from __future__ import annotations
@@ -56,7 +59,10 @@ THEME_OUT_OF_DATE_MESSAGE: Final = (
 NO_LOOK_MESSAGE: Final = "There is no callout look yet, so there is nothing to comment on."
 BEING_WRITTEN_MESSAGE: Final = "The callout look is already being written."
 
-NEWER_THEME_REASON: Final = "The graphics look was written again since this callout look was made."
+THEME_NOTE: Final = (
+    "This callout look was written from an older graphics look. Write it again if the callouts "
+    "should change with it."
+)
 THEME_STALE_REASON: Final = "The graphics look is out of date: write it again first."
 
 
@@ -225,11 +231,16 @@ def _out_of_date_reasons(
 ) -> list[str]:
     """Why a version is no longer current, one sentence each."""
     reasons: list[str] = []
-    if not provenance.same_row(_recorded_theme(row.inputs), theme_state.latest):
-        reasons.append(NEWER_THEME_REASON)
     if theme_state.out_of_date:
         reasons.append(THEME_STALE_REASON)
     return reasons
+
+
+def _theme_note(row: CalloutLook, theme_state: graphic_theme.GraphicThemeState) -> str | None:
+    """A note, not a reason: the newest version was written from an older graphics look."""
+    if provenance.same_row(_recorded_theme(row.inputs), theme_state.latest):
+        return None
+    return THEME_NOTE
 
 
 @dataclass(frozen=True)
@@ -246,6 +257,8 @@ class CalloutLookState:
     blocked_reason: str | None
     # Whether the project has a callout look at all (motion callouts on a continuous explainer).
     wanted: bool
+    # Set when the newest version was written from an older graphics look. It stays current.
+    theme_note: str | None = None
 
 
 @memoized_state
@@ -259,7 +272,9 @@ async def state(session: AsyncSession, project: Project) -> CalloutLookState:
     bible = await story_bible.latest(session, project.id)
     theme_state = await graphic_theme.state(session, project)
     is_wanted = wanted(project)
-    reasons = _out_of_date_reasons(newest, theme_state) if newest is not None and is_wanted else []
+    judged = newest is not None and is_wanted
+    reasons = _out_of_date_reasons(newest, theme_state) if newest is not None and judged else []
+    note = _theme_note(newest, theme_state) if newest is not None and judged else None
     return CalloutLookState(
         latest=newest,
         versions=versions,
@@ -268,4 +283,5 @@ async def state(session: AsyncSession, project: Project) -> CalloutLookState:
         reasons=reasons,
         blocked_reason=blocked_reason(project, bible, theme_state),
         wanted=is_wanted,
+        theme_note=note,
     )

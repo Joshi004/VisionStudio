@@ -27,6 +27,7 @@ import {
 import { describeError } from "../../api/errors";
 import { isJobActive } from "../../api/polling";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
+import { CalloutGraphicsCard } from "./CalloutGraphicsCard";
 import { CalloutLookCard } from "./CalloutLookCard";
 import { CalloutPlanEditor } from "./CalloutPlanEditor";
 import { ReplaceManualModal } from "./ReplaceManualModal";
@@ -167,6 +168,7 @@ export function CalloutPlanPanel({ projectId }: CalloutPlanPanelProps) {
       </Paper>
 
       <CalloutLookCard projectId={projectId} />
+      <CalloutGraphicsCard projectId={projectId} />
 
       {editing && latest && data && (
         <Paper withBorder p="md" radius="md">

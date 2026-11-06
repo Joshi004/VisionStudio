@@ -13,7 +13,11 @@ import {
 } from "@mantine/core";
 
 import { describeError } from "../../api/errors";
-import { useCalloutLook, useRunCalloutLook, type CalloutLookOut } from "../../api/calloutLook";
+import {
+  useCalloutLook,
+  useRunCalloutLook,
+  type CalloutLookOut,
+} from "../../api/calloutLook";
 import { isJobActive } from "../../api/polling";
 import { JobStatusBadge } from "../jobs/JobStatusBadge";
 import { FeedbackBadge } from "./FeedbackBadge";
@@ -78,9 +82,9 @@ export function CalloutLookCard({ projectId }: CalloutLookCardProps) {
           <Stack gap={2}>
             <Title order={4}>Callout look</Title>
             <Text size="sm" c="dimmed">
-              The one look every motion callout of this video shares: the panel behind it, the
-              corners, how it enters and how a number stands out. The model writes it from the
-              graphics look and the Story Bible.
+              The one look every motion callout of this video shares: the panel
+              behind it, the corners, how it enters and how a number stands out.
+              The model writes it from the graphics look and the Story Bible.
             </Text>
           </Stack>
           <Group gap="sm" align="flex-end">
@@ -127,8 +131,8 @@ export function CalloutLookCard({ projectId }: CalloutLookCardProps) {
           <Alert color="yellow" title="Out of date">
             <Stack gap={4}>
               <Text size="sm">
-                Something this look was written from has changed. Press Write again to make a new
-                one.
+                Something this look was written from has changed. Press Write
+                again to make a new one.
               </Text>
               {data.reasons.length > 0 && (
                 <List size="sm">
@@ -139,6 +143,12 @@ export function CalloutLookCard({ projectId }: CalloutLookCardProps) {
               )}
             </Stack>
           </Alert>
+        )}
+
+        {data?.theme_note && (
+          <Text size="sm" c="dimmed">
+            {data.theme_note}
+          </Text>
         )}
 
         {latest && <CalloutLookView look={latest} />}
@@ -186,10 +196,22 @@ function CalloutLookView({ look }: { look: CalloutLookOut }) {
       </Group>
 
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
-        <Detail label="Panel" value={PANEL_LABELS[fields.panel] ?? fields.panel} />
-        <Detail label="Corners" value={CORNER_LABELS[fields.corners] ?? fields.corners} />
-        <Detail label="Entrance" value={ENTRANCE_LABELS[fields.entrance] ?? fields.entrance} />
-        <Detail label="Density" value={DENSITY_LABELS[fields.density] ?? fields.density} />
+        <Detail
+          label="Panel"
+          value={PANEL_LABELS[fields.panel] ?? fields.panel}
+        />
+        <Detail
+          label="Corners"
+          value={CORNER_LABELS[fields.corners] ?? fields.corners}
+        />
+        <Detail
+          label="Entrance"
+          value={ENTRANCE_LABELS[fields.entrance] ?? fields.entrance}
+        />
+        <Detail
+          label="Density"
+          value={DENSITY_LABELS[fields.density] ?? fields.density}
+        />
       </SimpleGrid>
 
       <Detail label="Emphasis" value={fields.emphasis} />
