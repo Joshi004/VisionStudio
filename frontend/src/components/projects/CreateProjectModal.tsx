@@ -27,6 +27,8 @@ import { PROJECT_KINDS, STAGING_MAX_CHARS, isProjectKind } from "./projectKinds"
 import type { ProjectKind } from "./projectKinds";
 import { SPEECH_MODES, isSpeechMode } from "./speechModes";
 import type { SpeechMode } from "./speechModes";
+import { TAKE_SOURCES, isTakeSource } from "./takeSources";
+import type { TakeSource } from "./takeSources";
 import { DELIVERY_MAX_CHARS, VOICE_TRACKS, isVoiceTrack } from "./voiceTracks";
 import type { VoiceTrack } from "./voiceTracks";
 
@@ -134,6 +136,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [callouts, setCallouts] = useState(true);
   const [calloutStyle, setCalloutStyle] = useState<CalloutStyle>("boxes");
   const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
+  const [takeSource, setTakeSource] = useState<TakeSource>("generated");
   const [delivery, setDelivery] = useState("");
   const [staging, setStaging] = useState("");
   const [outfit, setOutfit] = useState("");
@@ -166,8 +169,15 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         callout_style: canChooseCalloutStyle ? calloutStyle : "boxes",
         // A story sends neither: it is always "lines" and has no delivery text.
         voice_track: explainer ? voiceTrack : undefined,
+        // Only a continuous explainer has a voice source; the delivery text is for generated voice.
+        take_source: explainer && voiceTrack === "continuous" ? takeSource : undefined,
         presenter_delivery:
-          explainer && voiceTrack === "continuous" && delivery.trim() !== "" ? delivery : undefined,
+          explainer &&
+          voiceTrack === "continuous" &&
+          takeSource === "generated" &&
+          delivery.trim() !== ""
+            ? delivery
+            : undefined,
         presenter_staging: explainer && staging.trim() !== "" ? staging : undefined,
         presenter_outfit:
           explainer && outfitId === null && outfit.trim() !== "" ? outfit : undefined,
@@ -342,6 +352,34 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
               </Stack>
             </Radio.Group>
             {voiceTrack === "continuous" && (
+              <Radio.Group
+                label="Voice source"
+                description="Who speaks the script. You can change it later in the project settings."
+                value={takeSource}
+                onChange={(value) => {
+                  if (isTakeSource(value)) {
+                    setTakeSource(value);
+                  }
+                }}
+              >
+                <Stack mt="xs" gap="xs">
+                  {TAKE_SOURCES.map((option) => (
+                    <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                      <Group wrap="nowrap" align="flex-start">
+                        <Radio.Indicator />
+                        <Stack gap={2}>
+                          <Text fw={500}>{option.label}</Text>
+                          <Text size="sm" c="dimmed">
+                            {option.description}
+                          </Text>
+                        </Stack>
+                      </Group>
+                    </Radio.Card>
+                  ))}
+                </Stack>
+              </Radio.Group>
+            )}
+            {voiceTrack === "continuous" && takeSource === "generated" && (
               <Textarea
                 label="Presenter delivery (optional)"
                 description="How the presenter should sound, for example pace and energy. Left empty, the style from the Story Bible is used, or a default. You can change it later in the project settings."

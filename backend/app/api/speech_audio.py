@@ -30,7 +30,7 @@ from app.api.discovery import DiscoveryJobOut
 from app.api.environment_links import DiscoveryId
 from app.api.errors import ErrorResponse
 from app.api.jobs import JobStatus
-from app.api.projects import load_project
+from app.api.projects import TakeSource, load_project
 from app.db.models import Job, SpeechUnitAudio
 from app.db.session import SessionDep
 from app.jobs import dispatcher
@@ -157,6 +157,9 @@ class SpeechAudioStateOut(BaseModel):
     blocked_reason: str | None
     # True for a continuous explainer, whose scenes are spoken as takes.
     continuous: bool
+    # Where the takes come from (REC-002): `recorded` means a person records them, and Make and
+    # Make all are refused. `generated` for every other project.
+    take_source: TakeSource
 
 
 class SpeechAudioSkippedOut(BaseModel):
@@ -274,6 +277,8 @@ async def get_speech_audio(project_id: int, session: SessionDep) -> SpeechAudioS
         ],
         blocked_reason=current.blocked_reason,
         continuous=current.continuous,
+        # The database CHECK constraint keeps this to the two allowed values.
+        take_source=cast(TakeSource, project.take_source),
     )
 
 

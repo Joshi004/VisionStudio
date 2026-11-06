@@ -12597,6 +12597,8 @@ export interface components {
             voice_track?: ("lines" | "continuous") | null;
             /** Presenter Delivery */
             presenter_delivery?: string | null;
+            /** Take Source */
+            take_source?: ("generated" | "recorded") | null;
             /** Graphics */
             graphics?: boolean | null;
             /** Presenter Staging */
@@ -12700,6 +12702,11 @@ export interface components {
              * @enum {string}
              */
             voice_track: "lines" | "continuous";
+            /**
+             * Take Source
+             * @enum {string}
+             */
+            take_source: "generated" | "recorded";
             /** Presenter Delivery */
             presenter_delivery: string | null;
             /** Presenter Staging */
@@ -12798,6 +12805,8 @@ export interface components {
             callout_style?: ("boxes" | "motion") | null;
             /** Presenter Delivery */
             presenter_delivery?: string | null;
+            /** Take Source */
+            take_source?: ("generated" | "recorded") | null;
             /** Presenter Staging */
             presenter_staging?: string | null;
             /** Presenter Outfit */
@@ -15897,6 +15906,11 @@ export interface components {
             blocked_reason: string | null;
             /** Continuous */
             continuous: boolean;
+            /**
+             * Take Source
+             * @enum {string}
+             */
+            take_source: "generated" | "recorded";
         };
         /** SpeechSceneAudioOut */
         SpeechSceneAudioOut: {

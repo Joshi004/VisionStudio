@@ -70,6 +70,8 @@ JOB_TYPE: Final = "synthesize_speech_unit"
 # The `kind` of a scene's take (FLOW-003). A unit's is `narration` or `dialogue`.
 KIND_TAKE: Final = "take"
 TAKE_MODE: Final = "direction"
+# The `mode` of a take a person recorded (REC-002). It has no voice and no instruction.
+MODE_RECORDED: Final = "recorded"
 # Two presses on one line in one voice make one job.
 DEDUPE_KEY: Final = "target"
 
@@ -80,6 +82,14 @@ Status = Literal["unavailable", "none", "in_progress", "failed", "ready", "out_o
 
 _ALREADY_BEING_MADE: Final = "The speech is already being made."
 _SPOKEN_AS_TAKE: Final = "This explainer speaks each scene as one take. Make the scene's take."
+_SPOKEN_AS_RECORDED_TAKE: Final = (
+    "This explainer speaks each scene as one recorded take. Record the scene."
+)
+RECORDED_REFUSED: Final = "This explainer's voice is recorded. Record or upload it."
+RECORD_THE_VOICE: Final = "Record the voice (the whole video or this scene)."
+RECORDED_OUT_OF_DATE: Final = (
+    "The text of this scene has changed since it was recorded. Record the scene again."
+)
 
 
 class SpeechSynthesisError(ValueError):
@@ -163,6 +173,8 @@ class AudioState:
     narrator: _VoiceChoice
     characters: dict[str, _VoiceChoice]
     continuous: bool = False
+    # True for a continuous explainer whose takes are recorded by a person (REC-002).
+    recorded: bool = False
 
 
 @dataclass(frozen=True)
@@ -222,6 +234,13 @@ def is_continuous(project: Project) -> bool:
     return project.voice_track == projects.VOICE_CONTINUOUS
 
 
+def is_recorded(project: Project) -> bool:
+    """Whether the takes of the project are recorded by a person, not made by the speech model
+    (REC-002). Only a continuous explainer can be.
+    """
+    return is_continuous(project) and project.take_source == projects.TAKE_RECORDED
+
+
 def take_text(units: list[dict[str, Any]]) -> str:
     """What a scene's take says: its unit texts in order, joined with one space. Units are slices
     of the script, so nothing is added: a unit that ends at a comma stays a comma.
@@ -240,6 +259,28 @@ def take_key(text: str, voice_id: int, instruction: str) -> str:
             "voice_id": voice_id,
             "mode": TAKE_MODE,
             "instruction": instruction,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(recorded.encode("utf-8")).hexdigest()
+
+
+def recorded_take_key(
+    text: str, recording_sha256: str, start_s: float | None, end_s: float | None
+) -> str:
+    """The hash of what a recorded take depends on: its text, the recording it was cut from and
+    its start and end in that recording (None for a scene recorded on its own). It records that
+    the take is recorded, so it can never equal a generated take's key or a unit's.
+    """
+    recorded = json.dumps(
+        {
+            "take": True,
+            "recorded": True,
+            "text": text,
+            "recording_sha256": recording_sha256,
+            "start_s": start_s,
+            "end_s": end_s,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -467,6 +508,42 @@ def _take_reasons(
     return reasons or ["This scene has changed since the take was made."]
 
 
+def _recorded_take_entry(
+    text: str, scene_refusal: str | None, recorded_takes: list[SpeechUnitAudio]
+) -> TakeEntry:
+    """The take of one scene of a recorded project (REC-002). `recorded_takes` are the scene's
+    recorded rows, the newest first. It is never `unavailable`: no voice is needed. It cannot be
+    made by the speech model, so `can_run` is always False, and `blocked_reason` is what the
+    pipeline stops with while the take is missing.
+    """
+    stored_rows = [row for row in recorded_takes if row.path is not None]
+    stored = next((row for row in stored_rows if row.text == text), None)
+    status: Status
+    reasons: list[str] = []
+    missing: str | None = None
+    if stored is not None:
+        status = "ready"
+    elif stored_rows:
+        status = "out_of_date"
+        reasons = [RECORDED_OUT_OF_DATE]
+        missing = RECORDED_OUT_OF_DATE
+    else:
+        status = "none"
+        missing = RECORD_THE_VOICE
+    return TakeEntry(
+        text=text,
+        status=status,
+        reasons=reasons,
+        voice=None,
+        instruction="",
+        audio=stored,
+        error=None,
+        can_run=False,
+        blocked_reason=scene_refusal or missing,
+        job=None,
+    )
+
+
 def _take_entry(
     text: str,
     instruction: str,
@@ -566,8 +643,12 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
     narrator = await _narrator_choice(session, project)
     characters = await _character_choices(session, project, names)
     continuous = is_continuous(project)
-    # One instruction for every take of the project (FLOW-003, F-3).
-    delivery = await explainer.presenter_delivery(session, project) if continuous else ""
+    recorded = is_recorded(project)
+    # One instruction for every take of the project (FLOW-003, F-3). A recorded project has none:
+    # nobody is told how to sound.
+    delivery = (
+        await explainer.presenter_delivery(session, project) if continuous and not recorded else ""
+    )
 
     scenes: list[SceneAudio] = []
     for entry in planned.entries:
@@ -589,20 +670,32 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
         take: TakeEntry | None = None
         if continuous:
             # The units are not spoken one by one: the scene is, as one take.
+            spoken_as = _SPOKEN_AS_RECORDED_TAKE if recorded else _SPOKEN_AS_TAKE
             units = [
-                replace(unit, can_run=False, blocked_reason=unit.blocked_reason or _SPOKEN_AS_TAKE)
+                replace(unit, can_run=False, blocked_reason=unit.blocked_reason or spoken_as)
                 for unit in units
             ]
             if units:
-                take = _take_entry(
-                    take_text([unit.unit for unit in units]),
-                    delivery,
-                    scene_refusal,
-                    narrator,
-                    by_key,
-                    takes_by_scene.get(entry.item["id"], []),
-                    jobs,
-                )
+                text = take_text([unit.unit for unit in units])
+                scene_takes = takes_by_scene.get(entry.item["id"], [])
+                # Each kind of take counts only in its own mode: switching `take_source` hides
+                # the other kind's rows and deletes none.
+                if recorded:
+                    take = _recorded_take_entry(
+                        text,
+                        scene_refusal,
+                        [row for row in scene_takes if row.mode == MODE_RECORDED],
+                    )
+                else:
+                    take = _take_entry(
+                        text,
+                        delivery,
+                        scene_refusal,
+                        narrator,
+                        by_key,
+                        [row for row in scene_takes if row.mode != MODE_RECORDED],
+                        jobs,
+                    )
         scenes.append(SceneAudio(scene=entry, units=units, take=take))
     return AudioState(
         scenes_version=planned.scenes_version,
@@ -611,6 +704,7 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
         narrator=narrator,
         characters=characters,
         continuous=continuous,
+        recorded=recorded,
     )
 
 
@@ -826,6 +920,8 @@ async def start_take(session: AsyncSession, project: Project, scene_id: str) -> 
     SpeechSynthesisError.
     """
     current = await state(session, project)
+    if current.recorded:
+        raise SpeechSynthesisError(RECORDED_REFUSED)
     if current.blocked_reason is not None:
         raise SpeechSynthesisError(current.blocked_reason)
     scene, take = _find_take(current, scene_id)
@@ -851,6 +947,8 @@ async def start_all(session: AsyncSession, project: Project) -> StartAllResult:
     when nothing can be made yet.
     """
     current = await state(session, project)
+    if current.recorded:
+        raise SpeechSynthesisError(RECORDED_REFUSED)
     if current.blocked_reason is not None:
         raise SpeechSynthesisError(current.blocked_reason)
     job_ids: list[int] = []

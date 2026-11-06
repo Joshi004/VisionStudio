@@ -35,6 +35,7 @@ ProjectKind = Literal["story", "explainer"]
 VoiceTrack = Literal["lines", "continuous"]
 CaptionMode = Literal["burned", "ytt"]
 CalloutStyle = Literal["boxes", "motion"]
+TakeSource = Literal["generated", "recorded"]
 
 # SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
 _MAX_PROJECT_ID = 2**63 - 1
@@ -65,6 +66,9 @@ class ProjectCreate(BaseModel):
     # story is always `lines`. The delivery text is for a continuous explainer only.
     voice_track: VoiceTrack | None = None
     presenter_delivery: StrictStr | None = None
+    # Where a continuous explainer's takes come from (REC-002). Left out, `generated`. `recorded`
+    # is refused for any project that is not a continuous explainer.
+    take_source: TakeSource | None = None
     # Graphic shots (EXG-001). Left out, a continuous explainer gets them on and every other
     # project off. Asking for them on any other project is refused.
     graphics: StrictBool | None = None
@@ -105,6 +109,8 @@ class ProjectUpdate(BaseModel):
     callout_style: CalloutStyle | None = None
     # The text that steers a continuous explainer's voice (FLOW-002). Null or blank clears it.
     presenter_delivery: StrictStr | None = None
+    # Where a continuous explainer's takes come from (REC-002). Can be changed at any time.
+    take_source: TakeSource | None = None
     # How an explainer's presenter is placed and moves on camera. Null or blank clears it.
     presenter_staging: StrictStr | None = None
     # What an explainer's presenter wears. Null or blank clears it.
@@ -187,6 +193,8 @@ class ProjectDetail(BaseModel):
     callout_style: CalloutStyle
     # How the speech is made: `lines` for a story and for an explainer made before FLOW-002.
     voice_track: VoiceTrack
+    # Where a continuous explainer's takes come from: `generated` (the default) or `recorded`.
+    take_source: TakeSource
     # The owner's voice text for a continuous explainer. Null when there is none.
     presenter_delivery: str | None
     # The owner's text for how an explainer's presenter is placed and moves. Null when there is
@@ -226,6 +234,11 @@ def _kind(project: Project) -> ProjectKind:
 def _voice_track(project: Project) -> VoiceTrack:
     # The database CHECK constraint keeps this to the two allowed values.
     return cast(VoiceTrack, project.voice_track)
+
+
+def _take_source(project: Project) -> TakeSource:
+    # The database CHECK constraint keeps this to the two allowed values.
+    return cast(TakeSource, project.take_source)
 
 
 def _caption_mode(project: Project) -> CaptionMode:
@@ -277,6 +290,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         callouts=project.callouts,
         callout_style=_callout_style(project),
         voice_track=_voice_track(project),
+        take_source=_take_source(project),
         presenter_delivery=project.presenter_delivery,
         presenter_staging=project.presenter_staging,
         presenter_outfit=project.presenter_outfit,
@@ -354,6 +368,7 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             presenter_outfit=body.presenter_outfit,
             presenter_named_look_id=body.presenter_named_look_id,
             callout_style=body.callout_style,
+            take_source=body.take_source,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

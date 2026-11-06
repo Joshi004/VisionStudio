@@ -44,6 +44,13 @@ SPEECH_MODES: Final = (SPEECH_BOTH, SPEECH_NO_DIALOGUE, SPEECH_NO_NARRATION)
 VOICE_LINES: Final = "lines"
 VOICE_CONTINUOUS: Final = "continuous"
 VOICE_TRACKS: Final = (VOICE_LINES, VOICE_CONTINUOUS)
+# Where a continuous explainer's takes come from (REC-002). `generated`: the speech model.
+# `recorded`: a person records the script. Can be changed at any time.
+TAKE_GENERATED: Final = "generated"
+TAKE_RECORDED: Final = "recorded"
+TAKE_SOURCES: Final = (TAKE_GENERATED, TAKE_RECORDED)
+TAKE_SOURCE_MESSAGE: Final = "Voice source must be generated or recorded."
+TAKE_RECORDED_ONLY_MESSAGE: Final = "Only a continuous explainer can have a recorded voice."
 # How an explainer's captions are delivered (CAP-001). `burned`: drawn on the picture.
 # `ytt`: nothing is drawn; the captions come as a file. A story always stores `burned`.
 CAPTION_BURNED: Final = "burned"
@@ -134,6 +141,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "callouts": "Callouts",
     "callout_style": "Callout style",
     "presenter_delivery": "Presenter delivery",
+    "take_source": "Voice source",
     "presenter_staging": "Presenter staging",
     "presenter_outfit": "Presenter outfit",
     "presenter_named_look_id": "Presenter saved outfit",
@@ -215,6 +223,12 @@ def validate_project(project: Project) -> None:
         raise ProjectValidationError("Voice must be lines or continuous.")
     if project.kind != KIND_EXPLAINER and project.voice_track != VOICE_LINES:
         raise ProjectValidationError("Only an explainer can have a continuous voice.")
+    if project.take_source not in TAKE_SOURCES:
+        raise ProjectValidationError(TAKE_SOURCE_MESSAGE)
+    if project.take_source == TAKE_RECORDED and (
+        project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
+    ):
+        raise ProjectValidationError(TAKE_RECORDED_ONLY_MESSAGE)
     if project.presenter_delivery is not None:
         if project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS:
             raise ProjectValidationError(
@@ -304,6 +318,7 @@ async def create_project(
     presenter_outfit: str | None = None,
     presenter_named_look_id: int | None = None,
     callout_style: str = CALLOUT_BOXES,
+    take_source: str | None = None,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
@@ -322,6 +337,9 @@ async def create_project(
     `callout_style` (CMO-002) is `boxes` unless sent as `motion`, which is refused unless the
     project is a continuous explainer with graphics and callouts on.
 
+    `take_source` (REC-002) is `generated` unless sent as `recorded`, which is refused unless the
+    project is a continuous explainer.
+
     `graphics` (EXG-001) is on by default for a continuous explainer and off for every other
     project; asking for it on any other project is refused.
 
@@ -337,6 +355,8 @@ async def create_project(
         raise ProjectValidationError(CAPTION_MODE_MESSAGE)
     if callout_style not in CALLOUT_STYLES:
         raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
+    if take_source is not None and take_source not in TAKE_SOURCES:
+        raise ProjectValidationError(TAKE_SOURCE_MESSAGE)
     if voice_track is not None and voice_track not in VOICE_TRACKS:
         raise ProjectValidationError("Voice must be lines or continuous.")
     if kind == KIND_EXPLAINER:
@@ -397,6 +417,7 @@ async def create_project(
         callouts=callouts if kind == KIND_EXPLAINER else True,
         callout_style=callout_style,
         voice_track=voice_track,
+        take_source=take_source or TAKE_GENERATED,
         presenter_delivery=delivery,
         presenter_staging=staging,
         presenter_outfit=outfit,
@@ -590,6 +611,8 @@ def _prepare_value(field: str, value: object) -> object:
         raise ProjectValidationError("Callouts must be on or off.")
     if field == "callout_style" and value not in CALLOUT_STYLES:
         raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
+    if field == "take_source" and value not in TAKE_SOURCES:
+        raise ProjectValidationError(TAKE_SOURCE_MESSAGE)
     return value
 
 

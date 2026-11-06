@@ -46,6 +46,7 @@ class Project(Base):
         CheckConstraint("voice_track IN ('lines', 'continuous')", name="voice_track_valid"),
         CheckConstraint("caption_mode IN ('burned', 'ytt')", name="caption_mode_valid"),
         CheckConstraint("callout_style IN ('boxes', 'motion')", name="callout_style_valid"),
+        CheckConstraint("take_source IN ('generated', 'recorded')", name="take_source_valid"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -115,6 +116,12 @@ class Project(Base):
     # SCN-002. The scene the owner pushed to the front of the GPU server's queue (its id in the
     # scene discovery). Its clips are sent with the most urgent priority. NULL: none is pushed.
     pushed_scene_id: Mapped[str | None] = mapped_column(default=None)
+    # REC-002. Where the takes of a continuous explainer come from: `generated` (the speech
+    # model, as before) or `recorded` (a person records the script). Only a continuous explainer
+    # can be `recorded`. Can be changed at any time: switching deletes nothing.
+    take_source: Mapped[str] = mapped_column(
+        default="generated", server_default=text("'generated'")
+    )
 
 
 class Asset(Base):
@@ -1237,7 +1244,7 @@ class SpeechUnitAudio(Base):
     __tablename__ = "speech_unit_audio"
     __table_args__ = (
         CheckConstraint("kind IN ('narration', 'dialogue', 'take')", name="kind_valid"),
-        CheckConstraint("mode IN ('clone', 'direction')", name="mode_valid"),
+        CheckConstraint("mode IN ('clone', 'direction', 'recorded')", name="mode_valid"),
         Index("idx_speech_unit_audio_project_key", "project_id", "audio_key"),
         Index("idx_speech_unit_audio_project_scene", "project_id", "scene_id"),
     )
@@ -1301,6 +1308,103 @@ class SpeechWordTiming(Base):
         ForeignKey("job.id", ondelete="SET NULL"), default=None
     )
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class VoiceRecording(Base):
+    """One recording of a person's voice, received (`browser`, `upload`) or made by splicing a
+    patch into a full recording (`splice`) (REC-002). A stored row is never changed.
+
+    `scope` is `full` (the whole video in one flow, numbered by `version` from 1 per project),
+    `scene` (one scene, with its `scene_id`) or `patch` (a short passage that replaces a stretch
+    of a full recording). `base_recording_id` is, for a spliced full version, the version it was
+    made from, and for a patch, the full version it patches; `patch_id` is the patch a spliced
+    version was made with. `text` is what the person was asked to read. `path` is the converted
+    file (mono, 24 kHz, 16-bit WAV) under the project's media folder, so deleting the project
+    removes it. `inputs` records the speech units the text came from and, for a patch, its region.
+    """
+
+    __tablename__ = "voice_recording"
+    __table_args__ = (
+        CheckConstraint("scope IN ('full', 'scene', 'patch')", name="scope_valid"),
+        CheckConstraint("origin IN ('browser', 'upload', 'splice')", name="origin_valid"),
+        CheckConstraint("(scope = 'scene') = (scene_id IS NOT NULL)", name="scene_only_for_scene"),
+        CheckConstraint("(scope = 'full') = (version IS NOT NULL)", name="version_only_for_full"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_voice_recording_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    scope: Mapped[str]
+    scene_id: Mapped[str | None] = mapped_column(default=None)
+    version: Mapped[int | None] = mapped_column(default=None)
+    base_recording_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice_recording.id", ondelete="SET NULL"), default=None
+    )
+    patch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice_recording.id", ondelete="SET NULL"), default=None
+    )
+    text: Mapped[str]
+    origin: Mapped[str]
+    path: Mapped[str]
+    size_bytes: Mapped[int]
+    sha256: Mapped[str]
+    duration_s: Mapped[float]
+    inputs: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class VoiceRecordingTiming(Base):
+    """The start and end time of every script word of one recording (REC-002). It has the shape
+    of `speech_word_timing`, one row per `voice_recording` row; `words` is each
+    `{"text", "start", "end"}` in seconds from the start of the file.
+    """
+
+    __tablename__ = "voice_recording_timing"
+    __table_args__ = (
+        CheckConstraint("source IN ('parakeet', 'estimated')", name="source_valid"),
+        Index("idx_voice_recording_timing_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    voice_recording_id: Mapped[int] = mapped_column(
+        ForeignKey("voice_recording.id", ondelete="CASCADE"), unique=True
+    )
+    source: Mapped[str]
+    match_percent: Mapped[float]
+    threshold: Mapped[int]
+    words: Mapped[Any] = mapped_column(JSON)
+    heard_text: Mapped[str] = mapped_column(default="", server_default=text("''"))
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class RecordingBoundaryDecision(Base):
+    """The owner's decision on one scene boundary of one full recording version (REC-002):
+    `keep` (cut in the middle of the pause) or `cut_at` (cut at `cut_s`, seconds from the start
+    of the recording).
+    """
+
+    __tablename__ = "recording_boundary_decision"
+    __table_args__ = (
+        CheckConstraint("decision IN ('keep', 'cut_at')", name="decision_valid"),
+        CheckConstraint("(decision = 'cut_at') = (cut_s IS NOT NULL)", name="cut_only_for_cut_at"),
+        UniqueConstraint("recording_id", "after_scene_id", "before_scene_id"),
+        Index("idx_recording_boundary_decision_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    recording_id: Mapped[int] = mapped_column(ForeignKey("voice_recording.id", ondelete="CASCADE"))
+    after_scene_id: Mapped[str]
+    before_scene_id: Mapped[str]
+    decision: Mapped[str]
+    cut_s: Mapped[float | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 
 
 class ShotVoiceSource(Base):

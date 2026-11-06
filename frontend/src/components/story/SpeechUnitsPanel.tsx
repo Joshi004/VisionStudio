@@ -64,9 +64,24 @@ const TAKE_STATUS: Record<
   out_of_date: { label: "Out of date", color: "yellow" },
 };
 
+/** The labels of a take a person records (REC-002). Nothing is "made" or "cannot be made". */
+const RECORDED_TAKE_STATUS: Record<
+  SpeechTake["status"],
+  { label: string; color: string }
+> = {
+  unavailable: { label: "Not recorded", color: "gray" },
+  none: { label: "Not recorded", color: "gray" },
+  in_progress: { label: "Being processed", color: "blue" },
+  failed: { label: "Failed", color: "red" },
+  ready: { label: "Recorded", color: "green" },
+  out_of_date: { label: "Out of date", color: "yellow" },
+};
+
 type TakeLineProps = {
   take: SpeechTake;
   busy: boolean;
+  /** True when a person records the takes (REC-002): nothing is made, so there is no Make. */
+  recorded: boolean;
   onMake: () => void;
 };
 
@@ -75,8 +90,10 @@ type TakeLineProps = {
  * voice, the player with the measured length, why it is out of date or cannot be made, and the
  * button to make it. The scene's units are spoken inside it, not one by one.
  */
-function TakeLine({ take, busy, onMake }: TakeLineProps) {
-  const status = TAKE_STATUS[take.status];
+function TakeLine({ take, busy, recorded, onMake }: TakeLineProps) {
+  const status = recorded
+    ? RECORDED_TAKE_STATUS[take.status]
+    : TAKE_STATUS[take.status];
   const label =
     take.status === "none" || take.status === "unavailable"
       ? "Make the take"
@@ -94,21 +111,28 @@ function TakeLine({ take, busy, onMake }: TakeLineProps) {
             {take.audio.measured_seconds.toFixed(1)} s
           </Text>
         )}
-        {take.voice_name !== null && (
+        {recorded && take.audio !== null && (
+          <Text size="xs" c="dimmed">
+            Recorded
+          </Text>
+        )}
+        {!recorded && take.voice_name !== null && (
           <Text size="xs" c="dimmed">
             {take.voice_name}, directed
           </Text>
         )}
         {take.word_timing !== null && <TimingBadge timing={take.word_timing} />}
-        <Button
-          size="compact-xs"
-          variant="default"
-          disabled={!take.can_run || busy}
-          onClick={onMake}
-          title={`Delivery: ${take.instruction}`}
-        >
-          {label}
-        </Button>
+        {!recorded && (
+          <Button
+            size="compact-xs"
+            variant="default"
+            disabled={!take.can_run || busy}
+            onClick={onMake}
+            title={`Delivery: ${take.instruction}`}
+          >
+            {label}
+          </Button>
+        )}
       </Group>
       {take.audio !== null && (
         <audio
@@ -131,11 +155,13 @@ function TakeLine({ take, busy, onMake }: TakeLineProps) {
       {take.word_timing?.status === "estimated" && (
         <Text size="xs" c="red">
           Too few words matched ({take.word_timing.match_percent ?? 0}% of{" "}
-          {take.word_timing.threshold ?? 0}% needed) to cut on. Make the take
-          again.
+          {take.word_timing.threshold ?? 0}% needed) to cut on.{" "}
+          {recorded ? "Record it again." : "Make the take again."}
         </Text>
       )}
-      {take.blocked_reason !== null && take.status !== "in_progress" && (
+      {take.blocked_reason !== null &&
+        take.status !== "in_progress" &&
+        !take.reasons.includes(take.blocked_reason) && (
         <Text size="xs" c="dimmed">
           {take.blocked_reason}
         </Text>
@@ -160,6 +186,8 @@ type EntryRowProps = {
   speechBusy: boolean;
   onMake: (unitId: string) => void;
   onMakeTake: () => void;
+  /** True when a person records the takes (REC-002). */
+  recorded: boolean;
 };
 
 /**
@@ -180,6 +208,7 @@ function EntryRow({
   speechBusy,
   onMake,
   onMakeTake,
+  recorded,
 }: EntryRowProps) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -262,7 +291,12 @@ function EntryRow({
             </Text>
           )}
           {take !== null && (
-            <TakeLine take={take} busy={speechBusy} onMake={onMakeTake} />
+            <TakeLine
+              take={take}
+              busy={speechBusy}
+              recorded={recorded}
+              onMake={onMakeTake}
+            />
           )}
           {entry.reasons.map((text) => (
             <Text key={text} size="xs" c="yellow.8">
@@ -375,6 +409,8 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
   const speechBusy =
     makeAll.isPending || makeOne.isPending || makeTake.isPending;
   const continuous = audio.data?.continuous ?? false;
+  // A recorded explainer (REC-002) has no Make: its takes are recorded or uploaded.
+  const recorded = audio.data?.take_source === "recorded";
   // What "Make all" would do: the units (or, for a continuous explainer, the scene takes) that
   // may run and have no current audio.
   const speechCount = (audio.data?.scenes ?? []).reduce(
@@ -423,21 +459,23 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
             >
               Plan all
             </Button>
-            <Button
-              variant="default"
-              onClick={() => makeAll.mutate()}
-              loading={makeAll.isPending}
-              disabled={
-                audio.isLoading ||
-                audio.isError ||
-                speechBusy ||
-                projectBlocked ||
-                speechCount === 0
-              }
-              title="Speak every unit (or every scene, for a continuous explainer) that has no current speech"
-            >
-              Make all speech
-            </Button>
+            {!recorded && (
+              <Button
+                variant="default"
+                onClick={() => makeAll.mutate()}
+                loading={makeAll.isPending}
+                disabled={
+                  audio.isLoading ||
+                  audio.isError ||
+                  speechBusy ||
+                  projectBlocked ||
+                  speechCount === 0
+                }
+                title="Speak every unit (or every scene, for a continuous explainer) that has no current speech"
+              >
+                Make all speech
+              </Button>
+            )}
           </Group>
         </Group>
 
@@ -536,6 +574,7 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
             speechBusy={speechBusy}
             onMake={(unitId) => makeOne.mutate({ sceneId: entry.id, unitId })}
             onMakeTake={() => makeTake.mutate({ sceneId: entry.id })}
+            recorded={recorded}
           />
         ))}
       </Stack>

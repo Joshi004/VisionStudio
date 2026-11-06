@@ -206,6 +206,8 @@ Status: Derived from `ANALYSIS.md` (originally Revision 3, now updated for Revis
 
 **Update (EXG-008 Graphics lab stops making template videos, 2026-11-04):** no migration. **The Graphics lab no longer starts the two template engines, `remotion_templates` and `python_templates`.** (1) **Nothing is deleted**: no table, column, CHECK value, job type, handler, renderer or row changes, and the two engines stay in the engine registry (`services/graphics_engines.py`) with a new flag `retired`, so a run's old template renders still load and show. (2) **Make all** (and with it the trial) skips a retired engine, so a new run makes the brief, the block scene and the component (three paid calls, at most eight with retries) and no `write_lab_graphic_template_spec` job. (3) **Ask again on a retired engine** and **Render again of its render** are refused with 409 ("Templates are no longer made. Older attempts are kept."). (4) The API's engine (`GraphicEngineOut`) has a new read-only field `retired`. (5) A trial set's summary has a template column only when the set has a render of it, so older sets keep four columns and new sets have two.
 
+**Update (REC-002 recorded voice setting and tables, 2026-11-06):** migration `0092`. **A continuous explainer can choose recorded voice, and every table the recorded-voice plan needs exists.** (1) **One new column on `project`** (Section 4.1): `take_source` (`generated` or `recorded`, NOT NULL, default `generated`, CHECK `ck_project_take_source_valid`). `recorded` is refused for anything but a continuous explainer; `PATCH /api/projects/{id}` may change it at any time. (2) **`speech_unit_audio.mode`** (Section 4.42): the CHECK gains `recorded`; the table is rebuilt in batch mode and no row changes. (3) **Three new tables**: `voice_recording` (4.85), `voice_recording_timing` (4.86, a separate table shaped like `speech_word_timing`, which is unchanged) and `recording_boundary_decision` (4.87). All three belong to a project and are deleted with it (`CASCADE`); recordings are stored under the project's media folder, which project deletion removes. (4) No new job type or setting. The downgrade deletes the recorded takes and their word timings, and the three tables; stored files are never deleted. Nothing writes the new tables yet: a recorded project's takes are `none` until REC-003.
+
 **How to read this document:** every table and field name is taken directly from `ANALYSIS.md`. Where `ANALYSIS.md` describes behaviour in prose but doesn't spell out a concrete SQL type, default, index, or constraint, I chose a simple, standard convention and marked it. **Section 8 ("Assumptions and additions beyond ANALYSIS.md") lists every one of those choices in one place** so you can confirm or correct them before anything is built. Nothing in Sections 1–7 should surprise you if you've read `ANALYSIS.md`; it's the same model, just made concrete.
 
 ---
@@ -671,6 +673,7 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `presenter_outfit` | TEXT | NULL | — | Migration `0082`. The owner's text for what an explainer's presenter wears (for example "a navy blazer over a white shirt"), at most 300 characters (the longest named-look description), trimmed; a blank text is stored as NULL. NULL means the presenter's default outfit. Set only on an explainer (any other project gets 422). `PATCH /api/projects/{id}` may change it at any time. The look resolution uses it as the presenter's look request in every scene, in place of what the scene definitions asked for, so it resolves to one named look (with its own pictures) shared by every scene. The resolution records its SHA-256 in `inputs.presenter_outfit.sha256` and is out of date when the text changes |
 | `presenter_named_look_id` | INTEGER, FK → `character_named_look.id` | NULL | — | Migration `0083`. The saved outfit (a named look of the presenter) an explainer's presenter wears in every scene, picked from the presenter's outfits in the Character Lab. NULL means the typed `presenter_outfit` or the default outfit. Never set together with `presenter_outfit` (422), and only on an explainer. `ON DELETE SET NULL` (the outfit's deletion in the lab only hides it, so this normally stays set). The look resolution uses it as the presenter's look in every scene, with no model matching, and records its id in `inputs.presenter_named_look`; the resolution is out of date when the pick changes |
 | `graphics` | BOOLEAN | NOT NULL | `0` | EXG-001. Whether a continuous explainer gets graphic shots (charts, diagrams and text cards drawn by code). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. Only an explainer with `voice_track = continuous` can have it on (`validate_project`). A new continuous explainer defaults to on; every other project, and every project made before this column, is off. Off, the project gets exactly the instructions, jobs and FFmpeg commands it got before |
+| `take_source` | TEXT | NOT NULL | `'generated'` | Migration `0092` (REC-002). Where a continuous explainer's takes come from, `CHECK (take_source IN ('generated', 'recorded'))`: `generated` (the speech model, as before) or `recorded` (a person records the script). `recorded` is allowed only for an explainer with `voice_track = continuous` (`validate_project`). `PATCH /api/projects/{id}` may change it at any time for such a project; switching deletes nothing, and the other kind's takes stop counting until it is switched back. Every project made before this column is `generated` |
 | `pushed_scene_id` | TEXT | NULL | — | Migration `0084` (SCN-002). The id, in the scene discovery, of the scene the owner pushed to the front of the GPU server's queue. Its clips are sent with priority 1 and the ones already waiting on the server are moved up. NULL means none is pushed. Set by the push and by "Generate scene", cleared by "Stop pushing" or by pushing another scene |
 
 ```sql
@@ -704,7 +707,9 @@ CREATE TABLE project (
     presenter_staging  TEXT,
     presenter_outfit   TEXT,
     presenter_named_look_id INTEGER REFERENCES character_named_look(id) ON DELETE SET NULL,
-    pushed_scene_id    TEXT
+    pushed_scene_id    TEXT,
+    take_source        TEXT NOT NULL DEFAULT 'generated'
+        CHECK (take_source IN ('generated', 'recorded'))
 );
 ```
 
@@ -2244,7 +2249,7 @@ CREATE INDEX idx_speech_units_project_scene ON speech_units (project_id, scene_i
 | `kind` | TEXT | NOT NULL | — | `narration`, `dialogue` or `take` (`CHECK`) |
 | `speaker_id` | TEXT | NULL | — | The discovered character's slug id; NULL for narration and for a take |
 | `text` | TEXT | NOT NULL | — | The text that was spoken, as it was when the speech was queued |
-| `mode` | TEXT | NOT NULL | — | `clone` (no delivery emotion) or `direction` (steered by `instruction`) (`CHECK`) |
+| `mode` | TEXT | NOT NULL | — | `clone` (no delivery emotion) or `direction` (steered by `instruction`); `recorded` (REC-002, migration `0092`) for a take a person recorded, with `voice_id` and `instruction` NULL (`CHECK`) |
 | `instruction` | TEXT | NULL | — | What steered a `direction` speech, written from the unit's emotion |
 | `voice_id` | INTEGER, FK → `voice.id` | NULL | — | The saved voice that spoke it. `ON DELETE SET NULL` |
 | `audio_key` | TEXT | NOT NULL | — | SHA-256 of `{text, voice_id, mode, instruction}` (of `{take: true, text, voice_id, mode, instruction}` for a take) |
@@ -2266,7 +2271,7 @@ CREATE TABLE speech_unit_audio (
     kind        TEXT NOT NULL CHECK (kind IN ('narration', 'dialogue', 'take')),
     speaker_id  TEXT,
     text        TEXT NOT NULL,
-    mode        TEXT NOT NULL CHECK (mode IN ('clone', 'direction')),
+    mode        TEXT NOT NULL CHECK (mode IN ('clone', 'direction', 'recorded')),
     instruction TEXT,
     voice_id    INTEGER REFERENCES voice(id) ON DELETE SET NULL,
     audio_key   TEXT NOT NULL,
@@ -3983,6 +3988,118 @@ CREATE TABLE callout_graphic_choice (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (project_id, match_key)
 );
+```
+
+### 4.85 `voice_recording`
+
+*Added in REC-002 (migration `0092`); written from REC-003.* One row per recording of a person's voice for a continuous explainer with `project.take_source = 'recorded'`: received from the browser or an upload, or made by splicing a patch into a full recording. A stored row is never changed. The file is converted to the takes' format (mono, 24 kHz, 16-bit PCM WAV) and stored under the project's folder in `media/` (through `storage.save`), so deleting the project removes it with the folder.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `scope` | TEXT | NOT NULL | — | `full` (the whole video in one flow), `scene` (one scene) or `patch` (a short passage that replaces a stretch of a full recording) (`CHECK`) |
+| `scene_id` | TEXT | NULL | — | The scene's slug id. Set exactly when `scope = 'scene'` (`CHECK`) |
+| `version` | INTEGER | NULL | — | The number of a full recording, from 1 per project. Set exactly when `scope = 'full'` (`CHECK`). `UNIQUE (project_id, version)` |
+| `base_recording_id` | INTEGER, FK → `voice_recording.id` | NULL | — | For a spliced full version, the version it was made from; for a patch, the full version it patches. `ON DELETE SET NULL` |
+| `patch_id` | INTEGER, FK → `voice_recording.id` | NULL | — | For a spliced full version, the patch it was made with. `ON DELETE SET NULL` |
+| `text` | TEXT | NOT NULL | — | What the person was asked to read |
+| `origin` | TEXT | NOT NULL | — | `browser`, `upload` or `splice` (`CHECK`) |
+| `path` | TEXT | NOT NULL | — | The converted WAV, relative to `media/` |
+| `size_bytes` | INTEGER | NOT NULL | — | Size of the stored file |
+| `sha256` | TEXT | NOT NULL | — | Hash of the stored file |
+| `duration_s` | REAL | NOT NULL | — | The length measured with ffprobe |
+| `inputs` | JSON | NOT NULL | — | The speech units' rows and versions the text came from, and for a patch its region |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE voice_recording (
+    id                INTEGER PRIMARY KEY,
+    project_id        INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    scope             TEXT NOT NULL CHECK (scope IN ('full', 'scene', 'patch')),
+    scene_id          TEXT,
+    version           INTEGER,
+    base_recording_id INTEGER REFERENCES voice_recording(id) ON DELETE SET NULL,
+    patch_id          INTEGER REFERENCES voice_recording(id) ON DELETE SET NULL,
+    text              TEXT NOT NULL,
+    origin            TEXT NOT NULL CHECK (origin IN ('browser', 'upload', 'splice')),
+    path              TEXT NOT NULL,
+    size_bytes        INTEGER NOT NULL,
+    sha256            TEXT NOT NULL,
+    duration_s        REAL NOT NULL,
+    inputs            JSON NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((scope = 'scene') = (scene_id IS NOT NULL)),
+    CHECK ((scope = 'full') = (version IS NOT NULL)),
+    UNIQUE (project_id, version)
+);
+CREATE INDEX idx_voice_recording_project ON voice_recording (project_id);
+```
+
+### 4.86 `voice_recording_timing`
+
+*Added in REC-002 (migration `0092`); written from REC-004.* The time of every script word of one recording, shaped like `speech_word_timing` (Section 4.68). It is a separate table so that `speech_word_timing`, which belongs to one `speech_unit_audio` row, is unchanged. One row per `voice_recording` row (`UNIQUE`). The words are the script's (the recording's `text`), never a transcript.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `voice_recording_id` | INTEGER, FK → `voice_recording.id` | NOT NULL | — | `UNIQUE`, `ON DELETE CASCADE` |
+| `source` | TEXT | NOT NULL | — | `parakeet` or `estimated` (`CHECK`) |
+| `match_percent` | REAL | NOT NULL | — | As in Section 4.68 |
+| `threshold` | INTEGER | NOT NULL | — | The `word_timing_match_threshold` setting when the row was made |
+| `words` | JSON | NOT NULL | — | `[{"text", "start", "end"}]`; a per-word `heard` flag is added by REC-004 |
+| `heard_text` | TEXT | NOT NULL | `''` | What Parakeet heard |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The timing job. `ON DELETE SET NULL` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE voice_recording_timing (
+    id                 INTEGER PRIMARY KEY,
+    project_id         INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    voice_recording_id INTEGER NOT NULL UNIQUE REFERENCES voice_recording(id) ON DELETE CASCADE,
+    source             TEXT NOT NULL CHECK (source IN ('parakeet', 'estimated')),
+    match_percent      REAL NOT NULL,
+    threshold          INTEGER NOT NULL,
+    words              JSON NOT NULL,
+    heard_text         TEXT NOT NULL DEFAULT '',
+    job_id             INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_voice_recording_timing_project ON voice_recording_timing (project_id);
+```
+
+### 4.87 `recording_boundary_decision`
+
+*Added in REC-002 (migration `0092`); written from REC-005.* The owner's decision on one scene boundary of one full recording version: `keep` (cut in the middle of the pause) or `cut_at` (cut at `cut_s`).
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE` |
+| `recording_id` | INTEGER, FK → `voice_recording.id` | NOT NULL | — | The full recording version. `ON DELETE CASCADE` |
+| `after_scene_id` | TEXT | NOT NULL | — | The scene before the boundary |
+| `before_scene_id` | TEXT | NOT NULL | — | The scene after the boundary. `UNIQUE (recording_id, after_scene_id, before_scene_id)` |
+| `decision` | TEXT | NOT NULL | — | `keep` or `cut_at` (`CHECK`) |
+| `cut_s` | REAL | NULL | — | Seconds from the start of the recording. Set exactly when `decision = 'cut_at'` (`CHECK`) |
+| `created_at` | DATETIME | NOT NULL | now | |
+| `updated_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE recording_boundary_decision (
+    id              INTEGER PRIMARY KEY,
+    project_id      INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    recording_id    INTEGER NOT NULL REFERENCES voice_recording(id) ON DELETE CASCADE,
+    after_scene_id  TEXT NOT NULL,
+    before_scene_id TEXT NOT NULL,
+    decision        TEXT NOT NULL CHECK (decision IN ('keep', 'cut_at')),
+    cut_s           REAL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((decision = 'cut_at') = (cut_s IS NOT NULL)),
+    UNIQUE (recording_id, after_scene_id, before_scene_id)
+);
+CREATE INDEX idx_recording_boundary_decision_project ON recording_boundary_decision (project_id);
 ```
 
 ---

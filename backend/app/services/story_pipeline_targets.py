@@ -1504,10 +1504,12 @@ async def _evaluate_speech_synthesis(
             # A continuous explainer speaks each scene as one take (FLOW-003).
             take = scene.take
             if take is not None:
+                # A recorded take is never made by a job: its `blocked_reason` says what to record.
+                take_kind = "recorded voice" if state.recorded else "voice take"
                 targets.append(
                     Target(
                         f"take:{scene_id}",
-                        f"Scene {scene.scene.item.get('index')}, voice take",
+                        f"Scene {scene.scene.item.get('index')}, {take_kind}",
                         take.status == "ready",
                         active=take.status == "in_progress",
                         block=(

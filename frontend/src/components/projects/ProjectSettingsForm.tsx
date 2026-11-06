@@ -23,6 +23,7 @@ import { CAPTION_MODES, isCaptionMode } from "./captionModes";
 import { PresenterOutfitField } from "./PresenterOutfitField";
 import { STAGING_MAX_CHARS, projectKindLabel } from "./projectKinds";
 import { speechModeLabel } from "./speechModes";
+import { TAKE_SOURCES, isTakeSource } from "./takeSources";
 import { DELIVERY_MAX_CHARS, voiceTrackLabel } from "./voiceTracks";
 import { changedFields, initialDraft, type Draft, type NUMBER_FIELDS } from "./settingsDraft";
 
@@ -207,20 +208,53 @@ export function ProjectSettingsForm({
               </Group>
               {project.voice_track === "continuous" && (
                 <>
-                  <Textarea
-                    label="Presenter delivery"
-                    description="How the presenter should sound, for example pace and energy. Left empty, the style from the Story Bible is used, or a default."
-                    value={draft.presenter_delivery}
-                    onChange={(event) => edit("presenter_delivery", event.currentTarget.value)}
-                    maxLength={DELIVERY_MAX_CHARS}
-                    autosize
-                    minRows={2}
-                    maxRows={6}
-                  />
+                  <Radio.Group
+                    label="Voice source"
+                    value={draft.take_source}
+                    onChange={(value) => {
+                      if (isTakeSource(value)) {
+                        edit("take_source", value);
+                      }
+                    }}
+                  >
+                    <Stack mt="xs" gap="xs">
+                      {TAKE_SOURCES.map((option) => (
+                        <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                          <Group wrap="nowrap" align="flex-start">
+                            <Radio.Indicator />
+                            <Stack gap={2}>
+                              <Text fw={500}>{option.label}</Text>
+                              <Text size="sm" c="dimmed">
+                                {option.description}
+                              </Text>
+                            </Stack>
+                          </Group>
+                        </Radio.Card>
+                      ))}
+                    </Stack>
+                  </Radio.Group>
                   <Text size="xs" c="dimmed">
-                    Every scene's voice take is made with this text, so changing it makes the
-                    takes out of date.
+                    Switching deletes nothing: the other kind's takes count again when you switch
+                    back.
                   </Text>
+                  {draft.take_source === "generated" && (
+                    <>
+                      <Textarea
+                        label="Presenter delivery"
+                        description="How the presenter should sound, for example pace and energy. Left empty, the style from the Story Bible is used, or a default."
+                        value={draft.presenter_delivery}
+                        onChange={(event) => edit("presenter_delivery", event.currentTarget.value)}
+                        maxLength={DELIVERY_MAX_CHARS}
+                        autosize
+                        minRows={2}
+                        maxRows={6}
+                      />
+                      <Text size="xs" c="dimmed">
+                        Every scene's voice take is made with this text, so changing it makes the
+                        takes out of date.
+                      </Text>
+                    </>
+                  )}
                   <Group gap="sm">
                     <Text size="sm" fw={500}>
                       Graphics
