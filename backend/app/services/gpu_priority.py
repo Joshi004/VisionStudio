@@ -56,6 +56,7 @@ SHORT_WORK_JOB_TYPES: Final = frozenset(
         "lab_voice",
         "check_take_dialogue",
         "time_speech_words",
+        "time_voice_recording",
         "time_lab_speech_words",
         "time_lab_graphic_words",
         "lab_image",

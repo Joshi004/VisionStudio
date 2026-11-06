@@ -395,6 +395,15 @@ COMPARING_DIALOGUE: Final = "comparing the speech with the dialogue"
 UPLOADING_SPEECH_FOR_TRANSCRIPT: Final = "uploading the speech for transcription"
 MATCHING_WORDS: Final = "matching the heard words to the script"
 
+# `time_voice_recording` (REC-004) times a person's whole recording of a recorded explainer. It
+# finds the pauses and cuts the file into pieces first (the pieces go to the server one after the
+# other, shown with `speech_part`), and `split_voice_recording` cuts it into the scenes' takes.
+FINDING_RECORDING_PAUSES: Final = "finding the pauses in the recording"
+CUTTING_RECORDING_PIECE: Final = "cutting a piece of the recording"
+NEXT_RECORDING_PIECE: Final = "waiting to send the next piece of the recording"
+SPLITTING_RECORDING: Final = "splitting the recording into scenes"
+SAVING_SCENE_TAKES: Final = "saving the scene takes"
+
 TRANSCRIPT_FINISHING_PHASES: Final = frozenset(
     {DOWNLOADING_TRANSCRIPT, COMPARING_DIALOGUE, MATCHING_WORDS}
 )

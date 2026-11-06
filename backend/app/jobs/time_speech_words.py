@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any, Final
 
 from sqlalchemy import select
@@ -94,19 +95,52 @@ class TimeSpeechWordsHandler(JobHandler):
             return
 
         filename = f"speech-{audio_id}.wav"
+        sent = await self._upload_and_submit(job_id, path, filename, base_url, partition, priority)
+        if sent is None:
+            return
+        remote_asset_id, provider_job_id = sent
+
+        # The job's own key stays on the input: `finish` and the dedupe read it.
+        submitted = {
+            **recorded,
+            "server_url": docker_mapped(base_url),
+            "upload": {"filename": filename, "remote_asset_id": remote_asset_id},
+            "endpoint": transcriber.TRANSCRIBE_PATH,
+            "body": transcriber.build_body(remote_asset_id, partition, priority),
+        }
+        async with SessionLocal() as session:
+            await store.mark_submitted(session, job_id, provider_job_id, submitted)
+
+    async def _upload_and_submit(
+        self,
+        job_id: int,
+        path: Path,
+        filename: str,
+        base_url: str,
+        partition: str,
+        priority: int | None,
+        *,
+        upload_phase: str = phases.UPLOADING_SPEECH_FOR_TRANSCRIPT,
+        submit_phase: str = phases.SUBMITTING,
+    ) -> tuple[str, str] | None:
+        """Uploads the WAV at `path` and submits its transcription. Returns the server's asset id
+        and job id, or None when it gave up: the job was then put back in the queue or failed
+        (`_give_up_starting`). A 502 is retried once after a pause, and a 400 for an unknown asset
+        uploads the file again once.
+        """
         retried_server_error = False
         retried_asset = False
         while True:
             try:
-                await note_uploading(job_id, phases.UPLOADING_SPEECH_FOR_TRANSCRIPT)
+                await note_uploading(job_id, upload_phase)
                 remote_asset_id = await gpu_server.upload_file(
                     base_url, path, filename, SPEECH_MIME
                 )
-                await self._phase(job_id, phases.SUBMITTING)
+                await self._phase(job_id, submit_phase)
                 provider_job_id = await transcriber.submit(
                     base_url, remote_asset_id, partition, priority
                 )
-                break
+                return remote_asset_id, provider_job_id
             except GpuCallError as exc:
                 if exc.kind == "server_error" and not retried_server_error:
                     retried_server_error = True
@@ -119,18 +153,7 @@ class TimeSpeechWordsHandler(JobHandler):
                     retried_asset = True  # the server lost the upload: send it again
                     continue
                 await self._give_up_starting(job_id, exc)
-                return
-
-        # The job's own key stays on the input: `finish` and the dedupe read it.
-        submitted = {
-            **recorded,
-            "server_url": docker_mapped(base_url),
-            "upload": {"filename": filename, "remote_asset_id": remote_asset_id},
-            "endpoint": transcriber.TRANSCRIBE_PATH,
-            "body": transcriber.build_body(remote_asset_id, partition, priority),
-        }
-        async with SessionLocal() as session:
-            await store.mark_submitted(session, job_id, provider_job_id, submitted)
+                return None
 
     async def _speech_path(self, session: AsyncSession, target_id: object) -> str | None:
         """The stored path of the speech to time, or None when there is none any more."""

@@ -29,8 +29,11 @@ equal to a unit's key), so an unchanged scene is not made again and one changed 
 its scene's take out of date. The units of such a project are not spoken one by one. A `lines`
 project and a story never have a take and are unchanged.
 
-A recorded take (REC-002) is stored by `services/voice_recordings.py` (REC-003), not by a job
-of this module.
+A recorded take (REC-002) is stored by `services/voice_recordings.py` (REC-003), or made by the
+job that splits a full recording (REC-004), not by a job of this module. A newer full recording
+takes over the scenes whose text it was read from while it is being transcribed, split or held on
+tight boundaries (`services/full_recordings.py`); if it is refused or fails, the scenes keep their
+earlier takes.
 
 `start_unit`, `start_take` and `start_all` queue the jobs and write one `speech_unit_audio` row
 per job, in one transaction.
@@ -61,6 +64,7 @@ from app.providers import speech_synthesizer
 from app.services import (
     character_links,
     explainer,
+    full_recordings,
     projects,
     speech_chunks,
     speech_units,
@@ -511,16 +515,58 @@ def _take_reasons(
     return reasons or ["This scene has changed since the take was made."]
 
 
+def _recording_id_of(row: SpeechUnitAudio) -> int:
+    """The id of the `voice_recording` a recorded take was made from, 0 when it names none."""
+    recorded = row.inputs.get("recording") if isinstance(row.inputs, dict) else None
+    found = recorded.get("id") if isinstance(recorded, dict) else None
+    return found if isinstance(found, int) else 0
+
+
 def _recorded_take_entry(
-    text: str, scene_refusal: str | None, recorded_takes: list[SpeechUnitAudio]
+    scene_id: str,
+    text: str,
+    scene_refusal: str | None,
+    recorded_takes: list[SpeechUnitAudio],
+    full: full_recordings.FullRecordingStatus | None = None,
 ) -> TakeEntry:
     """The take of one scene of a recorded project (REC-002). `recorded_takes` are the scene's
-    recorded rows, the newest first. It is never `unavailable`: no voice is needed. It cannot be
-    made by the speech model, so `can_run` is always False, and `blocked_reason` is what the
-    pipeline stops with while the take is missing.
+    recorded rows. It is never `unavailable`: no voice is needed. It cannot be made by the speech
+    model, so `can_run` is always False, and `blocked_reason` is what the pipeline stops with
+    while the take is missing.
+
+    The newest recording wins (REC-004): of the takes with the scene's current text, the one made
+    from the newest recording, by the recording's id, so a scene recorded on its own after a full
+    recording replaces the take that recording gave it. `full` is the newest full recording. While
+    it is being transcribed or split the scene is `in_progress`, and while it holds tight
+    boundaries the scene has no take, whatever earlier takes there are, because it is about to
+    replace them (when it covers this scene: its text for the scene is the scene's current text,
+    and no take is made from a newer recording). Once it is refused or has failed it is ignored,
+    and the scene keeps its earlier take, or shows the reason when it has none.
     """
-    stored_rows = [row for row in recorded_takes if row.path is not None]
+    stored_rows = sorted(
+        (row for row in recorded_takes if row.path is not None),
+        key=lambda row: (_recording_id_of(row), row.id),
+        reverse=True,
+    )
     stored = next((row for row in stored_rows if row.text == text), None)
+    covered = full is not None and any(
+        scene.scene_id == scene_id and scene.text == text for scene in full.scenes
+    )
+    if full is not None and covered:
+        newer_take = stored is not None and _recording_id_of(stored) > full.recording.id
+        if not newer_take and full.stage in ("transcribing", "splitting", "tight"):
+            return TakeEntry(
+                text=text,
+                status="in_progress" if full.stage != "tight" else "none",
+                reasons=[],
+                voice=None,
+                instruction="",
+                audio=None,
+                error=None,
+                can_run=False,
+                blocked_reason=scene_refusal or full_recordings.stage_message(full),
+                job=None,
+            )
     status: Status
     reasons: list[str] = []
     missing: str | None = None
@@ -532,7 +578,12 @@ def _recorded_take_entry(
         missing = RECORDED_OUT_OF_DATE
     else:
         status = "none"
-        missing = RECORD_THE_VOICE
+        # A refused recording, or one whose job failed, is the reason for a scene it covers.
+        missing = (
+            full_recordings.stage_message(full)
+            if full is not None and covered and full.stage != "split"
+            else RECORD_THE_VOICE
+        )
     return TakeEntry(
         text=text,
         status=status,
@@ -647,6 +698,7 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
     characters = await _character_choices(session, project, names)
     continuous = is_continuous(project)
     recorded = is_recorded(project)
+    full = await full_recordings.newest(session, project) if recorded else None
     # One instruction for every take of the project (FLOW-003, F-3). A recorded project has none:
     # nobody is told how to sound.
     delivery = (
@@ -683,9 +735,11 @@ async def state(session: AsyncSession, project: Project) -> AudioState:
                 # the other kind's rows and deletes none.
                 if recorded:
                     take = _recorded_take_entry(
+                        entry.item["id"],
                         text,
                         refusal,
                         [row for row in scene_takes if row.mode == MODE_RECORDED],
+                        full,
                     )
                 else:
                     take = _take_entry(

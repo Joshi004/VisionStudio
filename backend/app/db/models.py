@@ -208,7 +208,8 @@ class Job(Base):
             "'write_shot_graphic_component', 'write_shot_graphic_scene', "
             "'render_shot_graphic', 'describe_photo', 'render_scene', "
             "'write_thumbnail_concepts', 'write_callout_look', 'write_callout_component', "
-            "'render_callout_preview', 'write_callout_scene')",
+            "'render_callout_preview', 'write_callout_scene', "
+            "'time_voice_recording', 'split_voice_recording')",
             name="type_valid",
         ),
         CheckConstraint(

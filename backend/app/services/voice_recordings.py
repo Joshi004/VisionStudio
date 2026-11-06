@@ -14,26 +14,37 @@ or an uploaded file, and makes it the take of one scene:
    row (scope `scene`) and a recorded `speech_unit_audio` take row are added, and the job that
    times the words of the take is queued, as `synthesize_speech_unit` does for a generated take.
 
-The two rows share the one converted file. A recording is never changed or deleted afterwards:
-recording the scene again adds a newer take, and the newest take that matches the scene's current
-text is the scene's take (`speech_synthesis`). Logs hold ids and sizes, never the text.
+A **full recording** (REC-004) is received the same way (one shared receive step), but it is of
+the whole script: one `voice_recording` row (scope `full`, a new version) and the job that
+transcribes it (`services/full_recordings.py`). It becomes the scenes' takes later, when the
+split job has cut it.
+
+The two rows of a scene recording share the one converted file. A recording is never changed
+or deleted afterwards: recording the scene again adds a newer take, and the newest take that
+matches the scene's current text is the scene's take (`speech_synthesis`). Logs hold ids and
+sizes, never the text.
 
 This module never calls the GPU server.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Project, SpeechUnitAudio, VoiceRecording
-from app.services import speech_synthesis, word_timings
+from app.services import full_recordings, speech_synthesis, word_timings
 from app.services.ffmpeg import ProbeResult, probe
 from app.services.speech_audio import SAMPLE_RATE, ConvertError, convert_to_take
 from app.services.storage import TempFile, TooLargeError, get_storage
@@ -43,6 +54,7 @@ _logger = logging.getLogger(__name__)
 ORIGIN_BROWSER: Final = "browser"
 ORIGIN_UPLOAD: Final = "upload"
 SCOPE_SCENE: Final = "scene"
+SCOPE_FULL: Final = "full"
 
 # ffprobe's `format_name` is a comma-separated list of the demuxer's names: a WebM file is
 # "matroska,webm" and an MP4 or M4A file is "mov,mp4,m4a,3gp,3g2,mj2".
@@ -55,6 +67,9 @@ CHANGED_WHILE_RECORDING: Final = (
 NOT_RECORDED_PROJECT: Final = (
     "This explainer's voice is generated. Choose Recorded voice in the project settings first."
 )
+PLAN_EVERY_SCENE: Final = "Plan every scene's speech units first."
+SCRIPT_CHANGED: Final = "The script changed while you were recording. Reload it and record again."
+TWO_AT_ONCE: Final = "Another recording was received at the same time. Send yours again."
 
 
 class RecordingInputError(Exception):
@@ -157,33 +172,35 @@ async def scene_target(
 # --- Receiving ----------------------------------------------------------------------------
 
 
-async def receive_scene_recording(
-    session: AsyncSession,
-    project: Project,
-    scene_id: str,
-    units_version: int,
-    origin: str,
-    chunks: AsyncIterable[bytes],
-    content_length: int | None,
-) -> StoredSceneRecording:
-    """Receives, checks, converts and stores a recording of one scene, and makes it the scene's
-    take. Commits. The caller has already ended its own read transaction, so none is open while
-    the file is received. Temporary files never outlive the call.
+@dataclass(frozen=True)
+class ReceivedAudio:
+    """A recording that was received, checked and converted: the temp WAV is in the takes'
+    format and is described (size and hash). The source is what the person sent.
     """
-    if origin not in (ORIGIN_BROWSER, ORIGIN_UPLOAD):
-        raise RecordingInputError(422, "The origin of the recording is not known.")
-    project_id = project.id
 
-    await scene_target(session, project, scene_id, units_version)
-    max_mb = await settings_service.get_int(session, settings_service.RECORDING_MAX_UPLOAD_MB_KEY)
-    # No transaction stays open while the file is received and converted.
-    await session.commit()
+    wav: TempFile
+    duration_s: float
+    source_format: str
+    source_size_bytes: int
+    source_sha256: str
 
-    max_bytes = max_mb * 1024 * 1024
-    too_large = f"The recording is larger than {max_mb} MB."
-    if content_length is not None and content_length > max_bytes:
-        raise RecordingInputError(413, too_large)
+    def source_json(self) -> dict[str, object]:
+        return {
+            "format": self.source_format,
+            "size_bytes": self.source_size_bytes,
+            "sha256": self.source_sha256,
+        }
 
+
+@asynccontextmanager
+async def _receive_audio(
+    chunks: AsyncIterable[bytes], max_bytes: int, too_large: str
+) -> AsyncIterator[ReceivedAudio]:
+    """Receives a stream with the size limit, decides its type from its content, converts it to
+    the takes' format and checks the result. Both temp files are removed when the block ends,
+    whatever happens (a file already moved into place is not there to remove). Raises
+    RecordingInputError.
+    """
     storage = get_storage()
     source: TempFile | None = None
     converted: Path | None = None
@@ -203,6 +220,55 @@ async def receive_scene_recording(
             raise RecordingInputError(422, str(exc)) from exc
         duration_s = check_converted(await probe(converted))
         wav = await storage.describe_temp(converted)
+        yield ReceivedAudio(
+            wav=wav,
+            duration_s=duration_s,
+            source_format=source_format,
+            source_size_bytes=source.size_bytes,
+            source_sha256=source.sha256,
+        )
+    finally:
+        if source is not None:
+            storage.discard(source)
+        if converted is not None:
+            storage.discard(converted)
+
+
+async def _max_bytes(session: AsyncSession) -> tuple[int, str]:
+    """The size limit in bytes and the sentence for a file over it. Ends the read transaction:
+    none stays open while a file is received and converted.
+    """
+    max_mb = await settings_service.get_int(session, settings_service.RECORDING_MAX_UPLOAD_MB_KEY)
+    await session.commit()
+    return max_mb * 1024 * 1024, f"The recording is larger than {max_mb} MB."
+
+
+async def receive_scene_recording(
+    session: AsyncSession,
+    project: Project,
+    scene_id: str,
+    units_version: int,
+    origin: str,
+    chunks: AsyncIterable[bytes],
+    content_length: int | None,
+) -> StoredSceneRecording:
+    """Receives, checks, converts and stores a recording of one scene, and makes it the scene's
+    take. Commits. The caller has already ended its own read transaction, so none is open while
+    the file is received. Temporary files never outlive the call.
+    """
+    if origin not in (ORIGIN_BROWSER, ORIGIN_UPLOAD):
+        raise RecordingInputError(422, "The origin of the recording is not known.")
+    project_id = project.id
+
+    await scene_target(session, project, scene_id, units_version)
+    max_bytes, too_large = await _max_bytes(session)
+    if content_length is not None and content_length > max_bytes:
+        raise RecordingInputError(413, too_large)
+
+    storage = get_storage()
+    async with _receive_audio(chunks, max_bytes, too_large) as audio:
+        wav = audio.wav
+        duration_s = audio.duration_s
 
         # The text may have changed while the file was received and converted.
         target = await scene_target(session, project, scene_id, units_version)
@@ -227,11 +293,7 @@ async def receive_scene_recording(
                         "version": target.plan_version,
                     }
                 ],
-                "source": {
-                    "format": source_format,
-                    "size_bytes": source.size_bytes,
-                    "sha256": source.sha256,
-                },
+                "source": audio.source_json(),
             },
         )
         session.add(recording)
@@ -282,12 +344,6 @@ async def receive_scene_recording(
             # Stored files are never deleted, so this leaves an unreferenced file behind.
             _logger.warning("recording stored but not recorded: %s", stored.relative_path)
             raise
-    finally:
-        if source is not None:
-            storage.discard(source)
-        if converted is not None:
-            # Already moved into place after a successful save; discard ignores that.
-            storage.discard(converted)
 
     _logger.info(
         "project %d: scene recording %d stored (%s, %.1fs, %d bytes), timing job %d",
@@ -295,6 +351,203 @@ async def receive_scene_recording(
         result.recording_id,
         origin,
         duration_s,
+        wav.size_bytes,
+        result.timing_job_id,
+    )
+    return result
+
+
+# --- A full recording (REC-004) ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ScriptScene:
+    """One scene of the script a person reads in a full recording."""
+
+    scene_id: str
+    index: int | None
+    title: str
+    # The scene's take text: what the person reads.
+    text: str
+    plan_id: int
+    plan_version: int
+
+
+@dataclass(frozen=True)
+class FullScript:
+    """What a full recording is read from: every scene that has speech, in order. `blocked_reason`
+    is why nothing can be recorded yet, or None. `script_key` identifies the text, so a recording
+    made from an older script is refused.
+    """
+
+    scenes: list[ScriptScene]
+    text: str
+    script_key: str
+    blocked_reason: str | None
+
+
+@dataclass(frozen=True)
+class StoredFullRecording:
+    recording_id: int
+    version: int
+    duration_s: float
+    timing_job_id: int
+
+
+def script_key_of(scenes: list[ScriptScene]) -> str:
+    """The hash of the scenes' ids and texts, in order."""
+    payload = json.dumps([[scene.scene_id, scene.text] for scene in scenes], ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def full_script(session: AsyncSession, project: Project) -> FullScript:
+    """The script of a recorded explainer to read in one flow. It is blocked until every scene's
+    speech units are planned and current: the text of a scene whose plan is out of date is not
+    known.
+    """
+    current = await speech_synthesis.state(session, project)
+    scenes: list[ScriptScene] = []
+    blocked = current.blocked_reason
+    if blocked is None:
+        for entry in current.scenes:
+            refusal = speech_synthesis.scene_refusal(entry.scene)
+            if refusal is not None:
+                blocked = PLAN_EVERY_SCENE
+                break
+            plan = entry.scene.row
+            if entry.take is None or plan is None:
+                continue  # a scene with no speech has nothing to read
+            item = entry.scene.item
+            index = item.get("index")
+            scenes.append(
+                ScriptScene(
+                    scene_id=str(item["id"]),
+                    index=index if isinstance(index, int) else None,
+                    title=str(item.get("title") or item["id"]),
+                    text=entry.take.text,
+                    plan_id=plan.id,
+                    plan_version=plan.version,
+                )
+            )
+    if blocked is None and not scenes:
+        blocked = "No scene has any speech to record."
+    if blocked is not None:
+        scenes = []
+    return FullScript(
+        scenes=scenes,
+        text=" ".join(scene.text for scene in scenes),
+        script_key=script_key_of(scenes),
+        blocked_reason=blocked,
+    )
+
+
+async def _checked_script(session: AsyncSession, project: Project, script_key: str) -> FullScript:
+    """The script, after checking the project is recorded and the person was shown this script.
+    Raises RecordingInputError: 422 when nothing can be recorded, 409 when the script changed.
+    """
+    if not speech_synthesis.is_recorded(project):
+        raise RecordingInputError(422, NOT_RECORDED_PROJECT)
+    script = await full_script(session, project)
+    if script.blocked_reason is not None:
+        raise RecordingInputError(422, script.blocked_reason)
+    if script.script_key != script_key:
+        raise RecordingInputError(409, SCRIPT_CHANGED)
+    return script
+
+
+async def receive_full_recording(
+    session: AsyncSession,
+    project: Project,
+    script_key: str,
+    origin: str,
+    chunks: AsyncIterable[bytes],
+    content_length: int | None,
+) -> StoredFullRecording:
+    """Receives, checks, converts and stores a recording of the whole script, and queues the job
+    that transcribes it. Commits. The caller has already ended its own read transaction. The
+    recording becomes the project's newest full recording (a new version); the older ones stay.
+    """
+    if origin not in (ORIGIN_BROWSER, ORIGIN_UPLOAD):
+        raise RecordingInputError(422, "The origin of the recording is not known.")
+    project_id = project.id
+
+    await _checked_script(session, project, script_key)
+    max_bytes, too_large = await _max_bytes(session)
+    if content_length is not None and content_length > max_bytes:
+        raise RecordingInputError(413, too_large)
+
+    storage = get_storage()
+    async with _receive_audio(chunks, max_bytes, too_large) as audio:
+        wav = audio.wav
+        # The text may have changed while the file was received and converted.
+        script = await _checked_script(session, project, script_key)
+        stored = await storage.save(wav, project_id, "wav")
+
+        newest_version = (
+            await session.execute(
+                select(func.max(VoiceRecording.version)).where(
+                    VoiceRecording.project_id == project_id,
+                    VoiceRecording.scope == SCOPE_FULL,
+                )
+            )
+        ).scalar_one_or_none()
+        version = (newest_version or 0) + 1
+        recording = VoiceRecording(
+            project_id=project_id,
+            scope=SCOPE_FULL,
+            version=version,
+            text=script.text,
+            origin=origin,
+            path=stored.relative_path,
+            size_bytes=wav.size_bytes,
+            sha256=wav.sha256,
+            duration_s=audio.duration_s,
+            inputs={
+                "project_id": project_id,
+                "artifacts": [
+                    {"kind": "speech_units", "id": scene.plan_id, "version": scene.plan_version}
+                    for scene in script.scenes
+                ],
+                "scenes": [
+                    {
+                        "scene_id": scene.scene_id,
+                        "text": scene.text,
+                        "plan_id": scene.plan_id,
+                        "plan_version": scene.plan_version,
+                    }
+                    for scene in script.scenes
+                ],
+                "source": audio.source_json(),
+            },
+        )
+        session.add(recording)
+        try:
+            await session.flush()
+            job, _created = await full_recordings.queue_timing(session, recording, commit=False)
+            result = StoredFullRecording(
+                recording_id=recording.id,
+                version=version,
+                duration_s=audio.duration_s,
+                timing_job_id=job.id,
+            )
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            _logger.warning("recording stored but not recorded: %s", stored.relative_path)
+            raise RecordingInputError(409, TWO_AT_ONCE) from None
+        except BaseException:
+            await session.rollback()
+            # Stored files are never deleted, so this leaves an unreferenced file behind.
+            _logger.warning("recording stored but not recorded: %s", stored.relative_path)
+            raise
+
+    _logger.info(
+        "project %d: full recording %d (version %d) stored (%s, %.1fs, %d bytes), timing job %d",
+        project_id,
+        result.recording_id,
+        version,
+        origin,
+        audio.duration_s,
         wav.size_bytes,
         result.timing_job_id,
     )

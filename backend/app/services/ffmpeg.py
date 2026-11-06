@@ -696,6 +696,73 @@ async def decode_mono_float(
     return result.stdout
 
 
+_SILENCE_START = re.compile(r"silence_start:\s*(-?\d+(?:\.\d+)?)")
+_SILENCE_END = re.compile(r"silence_end:\s*(-?\d+(?:\.\d+)?)")
+
+
+def _parse_silences(text: str, duration_s: float) -> list[tuple[float, float]]:
+    """The `(start, end)` pairs `silencedetect` printed. A silence that runs to the end of the
+    file has a start and no end: it ends at `duration_s`.
+    """
+    silences: list[tuple[float, float]] = []
+    start: float | None = None
+    for line in text.splitlines():
+        start_match = _SILENCE_START.search(line)
+        if start_match is not None:
+            start = max(0.0, float(start_match.group(1)))
+            continue
+        end_match = _SILENCE_END.search(line)
+        if end_match is not None and start is not None:
+            end = min(float(end_match.group(1)), duration_s)
+            if end > start:
+                silences.append((start, end))
+            start = None
+    if start is not None and duration_s > start:
+        silences.append((start, duration_s))
+    return silences
+
+
+async def find_silences(
+    path: Path,
+    duration_s: float,
+    *,
+    noise_db: float = -35.0,
+    min_s: float = 0.3,
+    timeout_s: float = 600.0,
+) -> list[tuple[float, float]] | None:
+    """The stretches of a file's first audio stream that stay quieter than `noise_db` for at
+    least `min_s` seconds, as `(start, end)` in seconds. Returns None when FFmpeg cannot run or
+    fails. Never raises.
+    """
+    args = [
+        "-hide_banner",
+        "-nostdin",
+        "-nostats",
+        "-i",
+        file_input(path),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-af",
+        f"silencedetect=noise={noise_db:g}dB:d={min_s:g}",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        result = await run_tool("ffmpeg", args, timeout_s=timeout_s)
+    except ToolError as exc:
+        _logger.warning("ffmpeg could not look for silences: %s", exc)
+        return None
+    text = result.stderr.decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        _logger.info(
+            "ffmpeg silencedetect exit code %s: %s", result.returncode, text[-500:].strip()
+        )
+        return None
+    return _parse_silences(text, duration_s)
+
+
 JOIN_SAMPLE_RATE = 48_000
 
 

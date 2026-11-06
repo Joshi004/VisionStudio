@@ -82,6 +82,11 @@ class Alignment:
     match_percent: float
     # What Parakeet heard, as it wrote it.
     heard_text: str
+    # One flag for each of `words` (REC-004): True when every token of the word matched a heard
+    # token exactly, so its time is the time it was heard. False when the time was shared out
+    # or filled in, or the timing is estimated. A word that makes no token counts as heard.
+    # Only a recording's timing stores it; `words` itself never carries it.
+    heard: tuple[bool, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -161,10 +166,13 @@ def _fill_gaps(
 
 def _matched_times(
     script: list[str], heard: list[tuple[str, float, float]], duration_s: float
-) -> tuple[list[tuple[float, float]], int]:
-    """A time for every script token, and how many of them matched a heard token exactly."""
+) -> tuple[list[tuple[float, float]], int, list[bool]]:
+    """A time for every script token, how many of them matched a heard token exactly, and for
+    each token whether it did.
+    """
     times: list[tuple[float, float] | None] = [None] * len(script)
     matched = 0
+    exact = [False] * len(script)
     heard_words = [token for token, _start, _end in heard]
     for tag, i1, i2, j1, j2 in SequenceMatcher(
         None, script, heard_words, autojunk=False
@@ -174,13 +182,14 @@ def _matched_times(
             for offset in range(i2 - i1):
                 _token, start, end = heard[j1 + offset]
                 times[i1 + offset] = (start, end)
+                exact[i1 + offset] = True
         elif tag == "replace":
             shares = _share_out(
                 [len(token) for token in script[i1:i2]], heard[j1][1], heard[j2 - 1][2]
             )
             for offset, share in enumerate(shares):
                 times[i1 + offset] = share
-    return _fill_gaps(times, script, duration_s), matched
+    return _fill_gaps(times, script, duration_s), matched, exact
 
 
 def _words_json(
@@ -234,17 +243,24 @@ def align(text: str, spoken: Sequence[SpokenWord], duration_s: float, threshold:
             {"text": word, "start": round(start, _ROUND_DIGITS), "end": round(end, _ROUND_DIGITS)}
             for word, (start, end) in zip(display, shares, strict=True)
         ]
-        return Alignment(words, SOURCE_ESTIMATED, match_percent, heard_text)
+        return Alignment(
+            words, SOURCE_ESTIMATED, match_percent, heard_text, (False,) * len(display)
+        )
 
     if not script or not heard:
         return estimated(0.0)
 
-    token_times, matched = _matched_times(script, heard, duration_s)
+    token_times, matched, exact = _matched_times(script, heard, duration_s)
     match_percent = round(100 * matched / len(script), 1)
     if match_percent < threshold:
         return estimated(match_percent)
     words = _words_json(display, owners, token_times, duration_s)
-    return Alignment(words, SOURCE_PARAKEET, match_percent, heard_text)
+    # A word is heard when all of its tokens matched exactly; a word with no token is heard.
+    word_heard = [True] * len(display)
+    for owner, token_exact in zip(owners, exact, strict=True):
+        if not token_exact:
+            word_heard[owner] = False
+    return Alignment(words, SOURCE_PARAKEET, match_percent, heard_text, tuple(word_heard))
 
 
 # --- Which projects, queueing, state ------------------------------------------------------

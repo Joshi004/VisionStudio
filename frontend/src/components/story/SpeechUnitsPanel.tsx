@@ -39,6 +39,7 @@ import {
   type RecordingOrigin,
 } from "../../api/voiceRecordings";
 import { ArtifactViewer } from "./ArtifactViewer";
+import { FullRecordingPanel } from "./FullRecordingPanel";
 import { PromptHoverCard } from "./PromptHoverCard";
 import { ReplaceManualModal } from "./ReplaceManualModal";
 import { SceneRecordingModal } from "./SceneRecordingModal";
@@ -209,10 +210,10 @@ function TakeLine({
       {take.blocked_reason !== null &&
         take.status !== "in_progress" &&
         !take.reasons.includes(take.blocked_reason) && (
-        <Text size="xs" c="dimmed">
-          {take.blocked_reason}
-        </Text>
-      )}
+          <Text size="xs" c="dimmed">
+            {take.blocked_reason}
+          </Text>
+        )}
     </Stack>
   );
 }
@@ -373,7 +374,12 @@ function EntryRow({
               }}
               onUpload={(file) => {
                 if (file !== null && unitsVersion !== null) {
-                  onSendRecording(unitsVersion, "upload", file, () => undefined);
+                  onSendRecording(
+                    unitsVersion,
+                    "upload",
+                    file,
+                    () => undefined,
+                  );
                 }
               }}
             />
@@ -551,9 +557,10 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
               saved voice (or the narrator&apos;s); the real length is measured
               from the speech. A continuous explainer speaks each scene as one
               take instead, in the presenter&apos;s voice with one delivery, so
-              its pace is even. With recorded voice, you record each scene in
-              the browser or upload a file for it, and read the scene&apos;s
-              text word for word.
+              its pace is even. With recorded voice, you record the whole video
+              in one go, or each scene on its own, in the browser or from a
+              file, and read the text word for word. A whole recording is cut
+              into the scenes at your pauses.
             </Text>
           </Stack>
           <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
@@ -659,6 +666,7 @@ export function SpeechUnitsPanel({ projectId }: SpeechUnitsPanelProps) {
             {data.blocked_reason}
           </Text>
         )}
+        {recorded && <FullRecordingPanel projectId={projectId} />}
         {entries.length > 0 && <Divider />}
 
         {entries.map((entry) => (

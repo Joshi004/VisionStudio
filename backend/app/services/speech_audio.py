@@ -75,6 +75,10 @@ class PadError(Exception):
     """The speech could not be padded. The message is meant to be shown to the user."""
 
 
+class CutError(Exception):
+    """A scene could not be cut out of a recording. The message is meant for the user."""
+
+
 def pad_args(source: Path, dest: Path, min_duration_s: float) -> list[str]:
     """Writes `source` as 16-bit PCM WAV with silence added at the end, so it lasts at least
     `min_duration_s`. A longer recording is written unchanged. The sample rate and channels stay.
@@ -228,6 +232,62 @@ async def take_window(source: Path, dest: Path, start_s: float, total_s: float) 
         raise PadError(f"The part of the voice take could not be cut: {exc}") from exc
     if result.returncode != 0:
         raise PadError("The part of the voice take could not be cut.")
+
+
+SCENE_FADE_S: Final = 0.015
+SCENE_CUT_TIMEOUT_S: Final = 300.0
+
+
+def cut_scene_args(
+    source: Path, dest: Path, start_sample: int, end_sample: int, fade_in: int, fade_out: int
+) -> list[str]:
+    """Writes the samples `start_sample` up to `end_sample` of `source` (the takes' format) as
+    16-bit PCM WAV, exact to the sample (REC-004). A fade of `fade_in` samples at the start and
+    `fade_out` at the end takes the click out of a cut made inside a recording; 0 leaves that
+    end alone (the start and the end of the whole recording).
+    """
+    length = end_sample - start_sample
+    steps = [f"atrim=start_sample={start_sample}:end_sample={end_sample}", "asetpts=PTS-STARTPTS"]
+    if fade_in > 0:
+        steps.append(f"afade=t=in:ss=0:ns={fade_in}")
+    if fade_out > 0:
+        steps.append(f"afade=t=out:ss={length - fade_out}:ns={fade_out}")
+    return [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-n",
+        "-i",
+        ffmpeg.file_input(source),
+        "-af",
+        ",".join(steps),
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        str(SAMPLE_RATE),
+        "-ac",
+        "1",
+        "-f",
+        "wav",
+        ffmpeg.file_input(dest),
+    ]
+
+
+async def cut_scene(
+    source: Path, dest: Path, start_sample: int, end_sample: int, fade_in: int, fade_out: int
+) -> None:
+    """Cuts one scene out of a full recording into the new WAV file `dest`. Raises CutError."""
+    try:
+        result = await ffmpeg.run_tool(
+            "ffmpeg",
+            cut_scene_args(source, dest, start_sample, end_sample, fade_in, fade_out),
+            timeout_s=SCENE_CUT_TIMEOUT_S,
+        )
+    except ffmpeg.ToolError as exc:
+        raise CutError(f"A scene could not be cut out of the recording: {exc}") from exc
+    if result.returncode != 0:
+        raise CutError("A scene could not be cut out of the recording.")
 
 
 def join_args(list_path: Path, dest: Path) -> list[str]:

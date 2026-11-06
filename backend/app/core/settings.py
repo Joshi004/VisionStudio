@@ -189,6 +189,12 @@ WORD_TIMING_MATCH_THRESHOLD_KEY = "word_timing_match_threshold"
 # safety guard: a recording is never refused for its length (R-6).
 RECORDING_MAX_UPLOAD_MB_KEY = "recording_max_upload_mb"
 
+# The pause between two scenes of a full recording below which the boundary is tight, in ms
+# (REC-004, R-7), and the longest stretch of a recording sent to the transcription server in one
+# request, in seconds (R-6: a longer recording is sent in pieces cut at silences).
+RECORDING_MIN_BOUNDARY_PAUSE_MS_KEY = "recording_min_boundary_pause_ms"
+RECORDING_TRANSCRIPTION_PIECE_S_KEY = "recording_transcription_piece_s"
+
 # The display limits of an explainer's callouts (EXPLAINER-009): the least time between the start
 # of two callouts, and the most callouts in any one minute. The callout plan is checked against
 # them and records the values it was checked with.
@@ -661,6 +667,36 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=500,
         min_value=1,
         max_value=500,
+    ),
+    SettingSpec(
+        key=RECORDING_MIN_BOUNDARY_PAUSE_MS_KEY,
+        group=GROUP_SPEECH,
+        label="Recording: least pause between scenes (ms)",
+        help=(
+            "A recording of the whole video is cut into one take per scene, and it can only be "
+            "cut cleanly where the person paused between two scenes. A pause shorter than this, "
+            "or a word next to the scene change that was not heard, makes that boundary tight: "
+            "the pipeline waits until it is decided. A starting value, not a measurement."
+        ),
+        value_type="integer",
+        default=200,
+        min_value=0,
+        max_value=2000,
+    ),
+    SettingSpec(
+        key=RECORDING_TRANSCRIPTION_PIECE_S_KEY,
+        group=GROUP_SPEECH,
+        label="Recording: longest piece sent for transcription (seconds)",
+        help=(
+            "A recording is never refused for its length. A recording longer than this is cut "
+            "at silences into pieces, the pieces are transcribed one after the other, and the "
+            "word times are joined. A starting value: nobody has measured how long a file the "
+            "transcription server takes in one request. It applies to the next recording."
+        ),
+        value_type="integer",
+        default=300,
+        min_value=30,
+        max_value=1800,
     ),
     SettingSpec(
         key=CALLOUT_MIN_GAP_MS_KEY,

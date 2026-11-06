@@ -4437,6 +4437,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/voice-recordings/full": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Full Recording
+         * @description The script of the whole video to read, and where the newest full recording stands. Worked
+         *     out on every read.
+         */
+        get: operations["get_full_recording_api_projects__project_id__voice_recordings_full_get"];
+        put?: never;
+        /**
+         * Upload Full Recording
+         * @description Makes a recording of the whole script (WAV, MP3, WebM or MP4/M4A, sent as the raw request
+         *     body) the project's newest full recording and queues its transcription.
+         */
+        post: operations["upload_full_recording_api_projects__project_id__voice_recordings_full_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/voice-recordings/full/{recording_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Full Recording
+         * @description Queues the transcription or the split of the newest full recording again, when it failed.
+         */
+        post: operations["retry_full_recording_api_projects__project_id__voice_recordings_full__recording_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/graphics": {
         parameters: {
             query?: never;
@@ -8363,6 +8409,63 @@ export interface components {
             /** Warnings */
             warnings: string[];
         };
+        /** FullRecordingOut */
+        FullRecordingOut: {
+            script: components["schemas"]["FullScriptOut"];
+            newest: components["schemas"]["FullRecordingStateOut"] | null;
+        };
+        /** FullRecordingStateOut */
+        FullRecordingStateOut: {
+            /** Recording Id */
+            recording_id: number;
+            /** Version */
+            version: number;
+            /** Origin */
+            origin: string;
+            /** Duration S */
+            duration_s: number;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "transcribing" | "transcription_failed" | "refused" | "tight" | "splitting" | "split_failed" | "split";
+            /** Message */
+            message: string;
+            /** Match Percent */
+            match_percent: number | null;
+            /** Threshold */
+            threshold: number | null;
+            /** Error */
+            error: string | null;
+            /** Boundaries */
+            boundaries: components["schemas"]["SceneBoundaryOut"][];
+            /** Tight Count */
+            tight_count: number;
+            /** Script Changed */
+            script_changed: boolean;
+            /** Can Retry */
+            can_retry: boolean;
+        };
+        /** FullRecordingStoredOut */
+        FullRecordingStoredOut: {
+            /** Recording Id */
+            recording_id: number;
+            /** Version */
+            version: number;
+            /** Duration S */
+            duration_s: number;
+            /** Timing Job Id */
+            timing_job_id: number;
+        };
+        /** FullScriptOut */
+        FullScriptOut: {
+            /** Scenes */
+            scenes: components["schemas"]["ScriptSceneOut"][];
+            /** Script Key */
+            script_key: string;
+            /** Blocked Reason */
+            blocked_reason: string | null;
+        };
         /** GapOut */
         GapOut: {
             /** After */
@@ -9564,7 +9667,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording";
             /**
              * Status
              * @enum {string}
@@ -9647,7 +9750,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording";
             /**
              * Kind
              * @enum {string}
@@ -9686,7 +9789,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording";
             /**
              * Status
              * @enum {string}
@@ -12538,7 +12641,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording";
             /** Running */
             running: number;
             /** Queued */
@@ -13463,6 +13566,11 @@ export interface components {
             /** Silence Rules */
             silence_rules: string[];
         };
+        /** RetryOut */
+        RetryOut: {
+            /** Job Id */
+            job_id: number;
+        };
         /**
          * ReviewOut
          * @description What the user can review while the run waits at a review point.
@@ -13583,6 +13691,25 @@ export interface components {
             source_id: number | null;
             /** Seam S */
             seam_s: number | null;
+        };
+        /** SceneBoundaryOut */
+        SceneBoundaryOut: {
+            /** After Scene Id */
+            after_scene_id: string;
+            /** Before Scene Id */
+            before_scene_id: string;
+            /** Pause S */
+            pause_s: number;
+            /** Cut S */
+            cut_s: number;
+            /** Tight */
+            tight: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Before Words */
+            before_words: string;
+            /** After Words */
+            after_words: string;
         };
         /**
          * SceneChangeOut
@@ -14409,6 +14536,17 @@ export interface components {
             text: string;
             /** After Event Id */
             after_event_id: string | null;
+        };
+        /** ScriptSceneOut */
+        ScriptSceneOut: {
+            /** Scene Id */
+            scene_id: string;
+            /** Index */
+            index: number | null;
+            /** Title */
+            title: string;
+            /** Text */
+            text: string;
         };
         /** SecretStatus */
         SecretStatus: {
@@ -21871,7 +22009,7 @@ export interface operations {
                 /** @description Only jobs with one of these statuses (repeat it). */
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
                 /** @description Only jobs of one of these types (repeat it). */
-                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene")[] | null;
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene" | "time_voice_recording" | "split_voice_recording")[] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -27914,6 +28052,161 @@ export interface operations {
                 };
             };
             /** @description The project is not recorded, the scene cannot have a recording, or the file is not acceptable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_full_recording_api_projects__project_id__voice_recordings_full_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FullRecordingOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project's voice is not recorded. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_full_recording_api_projects__project_id__voice_recordings_full_post: {
+        parameters: {
+            query: {
+                origin: "browser" | "upload";
+                script_key: string;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FullRecordingStoredOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The script changed since the person was shown it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The file is larger than the limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not sent as application/octet-stream. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The project is not recorded, a scene's speech is not planned, or the file is not acceptable. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_full_recording_api_projects__project_id__voice_recordings_full__recording_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                recording_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryOut"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The recording is not the newest full recording, or nothing failed. */
             422: {
                 headers: {
                     [name: string]: unknown;
