@@ -521,6 +521,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/callout-graphics/{callout_id}/{engine}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Callout Graphic Version
+         * @description Makes what is missing for one version of one callout. A version that is being made is
+         *     refused with 422.
+         */
+        post: operations["run_callout_graphic_version_api_projects__project_id__callout_graphics__callout_id___engine__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/callout-graphics/{callout_id}/{engine}/ask-again": {
         parameters: {
             query?: never;
@@ -535,6 +556,28 @@ export interface paths {
          * @description A paid model call: makes one version again as a new attempt.
          */
         post: operations["ask_callout_graphic_again_api_projects__project_id__callout_graphics__callout_id___engine__ask_again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/callout-graphics/{callout_id}/choice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Callout Graphic Choice
+         * @description Chooses the version the video uses for a callout, or `null` for the rule (the component,
+         *     and the blocks only when it failed outright). A version needs a current preview. A callout
+         *     whose type, items, unit or phrase change is back on the rule.
+         */
+        put: operations["set_callout_graphic_choice_api_projects__project_id__callout_graphics__callout_id__choice_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6194,17 +6237,29 @@ export interface components {
             blocked_reason: string | null;
             /** Length S */
             length_s: number | null;
+            /** Choice */
+            choice: ("generated_component" | "remotion_blocks") | null;
             used: components["schemas"]["CalloutGraphicUsedOut"] | null;
             /** Engines */
             engines: components["schemas"]["CalloutGraphicEngineOut"][];
+        };
+        /** CalloutGraphicChoiceIn */
+        CalloutGraphicChoiceIn: {
+            /** Engine */
+            engine: ("generated_component" | "remotion_blocks") | null;
+        };
+        /** CalloutGraphicChoiceOut */
+        CalloutGraphicChoiceOut: {
+            /** Engine */
+            engine: ("generated_component" | "remotion_blocks") | null;
         };
         /** CalloutGraphicEngineOut */
         CalloutGraphicEngineOut: {
             /**
              * Key
-             * @constant
+             * @enum {string}
              */
-            key: "generated_component";
+            key: "generated_component" | "remotion_blocks";
             /** Label */
             label: string;
             /**
@@ -6222,14 +6277,14 @@ export interface components {
         /**
          * CalloutGraphicUsedOut
          * @description What the story render draws for a callout. `box` is today's text box, for a callout whose
-         *     component failed outright.
+         *     two versions both failed outright.
          */
         CalloutGraphicUsedOut: {
             /**
              * Engine
              * @enum {string}
              */
-            engine: "generated_component" | "box";
+            engine: "generated_component" | "remotion_blocks" | "box";
             /** Attempt Id */
             attempt_id: number | null;
             /** Attempt */
@@ -6238,7 +6293,7 @@ export interface components {
              * Because
              * @enum {string}
              */
-            because: "chosen" | "default" | "component_failed";
+            because: "chosen" | "default" | "component_failed" | "both_failed";
         };
         /** CalloutGraphicsRun */
         CalloutGraphicsRun: {
@@ -9488,7 +9543,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
             /**
              * Status
              * @enum {string}
@@ -9571,7 +9626,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
             /**
              * Kind
              * @enum {string}
@@ -9610,7 +9665,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
             /**
              * Status
              * @enum {string}
@@ -12462,7 +12517,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview";
+            type: "lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene";
             /** Running */
             running: number;
             /** Queued */
@@ -19090,6 +19145,48 @@ export interface operations {
             };
         };
     };
+    run_callout_graphic_version_api_projects__project_id__callout_graphics__callout_id___engine__run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                callout_id: string;
+                engine: "generated_component" | "remotion_blocks";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalloutGraphicsRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a motion callouts project, the callout plan or the callout look is missing, out of date or being written, no such callout, or the version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     ask_callout_graphic_again_api_projects__project_id__callout_graphics__callout_id___engine__ask_again_post: {
         parameters: {
             query?: never;
@@ -19097,7 +19194,7 @@ export interface operations {
             path: {
                 project_id: number;
                 callout_id: string;
-                engine: "generated_component";
+                engine: "generated_component" | "remotion_blocks";
             };
             cookie?: never;
         };
@@ -19110,6 +19207,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CalloutGraphicAskRun"];
+                };
+            };
+            /** @description No such project. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not a motion callouts project, the callout plan or the callout look is missing, out of date or being written, no such callout, or the version is already being made. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_callout_graphic_choice_api_projects__project_id__callout_graphics__callout_id__choice_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+                callout_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalloutGraphicChoiceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalloutGraphicChoiceOut"];
                 };
             };
             /** @description No such project. */
@@ -21683,7 +21825,7 @@ export interface operations {
                 /** @description Only jobs with one of these statuses (repeat it). */
                 status?: ("queued" | "running" | "succeeded" | "failed" | "cancelled")[] | null;
                 /** @description Only jobs of one of these types (repeat it). */
-                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview")[] | null;
+                type?: ("lab_video" | "write_lab_video_prompt" | "lab_voice" | "lab_image" | "write_character_look_prompt" | "write_character_take_prompt" | "write_story_bible" | "discover_characters" | "discover_environments" | "discover_scenes" | "define_character" | "discover_relations" | "design_voice" | "write_environment_prompt" | "define_environment" | "define_scene" | "extract_events" | "resolve_looks_states" | "synthesize_speech_unit" | "plan_shots" | "define_shot" | "check_shot_continuity" | "repair_shot_cut" | "compile_shot_prompt" | "generate_shot" | "render_story" | "check_shot_takes" | "story_pipeline" | "check_take_dialogue" | "select_shot_references" | "lab_music" | "write_lab_music_prompt" | "stage_scene" | "plan_environment_views" | "write_environment_view_prompt" | "write_music_bible" | "write_music_theme_prompt" | "write_music_plan" | "write_music_cue" | "audit_music_cues" | "rewrite_music_prompt" | "place_music" | "preview_music_mix" | "time_speech_words" | "write_callout_plan" | "time_lab_speech_words" | "render_av_test" | "write_lab_graphic_brief" | "write_lab_graphic_template_spec" | "write_lab_graphic_block_scene" | "write_lab_graphic_component" | "render_lab_graphic" | "time_lab_graphic_words" | "write_graphic_theme" | "write_shot_graphic_brief" | "write_shot_graphic_component" | "write_shot_graphic_scene" | "render_shot_graphic" | "describe_photo" | "render_scene" | "write_thumbnail_concepts" | "write_callout_look" | "write_callout_component" | "render_callout_preview" | "write_callout_scene")[] | null;
                 limit?: number;
                 offset?: number;
             };

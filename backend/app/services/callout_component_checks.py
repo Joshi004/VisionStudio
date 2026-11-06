@@ -76,6 +76,11 @@ def motion_resolved(
         "fonts": resolved["fonts"],
         "look": resolved["look"],
     }
+    # A block scene needs the frame's width and the video's motion (CMO-004); a component ignores
+    # them. An attempt made before they existed does not have them.
+    for key in ("frame_width", "motion"):
+        if key in resolved:
+            body[key] = resolved[key]
     if backdrop is not None:
         body["backdrop"] = backdrop
     return body

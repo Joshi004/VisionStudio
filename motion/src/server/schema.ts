@@ -7,12 +7,14 @@ export const ENGINES = [
   "remotion_blocks",
   "generated_component",
   "callout_component",
+  "callout_blocks",
 ] as const;
 export type Engine = (typeof ENGINES)[number];
 
 // The engines that draw a callout (CMO-001): a transparent clip laid over a shot. Only they may be
-// asked for ProRes 4444, and only they may be longer than MAX_FRAMES. CMO-004 adds `callout_blocks`.
-export const CALLOUT_ENGINES: readonly Engine[] = ["callout_component"];
+// asked for ProRes 4444, and only they may be longer than MAX_FRAMES. `callout_blocks` (CMO-004)
+// draws the block scene of a callout.
+export const CALLOUT_ENGINES: readonly Engine[] = ["callout_component", "callout_blocks"];
 
 export function isCalloutEngine(engine: Engine): boolean {
   return CALLOUT_ENGINES.includes(engine);
@@ -98,6 +100,9 @@ export const renderRequestSchema = {
 // The body of POST /layout (GFX-009): the size, length and resolved brief of a render, the block
 // scene as its `input`, and the frames at which to report the texts on the screen.
 export type LayoutRequest = {
+  // `callout` (CMO-004): the scene is a callout's, `resolved` is the callout's brief and `frames`
+  // may be as long as a callout. Without it: a graphic shot's scene.
+  mode?: "blocks" | "callout";
   width: number;
   height: number;
   fps: number;
@@ -114,20 +119,32 @@ export const layoutRequestSchema = {
   additionalProperties: false,
   required: ["width", "height", "fps", "frames", "resolved", "input", "at_frames"],
   properties: {
+    mode: { type: "string", enum: ["blocks", "callout"] },
     width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     fps: { type: "integer", minimum: 1, maximum: 60 },
-    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
+    // The most any mode may ask for; `layoutProblem` holds a shot's scene to MAX_FRAMES.
+    frames: { type: "integer", minimum: 1, maximum: CALLOUT_MAX_FRAMES },
     resolved: { type: "object" },
     input: {},
     at_frames: {
       type: "array",
       minItems: 1,
       maxItems: MAX_LAYOUT_FRAMES,
-      items: { type: "integer", minimum: 0, maximum: MAX_FRAMES - 1 },
+      items: { type: "integer", minimum: 0, maximum: CALLOUT_MAX_FRAMES - 1 },
     },
   },
 } as const;
+
+// The rules of a layout request that the JSON schema cannot hold. A readable message, or null.
+export function layoutProblem(request: LayoutRequest): string | null {
+  if (request.mode === "callout") return null;
+  if (request.frames > MAX_FRAMES) return `A block scene is laid out at most ${MAX_FRAMES} frames long.`;
+  if (request.at_frames.some((frame) => frame >= MAX_FRAMES)) {
+    return `A block scene is measured at frames below ${MAX_FRAMES}.`;
+  }
+  return null;
+}
 
 export const idParamsSchema = {
   type: "object",

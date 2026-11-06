@@ -1,16 +1,20 @@
 """`/api/projects/{project_id}/callout-graphics`: the graphics of the callouts of a motion
-explainer, the generated component of each callout (CMO-003).
+explainer, the two versions of each callout (the generated component, CMO-003, and the building
+blocks, CMO-004) and the owner's choice between them.
 
 - `GET ...` answers everything the callout panel shows for the stage in one call: each callout of
   the newest plan with where its graphics stand, and for the component every attempt with its
   preview, jobs and checks. "Out of date" is worked out on every read.
 - `POST .../run` makes what is missing for every callout that is turned on (the pipeline's own
-  start function): a new model call for a callout that has nothing, the preview again for code
-  with no preview, and a new attempt with the code it already has for a preview that is out of
-  date (new words or new colours), which asks no model.
+  start function): a new model call for a version that has nothing, the preview again for code or
+  a scene with no preview, and a new attempt with the code or the scene it already has for a
+  preview that is out of date (new words or new colours), which asks no model.
 - `POST .../{callout_id}/run` does the same for one callout.
+- `POST .../{callout_id}/{engine}/run` does the same for one version of one callout.
 - `POST .../{callout_id}/{engine}/ask-again` makes a new attempt of one version, with a new model
   call.
+- `PUT .../{callout_id}/choice` sets the version the video uses for one callout, or `null` for the
+  rule (the component, the blocks only when the component failed outright, else a box).
 
 The rows and the jobs are made by `app/services/callout_graphics.py`. The answers never return ORM
 objects.
@@ -49,11 +53,11 @@ _INVALID = {
     }
 }
 
-EngineKey = Literal["generated_component"]
+EngineKey = Literal["generated_component", "remotion_blocks"]
 Status = Literal["none", "writing", "rendering", "ready", "out_of_date", "failed"]
 CalloutStatus = Literal["none", "working", "ready", "out_of_date", "failed"]
-UsedEngine = Literal["generated_component", "box"]
-UsedBecause = Literal["chosen", "default", "component_failed"]
+UsedEngine = Literal["generated_component", "remotion_blocks", "box"]
+UsedBecause = Literal["chosen", "default", "component_failed", "both_failed"]
 
 
 class CalloutGraphicAttemptOut(BaseModel):
@@ -67,7 +71,7 @@ class CalloutGraphicAttemptOut(BaseModel):
     current: bool
     # `writing` or `rendering` while a job of the attempt is waiting or running.
     stage: Literal["writing", "rendering"] | None
-    # The component code, and the model call that wrote it. None until then.
+    # The component code or the block scene, and the model call that wrote it. None until then.
     input: Any | None
     input_job: JobSummary | None
     # The time, attempts and tokens of that call. None while it has none, and for an attempt made
@@ -80,7 +84,7 @@ class CalloutGraphicAttemptOut(BaseModel):
     warnings: Any | None
     # Why it has no preview, or None.
     last_error: str | None
-    # A component that has no preview and that nothing more will be tried for.
+    # A version that has no preview and that nothing more will be tried for.
     failed_outright: bool
     # The attempt whose code this one draws again for new words or colours, or None.
     rerender_of: int | None
@@ -92,7 +96,7 @@ class CalloutGraphicEngineOut(BaseModel):
     key: EngineKey
     label: str
     status: Status
-    # A component that failed outright (no current preview, nothing more will be tried).
+    # A version that failed outright (no current preview, nothing more will be tried).
     failed_outright: bool
     # Why the newest attempt has no preview, or None.
     last_error: str | None
@@ -102,7 +106,7 @@ class CalloutGraphicEngineOut(BaseModel):
 
 class CalloutGraphicUsedOut(BaseModel):
     """What the story render draws for a callout. `box` is today's text box, for a callout whose
-    component failed outright.
+    two versions both failed outright.
     """
 
     engine: UsedEngine
@@ -131,6 +135,8 @@ class CalloutGraphicCalloutOut(BaseModel):
     # How long the callout is drawn at in the preview, in seconds. None when it cannot be worked
     # out now.
     length_s: float | None
+    # The version the owner chose, or None for Automatic.
+    choice: EngineKey | None
     # The version the render draws, or None when the callout has nothing yet.
     used: CalloutGraphicUsedOut | None
     # Empty for a callout that is turned off.
@@ -155,6 +161,15 @@ class CalloutGraphicsRun(BaseModel):
 
 class CalloutGraphicAskRun(BaseModel):
     job_id: int
+
+
+class CalloutGraphicChoiceIn(BaseModel):
+    # None is Automatic: the rule picks the version.
+    engine: EngineKey | None
+
+
+class CalloutGraphicChoiceOut(BaseModel):
+    engine: EngineKey | None
 
 
 # --- Mapping ---------------------------------------------------------------------------------
@@ -246,6 +261,7 @@ def _callout_out(
         can_run=entry.can_run,
         blocked_reason=entry.blocked_reason,
         length_s=length_s,
+        choice=cast(EngineKey | None, entry.choice),
         used=(
             CalloutGraphicUsedOut(
                 engine=cast(UsedEngine, used.engine),
@@ -325,6 +341,27 @@ async def run_callout_graphic(
 
 
 @router.post(
+    "/projects/{project_id}/callout-graphics/{callout_id}/{engine}/run",
+    response_model=CalloutGraphicsRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def run_callout_graphic_version(
+    project_id: int, callout_id: DiscoveryId, engine: EngineKey, session: SessionDep
+) -> CalloutGraphicsRun:
+    """Makes what is missing for one version of one callout. A version that is being made is
+    refused with 422.
+    """
+    project = await load_project(session, project_id)
+    try:
+        jobs = await callout_graphics.start_callout(session, project, callout_id, engine)
+    except callout_graphics.CalloutGraphicsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    dispatcher.nudge()
+    return CalloutGraphicsRun(job_ids=[job.id for job in jobs])
+
+
+@router.post(
     "/projects/{project_id}/callout-graphics/{callout_id}/{engine}/ask-again",
     response_model=CalloutGraphicAskRun,
     status_code=status.HTTP_202_ACCEPTED,
@@ -341,3 +378,26 @@ async def ask_callout_graphic_again(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     dispatcher.nudge()
     return CalloutGraphicAskRun(job_id=job.id)
+
+
+@router.put(
+    "/projects/{project_id}/callout-graphics/{callout_id}/choice",
+    response_model=CalloutGraphicChoiceOut,
+    responses={**_NOT_FOUND, **_INVALID},
+)
+async def set_callout_graphic_choice(
+    project_id: int,
+    callout_id: DiscoveryId,
+    body: CalloutGraphicChoiceIn,
+    session: SessionDep,
+) -> CalloutGraphicChoiceOut:
+    """Chooses the version the video uses for a callout, or `null` for the rule (the component,
+    and the blocks only when it failed outright). A version needs a current preview. A callout
+    whose type, items, unit or phrase change is back on the rule.
+    """
+    project = await load_project(session, project_id)
+    try:
+        engine = await callout_graphics.set_choice(session, project, callout_id, body.engine)
+    except callout_graphics.CalloutGraphicsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return CalloutGraphicChoiceOut(engine=cast(EngineKey | None, engine))

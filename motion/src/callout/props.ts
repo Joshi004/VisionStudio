@@ -46,6 +46,9 @@ export type CalloutResolved = {
   kind: CalloutKind;
   placement: CalloutPlacement;
   frame_height: number;
+  // The block scenes of CMO-004 need these two; a component does not read them.
+  frame_width?: number;
+  motion?: string;
   exit_frame: number;
   parts: CalloutPart[];
   theme: Omit<CalloutTheme, "fontDisplay" | "fontText">;
@@ -54,6 +57,8 @@ export type CalloutResolved = {
   // Preview only: a colour painted under the callout so that an H.264 file can show it.
   backdrop?: string;
 };
+
+const MOTIONS = ["snappy", "smooth", "calm"];
 
 const THEME_KEYS = ["surface", "text", "muted", "accent", "positive", "negative", "number"] as const;
 
@@ -87,6 +92,12 @@ export function readCallout(input: GraphicInput): CalloutResolved {
   }
 
   const frameHeight = whole(raw["frame_height"], "frame_height");
+  const frameWidthRaw = raw["frame_width"];
+  const frameWidth = frameWidthRaw === undefined ? undefined : whole(frameWidthRaw, "frame_width");
+  const motionRaw = raw["motion"];
+  if (motionRaw !== undefined && !(typeof motionRaw === "string" && MOTIONS.includes(motionRaw))) {
+    throw new Error(`The callout's motion must be one of ${MOTIONS.join(", ")}.`);
+  }
   const exitFrame = whole(raw["exit_frame"], "exit_frame");
   if (exitFrame <= 0 || exitFrame >= input.frames) {
     throw new Error(`The callout's exit_frame (${exitFrame}) must be after the first frame and before the last (${input.frames}).`);
@@ -131,6 +142,8 @@ export function readCallout(input: GraphicInput): CalloutResolved {
     kind: kind as CalloutKind,
     placement: placement as CalloutPlacement,
     frame_height: frameHeight,
+    ...(frameWidth === undefined ? {} : { frame_width: frameWidth }),
+    ...(motionRaw === undefined ? {} : { motion: motionRaw as string }),
     exit_frame: exitFrame,
     parts,
     theme: theme as CalloutResolved["theme"],

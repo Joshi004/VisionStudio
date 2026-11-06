@@ -22,9 +22,10 @@
   (`rewrite_music_prompt.py`), the placement of the music on the timeline (`place_music.py`)
   and the preview of the music in context (`preview_music_mix.py`), and the timing of the words
   of an explainer's speech (`time_speech_words.py`) and the callout plan of an explainer
-  (`write_callout_plan.py`), the generated component and the preview of a motion callout
-  (`write_callout_component.py`, `render_callout_preview.py`), and the Audio video lab of a
-  character (`time_lab_speech_words.py`, `render_av_test.py`), and the brief and the word timing
+  (`write_callout_plan.py`), the generated component, the block scene and the preview of a
+  motion callout (`write_callout_component.py`, `write_callout_scene.py`,
+  `render_callout_preview.py`), and the Audio video lab of a character
+  (`time_lab_speech_words.py`, `render_av_test.py`), and the brief and the word timing
   of a Graphics lab run
   (`write_lab_graphic_brief.py`, `time_lab_graphic_words.py`), the template spec of a Graphics lab
   run (`write_lab_graphic_template_spec.py`), the block scene of a Graphics lab run
@@ -95,6 +96,7 @@ def register_handlers() -> None:
     from app.jobs.write_callout_component import WriteCalloutComponentHandler
     from app.jobs.write_callout_look import WriteCalloutLookHandler
     from app.jobs.write_callout_plan import WriteCalloutPlanHandler
+    from app.jobs.write_callout_scene import WriteCalloutSceneHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
     from app.jobs.write_environment_prompt import WriteEnvironmentPromptHandler
@@ -165,6 +167,7 @@ def register_handlers() -> None:
     handlers.register(WriteCalloutPlanHandler())
     handlers.register(WriteCalloutLookHandler())
     handlers.register(WriteCalloutComponentHandler())
+    handlers.register(WriteCalloutSceneHandler())
     handlers.register(RenderCalloutPreviewHandler())
     handlers.register(TimeLabSpeechWordsHandler())
     handlers.register(RenderAvTestHandler())

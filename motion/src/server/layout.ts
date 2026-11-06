@@ -27,7 +27,7 @@ async function measureOnce(request: LayoutRequest): Promise<LayoutReport> {
     serveUrl: BUNDLE_DIR,
     id: "BlocksLayout",
     inputProps: {
-      engine: "remotion_blocks",
+      engine: request.mode === "callout" ? "callout_blocks" : "remotion_blocks",
       width: request.width,
       height: request.height,
       fps: request.fps,

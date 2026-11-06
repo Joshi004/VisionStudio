@@ -6,6 +6,16 @@ import type { ColourRole, Region } from "./scene";
 
 export const GRID = 12;
 
+// What a callout changes in how the blocks are laid out (CMO-004). The shot graphics pass nothing,
+// so they are laid out exactly as before. The text sizes read the output frame (not the zone the
+// callout is drawn in), the corners and the panel come from the callout look.
+export type CtxOptions = {
+  frameWidth: number;
+  frameHeight: number;
+  corners: string;
+  panelOpacity: number;
+};
+
 export type BCtx = {
   width: number;
   height: number;
@@ -27,16 +37,32 @@ export type BCtx = {
   cellW: number;
   cellH: number;
   landscape: boolean;
+  // The height the text sizes read: the frame's for a callout, else the canvas's.
+  textHeight: number;
+  // Callout only: the corners of a panel and a node (`sharp`, `soft` or `round`), and how opaque a
+  // panel is. Null for a shot graphic.
+  corners: string | null;
+  panelOpacity: number;
 };
+
+// The radius a callout look's `corners` gives a box, or null when the scene has no look (a shot
+// graphic, which draws its own radius).
+export function cornerRadius(ctx: BCtx, box: Box): number | null {
+  if (ctx.corners === null) return null;
+  if (ctx.corners === "sharp") return 0;
+  if (ctx.corners === "round") return Math.floor(Math.min(boxWidth(box), boxHeight(box)) / 2);
+  return Math.round(0.012 * ctx.textHeight);
+}
 
 // A scene that cannot be drawn: the render fails, and the card shows this message.
 export function cannotDraw(message: string): never {
   throw new Error(`The block scene cannot be drawn: ${message}`);
 }
 
-export function makeBCtx(input: GraphicInput): BCtx {
+export function makeBCtx(input: GraphicInput, options?: CtxOptions): BCtx {
   const { width, height, resolved } = input;
-  const landscape = width >= height;
+  const textHeight = options === undefined ? height : options.frameHeight;
+  const landscape = options === undefined ? width >= height : options.frameWidth >= options.frameHeight;
   const area = resolved.safe_area;
   const safeWidth = area.right - area.left;
   return {
@@ -49,13 +75,16 @@ export function makeBCtx(input: GraphicInput): BCtx {
     top: area.top,
     right: area.right,
     W: safeWidth,
-    titleSize: Math.round((landscape ? 0.06 : 0.036) * height),
-    bodySize: Math.round((landscape ? 0.032 : 0.024) * height),
+    titleSize: Math.round((landscape ? 0.06 : 0.036) * textHeight),
+    bodySize: Math.round((landscape ? 0.032 : 0.024) * textHeight),
     stroke: Math.max(1, Math.round(height / 540)),
     gutter: Math.round(0.005 * height),
     cellW: safeWidth / GRID,
     cellH: (area.bottom - area.top) / GRID,
     landscape,
+    textHeight,
+    corners: options === undefined ? null : options.corners,
+    panelOpacity: options === undefined ? 1 : options.panelOpacity,
   };
 }
 

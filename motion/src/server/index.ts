@@ -8,6 +8,7 @@ import {
   checksProblem,
   checksRequestSchema,
   idParamsSchema,
+  layoutProblem,
   layoutRequestSchema,
   renderRequestSchema,
   requestProblem,
@@ -61,6 +62,8 @@ app.post<{ Body: LayoutRequest }>(
   "/layout",
   { schema: { body: layoutRequestSchema } },
   async (request, reply) => {
+    const problem = layoutProblem(request.body);
+    if (problem !== null) return reply.code(400).send({ error: problem });
     try {
       return await measureLayout(request.body);
     } catch (error) {

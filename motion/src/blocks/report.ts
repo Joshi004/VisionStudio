@@ -3,6 +3,7 @@
 // from it whether the scene has a layout problem (`graphics_blocks.layout_problems`).
 import type { Box, GraphicInput } from "../types";
 import { enterProgress, exitProgress } from "./effects";
+import type { CtxOptions } from "./ctx";
 import { layoutScene } from "./layout";
 import type { Issue } from "./layout";
 import type { Scene } from "./scene";
@@ -22,8 +23,13 @@ export type LayoutReport = {
 };
 
 // An element that has begun to leave is not counted: another may take its place on the same beat.
-export function layoutReport(input: GraphicInput, scene: Scene, frames: number[]): LayoutReport {
-  const layout = layoutScene(input, scene);
+export function layoutReport(
+  input: GraphicInput,
+  scene: Scene,
+  frames: number[],
+  options?: CtxOptions,
+): LayoutReport {
+  const layout = layoutScene(input, scene, options);
   const { ctx } = layout;
   return {
     frames: frames.map((frame) => {

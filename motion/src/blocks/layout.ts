@@ -3,11 +3,13 @@
 // what the model is told is what is drawn.
 import type { GraphicInput } from "../types";
 import { cannotDraw, GRID, makeBCtx, regionBox } from "./ctx";
-import type { BCtx } from "./ctx";
+import type { BCtx, CtxOptions } from "./ctx";
 import type { Box } from "../types";
 import type { Element, Region, Scene } from "./scene";
 import { layoutBars, layoutLine } from "./Series";
 import type { BarsLaid, LineLaid } from "./Series";
+import { layoutPanel } from "./Panel";
+import type { PanelLaid } from "./Panel";
 import { layoutArrow, layoutHighlight, layoutRing } from "./Shapes";
 import type { ArrowLaid, HighlightLaid, RingLaid } from "./Shapes";
 import { layoutTable } from "./Table";
@@ -25,7 +27,8 @@ export type Laid =
   | TableLaid
   | BadgeLaid
   | HighlightLaid
-  | RingLaid;
+  | RingLaid
+  | PanelLaid;
 
 export type Issue = { element: string; message: string };
 
@@ -48,8 +51,9 @@ function checkRegion(element: Element, region: Region): void {
   }
 }
 
-export function layoutScene(input: GraphicInput, scene: Scene): SceneLayout {
-  const ctx = makeBCtx(input);
+// `options` is for a callout (CMO-004); a shot graphic passes none.
+export function layoutScene(input: GraphicInput, scene: Scene, options?: CtxOptions): SceneLayout {
+  const ctx = makeBCtx(input, options);
   // The boxes of the elements that have a region, which the arrows and highlights follow.
   const boxes = new Map<string, Box>();
   for (const element of scene.elements) {
@@ -78,6 +82,8 @@ export function layoutScene(input: GraphicInput, scene: Scene): SceneLayout {
         return layoutNode(ctx, element, boxOf(element.id, element.id));
       case "table":
         return layoutTable(ctx, element, boxOf(element.id, element.id));
+      case "panel":
+        return layoutPanel(ctx, element, boxOf(element.id, element.id));
       case "badge":
         return layoutBadge(ctx, element, boxOf(element.id, element.id));
       case "progress_ring":

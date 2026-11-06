@@ -27,6 +27,8 @@ export type TextEl = Placed & {
   text: string;
   align?: Align;
   role?: ColourRole;
+  // Callout only: the part's colour, set from the part by `readCalloutScene` (callout.ts).
+  colour?: string;
 };
 export type CounterEl = Placed & {
   block: "counter";
@@ -48,11 +50,20 @@ export type LineSeriesEl = Placed & {
   labels: string[];
   area?: boolean;
 };
-export type NodeEl = Placed & { block: "node"; label: string; role?: ColourRole };
+export type NodeEl = Placed & { block: "node"; label: string; role?: ColourRole; colour?: string };
 export type ArrowEl = Common & { block: "arrow"; from: string; to: string; role?: ColourRole };
 export type TableCell = string | { value: string };
 export type TableEl = Placed & { block: "table"; header?: string[]; rows: TableCell[][] };
-export type BadgeEl = Placed & { block: "badge"; value?: string; text?: string; role?: ColourRole };
+export type BadgeEl = Placed & {
+  block: "badge";
+  value?: string;
+  text?: string;
+  role?: ColourRole;
+  colour?: string;
+};
+// Callout only (CMO-004): a box in `surface` under the other elements. A shot graphic's scene never
+// has one: `BLOCKS` below, which `readScene` checks, does not list it.
+export type PanelEl = Placed & { block: "panel" };
 export type HighlightEl = Common & { block: "highlight"; target: string; role?: ColourRole };
 export type RingEl = Placed & { block: "progress_ring"; value: string; role?: ColourRole };
 
@@ -66,7 +77,8 @@ export type Element =
   | TableEl
   | BadgeEl
   | HighlightEl
-  | RingEl;
+  | RingEl
+  | PanelEl;
 
 export type Scene = { blocks_version: number; elements: Element[] };
 

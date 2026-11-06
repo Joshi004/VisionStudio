@@ -1,6 +1,6 @@
 import { measureText } from "../templates/layout";
 import type { Box } from "../types";
-import { boxHeight, boxWidth, colourOf, measureOf } from "./ctx";
+import { boxHeight, boxWidth, colourOf, cornerRadius, measureOf } from "./ctx";
 import type { BCtx } from "./ctx";
 import { fitNumberIn, fitText, linesHeight, placeText } from "./fit";
 import type { TextItem } from "./fit";
@@ -27,6 +27,7 @@ export function layoutText(ctx: BCtx, element: TextEl, box: Box): TextLaid {
   );
   const align = element.align ?? "left";
   const role = element.role ?? (element.style === "label" ? "muted" : "text");
+  const colour = element.colour ?? colourOf(ctx, role);
   const item: TextItem = {
     part: "text",
     group: 0,
@@ -36,7 +37,7 @@ export function layoutText(ctx: BCtx, element: TextEl, box: Box): TextLaid {
     lines: fitted.lines,
     box: placeText(fitted.lines, font, fitted.size, align, box, box.top),
     align,
-    colour: colourOf(ctx, role),
+    colour,
     counts: false,
   };
   return { kind: "text", id: element.id, box, texts: [item] };
@@ -166,7 +167,7 @@ export function layoutBadge(ctx: BCtx, element: BadgeEl, box: Box): BadgeLaid {
     box,
     texts: [item],
     pill: { left, top, right: left + pillWidth, bottom: top + pillHeight },
-    fill: colourOf(ctx, element.role ?? "accent"),
+    fill: element.colour ?? colourOf(ctx, element.role ?? "accent"),
   };
 }
 
@@ -231,8 +232,10 @@ export function layoutNode(ctx: BCtx, element: NodeEl, box: Box): NodeLaid {
     id: element.id,
     box,
     texts: [item],
-    border: colourOf(ctx, element.role ?? "accent"),
-    radius: Math.min(Math.round(0.3 * fitted.size), Math.floor(Math.min(boxWidth(box), boxHeight(box)) / 2)),
+    border: element.colour ?? colourOf(ctx, element.role ?? "accent"),
+    radius:
+      cornerRadius(ctx, box) ??
+      Math.min(Math.round(0.3 * fitted.size), Math.floor(Math.min(boxWidth(box), boxHeight(box)) / 2)),
     stroke: Math.max(2, Math.round(ctx.height / 360)),
   };
 }

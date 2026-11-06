@@ -569,16 +569,18 @@ def _quoted(item: dict[str, Any]) -> str:
     return f'"{shown}" ({item["element"]})'
 
 
-def layout_problems(report: dict[str, Any], resolved: dict[str, Any]) -> list[str]:
-    """The sentences that say what is wrong with the layout, from the motion service's report:
-    a text outside the safe area, over the caption area, overlapping a text of another element,
-    or smaller than 2 percent of the height; and what the service could not fit. Each problem is
-    named once, at the first frame it is seen. At most `MAX_PROBLEMS`.
+def _layout_sentences(
+    report: dict[str, Any],
+    fps: int,
+    area: dict[str, Any],
+    caption: dict[str, Any] | None,
+    least: float,
+) -> list[str]:
+    """The sentences for a layout report: a text outside `area`, over the `caption` area (None for
+    a callout, which has none), overlapping a text of another element, or smaller than `least`
+    pixels; and what the service could not fit. Each problem is named once, at the first frame it
+    is seen. At most `MAX_PROBLEMS`.
     """
-    fps = int(resolved["fps"])
-    area = resolved["safe_area"]
-    caption = resolved["caption_zone"]
-    least = MIN_TEXT_SHARE * int(resolved["height"])
     problems: list[str] = []
     seen: set[tuple[str, ...]] = set()
 
@@ -611,7 +613,11 @@ def layout_problems(report: dict[str, Any], resolved: dict[str, Any]) -> list[st
                     ("outside", element, part),
                     f"The text {_quoted(item)} is outside the safe area.",
                 )
-            if box["bottom"] > caption["top"] and box["top"] < caption["bottom"]:
+            if (
+                caption is not None
+                and box["bottom"] > caption["top"]
+                and box["top"] < caption["bottom"]
+            ):
                 add(
                     ("caption", element, part),
                     f"The text {_quoted(item)} is over the caption area. Keep it higher.",
@@ -626,3 +632,284 @@ def layout_problems(report: dict[str, Any], resolved: dict[str, Any]) -> list[st
                         "Move one to another region or give them different beats.",
                     )
     return problems[:MAX_PROBLEMS]
+
+
+def layout_problems(report: dict[str, Any], resolved: dict[str, Any]) -> list[str]:
+    """The sentences that say what is wrong with the layout, from the motion service's report:
+    a text outside the safe area, over the caption area, overlapping a text of another element,
+    or smaller than 2 percent of the height; and what the service could not fit. Each problem is
+    named once, at the first frame it is seen. At most `MAX_PROBLEMS`.
+    """
+    return _layout_sentences(
+        report,
+        int(resolved["fps"]),
+        resolved["safe_area"],
+        resolved["caption_zone"],
+        MIN_TEXT_SHARE * int(resolved["height"]),
+    )
+
+
+# --- Callout mode (CMO-004) --------------------------------------------------------------------
+# A callout's scene is drawn on a transparent canvas the size of its zone, by the same blocks. The
+# scene names the parts of the callout instead of writing text, so a text edit keeps the scene.
+# These functions leave `check_scene` and `layout_problems` of the graphic shots as they were.
+
+# The same number is `CALLOUT_INSET_SHARE` of `motion/src/blocks/callout.ts`: each side of a zone
+# is left free by this share of the output frame's height.
+CALLOUT_INSET_SHARE: Final = 0.01
+CALLOUT_BLOCKS: Final = ("text", "badge", "node", "arrow", "highlight", "panel")
+MAX_CALLOUT_ELEMENTS: Final = 8
+# The blocks that need no data and the effects each may enter with, before the look narrows them.
+_CALLOUT_EFFECTS: Final = {
+    "text": (*WRAP_EFFECTS, "typewriter"),
+    "badge": WRAP_EFFECTS,
+    "node": WRAP_EFFECTS,
+    "panel": WRAP_EFFECTS,
+    "arrow": (*WRAP_EFFECTS, "draw"),
+    "highlight": (*WRAP_EFFECTS, "draw"),
+}
+# The effect each `entrance` of the callout look asks for.
+LOOK_ENTRANCE_EFFECT: Final = {
+    "fade_up": "slide_up",
+    "wipe": "slide_left",
+    "pop": "pop",
+    "draw": "typewriter",
+}
+# The looks of `panel` that have no panel block.
+NO_PANEL_LOOKS: Final = ("none", "underline")
+# The blocks that show one part of the callout.
+_PART_BLOCKS: Final = ("text", "badge", "node")
+# The blocks whose region counts as a filled box, for the share of the canvas they cover.
+_FILLED_BLOCKS: Final = ("panel", "node")
+_CALLOUT_KEYS: Final = {
+    "text": (("style", "part"), ("align",)),
+    "badge": (("part",), ()),
+    "node": (("part",), ()),
+    "panel": ((), ()),
+    "arrow": (("from", "to"), ("role",)),
+    "highlight": (("target",), ("role",)),
+}
+
+
+def callout_effects(block: str, look: dict[str, Any]) -> tuple[str, ...]:
+    """The effects a block of a callout may enter with: `fade`, the effect the callout look's
+    entrance asks for, and `draw` for an arrow or a highlight, whatever the block can do.
+    """
+    wanted = LOOK_ENTRANCE_EFFECT.get(str(look.get("entrance")))
+    return tuple(
+        effect
+        for effect in _CALLOUT_EFFECTS[block]
+        if effect == "fade" or effect == wanted or (block in FOLLOWING and effect == "draw")
+    )
+
+
+def callout_inset(resolved: dict[str, Any]) -> int:
+    """The free margin on each side of a zone, in pixels."""
+    return round(CALLOUT_INSET_SHARE * int(resolved["frame_height"]))
+
+
+class _CalloutContext(_Context):
+    """What the checks of one callout scene read: the parts are the beats, and the grid has 12
+    rows because a zone has no caption band.
+    """
+
+    def __init__(self, resolved: dict[str, Any]) -> None:
+        self.line = ""
+        self.rows = GRID
+        self.units = {}
+        self.numbers = {}
+        self.frames = {str(part["id"]): int(part["frame"]) for part in resolved["parts"]}
+        self.allowed_numbers = set()
+        self.blocks = {}
+        self.first_frame = {}
+
+
+def _callout_first_pass(ctx: _CalloutContext, raw: list[Any]) -> None:
+    for position, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"Element {position + 1} was not an object.")
+        name = item.get("id")
+        if not isinstance(name, str) or not ID_PATTERN.fullmatch(name):
+            raise ValueError(
+                f"Element {position + 1} has the id {name!r}; an id is 1 to 16 lowercase letters, "
+                "digits or underscores, starting with a letter."
+            )
+        if name in ctx.blocks:
+            raise ValueError(f"The id {name!r} is used by two elements.")
+        block = item.get("block")
+        if not isinstance(block, str) or block not in CALLOUT_BLOCKS:
+            raise ValueError(
+                f"The block of {name} was {block!r}; a callout may use only "
+                f"{', '.join(CALLOUT_BLOCKS)}."
+            )
+        ctx.blocks[name] = block
+
+
+def _callout_enter(
+    ctx: _CalloutContext, value: object, name: str, block: str, look: dict[str, Any]
+) -> dict[str, Any]:
+    given = object_of(value, f"entrance of {name}", ("beat", "effect"))
+    allowed = callout_effects(block, look)
+    effect = ctx.one_of(given["effect"], allowed, f"effect of the entrance of {name}")
+    beat = ctx.beat(given["beat"], f"beat of the entrance of {name} (a part id)")
+    ctx.first_frame[name] = ctx.frames[beat]
+    return {"beat": beat, "effect": effect}
+
+
+def _callout_element(
+    ctx: _CalloutContext,
+    item: dict[str, Any],
+    parts: dict[str, str],
+    look: dict[str, Any],
+    used: dict[str, str],
+) -> dict[str, Any]:
+    name = str(item["id"])
+    block = ctx.blocks[name]
+    if "exit" in item:
+        raise ValueError(
+            f"The element {name} has an exit. A callout's elements never leave: the whole callout "
+            "fades out at its end."
+        )
+    if "text" in item or "label" in item or "value" in item:
+        raise ValueError(
+            f"The element {name} writes its own text. Name the part it shows with "
+            '"part" instead: the words come from the callout.'
+        )
+    if block == "panel" and look.get("panel") in NO_PANEL_LOOKS:
+        raise ValueError(
+            f"The look of these callouts has no panel (panel: {look.get('panel')}), so the block "
+            "panel is not available. Use text, badge, node, arrow or highlight."
+        )
+    required, optional = _CALLOUT_KEYS[block]
+    placed = block not in FOLLOWING
+    given = object_of(
+        item,
+        f"element {name}",
+        ("id", "block", "enter", *(("region",) if placed else ()), *required),
+        optional,
+    )
+    out: dict[str, Any] = {"id": name, "block": block}
+    if placed:
+        out["region"] = ctx.region(given["region"], name)
+    if block in _PART_BLOCKS:
+        part = given["part"]
+        if not isinstance(part, str) or part not in parts:
+            raise ValueError(
+                f"The part of {name} was {part!r}; it must be one of {', '.join(parts)}."
+            )
+        if part in used:
+            raise ValueError(
+                f"The part {part} is shown by both {used[part]} and {name}. Show every part "
+                "exactly once."
+            )
+        used[part] = name
+        out["part"] = part
+    if block == "text":
+        out["style"] = ctx.one_of(given["style"], STYLES, f"style of {name}")
+        _align(ctx, given, out, name)
+    elif block in FOLLOWING:
+        key = "target" if block == "highlight" else None
+        if key is not None:
+            out[key] = ctx.element_id(given[key], f"{key} of {name}", placed=True, by=name)
+        else:
+            out["from"] = ctx.element_id(given["from"], f"from of {name}", placed=True, by=name)
+            out["to"] = ctx.element_id(given["to"], f"to of {name}", placed=True, by=name)
+        _role(ctx, given, out, name)
+    out["enter"] = _callout_enter(ctx, given["enter"], name, block, look)
+    if block in _PART_BLOCKS and out["enter"]["beat"] != out["part"]:
+        raise ValueError(
+            f"The element {name} shows the part {out['part']}, so it must enter on the beat "
+            f"{out['part']} (the moment that part appears), not {out['enter']['beat']}."
+        )
+    return out
+
+
+def _filled_share(elements: list[dict[str, Any]]) -> float:
+    """The share of the grid's cells under a `panel` or a `node`."""
+    cells: set[tuple[int, int]] = set()
+    for element in elements:
+        if element["block"] not in _FILLED_BLOCKS:
+            continue
+        first_column, first_row, last_column, last_row = element["region"]
+        cells.update(
+            (column, row)
+            for column in range(first_column, last_column + 1)
+            for row in range(first_row, last_row + 1)
+        )
+    return len(cells) / (GRID * GRID)
+
+
+def check_callout_scene(answer: dict[str, Any], resolved: dict[str, Any]) -> dict[str, Any]:
+    """The model's answer as the stored input of a callout's `remotion_blocks` version
+    (§4.4.2): the library's version and the checked elements. Raises ValueError with a message
+    fit for the user and for the model's corrected retry.
+
+    The rules: only `text`, `badge`, `node`, `arrow`, `highlight` and `panel` (and `panel` only when
+    the callout look has a panel); every part of the callout shown exactly once, by a block that
+    names it and enters on its beat; no text of the model's own; no exit; effects that follow the
+    look's entrance; regions inside the 12 x 12 grid; and no more than `callout_component_checks
+    .MAX_COVER` of the grid under panels and nodes.
+    """
+    from app.services.callout_component_checks import MAX_COVER
+
+    if not isinstance(answer, dict):
+        raise ValueError("The answer was not a JSON object.")
+    unknown = [key for key in answer if key != "elements"]
+    if unknown:
+        raise ValueError(f'The answer has "{unknown[0]}", which is not allowed there.')
+    raw = items_of(answer.get("elements"), "elements", 1, MAX_CALLOUT_ELEMENTS)
+    look = resolved.get("look") if isinstance(resolved.get("look"), dict) else {}
+    parts = {str(part["id"]): str(part["text"]) for part in resolved["parts"]}
+    ctx = _CalloutContext(resolved)
+    _callout_first_pass(ctx, raw)
+    used: dict[str, str] = {}
+    elements = [_callout_element(ctx, item, parts, look, used) for item in raw]
+    missing = [part for part in parts if part not in used]
+    if missing:
+        raise ValueError(
+            f"The part {missing[0]} is not shown by any element. Show every part exactly once."
+        )
+    _check_following(ctx, elements)
+    share = _filled_share(elements)
+    if share > MAX_COVER:
+        raise ValueError(
+            f"The panels and nodes fill {round(share * 100)} percent of the callout; the most "
+            f"allowed is {round(MAX_COVER * 100)} percent. The video under the callout must stay "
+            "visible: use smaller regions for them."
+        )
+    return {"blocks_version": BLOCKS_VERSION, "elements": elements}
+
+
+def callout_layout_frames(resolved: dict[str, Any]) -> list[int]:
+    """The frames a callout's layout is measured at: each part's frame and the last frame before
+    the exit fade. Sorted, without repeats.
+    """
+    frames = {int(resolved["exit_frame"]) - 1}
+    frames.update(int(part["frame"]) for part in resolved["parts"])
+    return sorted(frames)
+
+
+def callout_layout_problems(
+    report: dict[str, Any], resolved: dict[str, Any], zone: dict[str, Any]
+) -> list[str]:
+    """The sentences that say what is wrong with a callout scene's layout at one zone, from the
+    motion service's report: a text outside the zone (less its margin), overlapping a text of
+    another element, or smaller than 2 percent of the output frame's height; and what the service
+    could not fit. Each begins with the zone.
+    """
+    inset = callout_inset(resolved)
+    area = {
+        "left": inset,
+        "top": inset,
+        "right": int(zone["width"]) - inset,
+        "bottom": int(zone["height"]) - inset,
+    }
+    sentences = _layout_sentences(
+        report,
+        int(resolved["fps"]),
+        area,
+        None,
+        MIN_TEXT_SHARE * int(resolved["frame_height"]),
+    )
+    label = f"In the {zone['placement']} zone ({zone['width']} x {zone['height']} px): "
+    return [label + sentence for sentence in sentences]

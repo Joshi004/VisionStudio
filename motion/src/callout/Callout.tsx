@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { continueRender, delayRender, interpolate, useCurrentFrame } from "remotion";
 
+import { CalloutBlocks } from "../blocks/CalloutBlocks";
 import { useFontsReady } from "../fonts";
 import { loadComponent, visibleText } from "../generated/Generated";
 import type { GraphicInput } from "../types";
@@ -14,8 +15,9 @@ import { cutTexts } from "./report";
 // is transparent, so the video can be laid over a shot. Only a preview (`resolved.backdrop`) paints
 // a colour under the callout, so that an ordinary H.264 file can show it.
 //
-// Both versions of a callout (§4.4) are drawn here; CMO-004 adds the building blocks next to the
-// component. Whatever the version, the same exit fade ends the callout (CM-7).
+// Both versions of a callout (§4.4) are drawn here: the generated component (`callout_component`)
+// and the building blocks (`callout_blocks`, CMO-004). Whatever the version, the same exit fade
+// ends the callout (CM-7).
 export function Callout(input: GraphicInput) {
   const frame = useCurrentFrame();
   const ready = useFontsReady();
@@ -28,6 +30,7 @@ export function Callout(input: GraphicInput) {
   const props = useMemo(() => calloutProps(input, callout), [input, callout]);
   const Component = useMemo(() => {
     if (!ready) return null;
+    if (input.engine === "callout_blocks") return null;
     if (input.engine !== "callout_component") {
       throw new Error(`The Callout composition cannot draw the engine "${input.engine}".`);
     }
@@ -54,6 +57,7 @@ export function Callout(input: GraphicInput) {
     <div ref={root} style={{ position: "absolute", inset: 0, overflow: "hidden", background }}>
       <div style={{ position: "absolute", inset: 0, opacity }}>
         {Component !== null && <Component {...props} />}
+        {input.engine === "callout_blocks" && <CalloutBlocks input={input} callout={callout} ready={ready} />}
       </div>
     </div>
   );

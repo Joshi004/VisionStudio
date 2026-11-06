@@ -11,6 +11,7 @@ import type { Laid } from "./layout";
 import { readScene } from "./scene";
 import type { Element, Scene } from "./scene";
 import { DrawBars, DrawLine } from "./Series";
+import { DrawPanel } from "./Panel";
 import { DrawArrow, DrawHighlight, DrawRing } from "./Shapes";
 import { DrawTable } from "./Table";
 import { DrawBadge, DrawCounter, DrawNode, DrawText } from "./TextBlocks";
@@ -29,7 +30,7 @@ function targetsPresence(ctx: BCtx, frame: number, scene: Scene, element: Elemen
   return share;
 }
 
-function Piece({
+export function Piece({
   ctx,
   frame,
   scene,
@@ -60,6 +61,7 @@ function Piece({
     else if (entry.kind === "table") single = <DrawTable ctx={ctx} l={entry} />;
     else if (entry.kind === "arrow") single = <DrawArrow ctx={ctx} l={entry} effect={effect} p={own} />;
     else if (entry.kind === "highlight") single = <DrawHighlight ctx={ctx} l={entry} effect={effect} p={own} />;
+    else if (entry.kind === "panel") single = <DrawPanel l={entry} />;
     else single = <DrawRing ctx={ctx} l={entry} effect={effect} p={own} />;
     drawn = (
       <Fx ctx={ctx} effect={effect} p={own} box={entry.box}>

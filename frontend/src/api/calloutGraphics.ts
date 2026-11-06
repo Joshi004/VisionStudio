@@ -95,19 +95,31 @@ export function useMakeCalloutGraphics(projectId: number) {
   });
 }
 
-/** Makes what is missing for one callout. */
+/** Makes what is missing for one callout, both versions or just `engine`. */
 export function useMakeCalloutGraphic(projectId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { calloutId: string }) => {
-      const { data, error, response } = await api.POST(
-        "/api/projects/{project_id}/callout-graphics/{callout_id}/run",
-        {
-          params: {
-            path: { project_id: projectId, callout_id: input.calloutId },
-          },
-        },
-      );
+    mutationFn: async (input: {
+      calloutId: string;
+      engine?: CalloutGraphicEngineKey;
+    }) => {
+      const params = {
+        path: { project_id: projectId, callout_id: input.calloutId },
+      };
+      const { data, error, response } =
+        input.engine === undefined
+          ? await api.POST(
+              "/api/projects/{project_id}/callout-graphics/{callout_id}/run",
+              { params },
+            )
+          : await api.POST(
+              "/api/projects/{project_id}/callout-graphics/{callout_id}/{engine}/run",
+              {
+                params: {
+                  path: { ...params.path, engine: input.engine },
+                },
+              },
+            );
       if (!data) {
         throw new ApiError(
           detailMessage(
@@ -167,5 +179,43 @@ export function useAskCalloutGraphicAgain(projectId: number) {
         }),
         invalidateAfterJobAction(queryClient),
       ]),
+  });
+}
+
+/**
+ * The version the video uses for one callout. `null` is Automatic: the rule picks the generated
+ * component, and the blocks only when the component failed outright.
+ */
+export function useSetCalloutGraphicChoice(projectId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      calloutId: string;
+      engine: CalloutGraphicEngineKey | null;
+    }) => {
+      const { data, error, response } = await api.PUT(
+        "/api/projects/{project_id}/callout-graphics/{callout_id}/choice",
+        {
+          params: {
+            path: { project_id: projectId, callout_id: input.calloutId },
+          },
+          body: { engine: input.engine },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not set the choice (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: calloutGraphicsKey(projectId),
+      }),
   });
 }

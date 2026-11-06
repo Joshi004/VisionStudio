@@ -1,5 +1,5 @@
 """The `render_callout_preview` job: the preview of one attempt of a callout of a motion explainer
-(CMO-003, `Callouts_motion_implementation_phases.md` §4.5).
+(CMO-003, and CMO-004 for the block scene, `Callouts_motion_implementation_phases.md` §4.5).
 
 It is `render_shot_graphic` for a callout, with these differences: the callout is drawn at its
 nominal zone (the first of `resolved.zones`) and nominal length, on a grey backdrop so that an
@@ -7,23 +7,27 @@ ordinary H.264 file shows it and a browser plays it; the final transparent clips
 render (CMO-005), not here; and the file is the attempt's `preview_path`, a project file
 (`media/<project_id>/`).
 
-The input is `{callout_graphic_id}`. The attempt holds what is drawn (`input`: the component code)
-and the resolved callout it is drawn from (`inputs.resolved`).
+The input is `{callout_graphic_id}`. The attempt holds what is drawn (`input`: the component code,
+or the block scene) and the resolved callout it is drawn from (`inputs.resolved`). Its `engine`
+says which: a component is drawn by the motion engine `callout_component`, a scene by
+`callout_blocks`.
 
-1. An attempt made for new words or new colours (`inputs.rerender_of`) has code that was written
-   for other words. It is checked again first, in the browser and by the callout rules, which
-   costs no model call. A component that no longer works (a longer word that is cut, say) has
-   failed.
+1. An attempt made for new words or new colours (`inputs.rerender_of`) has code or a scene that
+   was written for other words. It is checked again first, which costs no model call. A component
+   is checked in the browser and by the callout rules, and one that no longer works (a longer word
+   that is cut, say) has failed. A scene is laid out again at every zone, and the problems found
+   (a word too long for its region, say) are kept on the attempt as warnings: it is still drawn.
 2. The motion service draws the preview, and it is downloaded.
 3. `ffprobe` checks it: the exact frame count, the size, the frame rate, H.264 and `yuv420p`.
    Any difference fails the job. The file is not kept.
 4. The file is stored, and the attempt gets its path, its metrics and its warnings.
 
-A preview the motion service says it could not draw, or does not finish in time, is repaired: the
-job fails, and in the same transaction a new attempt of the component and its write job in repair
-mode are queued, with the code and the error, while the chain's repairs
+A component preview the motion service says it could not draw, or does not finish in time, is
+repaired: the job fails, and in the same transaction a new attempt of the component and its write
+job in repair mode are queued, with the code and the error, while the chain's repairs
 (`graphics_component_repairs`) last. The same holds for code that fails the free check of step 1.
-With the repairs used up the component has failed outright. A service that cannot be reached is
+With the repairs used up the component has failed outright. A block scene has no repair chain:
+one the service cannot draw has failed outright at once. A service that cannot be reached is
 neither repaired nor a failure outright (`MotionServiceError`): it says nothing about the
 component, and the preview is made again later. A frame count, size or frame rate that is wrong
 is not either.
@@ -101,6 +105,8 @@ class _Plan:
     resolved: dict[str, Any]
     input: Any
     rerender: bool
+    # `generated_component` or `remotion_blocks`.
+    engine: str
 
 
 class RenderCalloutPreviewHandler(JobHandler):
@@ -154,13 +160,18 @@ class RenderCalloutPreviewHandler(JobHandler):
         health = await motion_renderer.health(base_url)
         versions = {"remotion": health.get("remotion"), "chrome": health.get("chrome")}
 
+        motion_engine = callout_graphic_common.MOTION_ENGINES[plan.engine]
+        blocks = plan.engine == callout_graphics.BLOCKS
         if plan.rerender:
-            await self._check_again(job_id, plan)
+            if blocks:
+                await self._measure_again(job_id, plan)
+            else:
+                await self._check_again(job_id, plan)
 
         video = storage.new_temp_path("mp4")
         temp_paths.append(video)
         body = graphics_render.render_body(
-            callout_graphic_common.MOTION_ENGINE,
+            motion_engine,
             width=int(plan.zone["width"]),
             height=int(plan.zone["height"]),
             fps=plan.fps,
@@ -168,8 +179,8 @@ class RenderCalloutPreviewHandler(JobHandler):
             resolved=callout_component_checks.motion_resolved(
                 plan.resolved, plan.zone, backdrop=callout_graphics.BACKDROP
             ),
-            input=None,
-            code=graphics_render.code_of(plan.input),
+            input=_scene_of(plan.input) if blocks else None,
+            code=None if blocks else graphics_render.code_of(plan.input),
         )
         render_s = await motion_draw.draw_in_motion(job_id, base_url, body, video)
 
@@ -185,7 +196,7 @@ class RenderCalloutPreviewHandler(JobHandler):
             frames=plan.frames,
         )
         metrics: dict[str, Any] = {
-            "engine": callout_graphic_common.MOTION_ENGINE,
+            "engine": motion_engine,
             "composition": COMPOSITION,
             "zone": plan.zone["placement"],
             "backdrop": callout_graphics.BACKDROP,
@@ -205,11 +216,32 @@ class RenderCalloutPreviewHandler(JobHandler):
         if mismatches:
             raise VideoMismatch(" ".join(mismatches), metrics)
 
-        warnings = graphics_render.component_warnings(plan.input)
+        warnings = (
+            _scene_warnings(plan.input)
+            if blocks
+            else graphics_render.component_warnings(plan.input)
+        )
         await phase_writer.note(job_id, phases.SAVING_GRAPHIC)
         temp = await storage.describe_temp(video)
         stored = await storage.save(temp, plan.project_id, "mp4")
         await _save(job_id, plan, stored.relative_path, metrics, warnings)
+
+    async def _measure_again(self, job_id: int, plan: _Plan) -> None:
+        """Lays the scene of an attempt made for new words or colours out once more, free of any
+        model call, and brings its recorded layout up to date. The problems found do not stop the
+        preview: they are kept as the attempt's warnings.
+        """
+        scene = _scene_of(plan.input)
+        measured = await callout_graphic_common.measure_callout_layout(job_id, plan.resolved, scene)
+        layout: dict[str, Any] = {
+            "checked": measured.problems is not None,
+            "asked_again": False,
+            "rechecked": True,
+            "problems": measured.problems or [],
+        }
+        if measured.problems is None:
+            layout["reason"] = measured.reason
+        plan.input = {**scene, "layout": layout}
 
     async def _check_again(self, job_id: int, plan: _Plan) -> None:
         """Checks the code of an attempt made for new words or colours once more, free of any
@@ -236,6 +268,22 @@ class RenderCalloutPreviewHandler(JobHandler):
         }
 
 
+def _scene_of(input: Any) -> dict[str, Any]:
+    """The block scene an attempt draws, without the record of its layout check. Raises
+    RenderFailed when the attempt holds no scene.
+    """
+    if not isinstance(input, dict) or not isinstance(input.get("elements"), list):
+        raise RenderFailed("The block scene is missing from the callout graphic.")
+    return {"blocks_version": input.get("blocks_version"), "elements": input["elements"]}
+
+
+def _scene_warnings(input: Any) -> list[str]:
+    """The layout problems that remain on a scene, as the warnings of its attempt."""
+    layout = input.get("layout") if isinstance(input, dict) else None
+    problems = layout.get("problems") if isinstance(layout, dict) else None
+    return [str(problem) for problem in problems] if isinstance(problems, list) else []
+
+
 async def _plan(row_id: int) -> _Plan:
     """Reads what the job draws. Raises RenderFailed."""
     async with SessionLocal() as session:
@@ -259,6 +307,7 @@ async def _plan(row_id: int) -> _Plan:
             resolved=resolved,
             input=row.input,
             rerender=inputs.get("rerender_of") is not None,
+            engine=row.engine,
         )
         await session.commit()
     return plan
@@ -313,6 +362,11 @@ async def _fail_drawing(job_id: int, row_id: int | None, message: str, errors: l
         job = await store.get_job(session, job_id)
         row = await session.get(CalloutGraphic, row_id)
         project = await session.get(Project, row.project_id) if row is not None else None
+        if row is not None and row.engine == callout_graphics.BLOCKS:
+            # A block scene has no repair chain: one that cannot be drawn has failed outright.
+            await session.rollback()
+            await callout_graphic_common.fail_attempt(job_id, row_id, message, outright=True)
+            return
         if (
             job is None
             or job.status != "running"

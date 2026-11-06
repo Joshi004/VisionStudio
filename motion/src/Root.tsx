@@ -2,7 +2,9 @@ import { Composition } from "remotion";
 import type { CalculateMetadataFunction } from "remotion";
 
 import { Blocks } from "./blocks/Blocks";
+import { calloutBlockInput, calloutOptions, readCalloutScene } from "./blocks/callout";
 import { Callout } from "./callout/Callout";
+import { readCallout } from "./callout/props";
 import { layoutReport } from "./blocks/report";
 import type { LayoutReport } from "./blocks/report";
 import { readScene } from "./blocks/scene";
@@ -28,7 +30,19 @@ type LayoutProps = GraphicInput & { at_frames: number[]; report: LayoutReport | 
 
 const layoutMetadata: CalculateMetadataFunction<LayoutProps> = async ({ props }) => {
   await fontsLoaded;
-  const report = layoutReport(props, readScene(props.input), props.at_frames);
+  let report: LayoutReport;
+  if (props.engine === "callout_blocks") {
+    // A callout's scene (CMO-004): laid out on the zone's canvas, like the composition draws it.
+    const callout = readCallout(props);
+    report = layoutReport(
+      calloutBlockInput(props, callout),
+      readCalloutScene(props.input, callout),
+      props.at_frames,
+      calloutOptions(callout),
+    );
+  } else {
+    report = layoutReport(props, readScene(props.input), props.at_frames);
+  }
   return {
     width: props.width,
     height: props.height,

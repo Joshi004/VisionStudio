@@ -201,7 +201,7 @@ class Job(Base):
             "'write_shot_graphic_component', 'write_shot_graphic_scene', "
             "'render_shot_graphic', 'describe_photo', 'render_scene', "
             "'write_thumbnail_concepts', 'write_callout_look', 'write_callout_component', "
-            "'render_callout_preview')",
+            "'render_callout_preview', 'write_callout_scene')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1567,7 +1567,8 @@ class CalloutGraphic(Base):
     the attempts of one engine for a match key from 1, and nothing is replaced. `input` is what
     the engine draws from (the component code or the block scene), `input_job_id` the model call
     that wrote it and `repair_of` the attempt a repaired component was made from. `inputs`
-    records the resolved callout and its hash. Nothing writes this table until CMO-003.
+    records the resolved callout and its hash. Written from CMO-003 (the component) and CMO-004
+    (the block scene).
     """
 
     __tablename__ = "callout_graphic"
@@ -1611,8 +1612,8 @@ class CalloutGraphic(Base):
 class CalloutGraphicChoice(Base):
     """The version of a callout the owner chose (CMO-002, revision 0089).
 
-    One row per callout, named by its match key. Choosing Automatic deletes the row. Nothing
-    writes this table until CMO-004.
+    One row per callout, named by its match key. Choosing Automatic deletes the row. Written
+    from CMO-004.
     """
 
     __tablename__ = "callout_graphic_choice"

@@ -1,14 +1,15 @@
-"""The graphics of the callouts of a motion explainer: the generated component of each callout, the
-jobs that make it, and where each stands (CMO-003, `Callouts_motion_implementation_phases.md`
-§4.5).
+"""The graphics of the callouts of a motion explainer: the two versions of each callout (the
+generated component, CMO-003, and the building blocks, CMO-004), the jobs that make them, and where
+each stands (`Callouts_motion_implementation_phases.md` §4.5).
 
-It follows `shot_graphics` for a callout. Each try at a callout's component is a row of
+It follows `shot_graphics` for a callout. Each try at one version of a callout is a row of
 `callout_graphic` (an **attempt**) and nothing is replaced. An attempt is made in two steps:
 
-1. A paid job (`write_callout_component`) asks the model for the code and saves it as the row's
-   `input`, after the static and browser checks and the repairs those need.
-2. A local job (`render_callout_preview`) has the motion service draw the code at its nominal zone
-   on a grey backdrop (an H.264 file a browser plays), checks the file and stores it.
+1. A paid job (`write_callout_component` or `write_callout_scene`) asks the model for the code or
+   the block scene and saves it as the row's `input`, after the checks and the repairs (a
+   component) or the layout re-ask (a scene) those need.
+2. A local job (`render_callout_preview`) has the motion service draw it at its nominal zone on a
+   grey backdrop (an H.264 file a browser plays), checks the file and stores it.
 
 **The match key** (`match_key`) is a hash of the callout's unit, phrase, type and number of items
 or sides. An attempt serves every callout of every plan version with the same key, so an edit of a
@@ -26,10 +27,10 @@ callout look, a new shape, or **Ask again** is a new model call.
 explainer with graphics and callouts on), its callout plan is current and not being written, and
 its callout look exists, is current and is not being written.
 
-**What a start does** (`start_callout` and `start_all`): nothing while a job of the component is
-waiting or running, nothing when it has a current preview, nothing when it failed outright with
-the current callout look; a new attempt with the code it already has when only the words or the
-colours changed; the preview again when the code has none; otherwise a new model call.
+**What a start does** (`start_callout` and `start_all`), for each version: nothing while a job of
+it is waiting or running, nothing when it has a current preview, nothing when it failed outright
+with the current callout look; a new attempt with the code or the scene it already has when only
+the words or the colours changed; the preview again when it has none; otherwise a new model call.
 
 **Repairs** work as for graphic shots (EXG-006): a **chain** starts at an attempt that is not a
 repair and may spend at most the setting `graphics_component_repairs` repair asks. A failed check
@@ -37,9 +38,16 @@ is repaired inside the job that wrote the component. A failed preview is repaire
 attempt** (`queue_repair`) with `repair_of` set. A chain that runs out leaves its newest attempt
 `failed_outright`.
 
-**The version a callout uses** (the rule, §4.5, with the component only): the newest current
-component with a preview; when the component failed outright, a box (today's text box); otherwise
-nothing yet. A callout is **done** when the rule gives a component or a box.
+**The version a callout uses** (the rule, §4.5), the first that holds:
+
+1. the version the owner chose (`callout_graphic_choice`, per match key), when it has a current
+   preview;
+2. the newest current component with a preview;
+3. the blocks' current preview, when the component failed outright;
+4. a box (today's text box), when both versions failed outright;
+5. otherwise nothing yet.
+
+A callout is **done** when the rule gives a version or a box.
 """
 
 from __future__ import annotations
@@ -49,11 +57,11 @@ import json
 from dataclasses import dataclass
 from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
-from app.db.models import CalloutGraphic, Job, Project
+from app.db.models import CalloutGraphic, CalloutGraphicChoice, Job, Project
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
@@ -69,10 +77,11 @@ from app.services import (
 from app.services.callout_plan_writer import ScriptUnit
 
 COMPONENT: Final = "generated_component"
-ENGINES: Final = (COMPONENT,)
-ENGINE_LABELS: Final = {COMPONENT: "Generated component"}
+BLOCKS: Final = "remotion_blocks"
+ENGINES: Final = (COMPONENT, BLOCKS)
+ENGINE_LABELS: Final = {COMPONENT: "Generated component", BLOCKS: "Building blocks"}
 
-WRITE_JOB_TYPES: Final = {COMPONENT: "write_callout_component"}
+WRITE_JOB_TYPES: Final = {COMPONENT: "write_callout_component", BLOCKS: "write_callout_scene"}
 PREVIEW_JOB_TYPE: Final = "render_callout_preview"
 # One write job of a kind per callout at a time; one preview job per attempt.
 WRITE_DEDUPE_KEY: Final = "callout_graphic_key"
@@ -85,11 +94,12 @@ MAX_FRAMES: Final = 1800
 # The smallest zone the motion service draws.
 MIN_SIDE_PX: Final = 64
 
-# What a version used by the video is: the component, or today's text box (§4.5).
+# What a version used by the video is: a version, or today's text box (§4.5).
 USED_BOX: Final = "box"
 USED_CHOSEN: Final = "chosen"
 USED_DEFAULT: Final = "default"
 USED_COMPONENT_FAILED: Final = "component_failed"
+USED_BOTH_FAILED: Final = "both_failed"
 
 # Engine and callout statuses. `none`: nothing was made. `writing`: the model call is waiting or
 # running. `rendering`: the preview is being drawn. `ready`: a current preview. `out_of_date`: a
@@ -111,6 +121,8 @@ BEING_MADE_MESSAGE: Final = "The graphics of this callout are already being made
 ENGINE_BUSY_MESSAGE: Final = "This version is already being made."
 STOPPED_MESSAGE: Final = "It stopped before a preview was made."
 NOT_FOUND_MESSAGE: Final = "There is no such callout in the callout plan."
+NO_PREVIEW_TO_CHOOSE_MESSAGE: Final = "This version has no current preview to choose yet."
+NOT_A_VERSION_MESSAGE: Final = "'{engine}' is not one of the versions of a callout."
 OFF_CALLOUT_MESSAGE: Final = "This callout is turned off."
 
 THEME_REASON: Final = "The graphics look was written again since this callout was drawn."
@@ -271,7 +283,9 @@ def resolve_callout(
     layout = callout_render.style_for(width, height).layout
     return {
         "kind": callout["type"],
+        "frame_width": width,
         "frame_height": height,
+        "motion": str(theme_content.get("motion") or "smooth"),
         "fps": fps,
         "frames": frames,
         "exit_frame": exit_frame,
@@ -370,6 +384,8 @@ class CalloutEntry:
     engines: list[EngineEntry]
     # The callout has what the rule picks (a current component, or a box).
     done: bool
+    # The owner's choice for this callout (an engine key), or None for Automatic.
+    choice: str | None
     used: UsedGraphic | None
     last_error: str | None
     # Why nothing can be made for this callout now, or None.
@@ -480,14 +496,23 @@ def _engine(
     )
 
 
-def _used(engine: EngineEntry) -> UsedGraphic | None:
-    """What the render draws (§4.5, with the component only): the component when it has a current
-    preview, a box when it failed outright, else nothing yet.
+def _used(engines: list[EngineEntry], choice: str | None) -> UsedGraphic | None:
+    """What the render draws (§4.5): the owner's choice when that version has a current preview,
+    else the component, else the blocks when the component failed outright, else a box when both
+    failed outright, else nothing yet.
     """
-    if engine.best is not None:
-        return UsedGraphic(engine.key, engine.best, USED_DEFAULT)
-    if engine.failed_outright:
-        return UsedGraphic(USED_BOX, None, USED_COMPONENT_FAILED)
+    component, blocks = engines
+    by_key = {component.key: component, blocks.key: blocks}
+    chosen = by_key[choice].best if choice in by_key else None
+    if choice is not None and chosen is not None:
+        return UsedGraphic(choice, chosen, USED_CHOSEN)
+    if component.best is not None:
+        return UsedGraphic(component.key, component.best, USED_DEFAULT)
+    if component.failed_outright:
+        if blocks.best is not None:
+            return UsedGraphic(blocks.key, blocks.best, USED_COMPONENT_FAILED)
+        if blocks.failed_outright:
+            return UsedGraphic(USED_BOX, None, USED_BOTH_FAILED)
     return None
 
 
@@ -522,6 +547,15 @@ async def _rows_by_key(
     for row in (await session.execute(statement)).scalars():
         grouped.setdefault((row.match_key, row.engine), []).append(row)
     return grouped
+
+
+async def _choices(session: AsyncSession, project_id: int) -> dict[str, CalloutGraphicChoice]:
+    statement = (
+        select(CalloutGraphicChoice)
+        .where(CalloutGraphicChoice.project_id == project_id)
+        .execution_options(populate_existing=True)
+    )
+    return {row.match_key: row for row in (await session.execute(statement)).scalars()}
 
 
 async def _jobs_of(session: AsyncSession, rows: list[CalloutGraphic]) -> dict[int, Job]:
@@ -614,6 +648,7 @@ async def _build(session: AsyncSession, project: Project) -> CalloutGraphicsStat
     plan = plan_state.latest
     units = {(unit.scene_id, unit.unit_id): unit for unit in plan_state.script}
     grouped = await _rows_by_key(session, project.id)
+    choices = await _choices(session, project.id)
     jobs = await _jobs_of(session, [row for rows in grouped.values() for row in rows])
 
     entries: list[CalloutEntry] = []
@@ -651,6 +686,7 @@ async def _build(session: AsyncSession, project: Project) -> CalloutGraphicsStat
                 sha,
                 material,
                 engines,
+                choices[key].engine if key in choices else None,
                 look,
                 theme,
                 plan,
@@ -675,12 +711,13 @@ def _callout_entry(
     sha: str | None,
     material: dict[str, Any] | None,
     engines: list[EngineEntry],
+    choice: str | None,
     look: Any,
     theme: Any,
     plan: Any,
 ) -> CalloutEntry:
     refusal = OFF_CALLOUT_MESSAGE if not enabled else (blocked if blocked is not None else problem)
-    used = _used(engines[0]) if engines else None
+    used = _used(engines, choice) if engines else None
     working = any(e.status in ("writing", "rendering") for e in engines)
     reasons: list[str] = []
     errors: list[str] = []
@@ -713,6 +750,7 @@ def _callout_entry(
         resolved_sha256=sha,
         engines=engines,
         done=used is not None,
+        choice=choice,
         used=used,
         last_error="; ".join(errors) if errors else None,
         refusal=refusal,
@@ -962,24 +1000,38 @@ async def _start_engine(
     return await queue_preview(session, source.row)
 
 
-async def _start_entry(session: AsyncSession, project: Project, entry: CalloutEntry) -> list[Job]:
+async def _start_entry(
+    session: AsyncSession, project: Project, entry: CalloutEntry, engine: str | None = None
+) -> list[Job]:
     jobs: list[Job] = []
-    for engine in entry.engines:
-        job = await _start_engine(session, project, entry, engine)
+    for version in entry.engines:
+        if engine is not None and version.key != engine:
+            continue
+        job = await _start_engine(session, project, entry, version)
         if job is not None:
             jobs.append(job)
     return jobs
 
 
-async def start_callout(session: AsyncSession, project: Project, callout_id: str) -> list[Job]:
-    """Makes what is missing for one callout (see the module note): the jobs it queued, in one
-    transaction, committed. A callout that has everything makes none. Raises
-    CalloutGraphicsError when its graphics cannot be made now.
+async def start_callout(
+    session: AsyncSession, project: Project, callout_id: str, engine: str | None = None
+) -> list[Job]:
+    """Makes what is missing for one callout, both versions or just `engine` (see the module
+    note): the jobs it queued, in one transaction, committed. A callout that has everything makes
+    none. Raises CalloutGraphicsError when its graphics cannot be made now. With `engine`, the
+    other version being made does not stop it.
     """
+    if engine is not None and engine not in ENGINES:
+        raise CalloutGraphicsError(NOT_A_VERSION_MESSAGE.replace("{engine}", engine))
     entry = _find(await _build(session, project), callout_id)
-    if not entry.can_run:
-        raise CalloutGraphicsError(entry.blocked_reason or BEING_MADE_MESSAGE)
-    jobs = await _start_entry(session, project, entry)
+    if engine is None:
+        if not entry.can_run:
+            raise CalloutGraphicsError(entry.blocked_reason or BEING_MADE_MESSAGE)
+    elif entry.refusal is not None:
+        raise CalloutGraphicsError(entry.refusal)
+    elif next(e for e in entry.engines if e.key == engine).status in ("writing", "rendering"):
+        raise CalloutGraphicsError(ENGINE_BUSY_MESSAGE)
+    jobs = await _start_entry(session, project, entry, engine)
     await session.commit()
     return jobs
 
@@ -1005,7 +1057,7 @@ async def ask_again(session: AsyncSession, project: Project, callout_id: str, en
     when it cannot be asked now.
     """
     if engine not in ENGINES:
-        raise CalloutGraphicsError(f"'{engine}' is not one of the versions of a callout.")
+        raise CalloutGraphicsError(NOT_A_VERSION_MESSAGE.replace("{engine}", engine))
     entry = _find(await _build(session, project), callout_id)
     if entry.refusal is not None:
         raise CalloutGraphicsError(entry.refusal)
@@ -1016,3 +1068,45 @@ async def ask_again(session: AsyncSession, project: Project, callout_id: str, en
         raise CalloutGraphicsError(ENGINE_BUSY_MESSAGE)
     await session.commit()
     return job
+
+
+async def set_choice(
+    session: AsyncSession, project: Project, callout_id: str, engine: str | None
+) -> str | None:
+    """The owner's choice of the version a callout uses (§4.5). `None` is Automatic: the row is
+    deleted and the callout is back on the rule. A version needs a current preview to be chosen.
+    The row names the callout's match key, so a callout whose type, items, unit or phrase change
+    (a new key) is back on the rule. Commits. Raises CalloutGraphicsError when it cannot be set.
+    """
+    if engine is not None and engine not in ENGINES:
+        raise CalloutGraphicsError(NOT_A_VERSION_MESSAGE.replace("{engine}", engine))
+    entry = _find(await _build(session, project), callout_id)
+    if engine is None:
+        await session.execute(
+            delete(CalloutGraphicChoice).where(
+                CalloutGraphicChoice.project_id == project.id,
+                CalloutGraphicChoice.match_key == entry.match_key,
+            )
+        )
+        await session.commit()
+        return None
+    if not entry.enabled:
+        raise CalloutGraphicsError(OFF_CALLOUT_MESSAGE)
+    if next(e for e in entry.engines if e.key == engine).best is None:
+        raise CalloutGraphicsError(NO_PREVIEW_TO_CHOOSE_MESSAGE)
+    existing = (
+        await session.execute(
+            select(CalloutGraphicChoice).where(
+                CalloutGraphicChoice.project_id == project.id,
+                CalloutGraphicChoice.match_key == entry.match_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        session.add(
+            CalloutGraphicChoice(project_id=project.id, match_key=entry.match_key, engine=engine)
+        )
+    else:
+        existing.engine = engine
+    await session.commit()
+    return engine

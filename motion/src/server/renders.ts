@@ -26,6 +26,7 @@ const COMPOSITION_OF: Record<Engine, string> = {
   remotion_blocks: "Blocks",
   generated_component: "Generated",
   callout_component: "Callout",
+  callout_blocks: "Callout",
 };
 
 export type RenderState = "queued" | "rendering" | "done" | "failed";
