@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Final
 
 from app.services import ffmpeg
+from app.services.recording_patches import Piece
 from app.services.render_commands import concat_list
 
 SAMPLE_RATE: Final = 24000
@@ -288,6 +289,77 @@ async def cut_scene(
         raise CutError(f"A scene could not be cut out of the recording: {exc}") from exc
     if result.returncode != 0:
         raise CutError("A scene could not be cut out of the recording.")
+
+
+SPLICE_TIMEOUT_S: Final = 600.0
+
+
+class SpliceError(Exception):
+    """Patches could not be spliced into a recording. The message is meant for the user."""
+
+
+def splice_args(
+    base: Path, patches: Sequence[Path], dest: Path, pieces: Sequence[Piece], fade_samples: int
+) -> list[str]:
+    """Writes the `pieces` end to end as 16-bit PCM WAV (REC-006). A piece's `source` is 0 for
+    `base` or the number (from 1) of its patch in `patches`; it is cut out by sample, and its
+    gain is applied (a patch is brought to the loudness of the recording around it). Each join
+    is a crossfade of exactly `fade_samples` samples (equal power), which is taken off the length.
+    """
+    args = ["-hide_banner", "-nostdin", "-loglevel", "error", "-n"]
+    graph: list[str] = []
+    for position, piece in enumerate(pieces):
+        source = base if piece.source == 0 else patches[piece.source - 1]
+        args += ["-i", ffmpeg.file_input(source)]
+        steps = [
+            f"atrim=start_sample={piece.start}:end_sample={piece.end}",
+            "asetpts=PTS-STARTPTS",
+        ]
+        if piece.gain_db != 0:
+            steps.append(f"volume={piece.gain_db:.2f}dB")
+        graph.append(f"[{position}:a:0]" + ",".join(steps) + f"[p{position}]")
+    if len(pieces) == 1:
+        graph.append("[p0]anull[out]")
+    else:
+        joined = "p0"
+        for position in range(1, len(pieces)):
+            label = "out" if position == len(pieces) - 1 else f"x{position}"
+            graph.append(
+                f"[{joined}][p{position}]acrossfade=ns={fade_samples}:c1=qsin:c2=qsin[{label}]"
+            )
+            joined = label
+    return [
+        *args,
+        "-filter_complex",
+        ";".join(graph),
+        "-map",
+        "[out]",
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        str(SAMPLE_RATE),
+        "-ac",
+        "1",
+        "-f",
+        "wav",
+        ffmpeg.file_input(dest),
+    ]
+
+
+async def splice(
+    base: Path, patches: Sequence[Path], dest: Path, pieces: Sequence[Piece], fade_samples: int
+) -> None:
+    """Splices patches into a recording, into the new WAV file `dest`. Raises SpliceError."""
+    try:
+        result = await ffmpeg.run_tool(
+            "ffmpeg",
+            splice_args(base, patches, dest, pieces, fade_samples),
+            timeout_s=SPLICE_TIMEOUT_S,
+        )
+    except ffmpeg.ToolError as exc:
+        raise SpliceError(f"The patches could not be spliced into the recording: {exc}") from exc
+    if result.returncode != 0:
+        raise SpliceError("The patches could not be spliced into the recording.")
 
 
 def join_args(list_path: Path, dest: Path) -> list[str]:

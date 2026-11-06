@@ -19,14 +19,19 @@ import {
   useFullRecording,
   useKeepAllBoundaries,
   useRetryFullRecording,
+  useRetryPatch,
+  useSplicePatches,
   useUploadFullRecording,
+  useUploadPatch,
   type FullRecordingState,
   type FullScript,
+  type PatchRegion,
   type RecordingOrigin,
   type SceneBoundary,
 } from "../../api/voiceRecordings";
 import { BoundaryCutModal } from "./BoundaryCutModal";
 import { FullRecordingModal } from "./FullRecordingModal";
+import { PatchRecordingModal } from "./PatchRecordingModal";
 
 type FullRecordingPanelProps = {
   projectId: number;
@@ -64,6 +69,47 @@ function sceneName(script: FullScript, sceneId: string): string {
   return `Scene ${script.scenes[position].index ?? position + 1}`;
 }
 
+const PATCH_STAGE: Record<
+  NonNullable<PatchRegion["patch_stage"]>,
+  { label: string; color: string }
+> = {
+  transcribing: { label: "Being transcribed", color: "blue" },
+  transcription_failed: { label: "Transcription failed", color: "red" },
+  refused: { label: "Refused", color: "red" },
+  accepted: { label: "Accepted", color: "green" },
+};
+
+function regionKey(region: PatchRegion): string {
+  return `${region.first_word}-${region.last_word}`;
+}
+
+/** "Scene 3 to Scene 4": the scene changes a part covers. */
+function regionTitle(script: FullScript, region: PatchRegion): string {
+  const first = region.boundaries[0];
+  const last = region.boundaries[region.boundaries.length - 1];
+  if (first === undefined || last === undefined) {
+    return "this part";
+  }
+  return `${sceneName(script, first.after_scene_id)} to ${sceneName(
+    script,
+    last.before_scene_id,
+  )}`;
+}
+
+/** The part of the recording that fixes a boundary, when it has one. */
+function regionOf(
+  newest: FullRecordingState,
+  boundary: SceneBoundary,
+): PatchRegion | undefined {
+  return newest.regions.find((region) =>
+    region.boundaries.some(
+      (item) =>
+        item.after_scene_id === boundary.after_scene_id &&
+        item.before_scene_id === boundary.before_scene_id,
+    ),
+  );
+}
+
 type TightBoundaryCardProps = {
   projectId: number;
   recordingId: number;
@@ -71,6 +117,10 @@ type TightBoundaryCardProps = {
   boundary: SceneBoundary;
   /** False while the recording cannot take decisions (it is being split, for example). */
   canDecide: boolean;
+  /** The part of the recording that fixes this boundary (REC-006), and whether it can be recorded. */
+  region: PatchRegion | undefined;
+  canPatch: boolean;
+  onRecordPart: () => void;
 };
 
 /**
@@ -84,6 +134,9 @@ function TightBoundaryCard({
   script,
   boundary,
   canDecide,
+  region,
+  canPatch,
+  onRecordPart,
 }: TightBoundaryCardProps) {
   const decide = useDecideBoundary(projectId, recordingId);
   const [cutOpen, setCutOpen] = useState(false);
@@ -164,7 +217,23 @@ function TightBoundaryCard({
           >
             Set the cut point
           </Button>
+          <Button
+            size="compact-xs"
+            variant="default"
+            disabled={!canPatch || region === undefined}
+            onClick={onRecordPart}
+          >
+            Record this part
+          </Button>
         </Group>
+        {region?.patch_stage != null && region.patch_message != null && (
+          <Text
+            size="xs"
+            c={region.patch_stage === "accepted" ? "green.8" : "dimmed"}
+          >
+            {PATCH_STAGE[region.patch_stage].label}: {region.patch_message}
+          </Text>
+        )}
         {decide.isError && !cutOpen && (
           <Alert color="red" title="Could not save the decision">
             {describeError(decide.error)}
@@ -202,24 +271,154 @@ type TightBoundariesProps = {
   newest: FullRecordingState;
 };
 
+type PartRowProps = {
+  script: FullScript;
+  region: PatchRegion;
+  canPatch: boolean;
+  uploading: boolean;
+  retrying: boolean;
+  onRecord: () => void;
+  onUpload: (file: File) => void;
+  onRetry: (patchId: number) => void;
+};
+
+/** One part to record again (REC-006), with the state of the newest patch recorded for it. */
+function PartRow({
+  script,
+  region,
+  canPatch,
+  uploading,
+  retrying,
+  onRecord,
+  onUpload,
+  onRetry,
+}: PartRowProps) {
+  return (
+    <Paper withBorder p="xs" radius="sm">
+      <Stack gap={4}>
+        <Group gap="xs" align="center">
+          <Text size="xs" fw={600}>
+            {regionTitle(script, region)}
+          </Text>
+          {region.patch_stage != null && (
+            <Badge
+              variant="light"
+              size="sm"
+              color={PATCH_STAGE[region.patch_stage].color}
+            >
+              {PATCH_STAGE[region.patch_stage].label}
+            </Badge>
+          )}
+        </Group>
+        <Text size="xs" lineClamp={2}>
+          {region.parts.join(" | ")}
+        </Text>
+        {region.patch_message != null && (
+          <Text
+            size="xs"
+            c={
+              region.patch_stage === "refused" ||
+              region.patch_stage === "transcription_failed"
+                ? "red"
+                : "dimmed"
+            }
+          >
+            {region.patch_message}
+          </Text>
+        )}
+        <Group gap="xs">
+          <Button size="compact-xs" disabled={!canPatch} onClick={onRecord}>
+            {region.patch_id === null ? "Record this part" : "Record it again"}
+          </Button>
+          <FileButton
+            onChange={(file) => {
+              if (file !== null) {
+                onUpload(file);
+              }
+            }}
+            accept={RECORDING_ACCEPT}
+          >
+            {(props) => (
+              <Button
+                {...props}
+                size="compact-xs"
+                variant="default"
+                loading={uploading}
+                disabled={!canPatch}
+              >
+                Upload this part
+              </Button>
+            )}
+          </FileButton>
+          {region.patch_stage === "transcription_failed" &&
+            region.patch_id !== null && (
+              <Button
+                size="compact-xs"
+                variant="default"
+                loading={retrying}
+                disabled={!canPatch}
+                onClick={() => onRetry(region.patch_id as number)}
+              >
+                Try again
+              </Button>
+            )}
+        </Group>
+      </Stack>
+    </Paper>
+  );
+}
+
 /**
  * Every tight boundary of the newest full recording, with "Keep all as is" while any is
  * undecided (REC-005). They stay listed once decided, and after the split, so that a decision
  * can be changed: a changed decision splits again, and only the two scenes either side of that
  * cut get new takes.
+ *
+ * A tight boundary can also be fixed by recording a short part of the text again (REC-006). The
+ * parts are listed together, so they can all be recorded in one sitting; each is transcribed and
+ * checked on its own, and "Splice in N patches" makes one new version of the recording that holds
+ * every accepted part.
  */
 function TightBoundaries({ projectId, script, newest }: TightBoundariesProps) {
   const keepAll = useKeepAllBoundaries(projectId, newest.recording_id);
+  const sendPatch = useUploadPatch(projectId, newest.recording_id);
+  const sendFile = useUploadPatch(projectId, newest.recording_id);
+  const splice = useSplicePatches(projectId, newest.recording_id);
+  const retryPatch = useRetryPatch(projectId, newest.recording_id);
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const tight = newest.boundaries.filter((boundary) => boundary.tight);
   // A fast reader leaves little pause: recording again with a clear pause is the better fix.
   const mostlyTight = tight.length * 2 > newest.boundaries.length;
+  const openRegion =
+    newest.regions.find((region) => regionKey(region) === openKey) ?? null;
+  const count = newest.accepted_patch_count;
+
+  function send(
+    region: PatchRegion,
+    origin: RecordingOrigin,
+    file: Blob,
+    done?: () => void,
+  ) {
+    const mutation = origin === "upload" ? sendFile : sendPatch;
+    mutation.mutate(
+      {
+        firstWord: region.first_word,
+        lastWord: region.last_word,
+        origin,
+        file,
+      },
+      { onSuccess: done },
+    );
+  }
+
   return (
     <Stack gap="xs">
       <Text size="xs" c="dimmed">
         A tight boundary has too little pause to cut at, or a word next to it
-        was not heard. For each one, keep the cut in the middle of the pause, or
-        set the cut point yourself. A recording that is cut where it should not
-        be can also be recorded again with a clear pause at the scene changes.
+        was not heard. For each one, keep the cut in the middle of the pause,
+        set the cut point yourself, or record the part around it again. A
+        recording that is cut where it should not be can also be recorded again
+        with a clear pause at the scene changes.
       </Text>
       {mostlyTight && (
         <Text size="xs" c="yellow.8">
@@ -244,16 +443,111 @@ function TightBoundaries({ projectId, script, newest }: TightBoundariesProps) {
           {describeError(keepAll.error)}
         </Alert>
       )}
-      {tight.map((boundary) => (
-        <TightBoundaryCard
-          key={`${boundary.after_scene_id}/${boundary.before_scene_id}`}
-          projectId={projectId}
-          recordingId={newest.recording_id}
-          script={script}
-          boundary={boundary}
-          canDecide={newest.can_decide}
+      {tight.map((boundary) => {
+        const region = regionOf(newest, boundary);
+        return (
+          <TightBoundaryCard
+            key={`${boundary.after_scene_id}/${boundary.before_scene_id}`}
+            projectId={projectId}
+            recordingId={newest.recording_id}
+            script={script}
+            boundary={boundary}
+            canDecide={newest.can_decide}
+            region={region}
+            canPatch={newest.can_patch}
+            onRecordPart={() => {
+              sendPatch.reset();
+              sendFile.reset();
+              setOpenKey(region === undefined ? null : regionKey(region));
+            }}
+          />
+        );
+      })}
+      {newest.regions.length > 0 && (
+        <Stack gap="xs">
+          <Text size="xs" fw={600}>
+            Parts to record again
+          </Text>
+          <Text size="xs" c="dimmed">
+            Each part replaces the stretch of the recording between two pauses
+            around a scene change. Record them all, then splice them in
+            together.
+          </Text>
+          {newest.regions.map((region) => (
+            <PartRow
+              key={regionKey(region)}
+              script={script}
+              region={region}
+              canPatch={newest.can_patch}
+              uploading={sendFile.isPending}
+              retrying={retryPatch.isPending}
+              onRecord={() => {
+                sendPatch.reset();
+                sendFile.reset();
+                setOpenKey(regionKey(region));
+              }}
+              onUpload={(file) => send(region, "upload", file)}
+              onRetry={(patchId) => retryPatch.mutate(patchId)}
+            />
+          ))}
+          {sendFile.isError && (
+            <Alert color="red" title="Could not use the file">
+              {describeError(sendFile.error)}
+            </Alert>
+          )}
+          {retryPatch.isError && (
+            <Alert color="red" title="Could not try again">
+              {describeError(retryPatch.error)}
+            </Alert>
+          )}
+          <Group gap="xs" align="center">
+            <Button
+              size="compact-xs"
+              loading={splice.isPending || newest.splice_stage === "splicing"}
+              disabled={!newest.can_splice}
+              onClick={() => splice.mutate()}
+            >
+              {`Splice in ${count} ${count === 1 ? "patch" : "patches"}`}
+            </Button>
+            <Text size="xs" c="dimmed">
+              {count === 0
+                ? "No part is accepted yet."
+                : `${count} ${count === 1 ? "part is" : "parts are"} accepted.`}
+            </Text>
+          </Group>
+          {newest.splice_stage === "splicing" && (
+            <Text size="xs" c="dimmed">
+              The parts are being spliced into a new version of the recording.
+            </Text>
+          )}
+          {newest.splice_stage === "splice_failed" && (
+            <Text size="xs" c="red">
+              The parts could not be spliced in: {newest.splice_error}
+            </Text>
+          )}
+          {splice.isError && (
+            <Alert color="red" title="Could not splice the parts">
+              {describeError(splice.error)}
+            </Alert>
+          )}
+        </Stack>
+      )}
+      {openRegion !== null && (
+        <PatchRecordingModal
+          opened
+          onClose={() => setOpenKey(null)}
+          region={openRegion}
+          title={regionTitle(script, openRegion)}
+          sending={sendPatch.isPending || sendFile.isPending}
+          error={sendPatch.error ?? sendFile.error}
+          onSend={(recording) =>
+            send(openRegion, "browser", recording, () => setOpenKey(null))
+          }
+          onUpload={(file) =>
+            send(openRegion, "upload", file, () => setOpenKey(null))
+          }
         />
-      ))}
+      )}
     </Stack>
   );
 }

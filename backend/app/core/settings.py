@@ -195,6 +195,10 @@ RECORDING_MAX_UPLOAD_MB_KEY = "recording_max_upload_mb"
 RECORDING_MIN_BOUNDARY_PAUSE_MS_KEY = "recording_min_boundary_pause_ms"
 RECORDING_TRANSCRIPTION_PIECE_S_KEY = "recording_transcription_piece_s"
 
+# The shortest pause, in ms, that a patch may start and end in (REC-006): the part of a full
+# recording a patch replaces begins and ends in pauses at least this long.
+RECORDING_PATCH_PAUSE_MS_KEY = "recording_patch_pause_ms"
+
 # The display limits of an explainer's callouts (EXPLAINER-009): the least time between the start
 # of two callouts, and the most callouts in any one minute. The callout plan is checked against
 # them and records the values it was checked with.
@@ -697,6 +701,22 @@ REGISTRY: tuple[SettingSpec, ...] = (
         default=300,
         min_value=30,
         max_value=1800,
+    ),
+    SettingSpec(
+        key=RECORDING_PATCH_PAUSE_MS_KEY,
+        group=GROUP_SPEECH,
+        label="Recording: pause a patch starts and ends in (ms)",
+        help=(
+            "A tight scene boundary can be fixed by recording a short passage again. The "
+            "passage replaces the stretch of the recording between two pauses found before and "
+            "after the boundary, and these are the shortest gaps between two heard words that "
+            "count as such a pause. A starting value, not a measurement. It applies to the next "
+            "time a recording is looked at."
+        ),
+        value_type="integer",
+        default=300,
+        min_value=50,
+        max_value=2000,
     ),
     SettingSpec(
         key=CALLOUT_MIN_GAP_MS_KEY,

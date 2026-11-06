@@ -15,7 +15,12 @@ download:
 - **Where the result goes.** After the last piece, the words are matched to the whole script and
   stored as the recording's `voice_recording_timing` row, with a per-word `heard` flag. In the
   same transaction that finishes the job, the split job is queued when the match is good and no
-  scene boundary is tight (`services/full_recordings.py`).
+  tight scene boundary is left undecided (`services/full_recordings.py`). A version made by
+  splicing patches (REC-006) first takes over the owner's decisions on the boundaries the patches
+  did not touch.
+- **A patch.** The recording of one region (`scope = 'patch'`, REC-006) is transcribed the same
+  way and matched to the region's text. Only its timing is stored: whether it can be used is
+  worked out on every read (`full_recordings.RegionStatus`), and nothing is queued after it.
 
 A recording whose heard words match the script too little gets estimated timing, which means the
 recording is refused (R-5): the panel says so and the owner records it again. The job itself
@@ -358,6 +363,10 @@ class TimeVoiceRecordingHandler(TimeSpeechWordsHandler):
             alignment.match_percent,
             threshold,
         )
+        if recording.scope != full_recordings.SCOPE_FULL:
+            # A patch (REC-006): its timing is read when the patch is checked, on every read.
+            output["patch_of"] = recording.base_recording_id
+            return
         if alignment.source != word_timings.SOURCE_PARAKEET:
             return  # refused: the owner records it again
         min_pause_ms = await settings_service.get_int(
@@ -372,6 +381,19 @@ class TimeVoiceRecordingHandler(TimeSpeechWordsHandler):
             return
         tight = sum(1 for boundary in found if boundary.tight)
         output["tight_boundaries"] = tight
-        if tight == 0:
+        decided: set[recording_boundaries.BoundaryKey] = set()
+        if recording.origin == "splice":
+            # A version made by splicing patches (REC-006) keeps the owner's decisions on the
+            # boundaries the patches did not touch.
+            carried = await full_recordings.carry_decisions(session, recording, found)
+            decided = set(carried)
+            output["carried_decisions"] = len(carried)
+        undecided = sum(
+            1
+            for boundary in found
+            if boundary.tight and recording_boundaries.key_of(boundary) not in decided
+        )
+        output["undecided_boundaries"] = undecided
+        if undecided == 0:
             split, _created = await full_recordings.queue_split(session, recording, commit=False)
             output["split_job_id"] = split.id

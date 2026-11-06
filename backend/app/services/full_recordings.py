@@ -50,7 +50,7 @@ from app.db.models import (
 )
 from app.db.types import utcnow
 from app.jobs import store
-from app.services import recording_boundaries
+from app.services import recording_boundaries, recording_patches
 from app.services.recording_boundaries import (
     Boundary,
     BoundaryDecision,
@@ -58,15 +58,18 @@ from app.services.recording_boundaries import (
     BoundaryKey,
     SceneText,
 )
-from app.services.speech_audio import SAMPLE_RATE
+from app.services.recording_patches import PatchRegion
+from app.services.speech_audio import SAMPLE_RATE, SCENE_FADE_S
 from app.services.storage import StorageError, get_storage
 from app.services.word_timings import SOURCE_ESTIMATED
 
 TIMING_JOB_TYPE: Final = "time_voice_recording"
 SPLIT_JOB_TYPE: Final = "split_voice_recording"
+SPLICE_JOB_TYPE: Final = "splice_voice_recording"
 # Two presses on one recording make one job.
 DEDUPE_KEY: Final = "voice_recording_id"
 SCOPE_FULL: Final = "full"
+SCOPE_PATCH: Final = "patch"
 
 Stage = Literal[
     "transcribing",
@@ -90,11 +93,35 @@ class RecordingNotFound(FullRecordingError):
     """The full recording asked for does not exist in the project."""
 
 
+class PatchTargetChanged(FullRecordingError):
+    """The recording is no longer the newest, or the stretch to record is no longer one: what
+    the person was shown is out of date.
+    """
+
+
 # The longest piece of a recording `excerpt` gives, in seconds.
 MAX_EXCERPT_S: Final = 10.0
 # The stages in which the owner may decide a boundary: not while the recording is not timed or
 # is being split (a running split must not see decisions change under it).
 DECIDABLE_STAGES: Final = ("tight", "split_failed", "split")
+
+
+PatchStage = Literal["transcribing", "transcription_failed", "refused", "accepted"]
+SpliceStage = Literal["splicing", "splice_failed"]
+
+
+@dataclass(frozen=True)
+class RegionStatus:
+    """One stretch a patch can replace, and the newest patch recorded for it (REC-006)."""
+
+    region: PatchRegion
+    patch: VoiceRecording | None = None
+    stage: PatchStage | None = None
+    # One sentence about the patch, or None when there is none.
+    message: str | None = None
+    match_percent: float | None = None
+    # The patch's timed words (with `heard`), once it is transcribed.
+    words: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +147,17 @@ class FullRecordingStatus:
     # Of each scene, the id of its take (a `speech_unit_audio` row) cut from this recording at
     # the cuts now wanted. A scene with none has to be split again.
     scene_takes: dict[str, int] = field(default_factory=dict)
+    # The stretches a patch can replace (REC-006), with the newest patch recorded for each.
+    regions: list[RegionStatus] = field(default_factory=list)
+    # The newest job that splices patches into this recording, and where it stands.
+    splice_job: Job | None = None
+    splice_stage: SpliceStage | None = None
+    splice_error: str | None = None
+
+    @property
+    def accepted_count(self) -> int:
+        """The patches that can be spliced in now."""
+        return sum(1 for item in self.regions if item.stage == "accepted")
 
     @property
     def tight_count(self) -> int:
@@ -338,6 +376,115 @@ async def timing_of(session: AsyncSession, recording_id: int) -> VoiceRecordingT
     return (await session.execute(statement)).scalars().first()
 
 
+# --- Patches: reading (REC-006) -----------------------------------------------------------------
+
+PATCH_TRANSCRIBING: Final = "The recording of this part is being transcribed."
+PATCH_ACCEPTED: Final = "This part is recorded and accepted. It is spliced in with the others."
+
+
+async def _patches_of(
+    session: AsyncSession, project_id: int, recording_id: int
+) -> list[VoiceRecording]:
+    """The patches recorded for a full recording, the oldest first."""
+    statement = (
+        select(VoiceRecording)
+        .where(
+            VoiceRecording.project_id == project_id,
+            VoiceRecording.scope == SCOPE_PATCH,
+            VoiceRecording.base_recording_id == recording_id,
+        )
+        .order_by(VoiceRecording.id)
+        .execution_options(populate_existing=True)
+    )
+    return list((await session.execute(statement)).scalars())
+
+
+def _region_key_of(patch: VoiceRecording) -> tuple[int, int] | None:
+    region = patch.inputs.get("region") if isinstance(patch.inputs, dict) else None
+    if (
+        isinstance(region, dict)
+        and isinstance(region.get("first_word"), int)
+        and isinstance(region.get("last_word"), int)
+    ):
+        return (region["first_word"], region["last_word"])
+    return None
+
+
+async def _region_status(
+    session: AsyncSession,
+    region: PatchRegion,
+    patch: VoiceRecording | None,
+    min_pause_s: float,
+) -> RegionStatus:
+    """The stage of the newest patch recorded for one region."""
+    if patch is None:
+        return RegionStatus(region=region)
+    timing = await timing_of(session, patch.id)
+    if timing is None:
+        job = await _newest_job(session, patch.project_id, TIMING_JOB_TYPE, patch.id)
+        if job is not None and job.status in store.ACTIVE_STATUSES:
+            return RegionStatus(
+                region=region, patch=patch, stage="transcribing", message=PATCH_TRANSCRIBING
+            )
+        error = (
+            _job_error(job)
+            if job is not None and job.status != "succeeded"
+            else ("The recording was not transcribed.")
+        )
+        return RegionStatus(
+            region=region,
+            patch=patch,
+            stage="transcription_failed",
+            message=f"This part could not be transcribed: {_sentence(error)} Try again.",
+        )
+    words: list[dict[str, Any]] = list(timing.words)
+    reasons = recording_patches.check_patch(
+        region,
+        words,
+        source=timing.source,
+        match_percent=timing.match_percent,
+        threshold=timing.threshold,
+        patch_duration_s=patch.duration_s,
+        min_pause_s=min_pause_s,
+        margin_s=2 * SCENE_FADE_S,
+    )
+    if reasons:
+        return RegionStatus(
+            region=region,
+            patch=patch,
+            stage="refused",
+            message=" ".join(reasons),
+            match_percent=timing.match_percent,
+            words=words,
+        )
+    return RegionStatus(
+        region=region,
+        patch=patch,
+        stage="accepted",
+        message=PATCH_ACCEPTED,
+        match_percent=timing.match_percent,
+        words=words,
+    )
+
+
+async def _region_statuses(
+    session: AsyncSession,
+    recording: VoiceRecording,
+    found_regions: list[PatchRegion],
+    min_pause_s: float,
+) -> list[RegionStatus]:
+    """Each region with the state of the newest patch recorded for it."""
+    newest_for: dict[tuple[int, int], VoiceRecording] = {}
+    for patch in await _patches_of(session, recording.project_id, recording.id):
+        key = _region_key_of(patch)
+        if key is not None:
+            newest_for[key] = patch  # the oldest first, so the newest ends up here
+    return [
+        await _region_status(session, region, newest_for.get(region.key), min_pause_s)
+        for region in found_regions
+    ]
+
+
 async def status_of(session: AsyncSession, recording: VoiceRecording) -> FullRecordingStatus:
     """Works out where one full recording stands."""
     project_id = recording.project_id
@@ -345,6 +492,13 @@ async def status_of(session: AsyncSession, recording: VoiceRecording) -> FullRec
     timing = await timing_of(session, recording.id)
     timing_job = await _newest_job(session, project_id, TIMING_JOB_TYPE, recording.id)
     split_job = await _newest_job(session, project_id, SPLIT_JOB_TYPE, recording.id)
+    splice_job = await _newest_job(session, project_id, SPLICE_JOB_TYPE, recording.id)
+    splice_stage: SpliceStage | None = None
+    splice_error: str | None = None
+    if splice_job is not None and splice_job.status in store.ACTIVE_STATUSES:
+        splice_stage = "splicing"
+    elif splice_job is not None and splice_job.status != "succeeded":
+        splice_stage, splice_error = "splice_failed", _job_error(splice_job)
 
     def made(stage: Stage, **values: Any) -> FullRecordingStatus:
         return FullRecordingStatus(
@@ -360,6 +514,10 @@ async def status_of(session: AsyncSession, recording: VoiceRecording) -> FullRec
             decisions=values.get("decisions", {}),
             cuts=values.get("cuts", []),
             scene_takes=values.get("scene_takes", {}),
+            regions=values.get("regions", []),
+            splice_job=splice_job,
+            splice_stage=splice_stage,
+            splice_error=splice_error,
         )
 
     if timing is None:
@@ -390,11 +548,23 @@ async def status_of(session: AsyncSession, recording: VoiceRecording) -> FullRec
         )
     except BoundaryError as exc:
         return made("refused", error=str(exc))
+    patch_pause_ms = await settings_service.get_int(
+        session, settings_service.RECORDING_PATCH_PAUSE_MS_KEY
+    )
+    words: list[dict[str, Any]] = list(timing.words)
+    found_regions = recording_patches.regions(
+        recording_boundaries.scene_spans(scenes, words),
+        words,
+        found,
+        patch_pause_ms / 1000,
+        recording.duration_s,
+    )
     details: dict[str, Any] = {
         "boundaries": found,
         "decisions": decisions,
         "cuts": cuts,
         "scene_takes": scene_takes,
+        "regions": await _region_statuses(session, recording, found_regions, min_pause_ms / 1000),
     }
 
     if scenes and len(scene_takes) == len(scenes):
@@ -593,6 +763,116 @@ async def keep_all(session: AsyncSession, project: Project, recording_id: int) -
     job = await _queue_split_if_needed(session, current.recording)
     await session.commit()
     return job
+
+
+# --- Patches: recording and splicing (REC-006) --------------------------------------------------
+
+
+async def _patchable(
+    session: AsyncSession, project: Project, recording_id: int
+) -> FullRecordingStatus:
+    """The newest full recording, when patches can be recorded for it and spliced into it. Raises
+    PatchTargetChanged when it is not the newest, FullRecordingError otherwise.
+    """
+    current = await newest(session, project)
+    if current is None or current.recording.id != recording_id:
+        raise PatchTargetChanged("This is not the newest full recording. Reload the page.")
+    if current.stage not in DECIDABLE_STAGES:
+        raise FullRecordingError(
+            "Parts can be recorded again once the recording has been transcribed and accepted, "
+            "and not while it is being split."
+        )
+    if current.splice_stage == "splicing":
+        raise FullRecordingError("The patches are being spliced in. Wait until that is done.")
+    return current
+
+
+async def patch_target(
+    session: AsyncSession, project: Project, recording_id: int, first_word: int, last_word: int
+) -> tuple[FullRecordingStatus, RegionStatus]:
+    """The full recording and the region a patch is being recorded for. Raises PatchTargetChanged
+    when the region is not one of the recording's now, FullRecordingError when patches cannot be
+    recorded now.
+    """
+    current = await _patchable(session, project, recording_id)
+    target = next(
+        (item for item in current.regions if item.region.key == (first_word, last_word)), None
+    )
+    if target is None:
+        raise PatchTargetChanged("The part to record has changed. Reload the page.")
+    return current, target
+
+
+async def queue_splice(session: AsyncSession, project: Project, recording_id: int) -> Job:
+    """Queues the job that splices every accepted patch into the newest full recording as a new
+    version, and commits. Raises FullRecordingError.
+    """
+    current = await _patchable(session, project, recording_id)
+    if any(item.stage == "transcribing" for item in current.regions):
+        raise FullRecordingError("A part is still being transcribed. Splice when it is done.")
+    if current.accepted_count == 0:
+        raise FullRecordingError("No recorded part has been accepted yet.")
+    job, _created = await store.create_job(
+        session,
+        project_id=project.id,
+        type=SPLICE_JOB_TYPE,
+        provider="local",
+        input={"requested": SPLICE_JOB_TYPE, DEDUPE_KEY: current.recording.id},
+        dedupe_key=DEDUPE_KEY,
+    )
+    return job
+
+
+async def retry_patch(
+    session: AsyncSession, project: Project, recording_id: int, patch_id: int
+) -> Job:
+    """Queues the transcription of a patch of the newest full recording again, when it failed,
+    and commits. Raises FullRecordingError.
+    """
+    current = await _patchable(session, project, recording_id)
+    target = next(
+        (item for item in current.regions if item.patch is not None and item.patch.id == patch_id),
+        None,
+    )
+    if target is None or target.patch is None or target.stage != "transcription_failed":
+        raise FullRecordingError("There is nothing to try again for this part.")
+    job, _created = await queue_timing(session, target.patch)
+    return job
+
+
+async def carry_decisions(
+    session: AsyncSession, recording: VoiceRecording, found: list[Boundary]
+) -> dict[BoundaryKey, BoundaryDecision]:
+    """For a version made by splicing patches into an older one: copies the owner's decisions on
+    the older version to this one, where they still apply (`recording_patches.carry_decisions`),
+    and returns them. `found` are this version's boundaries. Not committed.
+    """
+    inputs = recording.inputs if isinstance(recording.inputs, dict) else {}
+    stretches: list[recording_patches.ReplacedStretch] = []
+    for item in inputs.get("patches", []):
+        if not isinstance(item, dict):
+            continue
+        keys = frozenset(
+            (str(boundary["after_scene_id"]), str(boundary["before_scene_id"]))
+            for boundary in item.get("boundaries", [])
+            if isinstance(boundary, dict)
+            and "after_scene_id" in boundary
+            and "before_scene_id" in boundary
+        )
+        stretches.append(
+            recording_patches.ReplacedStretch(
+                end_s=float(item["join_end_s"]),
+                delta_s=int(item["delta_samples"]) / SAMPLE_RATE,
+                keys=keys,
+            )
+        )
+    if recording.base_recording_id is None or not stretches:
+        return {}
+    old = await decisions_of(session, recording.base_recording_id)
+    carried = recording_patches.carry_decisions(old, found, stretches)
+    if carried:
+        await _write_decisions(session, recording, carried)
+    return carried
 
 
 # --- A piece of a recording (REC-005) -----------------------------------------------------------

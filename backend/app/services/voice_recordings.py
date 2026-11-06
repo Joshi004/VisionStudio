@@ -44,7 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import settings as settings_service
 from app.db.models import Project, SpeechUnitAudio, VoiceRecording
-from app.services import full_recordings, speech_synthesis, word_timings
+from app.services import full_recordings, recording_patches, speech_synthesis, word_timings
 from app.services.ffmpeg import ProbeResult, probe
 from app.services.speech_audio import SAMPLE_RATE, ConvertError, convert_to_take
 from app.services.storage import TempFile, TooLargeError, get_storage
@@ -55,6 +55,7 @@ ORIGIN_BROWSER: Final = "browser"
 ORIGIN_UPLOAD: Final = "upload"
 SCOPE_SCENE: Final = "scene"
 SCOPE_FULL: Final = "full"
+SCOPE_PATCH: Final = "patch"
 
 # ffprobe's `format_name` is a comma-separated list of the demuxer's names: a WebM file is
 # "matroska,webm" and an MP4 or M4A file is "mov,mp4,m4a,3gp,3g2,mj2".
@@ -546,6 +547,114 @@ async def receive_full_recording(
         project_id,
         result.recording_id,
         version,
+        origin,
+        audio.duration_s,
+        wav.size_bytes,
+        result.timing_job_id,
+    )
+    return result
+
+
+# --- A patch of a full recording (REC-006) -----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StoredPatch:
+    patch_id: int
+    duration_s: float
+    timing_job_id: int
+
+
+async def _patch_target(
+    session: AsyncSession,
+    project: Project,
+    recording_id: int,
+    first_word: int,
+    last_word: int,
+) -> full_recordings.RegionStatus:
+    """The region a patch is for, after checking the project is recorded and the region is still
+    one of the newest full recording's. Raises RecordingInputError: 409 when what the person was
+    shown is out of date, 422 when no patch can be recorded now.
+    """
+    if not speech_synthesis.is_recorded(project):
+        raise RecordingInputError(422, NOT_RECORDED_PROJECT)
+    try:
+        _current, target = await full_recordings.patch_target(
+            session, project, recording_id, first_word, last_word
+        )
+    except full_recordings.PatchTargetChanged as exc:
+        raise RecordingInputError(409, str(exc)) from exc
+    except full_recordings.FullRecordingError as exc:
+        raise RecordingInputError(422, str(exc)) from exc
+    return target
+
+
+async def receive_patch(
+    session: AsyncSession,
+    project: Project,
+    recording_id: int,
+    first_word: int,
+    last_word: int,
+    origin: str,
+    chunks: AsyncIterable[bytes],
+    content_length: int | None,
+) -> StoredPatch:
+    """Receives, checks, converts and stores a recording of one region of the newest full
+    recording, and queues the job that transcribes it. Commits. The caller has already ended its
+    own read transaction. The patch is checked once it is transcribed, and spliced in later with
+    the others (`jobs/splice_voice_recording.py`).
+    """
+    if origin not in (ORIGIN_BROWSER, ORIGIN_UPLOAD):
+        raise RecordingInputError(422, "The origin of the recording is not known.")
+    project_id = project.id
+
+    await _patch_target(session, project, recording_id, first_word, last_word)
+    max_bytes, too_large = await _max_bytes(session)
+    if content_length is not None and content_length > max_bytes:
+        raise RecordingInputError(413, too_large)
+
+    storage = get_storage()
+    async with _receive_audio(chunks, max_bytes, too_large) as audio:
+        wav = audio.wav
+        # The recording may have been replaced while the file was received and converted.
+        target = await _patch_target(session, project, recording_id, first_word, last_word)
+        stored = await storage.save(wav, project_id, "wav")
+
+        patch = VoiceRecording(
+            project_id=project_id,
+            scope=SCOPE_PATCH,
+            base_recording_id=recording_id,
+            text=target.region.text,
+            origin=origin,
+            path=stored.relative_path,
+            size_bytes=wav.size_bytes,
+            sha256=wav.sha256,
+            duration_s=audio.duration_s,
+            inputs={
+                "project_id": project_id,
+                "region": recording_patches.region_json(target.region),
+                "source": audio.source_json(),
+            },
+        )
+        session.add(patch)
+        try:
+            await session.flush()
+            job, _created = await full_recordings.queue_timing(session, patch, commit=False)
+            result = StoredPatch(
+                patch_id=patch.id, duration_s=audio.duration_s, timing_job_id=job.id
+            )
+            await session.commit()
+        except BaseException:
+            await session.rollback()
+            # Stored files are never deleted, so this leaves an unreferenced file behind.
+            _logger.warning("recording stored but not recorded: %s", stored.relative_path)
+            raise
+
+    _logger.info(
+        "project %d: patch %d for recording %d stored (%s, %.1fs, %d bytes), timing job %d",
+        project_id,
+        result.patch_id,
+        recording_id,
         origin,
         audio.duration_s,
         wav.size_bytes,

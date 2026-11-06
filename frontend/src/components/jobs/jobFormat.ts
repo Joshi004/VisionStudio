@@ -62,6 +62,7 @@ const TYPE_LABELS: Record<JobSummary["type"], string> = {
   write_callout_scene: "Callout block scene",
   time_voice_recording: "Time full recording",
   split_voice_recording: "Split full recording",
+  splice_voice_recording: "Splice patches",
   write_shot_graphic_brief: "Graphic brief",
   write_shot_graphic_component: "Graphic component",
   write_shot_graphic_scene: "Graphic block scene",

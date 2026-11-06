@@ -32,7 +32,8 @@
   (`write_lab_graphic_block_scene.py`), the generated component of a Graphics lab run
   (`write_lab_graphic_component.py`) and the video of a Graphics lab render
   (`render_lab_graphic.py`), and the transcription and the split of a full recording of a
-  recorded explainer (`time_voice_recording.py`, `split_voice_recording.py`).
+  recorded explainer (`time_voice_recording.py`, `split_voice_recording.py`), and the splice of
+  the patches recorded for one (`splice_voice_recording.py`).
 - the steps the three discovery jobs share: `discovery_job.py`.
 - the shared steps of the remote (GPU server) jobs: `gpu_job.py` (the constants and the
   retry rules), `remote_video.py` (the video jobs), `remote_image.py` (the Qwen image jobs)
@@ -88,6 +89,7 @@ def register_handlers() -> None:
     from app.jobs.resolve_looks_states import ResolveLooksStatesHandler
     from app.jobs.rewrite_music_prompt import RewriteMusicPromptHandler
     from app.jobs.select_shot_references import SelectShotReferencesHandler
+    from app.jobs.splice_voice_recording import SpliceVoiceRecordingHandler
     from app.jobs.split_voice_recording import SplitVoiceRecordingHandler
     from app.jobs.stage_scene import StageSceneHandler
     from app.jobs.story_pipeline import StoryPipelineHandler
@@ -188,3 +190,4 @@ def register_handlers() -> None:
     handlers.register(WriteThumbnailConceptsHandler())
     handlers.register(TimeVoiceRecordingHandler())
     handlers.register(SplitVoiceRecordingHandler())
+    handlers.register(SpliceVoiceRecordingHandler())

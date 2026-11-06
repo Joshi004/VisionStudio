@@ -404,6 +404,11 @@ NEXT_RECORDING_PIECE: Final = "waiting to send the next piece of the recording"
 SPLITTING_RECORDING: Final = "splitting the recording into scenes"
 SAVING_SCENE_TAKES: Final = "saving the scene takes"
 
+# `splice_voice_recording` (REC-006) puts the patches a person recorded into the full recording.
+MEASURING_PATCH_LOUDNESS: Final = "measuring the loudness around each patch"
+SPLICING_PATCHES: Final = "splicing the patches into the recording"
+SAVING_SPLICED_RECORDING: Final = "saving the new version of the recording"
+
 TRANSCRIPT_FINISHING_PHASES: Final = frozenset(
     {DOWNLOADING_TRANSCRIPT, COMPARING_DIALOGUE, MATCHING_WORDS}
 )

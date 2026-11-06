@@ -13,6 +13,7 @@ export type FullRecording = components["schemas"]["FullRecordingOut"];
 export type FullRecordingState = components["schemas"]["FullRecordingStateOut"];
 export type FullScript = components["schemas"]["FullScriptOut"];
 export type SceneBoundary = components["schemas"]["SceneBoundaryOut"];
+export type PatchRegion = components["schemas"]["PatchRegionOut"];
 
 /** Where a recording came from: the browser's recorder, or a file the person chose. */
 export type RecordingOrigin = "browser" | "upload";
@@ -94,10 +95,13 @@ export function useFullRecording(projectId: number, enabled: boolean) {
     },
     enabled: enabled && isValidProjectId(projectId),
     refetchInterval: (current) => {
-      const stage = current.state.data?.newest?.stage;
-      return stage === "transcribing" || stage === "splitting"
-        ? ACTIVE_POLL_MS
-        : false;
+      const newest = current.state.data?.newest;
+      const busy =
+        newest?.stage === "transcribing" ||
+        newest?.stage === "splitting" ||
+        newest?.splice_stage === "splicing" ||
+        newest?.regions.some((region) => region.patch_stage === "transcribing");
+      return busy ? ACTIVE_POLL_MS : false;
     },
   });
 }
@@ -277,3 +281,113 @@ export function recordingExcerptUrl(
 
 /** The two seconds either side of a cut that the player and the previews play. */
 export const PREVIEW_SPAN_S = 2;
+
+/**
+ * Sends a recording of one part of the newest full recording that is to be recorded again (a
+ * patch, REC-006). `firstWord` and `lastWord` name the part as the full recording's state lists
+ * it. The patch is transcribed and checked by a job afterwards; the server checks the size and
+ * the type and stays the judge.
+ */
+export function useUploadPatch(projectId: number, recordingId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      firstWord: number;
+      lastWord: number;
+      origin: RecordingOrigin;
+      file: Blob;
+    }) => {
+      const query = new URLSearchParams({
+        origin: input.origin,
+        first_word: String(input.firstWord),
+        last_word: String(input.lastWord),
+      });
+      const response = await fetch(
+        `/api/projects/${projectId}/voice-recordings/full/${recordingId}/patches?${query.toString()}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: input.file,
+        },
+      );
+      if (!response.ok) {
+        throw await uploadError(response);
+      }
+      return (await response.json()) as components["schemas"]["PatchStoredOut"];
+    },
+    // A refusal can mean something changed, so the state is loaded again either way.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: speechAudioKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** "Splice in N patches": makes a new version of the full recording (REC-006). */
+export function useSplicePatches(projectId: number, recordingId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/voice-recordings/full/{recording_id}/patches/splice",
+        {
+          params: {
+            path: { project_id: projectId, recording_id: recordingId },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not splice the patches (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: speechAudioKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
+
+/** "Try again" on a patch whose transcription failed (REC-006). */
+export function useRetryPatch(projectId: number, recordingId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (patchId: number) => {
+      const { data, error, response } = await api.POST(
+        "/api/projects/{project_id}/voice-recordings/full/{recording_id}/patches/{patch_id}/retry",
+        {
+          params: {
+            path: {
+              project_id: projectId,
+              recording_id: recordingId,
+              patch_id: patchId,
+            },
+          },
+        },
+      );
+      if (!data) {
+        throw new ApiError(
+          detailMessage(
+            error,
+            `Could not try again (HTTP ${response.status}).`,
+          ),
+          response.status,
+        );
+      }
+      return data;
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: speechAudioKey(projectId) }),
+        invalidateAfterJobAction(queryClient),
+      ]),
+  });
+}
