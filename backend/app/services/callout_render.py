@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -111,6 +111,19 @@ _LAYOUTS: Final = (LAYOUT_LANDSCAPE, LAYOUT_PORTRAIT)
 
 CODE_AT_UNIT_START: Final = "callout_at_unit_start"
 CODE_DROPPED: Final = "callout_dropped"
+# A motion callout drawn as a box (CMO-005): at plan time because both versions failed outright,
+# at render time because its drawing failed (the render job adds those).
+CODE_FALLBACK: Final = "callout_fallback"
+
+# --- Motion callouts (CMO-005) ---------------------------------------------------------------
+STYLE_BOXES: Final = "boxes"
+STYLE_MOTION: Final = "motion"
+ENGINE_COMPONENT: Final = "generated_component"
+ENGINE_BLOCKS: Final = "remotion_blocks"
+MOTION_ENGINES: Final = (ENGINE_COMPONENT, ENGINE_BLOCKS)
+PLACEMENTS: Final = ("presenter", "broll", "portrait", "title")
+# The smallest zone the motion service draws, and its sizes are even (yuv420p).
+MIN_SIDE_PX: Final = 64
 
 
 class CalloutError(ValueError):
@@ -130,6 +143,48 @@ class CalloutSource:
     plan_version: int
     accent: str
     callouts: tuple[dict[str, Any], ...]
+    # Motion callouts (CMO-005). `callout_style` is `boxes` or `motion`. For `motion`, `look` and
+    # `theme` are `(id, version)` of the callout look and the graphics look the graphics were
+    # made with, and `motion` holds, by callout id, the version each callout is drawn with.
+    callout_style: str = STYLE_BOXES
+    look: tuple[int, int] | None = None
+    theme: tuple[int, int] | None = None
+    motion: Mapping[str, MotionPick] | None = None
+
+
+@dataclass(frozen=True)
+class MotionRef:
+    """One attempt of a callout's graphic (a `callout_graphic` row) and the version it is."""
+
+    graphic_id: int
+    engine: str
+
+
+@dataclass(frozen=True)
+class MotionPick:
+    """How the rule of §4.5 draws one callout: `use` is the version it is drawn with (None for a
+    box, when both versions failed outright) and `other` the other version's current attempt, if
+    it has one, which the render tries when `use` cannot be drawn.
+    """
+
+    use: MotionRef | None
+    other: MotionRef | None = None
+
+
+@dataclass(frozen=True)
+class MotionDraw:
+    """What the render draws for a motion callout: its version, the zone's box in pixels (even
+    sizes), and the start of each of its texts (one per text, not per line), in ms.
+    """
+
+    use: MotionRef
+    other: MotionRef | None
+    placement: str
+    x: int
+    y: int
+    width: int
+    height: int
+    part_starts_ms: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -185,6 +240,9 @@ class CalloutEntry:
     on_presenter: bool
     at_unit_start: bool
     parts: tuple[CalloutPart, ...]
+    # Set for a callout the render draws as a motion graphic. The parts are laid out all the
+    # same, so a callout that cannot be drawn is a box with no new layout.
+    motion: MotionDraw | None = None
 
 
 @dataclass(frozen=True)
@@ -358,6 +416,36 @@ def zone_box(kind: str, on_presenter: bool, layout: str, width: int, height: int
         cx = width * (0.74 if PRESENTER_SIDE == PRESENTER_RIGHT else 0.26)
         return Zone(cx, width * 0.40, height * 0.08, height * 0.40)
     return Zone(width / 2, width * 0.70, height * 0.08, height * 0.40)
+
+
+def placement_of(kind: str, on_presenter: bool, layout: str) -> str:
+    """The name of the zone a callout lands in (the motion service's `placement`)."""
+    if kind == TYPE_SECTION_TITLE:
+        return "title"
+    if layout == LAYOUT_PORTRAIT:
+        return "portrait"
+    return "presenter" if on_presenter else "broll"
+
+
+def even_side(value: float) -> int:
+    """A side of a zone the motion service draws: even, and at least `MIN_SIDE_PX`."""
+    return max(MIN_SIDE_PX, round(value / 2) * 2)
+
+
+def zone_rect(
+    kind: str, on_presenter: bool, layout: str, width: int, height: int
+) -> tuple[int, int, int, int]:
+    """The zone of `zone_box` as the box a motion callout is drawn in and laid at, in pixels of
+    the output: `(x, y, width, height)`, with even sizes (CMO-005). It is the one definition for
+    the preview's zones (`callout_graphics.zones_of`) and for the render, so they cannot differ.
+    The box stays inside the picture.
+    """
+    zone = zone_box(kind, on_presenter, layout, width, height)
+    box_width = min(even_side(zone.width), width // 2 * 2)
+    box_height = min(even_side(zone.bottom - zone.top), height // 2 * 2)
+    x = max(0, min(round(zone.cx - box_width / 2), width - box_width))
+    y = max(0, min(round(zone.top), height - box_height))
+    return x, y, box_width, box_height
 
 
 def _nominal_size(kind: str, layout: str, height: int) -> int:
@@ -623,6 +711,7 @@ def resolve(
 
     entries: list[CalloutEntry] = []
     guessed: list[str] = []
+    boxed: list[str] = []  # motion callouts with no version to draw: boxes (CMO-005)
     for placed in kept:
         end = placed.natural_end_ms
         if end - placed.start_ms < MIN_VISIBLE_MS:
@@ -634,6 +723,26 @@ def resolve(
         parts = _layout(placed, style, on_presenter, source.accent, measure)
         if placed.at_unit_start:
             guessed.append(_label(placed.callout))
+        motion: MotionDraw | None = None
+        if source.motion is not None:
+            pick = source.motion.get(str(placed.callout["id"]))
+            if pick is None or pick.use is None:
+                boxed.append(_label(placed.callout))
+            else:
+                kind = str(placed.callout["type"])
+                x, y, box_width, box_height = zone_rect(
+                    kind, on_presenter, style.layout, width, height
+                )
+                motion = MotionDraw(
+                    use=pick.use,
+                    other=pick.other,
+                    placement=placement_of(kind, on_presenter, style.layout),
+                    x=x,
+                    y=y,
+                    width=box_width,
+                    height=box_height,
+                    part_starts_ms=tuple(spec.start_ms for spec in placed.specs),
+                )
         entries.append(
             CalloutEntry(
                 id=str(placed.callout["id"]),
@@ -643,6 +752,7 @@ def resolve(
                 on_presenter=on_presenter,
                 at_unit_start=placed.at_unit_start,
                 parts=parts,
+                motion=motion,
             )
         )
 
@@ -669,6 +779,14 @@ def resolve(
                 f"{_named(on_graphic)}."
             )
         warnings.append({"code": CODE_DROPPED, "message": " ".join(sentences)})
+    if boxed:
+        warnings.append(
+            {
+                "code": CODE_FALLBACK,
+                "message": "Neither version of the graphic of these callouts could be made, so "
+                f"they are drawn as simple boxes: {_named(boxed)}.",
+            }
+        )
     return Resolution(CalloutTrack(style, tuple(entries)), warnings)
 
 
@@ -679,7 +797,7 @@ def track_dict(track: CalloutTrack) -> dict[str, Any]:
     """The callout track as it is frozen in the timeline (JSON)."""
     style = track.style
     return {
-        "style": {
+        "style": {  # the layout of the boxes; the project's `callout_style` is a key of its own
             "layout": style.layout,
             "play_res_x": style.play_res_x,
             "play_res_y": style.play_res_y,
@@ -710,9 +828,29 @@ def track_dict(track: CalloutTrack) -> dict[str, Any]:
                     }
                     for part in entry.parts
                 ],
+                # Only a motion callout has the key, so a track of boxes reads as it always did.
+                **({"motion": _motion_dict(entry.motion)} if entry.motion is not None else {}),
             }
             for entry in track.entries
         ],
+    }
+
+
+def _ref_dict(ref: MotionRef | None) -> dict[str, Any] | None:
+    return None if ref is None else {"graphic_id": ref.graphic_id, "engine": ref.engine}
+
+
+def _motion_dict(motion: MotionDraw) -> dict[str, Any]:
+    return {
+        "graphic_id": motion.use.graphic_id,
+        "engine": motion.use.engine,
+        "other": _ref_dict(motion.other),
+        "placement": motion.placement,
+        "x": motion.x,
+        "y": motion.y,
+        "width": motion.width,
+        "height": motion.height,
+        "part_starts_ms": list(motion.part_starts_ms),
     }
 
 
@@ -791,11 +929,49 @@ def _part_of(raw: object) -> CalloutPart:
     return part
 
 
+def _ref_of(raw: object) -> MotionRef:
+    data = _object(raw)
+    engine = _text(data.get("engine"))
+    if engine not in MOTION_ENGINES:
+        raise CalloutError("bad engine")
+    return MotionRef(graphic_id=_whole(data.get("graphic_id")), engine=engine)
+
+
+def _motion_of(raw: object) -> MotionDraw:
+    data = _object(raw)
+    other = data.get("other")
+    placement = _text(data.get("placement"))
+    motion = MotionDraw(
+        use=_ref_of(data),
+        other=None if other is None else _ref_of(other),
+        placement=placement,
+        x=_whole(data.get("x")),
+        y=_whole(data.get("y")),
+        width=_whole(data.get("width")),
+        height=_whole(data.get("height")),
+        part_starts_ms=tuple(_whole(start) for start in _list(data.get("part_starts_ms"))),
+    )
+    if (
+        placement not in PLACEMENTS
+        or motion.x < 0
+        or motion.y < 0
+        or motion.width < MIN_SIDE_PX
+        or motion.height < MIN_SIDE_PX
+        or motion.width % 2
+        or motion.height % 2
+        or not motion.part_starts_ms
+        or any(start < 0 for start in motion.part_starts_ms)
+    ):
+        raise CalloutError("bad motion")
+    return motion
+
+
 def _entry_of(raw: object) -> CalloutEntry:
     data = _object(raw)
     on_presenter, at_unit_start = data.get("on_presenter"), data.get("at_unit_start")
     if not isinstance(on_presenter, bool) or not isinstance(at_unit_start, bool):
         raise CalloutError("bad entry")
+    recorded_motion = data.get("motion")
     entry = CalloutEntry(
         id=_text(data.get("id")),
         type=_text(data.get("type")),
@@ -804,6 +980,7 @@ def _entry_of(raw: object) -> CalloutEntry:
         on_presenter=on_presenter,
         at_unit_start=at_unit_start,
         parts=tuple(_part_of(part) for part in _list(data.get("parts"))),
+        motion=None if recorded_motion is None else _motion_of(recorded_motion),
     )
     if (
         not entry.parts

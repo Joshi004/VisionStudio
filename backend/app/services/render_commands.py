@@ -48,6 +48,59 @@ _STEREO: Final = "aformat=channel_layouts=stereo"
 
 
 @dataclass(frozen=True)
+class Overlay:
+    """A drawn callout laid over a shot in stage 1 (CMO-005): a transparent clip (ProRes 4444),
+    its place in the picture, and which frames of it show over which frames of the shot.
+    """
+
+    path: Path
+    x: int
+    y: int
+    # The first frame of the shot it shows in.
+    at_frame: int
+    # The clip's frames shown: from `from_frame` up to, not including, `to_frame`.
+    from_frame: int
+    to_frame: int
+
+
+def _picture_graph(picture: str, overlays: Sequence[Overlay], fps: int) -> str:
+    """The picture's filter graph (`[v]` out) of a stage 1 clip: `picture` is the chain up to the
+    shot's output size and `setsar`, and each overlay is laid over it before the final
+    `format=yuv420p`. With no overlay it is the chain as it always was.
+
+    A clip is cut to the frames that show in this shot and moved to the shot frame it starts at
+    (`setpts` in whole frames: after `fps` every frame is on the 1/fps grid, and ProRes frames are
+    all key frames, so a clip may start at any of them). The blend is made in `yuv444`: the
+    callout's coloured edges keep their chroma, and no YUV to RGB conversion is added. `eof_action=
+    pass` shows the shot alone before the clip's first frame and after its last.
+    """
+    if not overlays:
+        return f"{picture},format=yuv420p[v]"
+    steps = [f"{picture}[b0]"]
+    for number, overlay in enumerate(overlays):
+        if (
+            overlay.at_frame < 0
+            or overlay.from_frame < 0
+            or overlay.to_frame <= overlay.from_frame
+            or overlay.x < 0
+            or overlay.y < 0
+        ):
+            raise ValueError("An overlay needs a place and at least one frame.")
+        clip = (
+            f"[{number + 1}:v:0]fps={fps},"
+            f"trim=start_frame={overlay.from_frame}:end_frame={overlay.to_frame},"
+            f"setpts=PTS-STARTPTS+{overlay.at_frame}/({fps}*TB)[c{number}]"
+        )
+        blend = (
+            f"[b{number}][c{number}]overlay=x={overlay.x}:y={overlay.y}"
+            f":format=yuv444:eof_action=pass[b{number + 1}]"
+        )
+        steps.extend([clip, blend])
+    steps.append(f"[b{len(overlays)}]format=yuv420p[v]")
+    return ";".join(steps)
+
+
+@dataclass(frozen=True)
 class ClipAudio:
     """The sound of a clip that is used in the render (a muted clip has none)."""
 
@@ -220,11 +273,13 @@ def trim_args(
     width: int,
     height: int,
     audio: ClipAudio | None,
+    overlays: Sequence[Overlay] = (),
 ) -> list[str]:
     """Stage 1: one clip, trimmed to `frames` frames, at the output size, as a MOV.
 
     `audio` is None for silence (a muted scene, a clip with no sound, or a clip sound volume
-    of 0).
+    of 0). `overlays` are the motion callouts laid over the picture (CMO-005); without any, the
+    arguments are exactly what they were.
     """
     if frames < 1:
         raise ValueError("A clip needs at least one frame.")
@@ -235,12 +290,13 @@ def trim_args(
     # `tpad` repeats the last frame once, in case the clip is one frame short of its shot: a shot's
     # length is stored on H3's own length, so a project at another frame rate can need one frame
     # more than the clip has after the rates are converted (D-9). A longer clip is cut as before.
-    video = (
+    picture = (
         f"[0:v:0]fps={fps},tpad=stop_mode=clone:stop=1,trim=end_frame={frames},"
         "setpts=PTS-STARTPTS,"
         f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
-        f"crop={width}:{height},setsar=1,format=yuv420p[v]"
+        f"crop={width}:{height},setsar=1"
     )
+    video = _picture_graph(picture, overlays, fps)
 
     sound = shot_sound_graph(audio, samples)
 
@@ -248,6 +304,7 @@ def trim_args(
         *_BASE,
         "-i",
         file_input(src),
+        *_overlay_inputs(overlays),
         "-filter_complex",
         f"{video};{sound}",
         "-map",
@@ -256,6 +313,10 @@ def trim_args(
         "[a]",
         *_trimmed_output_args(frames, fps, dest),
     ]
+
+
+def _overlay_inputs(overlays: Sequence[Overlay]) -> list[str]:
+    return [part for overlay in overlays for part in ("-i", file_input(overlay.path))]
 
 
 def _trimmed_output_args(frames: int, fps: int, dest: Path) -> list[str]:
@@ -294,17 +355,25 @@ def _trimmed_output_args(frames: int, fps: int, dest: Path) -> list[str]:
 
 
 def placeholder_args(
-    picture: Path, dest: Path, *, frames: int, fps: int, width: int, height: int
+    picture: Path,
+    dest: Path,
+    *,
+    frames: int,
+    fps: int,
+    width: int,
+    height: int,
+    overlays: Sequence[Overlay] = (),
 ) -> list[str]:
     """Stage 1 for a shot with no clip yet (a scene render, SCN-003): the still picture held for
     `frames` frames at the output size, with silence, written like any trimmed clip.
     """
     if frames < 1:
         raise ValueError("A placeholder needs at least one frame.")
-    video = (
+    still = (
         f"[0:v:0]fps={fps},trim=end_frame={frames},setpts=PTS-STARTPTS,"
-        f"scale={width}:{height}:flags=lanczos,setsar=1,format=yuv420p[v]"
+        f"scale={width}:{height}:flags=lanczos,setsar=1"
     )
+    video = _picture_graph(still, overlays, fps)
     sound = shot_sound_graph(None, sample_count(frames, fps))
     return [
         *_BASE,
@@ -314,6 +383,7 @@ def placeholder_args(
         str(fps),
         "-i",
         file_input(picture),
+        *_overlay_inputs(overlays),
         "-filter_complex",
         f"{video};{sound}",
         "-map",

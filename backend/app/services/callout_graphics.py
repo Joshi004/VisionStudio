@@ -65,6 +65,7 @@ from app.db.models import CalloutGraphic, CalloutGraphicChoice, Job, Project
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    callout_component_checks,
     callout_look,
     callout_plan,
     callout_plan_writer,
@@ -73,6 +74,7 @@ from app.services import (
     graphics_lab,
     graphics_render,
     graphics_resolve,
+    story_render_plan,
 )
 from app.services.callout_plan_writer import ScriptUnit
 
@@ -91,8 +93,6 @@ PREVIEW_DEDUPE_KEY: Final = "callout_graphic_id"
 BACKDROP: Final = "#808080"
 # What the motion service draws at most for a callout (`CALLOUT_MAX_FRAMES`).
 MAX_FRAMES: Final = 1800
-# The smallest zone the motion service draws.
-MIN_SIDE_PX: Final = 64
 
 # What a version used by the video is: a version, or today's text box (§4.5).
 USED_BOX: Final = "box"
@@ -189,10 +189,6 @@ def _pieces(callout: dict[str, Any]) -> list[_Piece]:
     return [_Piece(callout["text"], callout["role"], callout["phrase"])]
 
 
-def _even(value: float) -> int:
-    return max(MIN_SIDE_PX, round(value / 2) * 2)
-
-
 def zones_of(kind: str, layout: str, width: int, height: int) -> list[dict[str, Any]]:
     """The zones a callout is checked at, the first being the preview's (§4.5). A title has its
     own; in portrait there is one; in landscape a callout can land beside the presenter or over
@@ -206,14 +202,11 @@ def zones_of(kind: str, layout: str, width: int, height: int) -> list[dict[str, 
         choices = [("presenter", True), ("broll", False)]
     zones: list[dict[str, Any]] = []
     for placement, on_presenter in choices:
-        zone = callout_render.zone_box(kind, on_presenter, layout, width, height)
-        zones.append(
-            {
-                "placement": placement,
-                "width": _even(zone.width),
-                "height": _even(zone.bottom - zone.top),
-            }
+        # The render draws at the same size and place (`callout_render.zone_rect`, CMO-005).
+        _x, _y, zone_width, zone_height = callout_render.zone_rect(
+            kind, on_presenter, layout, width, height
         )
+        zones.append({"placement": placement, "width": zone_width, "height": zone_height})
     return zones
 
 
@@ -306,6 +299,57 @@ def resolve_callout(
         "look_version": look_version,
         "theme_version": theme_version,
     }
+
+
+@dataclass(frozen=True)
+class RenderRequest:
+    """What the render asks the motion service to draw for one motion callout (CMO-005)."""
+
+    # The `resolved` of the request, at the entry's zone, with no backdrop (transparent).
+    resolved: dict[str, Any]
+    frames: int
+    # The story frame the clip's first frame is shown at.
+    start_frame: int
+
+
+def render_request(
+    resolved: dict[str, Any],
+    draw: callout_render.MotionDraw,
+    start_ms: int,
+    end_ms: int,
+    fps: int,
+) -> RenderRequest:
+    """The request that draws a callout at its real zone and length (CM-9). Pure.
+
+    `resolved` is the attempt's resolved callout, `draw` the entry's box and the start of each of
+    its texts, and `start_ms` and `end_ms` the entry's times on the video's timeline. The length is
+    the entry's, in frames (at most `MAX_FRAMES`: a longer callout ends early, with its fade); the
+    exit fade is the last `FADE_MS`; each text appears at its own start, never at or after the
+    fade. Raises CalloutGraphicsError when the callout cannot be drawn like that.
+    """
+    parts = resolved["parts"]
+    if len(parts) != len(draw.part_starts_ms):
+        raise CalloutGraphicsError("The callout's texts are not the ones its graphic was made for.")
+    first = story_render_plan.frame_at(start_ms, fps)
+    frames = min(story_render_plan.frame_at(end_ms, fps) - first, MAX_FRAMES)
+    exit_frame = frames - round(callout_render.FADE_MS * fps / 1000)
+    if frames < 2 or exit_frame < 1:
+        raise CalloutGraphicsError("The callout is too short to be drawn.")
+    drawn_parts = [
+        {
+            **part,
+            "frame": max(0, min(story_render_plan.frame_at(start, fps) - first, exit_frame - 1)),
+        }
+        for part, start in zip(parts, draw.part_starts_ms, strict=True)
+    ]
+    return RenderRequest(
+        resolved=callout_component_checks.motion_resolved(
+            {**resolved, "exit_frame": exit_frame, "parts": drawn_parts},
+            {"placement": draw.placement},
+        ),
+        frames=frames,
+        start_frame=first,
+    )
 
 
 # --- What the state reads --------------------------------------------------------------------
@@ -411,6 +455,10 @@ class CalloutGraphicsState:
     # The callout look's version and whether it is current.
     look_version: int | None
     look_current: bool
+    # The newest callout look and graphics look rows (None when there are none): the render
+    # records which ones its callouts were made with (CMO-005).
+    look: Any = None
+    theme: Any = None
 
 
 def _recorded_id(row: CalloutGraphic, key: str) -> int | None:
@@ -643,6 +691,8 @@ async def _build(session: AsyncSession, project: Project) -> CalloutGraphicsStat
             wanted=wanted,
             look_version=look.version if look is not None else None,
             look_current=look is not None and not look_state.out_of_date,
+            look=look,
+            theme=theme,
         )
 
     plan = plan_state.latest
@@ -698,6 +748,8 @@ async def _build(session: AsyncSession, project: Project) -> CalloutGraphicsStat
         wanted=True,
         look_version=look.version if look is not None else None,
         look_current=look is not None and not look_state.out_of_date,
+        look=look,
+        theme=theme,
     )
 
 

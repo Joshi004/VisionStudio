@@ -31,8 +31,12 @@ The steps, which are also the phases the page shows:
 6. *mixing the sound* (stage 2): the shots' sound, the narration and the music layers become one
    float WAV, the pre-master;
 7. *measuring the mix*: the first pass of `loudnorm` over the pre-master (MD-19);
+   *drawing the callouts* (CMO-005, only for a project whose callouts are motion graphics): the
+   motion service draws each callout as a transparent clip at its real zone and length
+   (`jobs/callout_draw.py`); stage 1 lays each clip over the shots it shows in;
 8. *writing the captions and callouts* (EXPLAINER-008 and 010, only for an explainer with either):
-   the frozen caption groups and callouts become one ASS file (`services/caption_ass.py`);
+   the frozen caption groups and the callouts drawn as boxes become one ASS file
+   (`services/caption_ass.py`);
    *joining the shots and encoding the video* (stage 3): the MOVs are joined, the captions and
    callouts are burned into the picture with the bundled font, the pre-master is brought to the
    target loudness and true-peak ceiling by the second pass of `loudnorm`, and the final H.264
@@ -56,7 +60,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -275,6 +279,9 @@ class Timeline:
     master_lufs: float
     master_true_peak_db: float
     master_lra: float
+    # The project's `callout_style` the timeline was made with (CMO-005); a version 5 timeline
+    # has none and its callouts are boxes.
+    callout_style: str = callout_render.STYLE_BOXES
 
     @property
     def total_samples(self) -> int:
@@ -555,7 +562,10 @@ def parse_timeline(recorded: object) -> Timeline:
     half right.
     """
     raw = recorded.get("timeline") if isinstance(recorded, dict) else None
-    if not isinstance(raw, dict) or raw.get("version") != story_render_plan.TIMELINE_VERSION:
+    if (
+        not isinstance(raw, dict)
+        or raw.get("version") not in story_render_plan.READABLE_TIMELINE_VERSIONS
+    ):
         raise RenderFailed(_CHANGED_MESSAGE)
 
     fps, width, height = _whole(raw.get("fps")), _whole(raw.get("width")), _whole(raw.get("height"))
@@ -688,6 +698,14 @@ def parse_timeline(recorded: object) -> Timeline:
         raise RenderFailed(_CHANGED_MESSAGE)
     captions = _parse_captions(raw, width, height)
     callouts = _parse_callouts(raw, width, height)
+    recorded_callouts = raw.get("callouts")
+    callout_style = (
+        recorded_callouts.get("callout_style", callout_render.STYLE_BOXES)
+        if isinstance(recorded_callouts, dict)
+        else callout_render.STYLE_BOXES
+    )
+    if callout_style not in (callout_render.STYLE_BOXES, callout_render.STYLE_MOTION):
+        raise RenderFailed(_CHANGED_MESSAGE)
 
     def known(key: str) -> float:
         return values[key] or 0.0
@@ -703,6 +721,7 @@ def parse_timeline(recorded: object) -> Timeline:
         music=music,
         captions=captions,
         callouts=callouts,
+        callout_style=callout_style,
         shot_target_lufs=known("shot_target_lufs"),
         narration_target_lufs=known("narration_target_lufs"),
         max_boost_db=known("max_boost_db"),
@@ -784,6 +803,19 @@ class RenderStoryHandler(JobHandler):
             else []
         )
 
+        # Motion callouts (CMO-005): drawn now, laid over the shots in stage 1. A render of boxes
+        # has no such step. (Imported here: the module needs this one for `RenderFailed`.)
+        shot_overlays: list[list[render_commands.Overlay]] = [[] for _ in timeline.shots]
+        drawn: Any = None
+        if timeline.callouts is not None and any(e.motion for e in timeline.callouts.entries):
+            from app.jobs import callout_draw  # noqa: PLC0415
+
+            await self._phase(job_id, phases.DRAWING_CALLOUTS)
+            drawn = await callout_draw.draw_callouts(
+                job_id, job.project_id, timeline.callouts, timeline.fps, storage, temp_paths
+            )
+            shot_overlays = drawn.overlays_by_shot([shot.frames for shot in timeline.shots])
+
         await self._phase(job_id, phases.MEASURING_LEVELS)
         shot_lufs = [
             # The sound of a presenter clip on the take's voice is dropped: not measured.
@@ -864,6 +896,7 @@ class RenderStoryHandler(JobHandler):
                         fps=timeline.fps,
                         width=timeline.width,
                         height=timeline.height,
+                        overlays=shot_overlays[number - 1],
                     ),
                     TRIM_TIMEOUT_S,
                     f"drawing the placeholder of shot {shot.label}",
@@ -878,6 +911,7 @@ class RenderStoryHandler(JobHandler):
                         width=timeline.width,
                         height=timeline.height,
                         audio=audio,
+                        overlays=shot_overlays[number - 1],
                     ),
                     TRIM_TIMEOUT_S,
                     f"trimming the clip of shot {shot.label}",
@@ -909,13 +943,25 @@ class RenderStoryHandler(JobHandler):
             and timeline.captions.burned
             and bool(timeline.captions.groups)
         )
-        has_callouts = timeline.callouts is not None and bool(timeline.callouts.entries)
+        # Only the callouts drawn as boxes are burned in: a motion callout is already in the
+        # picture (and is a box again only when neither of its versions could be drawn).
+        box_track = timeline.callouts
+        if box_track is not None and drawn is not None:
+            box_track = replace(
+                box_track,
+                entries=tuple(
+                    entry
+                    for entry in box_track.entries
+                    if entry.motion is None or entry.id in drawn.boxed
+                ),
+            )
+        has_callouts = box_track is not None and bool(box_track.entries)
         if has_captions or has_callouts:
             await self._phase(job_id, phases.WRITING_CAPTIONS)
             captions = await write_subtitles(
                 storage,
                 timeline.captions if has_captions else None,
-                timeline.callouts if has_callouts else None,
+                box_track if has_callouts else None,
                 temp_paths,
             )
 
@@ -955,6 +1001,7 @@ class RenderStoryHandler(JobHandler):
             _music_record(timeline, lanes),
             master,
             (trim_seconds, join_seconds),
+            drawn,
         )
 
     async def _save(
@@ -972,7 +1019,11 @@ class RenderStoryHandler(JobHandler):
         music: dict[str, Any] | None,
         master: dict[str, Any],
         seconds: tuple[float, float],
+        drawn: Any = None,
     ) -> None:
+        """Stores the video and finishes the job. `drawn` is what the callout step made (a
+        `callout_draw.DrawnCallouts`), or None for a render with no motion callouts.
+        """
         temp = await storage.describe_temp(final)
         stored = await storage.save(temp, project_id, "mp4")
         audio = probe.audio
@@ -1012,6 +1063,7 @@ class RenderStoryHandler(JobHandler):
             "voice": voice,
             "music": music,
             "master": master,
+            **({"callouts": drawn.levels()} if drawn is not None else {}),
         }
         output: dict[str, Any] = {
             "final": {
@@ -1038,6 +1090,14 @@ class RenderStoryHandler(JobHandler):
                 {
                     "count": len(timeline.callouts.entries),
                     "by_type": _count_by_type(timeline.callouts),
+                    **(
+                        {
+                            "callout_style": timeline.callout_style,
+                            **(drawn.summary(len(timeline.callouts.entries)) if drawn else {}),
+                        }
+                        if timeline.callout_style == callout_render.STYLE_MOTION
+                        else {}
+                    ),
                 }
                 if timeline.callouts is not None
                 else None

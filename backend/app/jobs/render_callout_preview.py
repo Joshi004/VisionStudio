@@ -179,7 +179,7 @@ class RenderCalloutPreviewHandler(JobHandler):
             resolved=callout_component_checks.motion_resolved(
                 plan.resolved, plan.zone, backdrop=callout_graphics.BACKDROP
             ),
-            input=_scene_of(plan.input) if blocks else None,
+            input=callout_graphic_common.scene_of(plan.input) if blocks else None,
             code=None if blocks else graphics_render.code_of(plan.input),
         )
         render_s = await motion_draw.draw_in_motion(job_id, base_url, body, video)
@@ -231,7 +231,7 @@ class RenderCalloutPreviewHandler(JobHandler):
         model call, and brings its recorded layout up to date. The problems found do not stop the
         preview: they are kept as the attempt's warnings.
         """
-        scene = _scene_of(plan.input)
+        scene = callout_graphic_common.scene_of(plan.input)
         measured = await callout_graphic_common.measure_callout_layout(job_id, plan.resolved, scene)
         layout: dict[str, Any] = {
             "checked": measured.problems is not None,
@@ -266,15 +266,6 @@ class RenderCalloutPreviewHandler(JobHandler):
             "checks": shot_graphic_common.checks_record(checked, 0, limit),
             "warnings": callout_graphic_common.component_warnings(code, plan.resolved),
         }
-
-
-def _scene_of(input: Any) -> dict[str, Any]:
-    """The block scene an attempt draws, without the record of its layout check. Raises
-    RenderFailed when the attempt holds no scene.
-    """
-    if not isinstance(input, dict) or not isinstance(input.get("elements"), list):
-        raise RenderFailed("The block scene is missing from the callout graphic.")
-    return {"blocks_version": input.get("blocks_version"), "elements": input["elements"]}
 
 
 def _scene_warnings(input: Any) -> list[str]:

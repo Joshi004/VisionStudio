@@ -22,6 +22,7 @@ from app.core import settings as settings_service
 from app.db.models import CalloutGraphic
 from app.db.session import SessionLocal
 from app.jobs import phase_writer, phases, shot_graphic_common, store
+from app.jobs.render_story import RenderFailed
 from app.providers import motion_renderer
 from app.services import callout_component_checks, graphics_blocks, graphics_code_checks
 
@@ -41,6 +42,15 @@ STAGE_RULES: Final = "rules"
 async def _motion_url() -> str:
     async with SessionLocal() as session:
         return await settings_service.get_str(session, settings_service.MOTION_URL_KEY)
+
+
+def scene_of(input: Any) -> dict[str, Any]:
+    """The block scene an attempt draws, without the record of its layout check. Raises
+    RenderFailed when the attempt holds no scene. The preview and the story render both draw it.
+    """
+    if not isinstance(input, dict) or not isinstance(input.get("elements"), list):
+        raise RenderFailed("The block scene is missing from the callout graphic.")
+    return {"blocks_version": input.get("blocks_version"), "elements": input["elements"]}
 
 
 def part_texts(resolved: dict[str, Any]) -> list[str]:

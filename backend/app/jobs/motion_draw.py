@@ -30,16 +30,19 @@ class MotionRenderFailed(RenderFailed):
 
 
 async def draw_in_motion(
-    job_id: int, base_url: str, body: dict[str, Any], dest: Path
+    job_id: int, base_url: str, body: dict[str, Any], dest: Path, *, note_phase: bool = True
 ) -> float | None:
     """Has the motion service draw the video and downloads it to `dest`. Returns the service's
-    own render time in seconds.
+    own render time in seconds. With `note_phase` False the job's phase is left alone (the story
+    render draws many callouts at once and keeps its own phase, CMO-005).
     """
-    await phase_writer.note(job_id, phases.SENDING_GRAPHIC)
+    if note_phase:
+        await phase_writer.note(job_id, phases.SENDING_GRAPHIC)
     service_id = await motion_renderer.start_render(base_url, body)
     try:
-        status = await wait_for_service(job_id, base_url, service_id)
-        await phase_writer.note(job_id, phases.DOWNLOADING_GRAPHIC)
+        status = await wait_for_service(job_id, base_url, service_id, note_phase=note_phase)
+        if note_phase:
+            await phase_writer.note(job_id, phases.DOWNLOADING_GRAPHIC)
         await motion_renderer.download_render(base_url, service_id, dest)
     finally:
         await motion_renderer.delete_render(base_url, service_id)
@@ -47,7 +50,9 @@ async def draw_in_motion(
     return float(seconds) if isinstance(seconds, int | float) else None
 
 
-async def wait_for_service(job_id: int, base_url: str, service_id: str) -> dict[str, Any]:
+async def wait_for_service(
+    job_id: int, base_url: str, service_id: str, *, note_phase: bool = True
+) -> dict[str, Any]:
     """Polls the motion service until the render is done, writing its progress as the job's
     phase. Raises MotionRenderFailed when the service says it failed or does not finish in time.
     """
@@ -69,7 +74,7 @@ async def wait_for_service(job_id: int, base_url: str, service_id: str) -> dict[
             raise MotionRenderFailed(f"The motion service did not finish within {limit_s} s.")
         progress = status.get("progress")
         percent = int(float(progress) * 100) if isinstance(progress, int | float) else 0
-        if percent - shown >= PHASE_PERCENT_STEP:
+        if note_phase and percent - shown >= PHASE_PERCENT_STEP:
             shown = percent
             await phase_writer.note(job_id, phases.rendering_graphic(percent))
         await asyncio.sleep(POLL_INTERVAL_S)

@@ -37,7 +37,7 @@ changes nothing in a render that has started.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final, Literal
 
 from sqlalchemy import func, select
@@ -48,6 +48,7 @@ from app.db.models import Job, Project, SpeechUnitAudio, SpeechWordTiming, Story
 from app.db.state_memo import memoized_state
 from app.jobs import store
 from app.services import (
+    callout_graphics,
     callout_plan,
     callout_plan_writer,
     callout_render,
@@ -570,37 +571,105 @@ class CalloutGate:
 
     source: callout_render.CalloutSource | None
     blocked_reason: str | None
+    # The project's `callout_style` now (`boxes` when it has no callouts).
+    callout_style: str = callout_render.STYLE_BOXES
+
+
+_MOTION_WAY_OUT: Final = "Make the callout graphics first, or switch callouts to simple boxes."
+_MOTION_BEING_MADE: Final = (
+    "The callout graphics are being made. Wait for them to finish, or switch callouts to "
+    "simple boxes."
+)
+
+
+def _motion_pick(entry: callout_graphics.CalloutEntry) -> callout_render.MotionPick:
+    """How the render draws one callout of a motion project: the version the rule gives
+    (`callout_graphics.UsedGraphic`), and the other version's current attempt to fall back to.
+    A callout the rule gives a box has no version (CMO-005).
+    """
+    used = entry.used
+    if used is None or used.attempt is None or used.engine == callout_graphics.USED_BOX:
+        return callout_render.MotionPick(use=None)
+    other: callout_render.MotionRef | None = None
+    for engine in entry.engines:
+        if engine.key != used.engine and engine.best is not None:
+            other = callout_render.MotionRef(engine.best.row.id, engine.key)
+    return callout_render.MotionPick(
+        use=callout_render.MotionRef(used.attempt.row.id, used.engine), other=other
+    )
+
+
+async def _motion_source(
+    session: AsyncSession, project: Project, source: callout_render.CalloutSource
+) -> CalloutGate:
+    """The source of a motion project's render: every enabled callout must have its graphic (or
+    be a box because both versions failed outright, which does not block), and none may be being
+    made now. The picks go with the source.
+    """
+    graphics = await callout_graphics.state(session, project)
+    style = callout_render.STYLE_MOTION
+    if graphics.blocked_reason is not None:
+        return CalloutGate(None, f"{graphics.blocked_reason} {_MOTION_WAY_OUT}", style)
+    enabled = [entry for entry in graphics.entries if entry.enabled]
+    if any(entry.status == "working" for entry in enabled):
+        return CalloutGate(None, _MOTION_BEING_MADE, style)
+    if any(not entry.done for entry in enabled):
+        return CalloutGate(None, _MOTION_WAY_OUT, style)
+    if graphics.look is None or graphics.theme is None:
+        return CalloutGate(None, _MOTION_WAY_OUT, style)
+    picks = {str(entry.callout["id"]): _motion_pick(entry) for entry in enabled}
+    return CalloutGate(
+        replace(
+            source,
+            callout_style=style,
+            look=(graphics.look.id, graphics.look.version),
+            theme=(graphics.theme.id, graphics.theme.version),
+            motion=picks,
+        ),
+        None,
+        style,
+    )
 
 
 async def callout_gate(session: AsyncSession, project: Project) -> CalloutGate:
     """Whether the next render has callouts, and if it must, whether it can. It must have the
-    current callout plan (the owner's choice): a render is refused, never made without them.
+    current callout plan (the owner's choice): a render is refused, never made without them. In a
+    `motion` project it must also have the graphics of every callout (CMO-005).
     """
     if not callouts_wanted(project):
         return CalloutGate(None, None)
+    style = (
+        callout_render.STYLE_MOTION
+        if project.callout_style == projects.CALLOUT_MOTION
+        else callout_render.STYLE_BOXES
+    )
     state = await callout_plan.state(session, project)
     if state.job is not None and state.job.status in store.ACTIVE_STATUSES:
         return CalloutGate(
-            None, f"The callout plan is being written. Wait for it to finish. {_CALLOUT_WAY_OUT}"
+            None,
+            f"The callout plan is being written. Wait for it to finish. {_CALLOUT_WAY_OUT}",
+            style,
         )
     if state.latest is None:
-        return CalloutGate(None, f"There is no callout plan yet. {_CALLOUT_WAY_OUT}")
+        return CalloutGate(None, f"There is no callout plan yet. {_CALLOUT_WAY_OUT}", style)
     if state.blocked_reason is not None:
-        return CalloutGate(None, f"{state.blocked_reason} {_CALLOUT_WAY_OUT}")
+        return CalloutGate(None, f"{state.blocked_reason} {_CALLOUT_WAY_OUT}", style)
     if state.out_of_date:
         return CalloutGate(
-            None, f"The callout plan is out of date: {state.reasons[0]} {_CALLOUT_WAY_OUT}"
+            None,
+            f"The callout plan is out of date: {state.reasons[0]} {_CALLOUT_WAY_OUT}",
+            style,
         )
     content = state.latest.content
-    return CalloutGate(
-        callout_render.CalloutSource(
-            plan_id=state.latest.id,
-            plan_version=state.latest.version,
-            accent=str(content["accent"]["colour"]),
-            callouts=tuple(callout_plan_writer.enabled_callouts(content)),
-        ),
-        None,
+    source = callout_render.CalloutSource(
+        plan_id=state.latest.id,
+        plan_version=state.latest.version,
+        accent=str(content["accent"]["colour"]),
+        callouts=tuple(callout_plan_writer.enabled_callouts(content)),
     )
+    if style == callout_render.STYLE_MOTION:
+        return await _motion_source(session, project, source)
+    return CalloutGate(source, None, style)
 
 
 # --- Reading the state ----------------------------------------------------------------------
@@ -792,8 +861,68 @@ def graphic_reasons(
     ]
 
 
+_LOOK_AGAIN: Final = "The callout look was written again since this video was made."
+_THEME_AGAIN: Final = "The graphics look was written again since this video was made."
+# How many callouts a render names when their graphics changed (the rest are counted).
+_CALLOUTS_NAMED: Final = 5
+
+
+def _uses(engine: str | None) -> str:
+    """How a reason names what a callout is drawn with."""
+    if engine is None:
+        return "a simple box"
+    return f"its {callout_graphics.ENGINE_LABELS.get(engine, engine).lower()} version"
+
+
+def _same_id(recorded: object, now: int | None) -> bool:
+    then = recorded.get("id") if isinstance(recorded, dict) else None
+    return then == now
+
+
+def _motion_reasons(used: dict[str, Any], source: callout_render.CalloutSource) -> list[str]:
+    """Why the motion graphics of a render no longer match (§4.8): the callout look or the
+    graphics look was written again, or a callout is drawn with another version, or with a newer
+    attempt of its version. A render is compared with what it meant to draw (its timeline), not
+    with a fallback that happened while it was made (that is a warning on the render).
+    """
+    reasons: list[str] = []
+    if not _same_id(used.get("look"), source.look[0] if source.look else None):
+        reasons.append(_LOOK_AGAIN)
+    if not _same_id(used.get("theme"), source.theme[0] if source.theme else None):
+        reasons.append(_THEME_AGAIN)
+    if reasons or source.motion is None:
+        # Every graphic is made again then: naming each callout would only repeat it.
+        return reasons
+    changed: list[str] = []
+    for entry in used.get("entries") or []:
+        pick = source.motion.get(str(entry.get("id"))) if isinstance(entry, dict) else None
+        if pick is None:
+            continue  # the plan's own reason says so
+        then = entry.get("motion") if isinstance(entry.get("motion"), dict) else None
+        then_engine = then.get("engine") if then is not None else None
+        parts = entry.get("parts")
+        first = parts[0].get("text") if isinstance(parts, list) and parts else entry.get("id")
+        label = f'"{first}"'
+        now = pick.use
+        if then_engine != (now.engine if now is not None else None):
+            changed.append(
+                f"Callout {label} now uses {_uses(now.engine if now else None)} "
+                f"(this video used {_uses(then_engine)})."
+            )
+        elif now is not None and then is not None and then.get("graphic_id") != now.graphic_id:
+            changed.append(
+                f"The graphic of callout {label} was made again since this video was made."
+            )
+    reasons.extend(changed[:_CALLOUTS_NAMED])
+    if len(changed) > _CALLOUTS_NAMED:
+        reasons.append(f"{len(changed) - _CALLOUTS_NAMED} more callouts changed their graphic.")
+    return reasons
+
+
 def callout_reasons(recorded: dict[str, Any], gate: CalloutGate, *, wanted: bool) -> list[str]:
-    """Why the callouts of a render, which are burned into the picture, no longer match."""
+    """Why the callouts of a render, which are laid over or burned into the picture, no longer
+    match (§4.8). The first of the style, the plan and the graphics' own reasons that applies.
+    """
     used = recorded.get("callouts") if isinstance(recorded.get("callouts"), dict) else None
     if used is not None and not wanted:
         return ["Callouts have been switched off since this video was made."]
@@ -801,13 +930,23 @@ def callout_reasons(recorded: dict[str, Any], gate: CalloutGate, *, wanted: bool
         return ["Callouts have been switched on since this video was made."]
     if used is None:
         return []
+    if used.get("callout_style", callout_render.STYLE_BOXES) != gate.callout_style:
+        return [
+            "Callouts are now drawn as motion graphics."
+            if gate.callout_style == callout_render.STYLE_MOTION
+            else "Callouts are now drawn as simple boxes."
+        ]
     if gate.source is None:
+        if gate.callout_style == callout_render.STYLE_MOTION:
+            return ["The callout plan or the callout graphics of this video are out of date."]
         return ["The callout plan of this video is out of date or no longer ready."]
     if used.get("plan_id") != gate.source.plan_id:
         return [
             f"The callout plan was changed since this video was made (version "
             f"{gate.source.plan_version}; this video used version {used.get('plan_version')})."
         ]
+    if gate.callout_style == callout_render.STYLE_MOTION:
+        return _motion_reasons(used, gate.source)
     return []
 
 

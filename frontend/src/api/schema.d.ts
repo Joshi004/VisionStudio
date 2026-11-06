@@ -13237,7 +13237,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped" | "shot_placeholder" | "dialogue_not_heard" | "scene_start_unknown";
+            code: "take_out_of_date" | "take_without_sound" | "caption_timing_estimated" | "callout_at_unit_start" | "callout_dropped" | "callout_fallback" | "shot_placeholder" | "dialogue_not_heard" | "scene_start_unknown";
             /** Scene Id */
             scene_id?: string | null;
             /** Shot Id */

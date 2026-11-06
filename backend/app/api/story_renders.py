@@ -60,6 +60,7 @@ WarningCode = Literal[
     "caption_timing_estimated",
     "callout_at_unit_start",
     "callout_dropped",
+    "callout_fallback",
     "shot_placeholder",
     "dialogue_not_heard",
     "scene_start_unknown",
@@ -225,6 +226,17 @@ def warning_out(warning: dict[str, Any]) -> RenderWarningOut:
     )
 
 
+def render_warnings(row: StoryRender | SceneRender) -> list[RenderWarningOut]:
+    """What a finished render warns about: the warnings of its frozen timeline, then the
+    callouts the render itself had to draw another way (`levels["callouts"]`, CMO-005).
+    """
+    recorded = list(row.inputs.get("warnings", []))
+    callouts = (row.levels or {}).get("callouts")
+    if isinstance(callouts, dict):
+        recorded.extend(item for item in callouts.get("warnings") or [] if isinstance(item, dict))
+    return [warning_out(item) for item in recorded]
+
+
 def takes_out(row: StoryRender | SceneRender) -> list[RenderTakeOut]:
     """The take of each shot, from what the render recorded (never from the shots now)."""
     levels = {
@@ -330,7 +342,7 @@ def _render_out(entry: RenderEntry) -> StoryRenderOut:
         height=row.height,
         size_bytes=row.size_bytes,
         has_audio=row.audio is not None,
-        warnings=[warning_out(item) for item in row.inputs.get("warnings", [])],
+        warnings=render_warnings(row),
         takes=takes_out(row),
         narration=narration_out(row),
         music=music_out(row),

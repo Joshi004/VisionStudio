@@ -35,6 +35,7 @@ from app.api.story_renders import (
     master_out,
     music_out,
     narration_out,
+    render_warnings,
     takes_out,
     warning_out,
 )
@@ -131,7 +132,7 @@ def _render_out(entry: SceneRenderEntry) -> SceneRenderOut:
         height=row.height,
         size_bytes=row.size_bytes,
         has_audio=row.audio is not None,
-        warnings=[warning_out(item) for item in row.inputs.get("warnings", [])],
+        warnings=render_warnings(row),
         takes=takes,
         placeholders=sum(1 for take in takes if take.placeholder),
         narration=narration_out(row),

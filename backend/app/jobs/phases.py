@@ -293,6 +293,9 @@ SAVING_SHOT_PROMPT: Final = "saving the shot prompt"
 # --- Running: the story render (PHASE-028) ------------------------------------------------
 # `render_story` is a local job: every step is an FFmpeg run on this machine.
 CHECKING_RENDER_CLIPS: Final = "checking the clips"
+# CMO-005: only for a project whose callouts are motion graphics; drawn before the shots are
+# trimmed.
+DRAWING_CALLOUTS: Final = "drawing the callouts"
 MEASURING_LEVELS: Final = "measuring the sound levels"
 PLACING_NARRATION: Final = "placing the narration"
 # FLOW-008: the voice takes of a continuous explainer, in place of the narration.

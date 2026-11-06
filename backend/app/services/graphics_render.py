@@ -42,6 +42,14 @@ ENCODING: Final[dict[str, Any]] = {
     "color_space": "bt709",
 }
 
+# What a callout is drawn with when it is laid over a shot (CMO-005): ProRes 4444 with an alpha
+# channel. ffprobe reads the file back as `yuva444p12le`, not `yuva444p10le` (CMO-001).
+CALLOUT_ENCODING: Final[dict[str, Any]] = {
+    "codec": "prores",
+    "prores_profile": "4444",
+    "pixel_format": "yuva444p10le",
+}
+
 # How long the motion service may spend on one render before it stops it. The backend waits this
 # long plus a minute, then gives up on the service.
 RENDER_TIME_LIMIT_S: Final = 300
@@ -83,8 +91,10 @@ def render_body(
     resolved: dict[str, Any],
     input: Any,
     code: str | None,
+    encoding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The request every renderer gets: the motion service's `POST /renders` body."""
+    """The request every renderer gets: the motion service's `POST /renders` body. `encoding` is
+    `ENCODING` (H.264) unless given."""
     return {
         "engine": engine,
         "width": width,
@@ -94,7 +104,7 @@ def render_body(
         "resolved": resolved,
         "input": input,
         "code": code,
-        "encoding": dict(ENCODING),
+        "encoding": dict(encoding if encoding is not None else ENCODING),
         "time_limit_s": RENDER_TIME_LIMIT_S,
     }
 

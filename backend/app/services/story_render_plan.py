@@ -51,6 +51,11 @@ holds the style and every callout that is turned on in the current callout plan,
 time, its zone and its laid-out text (`callout_render.resolve`), and the plan it came from. It is
 null otherwise. While a section title shows, the captions are hidden.
 
+**Motion callouts** (timeline version 6, CMO-005). With `callout_style` `motion`, an entry's
+`motion` says which attempt of its graphic the render draws (a transparent clip laid over the
+shots at the entry's box), and which other attempt it falls back to; an entry without it is drawn
+as a box. The track records the callout look and the graphics look it was made with.
+
 **Voice** (timeline version 5, FLOW-008). A continuous explainer speaks each scene as one take.
 `voice` holds each scene's take at the scene's start plus the lead-in, cut into `pieces` around the
 presenter shots the owner switched to their clip's own voice (`shots[].voice` is `clip`): the take
@@ -78,7 +83,12 @@ from app.services import callout_render, caption_plan, font_metrics, frame_count
 # (EXPLAINER-010).
 # Version 5 adds `voice`, the scene takes of a continuous explainer, and `voice` / `voice_window`
 # on each shot (FLOW-008).
-TIMELINE_VERSION: Final = 5
+# Version 6 adds motion callouts (CMO-005): `callouts` gains `callout_style`, `look` and `theme`,
+# and an entry may have `motion` (the version it is drawn with, its box and the start of each
+# text). A version 5 timeline has none of them and is read as a track of boxes.
+TIMELINE_VERSION: Final = 6
+# The versions the render job reads.
+READABLE_TIMELINE_VERSIONS: Final = (5, 6)
 
 SHOT_TARGET_LUFS: Final = -16.0
 NARRATION_TARGET_LUFS: Final = -16.0
@@ -830,6 +840,10 @@ def _voice_entry(
     return {"takes": takes}
 
 
+def _version_ref(ref: tuple[int, int] | None) -> dict[str, int] | None:
+    return None if ref is None else {"id": ref[0], "version": ref[1]}
+
+
 def build_plan(
     scenes: list[SceneSource],
     *,
@@ -1289,6 +1303,9 @@ def _build(
         callouts_entry = callout_render.track_dict(resolution.track)
         callouts_entry["plan_id"] = callouts.plan_id
         callouts_entry["plan_version"] = callouts.plan_version
+        callouts_entry["callout_style"] = callouts.callout_style
+        callouts_entry["look"] = _version_ref(callouts.look)
+        callouts_entry["theme"] = _version_ref(callouts.theme)
         warnings.extend(resolution.warnings)
         hidden = callout_render.windows_hiding_captions(resolution.track)
 
@@ -1451,6 +1468,9 @@ def _shift_timeline(timeline: dict[str, Any], first_frame: int, fps: int) -> Non
         entry["end_ms"] = earlier(entry["end_ms"])
         for part in entry["parts"]:
             part["start_ms"] = earlier(part["start_ms"])
+        motion = entry.get("motion")
+        if motion is not None:
+            motion["part_starts_ms"] = [earlier(start) for start in motion["part_starts_ms"]]
 
 
 def build_scene_plan(
