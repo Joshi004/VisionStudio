@@ -14,7 +14,7 @@ const TEXT_MAX_CHARS = 4000;
 // Evaluates the transpiled component (CommonJS, from `server/transpile.ts`) and returns its default
 // export. The code can reach only what `allowedRequire` hands it. The container is the security
 // boundary (G-8); this only keeps an honest component honest.
-function loadComponent(compiled: string): ComponentType<GraphicProps> {
+export function loadComponent(compiled: string): ComponentType<GraphicProps> {
   const module: { exports: Record<string, unknown> } = { exports: {} };
   // eslint-disable-next-line no-new-func
   const run = new Function("require", "module", "exports", compiled) as (
@@ -31,7 +31,7 @@ function loadComponent(compiled: string): ComponentType<GraphicProps> {
 }
 
 // What is on the screen as text: the visible text of the page and the text of SVG labels.
-function visibleText(root: HTMLElement): string {
+export function visibleText(root: HTMLElement): string {
   const svgTexts = Array.from(root.querySelectorAll("text"), (node) => node.textContent ?? "");
   return [root.innerText, ...svgTexts].join("\n").slice(0, TEXT_MAX_CHARS);
 }

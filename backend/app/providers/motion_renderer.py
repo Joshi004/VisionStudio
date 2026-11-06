@@ -1,7 +1,9 @@
 """The motion service adapter: Remotion and headless Chrome in the `motion` container (GFX-005).
 
-The service draws a composition to an MP4 and keeps the file until it is fetched and deleted. The
-calls are the ones of §4.6 of `Graphics_lab_implementation_phases.md`:
+The service draws a composition to an MP4 (H.264) and keeps the file until it is fetched and
+deleted. The callout engines (CMO-001) may instead be drawn as a MOV: ProRes 4444 with an alpha
+channel, for laying over a shot. The calls are the ones of §4.6 of
+`Graphics_lab_implementation_phases.md`:
 
 - `start_render`: `POST /renders`, answers the service's `render_id` at once (202);
 - `render_status`: `GET /renders/{id}`: `queued`, `rendering`, `done` or `failed`, with progress;
@@ -9,8 +11,8 @@ calls are the ones of §4.6 of `Graphics_lab_implementation_phases.md`:
 - `delete_render`: `DELETE /renders/{id}`;
 - `layout`: `POST /layout`, the boxes of the texts of a block scene as the browser lays them out
   (GFX-009);
-- `checks`: `POST /checks`, whether a generated component compiles and draws, with the text it
-  shows (GFX-010);
+- `checks`: `POST /checks`, whether a generated component (or, with `engine`, a callout component)
+  compiles and draws, with the text it shows (GFX-010, CMO-001);
 - `health`: `GET /health`, the versions of Remotion and Chrome.
 
 Every call goes through `core/outbound.py`, so the URL rules and the time limits apply. Every
@@ -41,8 +43,10 @@ LAYOUT_TIMEOUT_S: Final = 90.0
 # plus 1 s for each frame above three, so 73 s at most).
 CHECKS_TIMEOUT_S: Final = 105.0
 DOWNLOAD_TIMEOUT_S: Final = 300.0
-# A graphic is at most 15 s long; a file this large means something is wrong.
-DOWNLOAD_MAX_BYTES: Final = 500 * 1024 * 1024
+# A graphic is at most 15 s long. A callout (ProRes 4444, CMO-001) is at most 75 s long: the
+# largest one measured (908 x 826, 1800 frames, 24 fps, a flat card with a shadow) is 618 MB, so
+# the limit is that size with half as much again. A file this large means something is wrong.
+DOWNLOAD_MAX_BYTES: Final = 900 * 1024 * 1024
 
 _RENDER_ID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _MESSAGE_MAX_CHARS: Final = 500
@@ -142,6 +146,10 @@ async def checks(base_url: str, body: dict[str, Any]) -> dict[str, Any]:
     [{frame, text}], check_s}`. The body is `{width, height, fps, frames, resolved, code}` and
     optionally `at_frames`, the frames to draw (at most 16; without it, three). A
     component that does not compile or draw is an answer with `ok` false, not an error.
+
+    With `engine: "callout_component"` (CMO-001) the component is checked as a callout (its
+    `resolved` is the callout's brief) and the answer also has `opaque` (`[{frame, share}]`, the
+    share of the canvas that is opaque) and `cut` (`[{frame, texts}]`, the texts that are cut off).
     """
     try:
         response = await outbound.request(

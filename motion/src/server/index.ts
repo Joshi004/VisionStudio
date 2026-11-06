@@ -4,9 +4,17 @@ import Fastify from "fastify";
 import { counts, enqueue, fileOf, MAX_PARALLEL, prepareRenderDir, remove, statusOf, sweep } from "./renders.ts";
 import { checkComponent, ServiceError } from "./checks.ts";
 import { measureLayout } from "./layout.ts";
-import { checksRequestSchema, idParamsSchema, layoutRequestSchema, renderRequestSchema } from "./schema.ts";
+import {
+  checksProblem,
+  checksRequestSchema,
+  idParamsSchema,
+  layoutRequestSchema,
+  renderRequestSchema,
+  requestProblem,
+} from "./schema.ts";
 import type { ChecksRequest, LayoutRequest, RenderRequest } from "./schema.ts";
 import { BLOCKS_VERSION } from "../blocks/scene.ts";
+import { CALLOUT_VERSION } from "../callout/version.ts";
 import { GENERATED_VERSION } from "../generated/version.ts";
 import { CATALOGUE_VERSION } from "../templates/spec.ts";
 import { readVersions } from "./versions.ts";
@@ -32,6 +40,7 @@ app.get("/health", async () => ({
   templates: CATALOGUE_VERSION,
   blocks: BLOCKS_VERSION,
   generated: GENERATED_VERSION,
+  callout: CALLOUT_VERSION,
   max_parallel: MAX_PARALLEL,
   ...counts(),
 }));
@@ -40,6 +49,8 @@ app.post<{ Body: RenderRequest }>(
   "/renders",
   { schema: { body: renderRequestSchema } },
   async (request, reply) => {
+    const problem = requestProblem(request.body);
+    if (problem !== null) return reply.code(400).send({ error: problem });
     const renderId = enqueue(request.body);
     return reply.code(202).send({ render_id: renderId });
   },
@@ -67,6 +78,8 @@ app.post<{ Body: ChecksRequest }>(
   "/checks",
   { schema: { body: checksRequestSchema } },
   async (request, reply) => {
+    const problem = checksProblem(request.body);
+    if (problem !== null) return reply.code(400).send({ error: problem });
     try {
       return await checkComponent(request.body);
     } catch (error) {
@@ -92,7 +105,7 @@ app.get<{ Params: { id: string } }>(
     const file = fileOf(request.params.id);
     if (file === null) return reply.code(404).send({ error: "The render has no finished file." });
     return reply
-      .header("Content-Type", "video/mp4")
+      .header("Content-Type", file.contentType)
       .header("Content-Length", String(file.size))
       .send(createReadStream(file.path));
   },

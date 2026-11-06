@@ -1,6 +1,8 @@
 import { openBrowser, renderStill, selectComposition } from "@remotion/renderer";
 import type { HeadlessBrowser } from "@remotion/renderer";
+import { PNG } from "pngjs";
 
+import { CALLOUT_MARKER } from "../callout/marker.ts";
 import { TEXT_MARKER } from "../generated/marker.ts";
 import { BUNDLE_DIR } from "./renders.ts";
 import type { ChecksRequest } from "./schema.ts";
@@ -24,8 +26,25 @@ export type ChecksResult = {
   errors: CheckError[];
   // The text on screen at each frame that was drawn.
   texts: { frame: number; text: string }[];
+  // Callout engine only (CMO-001): the share of the canvas that is opaque at each frame drawn, and
+  // the texts that are cut off. A generated component's answer has neither.
+  opaque?: { frame: number; share: number }[];
+  cut?: { frame: number; texts: string[] }[];
   check_s: number;
 };
+
+// A pixel with at least this alpha (of 255) counts as opaque.
+const OPAQUE_ALPHA = 128;
+
+// The share of the pixels of a PNG that are opaque, to three decimals.
+export function opaqueShare(png: Buffer): number {
+  const { data, width, height } = PNG.sync.read(png);
+  let opaque = 0;
+  for (let at = 3; at < data.length; at += 4) {
+    if ((data[at] ?? 0) >= OPAQUE_ALPHA) opaque += 1;
+  }
+  return Math.round((opaque / (width * height)) * 1000) / 1000;
+}
 
 // The check itself could not run (no browser), which says nothing about the component.
 export class ServiceError extends Error {}
@@ -67,9 +86,17 @@ async function drawStills(
   js: string,
   browser: HeadlessBrowser,
 ): Promise<ChecksResult> {
-  const result: ChecksResult = { ok: true, stage: null, errors: [], texts: [], check_s: 0 };
+  const callout = request.engine === "callout_component";
+  const result: ChecksResult = {
+    ok: true,
+    stage: null,
+    errors: [],
+    texts: [],
+    ...(callout ? { opaque: [], cut: [] } : {}),
+    check_s: 0,
+  };
   const inputProps = {
-    engine: "generated_component",
+    engine: callout ? "callout_component" : "generated_component",
     width: request.width,
     height: request.height,
     fps: request.fps,
@@ -78,11 +105,11 @@ async function drawStills(
     input: null,
     code: null,
     compiled: js,
-    report_text: true,
+    ...(callout ? { report_callout: true } : { report_text: true }),
   };
   const composition = await selectComposition({
     serveUrl: BUNDLE_DIR,
-    id: "Generated",
+    id: callout ? "Callout" : "Generated",
     inputProps,
     puppeteerInstance: browser,
     logLevel: "warn",
@@ -90,7 +117,7 @@ async function drawStills(
   });
   for (const frame of frames) {
     try {
-      await renderStill({
+      const still = await renderStill({
         serveUrl: BUNDLE_DIR,
         composition,
         frame,
@@ -101,15 +128,24 @@ async function drawStills(
         logLevel: "warn",
         timeoutInMilliseconds: FRAME_WAIT_MS,
         onBrowserLog: (log) => {
-          if (!log.text.startsWith(TEXT_MARKER)) return;
+          const marker = callout ? CALLOUT_MARKER : TEXT_MARKER;
+          if (!log.text.startsWith(marker)) return;
           try {
-            const seen = JSON.parse(log.text.slice(TEXT_MARKER.length)) as { frame: number; text: string };
+            const seen = JSON.parse(log.text.slice(marker.length)) as {
+              frame: number;
+              text: string;
+              cut?: string[];
+            };
             result.texts.push({ frame: seen.frame, text: seen.text });
+            if (callout && Array.isArray(seen.cut)) result.cut?.push({ frame: seen.frame, texts: seen.cut });
           } catch {
             // A component that wrote something like the marker is not an error.
           }
         },
       });
+      if (callout && still.buffer !== null) {
+        result.opaque?.push({ frame, share: opaqueShare(still.buffer) });
+      }
     } catch (error) {
       result.ok = false;
       result.stage = "render";

@@ -2,6 +2,7 @@ import { Composition } from "remotion";
 import type { CalculateMetadataFunction } from "remotion";
 
 import { Blocks } from "./blocks/Blocks";
+import { Callout } from "./callout/Callout";
 import { layoutReport } from "./blocks/report";
 import type { LayoutReport } from "./blocks/report";
 import { readScene } from "./blocks/scene";
@@ -66,6 +67,26 @@ function Nothing() {
   return null;
 }
 
+// A callout's own brief, so that Remotion Studio can open the composition (CMO-001).
+const placeholderCallout = {
+  kind: "emphasis",
+  placement: "presenter",
+  frame_height: 1080,
+  exit_frame: 60,
+  parts: [{ id: "p1", text: "Placeholder", role: "accent", colour: "#4DA3FF", frame: 6 }],
+  theme: {
+    surface: "#161C28",
+    text: "#FFFFFF",
+    muted: "#9AA4B2",
+    accent: "#4DA3FF",
+    positive: "#2ED573",
+    negative: "#FF4D4D",
+    number: "#FFB000",
+  },
+  fonts: { display: "Montserrat ExtraBold", text: "Inter Medium" },
+  look: {},
+};
+
 const defaults = (engine: string): GraphicInput => ({
   engine,
   width: 1920,
@@ -78,7 +99,7 @@ const defaults = (engine: string): GraphicInput => ({
 });
 
 // The compositions of §4.6. The test card (GFX-005), the templates (GFX-007), the blocks
-// (GFX-009) and the generated component (GFX-010) are drawn. `BlocksLayout` draws nothing: it
+// (GFX-009), the generated component (GFX-010) and the callout (CMO-001) are drawn. `BlocksLayout` draws nothing: it
 // only measures a block scene for `POST /layout`.
 export function Root() {
   return (
@@ -131,6 +152,21 @@ export function Root() {
         fps={24}
         durationInFrames={72}
         defaultProps={defaults("generated_component")}
+        calculateMetadata={metadata}
+      />
+      <Composition
+        id="Callout"
+        component={Callout}
+        width={768}
+        height={346}
+        fps={24}
+        durationInFrames={72}
+        defaultProps={{
+          ...defaults("callout_component"),
+          width: 768,
+          height: 346,
+          resolved: placeholderCallout as unknown as Resolved,
+        }}
         calculateMetadata={metadata}
       />
     </>

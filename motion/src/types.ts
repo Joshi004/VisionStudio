@@ -50,4 +50,7 @@ export type GraphicInput = {
   compiled?: string | null;
   // Check mode of `POST /checks`: the composition writes the text on screen to the console.
   report_text?: boolean;
+  // Check mode of `POST /checks` for a callout (CMO-001): the composition writes the text on screen
+  // and the text that is cut to the console.
+  report_callout?: boolean;
 };

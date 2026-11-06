@@ -6,18 +6,33 @@ export const ENGINES = [
   "remotion_templates",
   "remotion_blocks",
   "generated_component",
+  "callout_component",
 ] as const;
 export type Engine = (typeof ENGINES)[number];
 
+// The engines that draw a callout (CMO-001): a transparent clip laid over a shot. Only they may be
+// asked for ProRes 4444, and only they may be longer than MAX_FRAMES. CMO-004 adds `callout_blocks`.
+export const CALLOUT_ENGINES: readonly Engine[] = ["callout_component"];
+
+export function isCalloutEngine(engine: Engine): boolean {
+  return CALLOUT_ENGINES.includes(engine);
+}
+
 export const MAX_FRAMES = 720;
+// A callout stays up as long as its narration unit, up to 60 s: 1800 frames is 60 s at 30 fps.
+export const CALLOUT_MAX_FRAMES = 1800;
 export const MAX_TIME_LIMIT_S = 900;
 
+// H.264 for every engine; ProRes 4444 with an alpha channel for the callout engines only.
 export type Encoding = {
-  codec: "h264";
-  crf: number;
-  preset: string;
-  pixel_format: "yuv420p";
-  color_space: "bt709";
+  codec: "h264" | "prores";
+  // H.264 only.
+  crf?: number;
+  preset?: string;
+  color_space?: "bt709";
+  // ProRes only.
+  prores_profile?: "4444";
+  pixel_format: "yuv420p" | "yuva444p10le";
 };
 
 export type RenderRequest = {
@@ -43,16 +58,19 @@ export const renderRequestSchema = {
     width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     fps: { type: "integer", minimum: 1, maximum: 60 },
-    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
+    // The most any engine may ask for; `requestProblem` holds the other engines to MAX_FRAMES.
+    frames: { type: "integer", minimum: 1, maximum: CALLOUT_MAX_FRAMES },
     resolved: { type: "object" },
     input: {},
     code: { type: ["string", "null"], maxLength: 100_000 },
+    // One object for both codecs (a `oneOf` would let the validator strip fields while it tries
+    // the branches); `requestProblem` says which fields each codec needs.
     encoding: {
       type: "object",
       additionalProperties: false,
-      required: ["codec", "crf", "preset", "pixel_format", "color_space"],
+      required: ["codec", "pixel_format"],
       properties: {
-        codec: { type: "string", enum: ["h264"] },
+        codec: { type: "string", enum: ["h264", "prores"] },
         crf: { type: "integer", minimum: 0, maximum: 51 },
         preset: {
           type: "string",
@@ -68,8 +86,9 @@ export const renderRequestSchema = {
             "veryslow",
           ],
         },
-        pixel_format: { type: "string", enum: ["yuv420p"] },
         color_space: { type: "string", enum: ["bt709"] },
+        prores_profile: { type: "string", enum: ["4444"] },
+        pixel_format: { type: "string", enum: ["yuv420p", "yuva444p10le"] },
       },
     },
     time_limit_s: { type: "integer", minimum: 10, maximum: MAX_TIME_LIMIT_S },
@@ -127,7 +146,11 @@ export const MAX_CODE_CHARS = 40_000;
 // The most frames one check may draw when the request names them (EXG-006).
 export const MAX_CHECK_FRAMES = 16;
 
+export type ChecksEngine = "generated_component" | "callout_component";
+
 export type ChecksRequest = {
+  // Which contract the code follows. Without it: `generated_component`.
+  engine?: ChecksEngine;
   width: number;
   height: number;
   fps: number;
@@ -143,17 +166,59 @@ export const checksRequestSchema = {
   additionalProperties: false,
   required: ["width", "height", "fps", "frames", "resolved", "code"],
   properties: {
+    engine: { type: "string", enum: ["generated_component", "callout_component"] },
     width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 2 },
     fps: { type: "integer", minimum: 1, maximum: 60 },
-    frames: { type: "integer", minimum: 1, maximum: MAX_FRAMES },
+    frames: { type: "integer", minimum: 1, maximum: CALLOUT_MAX_FRAMES },
     resolved: { type: "object" },
     code: { type: "string", minLength: 1, maxLength: MAX_CODE_CHARS },
     at_frames: {
       type: "array",
       minItems: 1,
       maxItems: MAX_CHECK_FRAMES,
-      items: { type: "integer", minimum: 0, maximum: MAX_FRAMES - 1 },
+      items: { type: "integer", minimum: 0, maximum: CALLOUT_MAX_FRAMES - 1 },
     },
   },
 } as const;
+
+const BACKDROP = /^#[0-9a-fA-F]{6}$/;
+
+// The rules of a render request that depend on more than one field. The JSON schema above accepts
+// the widest request; this says which of those the service will draw. A readable message, or null.
+export function requestProblem(request: RenderRequest): string | null {
+  const { engine, encoding, frames, resolved } = request;
+  const callout = isCalloutEngine(engine);
+  if (!callout && frames > MAX_FRAMES) {
+    return `The engine "${engine}" draws at most ${MAX_FRAMES} frames.`;
+  }
+  if (encoding.codec === "h264") {
+    if (encoding.pixel_format !== "yuv420p") return "H.264 is drawn as yuv420p.";
+    if (encoding.crf === undefined || encoding.preset === undefined || encoding.color_space === undefined) {
+      return "H.264 needs crf, preset and color_space.";
+    }
+    if (encoding.prores_profile !== undefined) return "prores_profile belongs to the prores codec.";
+    if (callout && !BACKDROP.test(String(resolved["backdrop"] ?? ""))) {
+      return "An H.264 callout is a preview: resolved.backdrop must be a #RRGGBB colour, or the transparent areas would be black.";
+    }
+    return null;
+  }
+  if (!callout) return `Only the callout engines may be drawn as ProRes; "${engine}" is H.264 only.`;
+  if (encoding.prores_profile !== "4444" || encoding.pixel_format !== "yuva444p10le") {
+    return "ProRes needs prores_profile 4444 and pixel_format yuva444p10le.";
+  }
+  if (encoding.crf !== undefined || encoding.preset !== undefined) {
+    return "crf and preset belong to the h264 codec.";
+  }
+  if (resolved["backdrop"] !== undefined) return "A ProRes callout is transparent: resolved.backdrop is for previews only.";
+  return null;
+}
+
+// The rules of a check request that the JSON schema cannot hold.
+export function checksProblem(request: ChecksRequest): string | null {
+  const engine = request.engine ?? "generated_component";
+  if (engine !== "callout_component" && request.frames > MAX_FRAMES) {
+    return `The engine "${engine}" is checked at most ${MAX_FRAMES} frames long.`;
+  }
+  return null;
+}

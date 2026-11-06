@@ -22,12 +22,14 @@
     "@remotion/shapes": "4.0.540",
     "esbuild": "0.28.1",
     "fastify": "5.12.8",
+    "pngjs": "7.0.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "remotion": "4.0.540"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "@types/pngjs": "6.0.5",
     "@types/react": "19.3.0",
     "typescript": "5.9.3"
   }
