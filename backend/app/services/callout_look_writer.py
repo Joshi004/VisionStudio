@@ -65,7 +65,8 @@ line under the text, "ribbon" a bar on one side.
 with the accent colour, a larger size or a heavier weight.
 - "notes" is a short note on what makes these callouts belong together and with the graphics \
 look.
-- "reason" is one short sentence on why this look suits this video.
+- "reason" is one short sentence on why this look suits this video. It sits at the top level of \
+the answer, beside "look", not inside it.
 
 Use the graphics look you are given: the callouts keep its colours, fonts and pace. The video is \
 watched on a phone as well as on a computer, so the callouts stay clear and simple, and they \
@@ -75,11 +76,11 @@ never hide the presenter.
 
 {length_rule}"""
 
-_SHAPE: Final = """{"look": {"panel": "card", "corners": "soft", "entrance": "fade_up", \
+_SHAPE: Final = """{"reason": "A calm finance explainer: quiet cards that match its smooth \
+motion.", "look": {"panel": "card", "corners": "soft", "entrance": "fade_up", \
 "density": "balanced", "emphasis": "Numbers are larger and use the accent colour.", \
-"notes": "Rounded cards in the dark palette, entering together with the same short rise."}, \
-"reason": "A calm finance explainer: quiet cards that match its smooth motion."} (the values \
-here only show the form, never copy them)"""
+"notes": "Rounded cards in the dark palette, entering together with the same short rise."}} \
+(the values here only show the form, never copy them)"""
 
 
 def _instructions() -> str:
@@ -164,6 +165,13 @@ def check_answer(answer: dict[str, Any]) -> dict[str, Any]:
     look = answer.get("look")
     if not isinstance(look, dict):
         raise ValueError('The "look" was missing or was not an object.')
+    # The model often writes "reason" inside "look". The answer is the same, so it is accepted.
+    reason = answer.get("reason", look.get("reason"))
+    if not isinstance(reason, str):
+        raise ValueError(
+            'The "reason" was missing or was not text. It belongs at the top level of the '
+            'answer, beside "look", not inside it.'
+        )
     return {
         "look": {
             "panel": _choice(look, "panel", PANELS),
@@ -173,5 +181,5 @@ def check_answer(answer: dict[str, Any]) -> dict[str, Any]:
             "density": _choice(look, "density", DENSITIES),
             "notes": _text(look.get("notes"), "notes", NOTES_MAX_CHARS),
         },
-        "reason": _text(answer.get("reason"), "reason", REASON_MAX_CHARS),
+        "reason": _text(reason, "reason", REASON_MAX_CHARS),
     }
