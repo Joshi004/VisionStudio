@@ -45,6 +45,7 @@ class Project(Base):
         CheckConstraint("kind IN ('story', 'explainer')", name="kind_valid"),
         CheckConstraint("voice_track IN ('lines', 'continuous')", name="voice_track_valid"),
         CheckConstraint("caption_mode IN ('burned', 'ytt')", name="caption_mode_valid"),
+        CheckConstraint("callout_style IN ('boxes', 'motion')", name="callout_style_valid"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -78,6 +79,10 @@ class Project(Base):
     # read for an explainer, at render time, so they can be changed at any time.
     caption_mode: Mapped[str] = mapped_column(default="burned", server_default=text("'burned'"))
     callouts: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    # CMO-002. How the callouts are drawn: `boxes` (text boxes) or `motion` (small animated
+    # graphics). `motion` only on a continuous explainer with graphics and callouts on. Can be
+    # changed at any time.
+    callout_style: Mapped[str] = mapped_column(default="boxes", server_default=text("'boxes'"))
     # The words of the story the owner suggests a graphic for: `[{id, start, end, text}]`, with
     # `start` and `end` character positions in `script_text`. Only for a continuous explainer
     # with graphics on. NULL means none. See `services/graphic_suggestions`.
@@ -171,7 +176,7 @@ class Job(Base):
         # Graphics lab jobs, since revision 0079, and the five explainer graphics jobs, since
         # revision 0080, and the reading of a reference photo, since revision 0083, and the render
         # of one scene, since revision 0085, and the writing of thumbnail concepts, since
-        # revision 0086.
+        # revision 0086, and the writing of the callout look, since revision 0089.
         CheckConstraint(
             "type IN ('lab_image', 'lab_video', 'write_lab_video_prompt', 'lab_voice', "
             "'write_character_look_prompt', 'write_character_take_prompt', 'write_story_bible', "
@@ -194,7 +199,7 @@ class Job(Base):
             "'write_graphic_theme', 'write_shot_graphic_brief', "
             "'write_shot_graphic_component', 'write_shot_graphic_scene', "
             "'render_shot_graphic', 'describe_photo', 'render_scene', "
-            "'write_thumbnail_concepts')",
+            "'write_thumbnail_concepts', 'write_callout_look')",
             name="type_valid",
         ),
         CheckConstraint(
@@ -1520,6 +1525,105 @@ class ShotGraphicChoice(Base):
     scene_id: Mapped[str]
     shot_id: Mapped[str]
     brief_id: Mapped[int] = mapped_column(ForeignKey("shot_graphic_brief.id", ondelete="CASCADE"))
+    engine: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class CalloutLook(Base):
+    """One version of the look every motion callout of a project shares (CMO-002, revision 0089).
+
+    Follows the artifact provenance convention (DATABASE_STRUCTURE.md Section 2.1): every run is
+    a new row with the next `version`, and a stored row is never changed. `inputs` holds the
+    graphics look and the Story Bible it was written from, so staleness is worked out on read.
+    `content` is `{look, reason}`.
+    """
+
+    __tablename__ = "callout_look"
+    __table_args__ = (
+        CheckConstraint("source IN ('ai')", name="source_valid"),
+        UniqueConstraint("project_id", "version"),
+        Index("idx_callout_look_project", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    version: Mapped[int]
+    source: Mapped[str]
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any] = mapped_column(JSON)
+    content: Mapped[Any] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class CalloutGraphic(Base):
+    """One attempt of one engine for one callout (CMO-002, revision 0089).
+
+    `engine` is `generated_component` or `remotion_blocks`. `match_key` identifies a callout
+    across plan versions (its unit, phrase, type and number of items or sides). `attempt` counts
+    the attempts of one engine for a match key from 1, and nothing is replaced. `input` is what
+    the engine draws from (the component code or the block scene), `input_job_id` the model call
+    that wrote it and `repair_of` the attempt a repaired component was made from. `inputs`
+    records the resolved callout and its hash. Nothing writes this table until CMO-003.
+    """
+
+    __tablename__ = "callout_graphic"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
+        ),
+        UniqueConstraint("project_id", "match_key", "engine", "attempt"),
+        Index("idx_callout_graphic_project_key_engine", "project_id", "match_key", "engine"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    # The callout plan version the attempt was made for.
+    plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("callout_plan.id", ondelete="SET NULL"), default=None
+    )
+    callout_id: Mapped[str]
+    match_key: Mapped[str]
+    engine: Mapped[str]
+    attempt: Mapped[int]
+    repair_of: Mapped[int | None] = mapped_column(
+        ForeignKey("callout_graphic.id", ondelete="SET NULL"), default=None
+    )
+    input: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    input_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    preview_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("job.id", ondelete="SET NULL"), default=None
+    )
+    inputs: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    preview_path: Mapped[str | None] = mapped_column(default=None)
+    metrics: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    warnings: Mapped[Any | None] = mapped_column(JSON(none_as_null=True), default=None)
+    last_error: Mapped[str | None] = mapped_column(default=None)
+    failed_outright: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
+
+
+class CalloutGraphicChoice(Base):
+    """The version of a callout the owner chose (CMO-002, revision 0089).
+
+    One row per callout, named by its match key. Choosing Automatic deletes the row. Nothing
+    writes this table until CMO-004.
+    """
+
+    __tablename__ = "callout_graphic_choice"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ('generated_component', 'remotion_blocks')", name="engine_valid"
+        ),
+        UniqueConstraint("project_id", "match_key"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    match_key: Mapped[str]
     engine: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=utcnow, server_default=_CURRENT_TIMESTAMP)
 

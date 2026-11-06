@@ -304,6 +304,8 @@ Rules that go with it:
 
 **Update (CAP-003 SRT file download, 2026-11-05): no migration, no new table, no new column, no new job type, no new setting.** (1) **Each caption word of the frozen track gains an optional `raw`**: the word as the script has it, with its casing and punctuation (`"rates,"`), next to `text` (upper case, punctuation removed). It is written for every explainer render made from now on and is read as optional: a track without it is from before CAP-003 (`parse_track` gives `raw` None, and a `raw` that is not text is refused as unreadable). Nothing that burns or compares the track reads it. (2) **`GET /api/projects/{id}/story-renders/{render_number}/captions.srt`** is written on request and never stored, like the YTT file: `application/x-subrip`, `Content-Disposition: attachment`, file name `<slug of the project name>-render-<n>.srt`, made by the pure `services/caption_srt.py` from the stored track. The words are joined into sentence-sized cues (at most 2 lines of 42 characters, 1 to 7 s on screen, ended at `.`, `!`, `?` or `…`, a pause of 0.30 s or more, or a change of speech; none overlap). A track with no `raw` gives the same cues from the caption text, without the sentence marks. The 404 and 422 answers are those of the YTT file.
 
+**Update (CMO-002 callout style and callout look, 2026-11-06):** migration `0089`. **A continuous explainer with graphics on can choose motion callouts and get a callout look; every table and job type the whole motion callouts plan needs exists.** (1) **One new column on `project`** (Section 4.1): `callout_style` (TEXT, NOT NULL, default `'boxes'`, CHECK `boxes` or `motion`; every project made before this reads `boxes`). `PATCH /api/projects/{id}` may change it at any time for an explainer. `motion` is refused (422) unless the project is an explainer with a continuous voice, `graphics` on and `callouts` on, so a PATCH that switches `callouts` off on a `motion` project is refused unless it also sends `boxes`. (2) **Three new tables**, `callout_look` (Section 4.82), `callout_graphic` (4.83) and `callout_graphic_choice` (4.84). All three belong to a project and are deleted with it (`CASCADE`). Only `callout_look` is written in this phase; the other two are written from CMO-003 on. (3) **`job.type` gains `write_callout_look`** (one paid call on the story model, restart rule `never_rerun`): the CHECK is rebuilt in batch mode, so `job` now has sixty-two types. No row changes. (4) Preview files of `callout_graphic.preview_path` are stored under `media/<project_id>/`, which the project's deletion removes.
+
 
 ---
 
@@ -512,6 +514,14 @@ erDiagram
 | `shot_graphic` | `render_job_id` | `job.id` | Yes (the `render_shot_graphic` job; `SET NULL`). EXG-001 |
 | `shot_graphic_choice` | `project_id` | `project.id` | No (`CASCADE`). EXG-001 |
 | `shot_graphic_choice` | `brief_id` | `shot_graphic_brief.id` | No (`CASCADE`). EXG-001 |
+| `callout_look` | `project_id` | `project.id` | No (`CASCADE`). CMO-002 |
+| `callout_look` | `job_id` | `job.id` | Yes (the `write_callout_look` job; `SET NULL`). CMO-002 |
+| `callout_graphic` | `project_id` | `project.id` | No (`CASCADE`). CMO-002 |
+| `callout_graphic` | `plan_id` | `callout_plan.id` | Yes (the plan version the attempt was made for; `SET NULL`). CMO-002 |
+| `callout_graphic` | `repair_of` | `callout_graphic.id` | Yes (the attempt a repair was made from; `SET NULL`). CMO-002 |
+| `callout_graphic` | `input_job_id` | `job.id` | Yes (the model call that wrote the input; `SET NULL`). CMO-002 |
+| `callout_graphic` | `preview_job_id` | `job.id` | Yes (the `render_callout_preview` job; `SET NULL`). CMO-002 |
+| `callout_graphic_choice` | `project_id` | `project.id` | No (`CASCADE`). CMO-002 |
 | `narrator_voice` | `project_id` | `project.id` | No (`CASCADE`). PHASE-011 |
 | `narrator_voice` | `voice_id` | `voice.id` | Yes (the saved voice; `SET NULL`). PHASE-011 |
 | `narrator_voice` | `job_id` | `job.id` | Yes (the `design_voice` job of an `ai` version; `SET NULL`; NULL for a manual one). PHASE-011 |
@@ -650,6 +660,7 @@ One row per project. Since migration `0022` it holds only the name, the orientat
 | `ambience_enabled` | BOOLEAN | NOT NULL | `1` | MUSIC-012. Whether a render includes the ambience beds and the point sounds Stable Audio makes. On for every project, new and existing. `PATCH /api/projects/{id}` may change it at any time (a JSON `true` or `false`; anything else is refused with 422). It matters only while `music_enabled` is on, and it changes the render, not the placement: a render made with another value is out of date, the music is not placed again |
 | `caption_mode` | TEXT | NOT NULL | `'burned'` | Migration `0087` (CAP-001). How an explainer's captions are delivered, `CHECK (caption_mode IN ('burned', 'ytt'))`: `burned` (drawn on the picture) or `ytt` (nothing is drawn; the captions come as a file). It replaces the BOOLEAN `captions` (EXPLAINER-007), which `0087` dropped: a project that had captions on became `burned`, one that had them off became `ytt`. It is only read for an explainer, at render time. `PATCH /api/projects/{id}` may change it at any time for an explainer (`"burned"` or `"ytt"`; anything else, or any PATCH of a story, is refused with 422), and `POST /api/projects` keeps `burned` for a story. Every explainer's speeches get word timings (Section 4.68) and every explainer render freezes the full caption track, whatever the mode. Changing it never touches a stored render; it makes a render out of date only when its picture no longer fits (Section 5, `story_render`) |
 | `callouts` | BOOLEAN | NOT NULL | `1` | EXPLAINER-007. Whether an explainer's render draws callouts. The same rules as `caption_mode` |
+| `callout_style` | TEXT | NOT NULL | `'boxes'` | Migration `0089` (CMO-002). How an explainer's callouts are drawn, `CHECK (callout_style IN ('boxes', 'motion'))`: `boxes` (short text boxes) or `motion` (small animated graphics in the video's graphics look). `motion` is allowed only for an explainer with `voice_track = continuous`, `graphics` on and `callouts` on (`validate_project`), so it is never stored on a project that cannot have it. `PATCH /api/projects/{id}` may change it at any time for an explainer; `POST /api/projects` keeps `boxes` for a story. Nothing reads it yet in this phase |
 | `voice_track` | TEXT | NOT NULL | `'lines'` | `lines` \| `continuous` — how an explainer's speech is made (FLOW-002). Chosen when the project is created and never changed: `PATCH /api/projects/{id}` refuses it. `lines`: each line is its own speech (what every project did until now). `continuous`: one voice take per scene, the picture cut on top of it. A new explainer defaults to `continuous`; a story, and every project made before this column, is `lines` |
 | `presenter_delivery` | TEXT | NULL | — | FLOW-002. The owner's text that steers the voice of every take of a `continuous` explainer, at most 500 characters. NULL means the Story Bible's `storytelling_style.narration`, or a fixed default. Set only on a continuous explainer. `PATCH /api/projects/{id}` may change it at any time for one (a blank text clears it; any other project gets 422) |
 | `presenter_staging` | TEXT | NULL | — | Migration `0081`. The owner's text for how an explainer's presenter is placed and moves on camera (for example "seated at a desk, still"), at most 500 characters, trimmed; a blank text is stored as NULL. NULL means the presenter stands. Set only on an explainer (any other project gets 422). `PATCH /api/projects/{id}` may change it at any time. It is sent to the definition of every explainer shot as `PRESENTER STAGING`, and each definition records its SHA-256 in `inputs.presenter_staging.sha256`; a presenter shot whose recorded hash differs from the current text is out of date (B-roll is not). A studio designed from the script (no set chosen) is designed with it, but is not made out of date when it changes |
@@ -680,6 +691,8 @@ CREATE TABLE project (
     caption_mode       TEXT NOT NULL DEFAULT 'burned'
         CHECK (caption_mode IN ('burned', 'ytt')),
     callouts           BOOLEAN NOT NULL DEFAULT 1,
+    callout_style      TEXT NOT NULL DEFAULT 'boxes'
+        CHECK (callout_style IN ('boxes', 'motion')),
     voice_track        TEXT NOT NULL DEFAULT 'lines'
         CHECK (voice_track IN ('lines', 'continuous')),
     presenter_delivery TEXT,
@@ -3852,6 +3865,114 @@ CREATE INDEX idx_thumbnails_project ON thumbnails (project_id);
 CREATE INDEX idx_thumbnails_lab_run ON thumbnails (lab_run_id);
 ```
 
+### 4.82 `callout_look`
+
+*Added in CMO-002 (migration `0089`).* One version of the look every motion callout of a project shares: the panel, the corners, the entrance, how a key word stands out, the density and a note on what makes the callouts belong together, written once for the video (CM-7). It follows Section 2.1: every run is a new row with the next `version`, and a stored row is never changed. `inputs` holds the graphics look and the Story Bible the version was written from, so it is out of date when the newest graphics look is not the recorded one (worked out on read, never stored). `content` is `{look, reason}`. The `write_callout_look` job writes it (Section 5, `job.input` and `job.output` for a `write_callout_look` job); the only `source` is `ai`.
+
+**JSON shapes.**
+
+- `inputs` is `{"artifacts": [{"kind": "graphic_theme", "id": 3, "version": 2}, {"kind": "story_bible", "id": 12, "version": 3}], "feedback": {"text": "...", "base_version": 1}}`. `feedback` is there only when the version was made with the owner's note (`user_feedback`). The version is **out of date** when the newest graphics look is not the recorded one (`provenance.same_row`), worked out on every read in `services/callout_look.py`; nothing is stored.
+- `content` is `{"look": {"panel": "card", "corners": "soft", "entrance": "fade_up", "emphasis": "...", "density": "balanced", "notes": "..."}, "reason": "..."}`. `panel` is `none`, `card`, `glass`, `underline` or `ribbon`; `corners` is `sharp`, `soft` or `round`; `entrance` is `fade_up`, `wipe`, `pop` or `draw`; `density` is `airy`, `balanced` or `compact`; `emphasis` is at most 160 characters, `notes` at most 300 and `reason` at most 200 (`services/callout_look_writer.py`).
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (project_id, version)` |
+| `version` | INTEGER | NOT NULL | — | From 1, for each project |
+| `source` | TEXT | NOT NULL | — | `ai` (`CHECK`) |
+| `job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote it. `ON DELETE SET NULL` |
+| `inputs` | JSON | NOT NULL | — | What the version was built from (the graphics look and the Story Bible) |
+| `content` | JSON | NOT NULL | — | `{look, reason}` |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE callout_look (
+    id         INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    version    INTEGER NOT NULL,
+    source     TEXT NOT NULL CHECK (source IN ('ai')),
+    job_id     INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs     JSON NOT NULL,
+    content    JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, version)
+);
+CREATE INDEX idx_callout_look_project ON callout_look (project_id);
+```
+
+### 4.83 `callout_graphic`
+
+*Added in CMO-002 (migration `0089`); nothing writes it until CMO-003.* One attempt of one engine for one callout. Every callout of a `motion` project gets both a **generated component** and a **block scene**, and each attempt is a row, like `shot_graphic`. `engine` is `generated_component` or `remotion_blocks` (`CHECK`). `match_key` is a hash of the callout's scene, unit, phrase, type and number of items or sides, so an attempt can be used for any callout of any plan version with the same key (a manual edit of the words keeps its code). `attempt` counts the attempts of one engine for a match key from 1, and nothing is replaced. `repair_of` names the attempt a repaired component was made from. `input` is the component code or the block scene, `inputs` the resolved callout and its hash, `preview_path` the H.264 preview under `media/<project_id>/`, and `failed_outright` is set on the newest attempt of a version that nothing more will be tried for.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (project_id, match_key, engine, attempt)` |
+| `plan_id` | INTEGER, FK → `callout_plan.id` | NULL | — | The plan version the attempt was made for. `ON DELETE SET NULL` |
+| `callout_id` | TEXT | NOT NULL | — | The callout's id in that plan |
+| `match_key` | TEXT | NOT NULL | — | See above |
+| `engine` | TEXT | NOT NULL | — | `generated_component` or `remotion_blocks` (`CHECK`) |
+| `attempt` | INTEGER | NOT NULL | — | From 1, for each engine of a match key |
+| `repair_of` | INTEGER, FK → `callout_graphic.id` | NULL | — | The attempt this repairs. `ON DELETE SET NULL` |
+| `input` | JSON | NULL | — | The component code or the block scene |
+| `input_job_id` | INTEGER, FK → `job.id` | NULL | — | The job that wrote `input`. `ON DELETE SET NULL` |
+| `preview_job_id` | INTEGER, FK → `job.id` | NULL | — | The `render_callout_preview` job. `ON DELETE SET NULL` |
+| `inputs` | JSON | NULL | — | The resolved callout and its hash |
+| `preview_path` | TEXT | NULL | — | The preview, under the project's media folder |
+| `metrics` | JSON | NULL | — | What was measured on the preview |
+| `warnings` | JSON | NULL | — | What the checks found that is not an error |
+| `last_error` | TEXT | NULL | — | A failure no job holds, or the errors of an outright failure |
+| `failed_outright` | BOOLEAN | NOT NULL | `0` | See above |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE callout_graphic (
+    id              INTEGER PRIMARY KEY,
+    project_id      INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    plan_id         INTEGER REFERENCES callout_plan(id) ON DELETE SET NULL,
+    callout_id      TEXT NOT NULL,
+    match_key       TEXT NOT NULL,
+    engine          TEXT NOT NULL CHECK (engine IN ('generated_component', 'remotion_blocks')),
+    attempt         INTEGER NOT NULL,
+    repair_of       INTEGER REFERENCES callout_graphic(id) ON DELETE SET NULL,
+    input           JSON,
+    input_job_id    INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    preview_job_id  INTEGER REFERENCES job(id) ON DELETE SET NULL,
+    inputs          JSON,
+    preview_path    TEXT,
+    metrics         JSON,
+    warnings        JSON,
+    last_error      TEXT,
+    failed_outright BOOLEAN NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, match_key, engine, attempt)
+);
+CREATE INDEX idx_callout_graphic_project_key_engine ON callout_graphic (project_id, match_key, engine);
+```
+
+### 4.84 `callout_graphic_choice`
+
+*Added in CMO-002 (migration `0089`); nothing writes it until CMO-004.* The version of a callout the owner chose to use in the video, instead of the rule's pick (CM-4). One row per callout, named by its `match_key`; a choice counts only while the callout keeps that key. Choosing Automatic deletes the row.
+
+| Column | Type | Null | Default | Description |
+|---|---|---|---|---|
+| `id` | INTEGER | NOT NULL | auto | Primary key |
+| `project_id` | INTEGER, FK → `project.id` | NOT NULL | — | `ON DELETE CASCADE`. `UNIQUE (project_id, match_key)` |
+| `match_key` | TEXT | NOT NULL | — | The callout's match key |
+| `engine` | TEXT | NOT NULL | — | `generated_component` or `remotion_blocks` (`CHECK`) |
+| `created_at` | DATETIME | NOT NULL | now | |
+
+```sql
+CREATE TABLE callout_graphic_choice (
+    id         INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    match_key  TEXT NOT NULL,
+    engine     TEXT NOT NULL CHECK (engine IN ('generated_component', 'remotion_blocks')),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (project_id, match_key)
+);
+```
+
 ---
 
 ## 5. JSON column shapes
@@ -4997,6 +5118,10 @@ One job per press of **Run** on the callout plan (or per pipeline run). It belon
 ### `job.input` and `job.output` for a `write_graphic_theme` job (EXG-002)
 
 One job per press of **Run**, **Write again** or **Write again with a note** on the graphics look (or per pipeline run). It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, on the **story model**, and is deduped per project (a press while one waits or runs returns that job; a note is then refused with 422, because it must not be dropped silently). `input` is a copy of everything the job needs, taken when it was queued: `bible` (the Story Bible's content), `orientation`, `saved_inputs` (the provenance the version will carry) and, for a note, `feedback` (`{"text", "base_version", "previous"}`, where `previous` is the earlier version's `{theme, reason}`). When the job starts, `server_url`, `endpoint` and `calls_sent.theme` (`instructions_sha256` and the exact `request`) are added. There is **one call**, with the shared at-most-two-attempts rule of `jobs/llm_call.py`: an answer with an unknown palette, background or motion, a mood over 40 characters, or a reason over 200 is sent back once with the reason. An accent that cannot be read never fails the job: the palette's default is stored with a note. `output` is `{"calls": {"theme": {...attempts...}}, "usage": {...}, "graphic_theme_id", "version", "seconds"}`. A successful job saves its row and finishes in **one transaction**. Nothing paid starts by itself: it starts only from `POST /api/projects/{id}/graphic-theme/run` or a pipeline run, and only for a continuous explainer with graphics on (422 otherwise).
+
+### `job.input` and `job.output` for a `write_callout_look` job (CMO-002)
+
+One job per press of **Write the look**, **Write again** or **Write again with a note** on the callout look. It belongs to a project, is `provider='llm'` with the restart rule `never_rerun`, on the **story model**, and is deduped per project (a press while one waits or runs is refused with 422, "The callout look is already being written."). `input` is a copy of everything the job needs, taken when it was queued: `bible` (the Story Bible's content), `graphic_theme` (the graphics look's content), `colours` (its resolved colours), `orientation`, `saved_inputs` (the provenance the version will carry: `artifacts` with `graphic_theme` and `story_bible`) and, for a note, `feedback` (`{"text", "base_version", "previous"}`, where `previous` is the earlier version's `{look, reason}`). When the job starts, `server_url`, `endpoint` and `calls_sent.look` (`instructions_sha256` and the exact `request`) are added. There is **one call**, with the shared at-most-two-attempts rule of `jobs/llm_call.py`: an answer with an unknown panel, corners, entrance or density, an empty or over-long emphasis (160), notes (300) or reason (200), or one that was cut off, is sent back once with the reason. A bad answer stores nothing. `output` is `{"calls": {"look": {...attempts...}}, "usage": {...}, "callout_look_id", "version", "seconds"}`. A successful job saves its row and finishes in **one transaction**. Nothing paid starts by itself: it starts only from `POST /api/projects/{id}/callout-look/run`, and only for a continuous explainer with graphics and callouts on and `callout_style='motion'`, once the Story Bible and an up-to-date graphics look exist (422 otherwise).
 
 ### `job.input` and `job.output` for a `write_shot_graphic_brief` job (EXG-004)
 

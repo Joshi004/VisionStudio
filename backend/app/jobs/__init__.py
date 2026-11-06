@@ -89,6 +89,7 @@ def register_handlers() -> None:
     from app.jobs.time_lab_graphic_words import TimeLabGraphicWordsHandler
     from app.jobs.time_lab_speech_words import TimeLabSpeechWordsHandler
     from app.jobs.time_speech_words import TimeSpeechWordsHandler
+    from app.jobs.write_callout_look import WriteCalloutLookHandler
     from app.jobs.write_callout_plan import WriteCalloutPlanHandler
     from app.jobs.write_character_look_prompt import WriteCharacterLookPromptHandler
     from app.jobs.write_character_take_prompt import WriteCharacterTakePromptHandler
@@ -158,6 +159,7 @@ def register_handlers() -> None:
     handlers.register(PreviewMusicMixHandler())
     handlers.register(TimeSpeechWordsHandler())
     handlers.register(WriteCalloutPlanHandler())
+    handlers.register(WriteCalloutLookHandler())
     handlers.register(TimeLabSpeechWordsHandler())
     handlers.register(RenderAvTestHandler())
     handlers.register(WriteLabGraphicBriefHandler())

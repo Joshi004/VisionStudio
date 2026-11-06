@@ -34,6 +34,7 @@ SpeechMode = Literal["both", "no_dialogue", "no_narration"]
 ProjectKind = Literal["story", "explainer"]
 VoiceTrack = Literal["lines", "continuous"]
 CaptionMode = Literal["burned", "ytt"]
+CalloutStyle = Literal["boxes", "motion"]
 
 # SQLite integers are 64-bit. Larger ids cannot exist, and must not reach the database.
 _MAX_PROJECT_ID = 2**63 - 1
@@ -57,6 +58,9 @@ class ProjectCreate(BaseModel):
     # them.
     caption_mode: CaptionMode = "burned"
     callouts: StrictBool = True
+    # How callouts are drawn (CMO-002). `motion` only for a continuous explainer with graphics
+    # and callouts on; any other project that asks for it is refused.
+    callout_style: CalloutStyle = "boxes"
     # How an explainer's speech is made (FLOW-002). Left out, an explainer gets `continuous`. A
     # story is always `lines`. The delivery text is for a continuous explainer only.
     voice_track: VoiceTrack | None = None
@@ -96,6 +100,9 @@ class ProjectUpdate(BaseModel):
     # (EXPLAINER-007). Only an explainer can change them, at any time.
     caption_mode: CaptionMode | None = None
     callouts: StrictBool | None = None
+    # How callouts are drawn (CMO-002). `motion` needs callouts on, so switching callouts off on
+    # a motion project has to send `boxes` too.
+    callout_style: CalloutStyle | None = None
     # The text that steers a continuous explainer's voice (FLOW-002). Null or blank clears it.
     presenter_delivery: StrictStr | None = None
     # How an explainer's presenter is placed and moves on camera. Null or blank clears it.
@@ -176,6 +183,8 @@ class ProjectDetail(BaseModel):
     # `ytt` (a caption file). Whether it gets callouts. A story never reads them.
     caption_mode: CaptionMode
     callouts: bool
+    # How callouts are drawn: `boxes` (text boxes) or `motion` (small animated graphics).
+    callout_style: CalloutStyle
     # How the speech is made: `lines` for a story and for an explainer made before FLOW-002.
     voice_track: VoiceTrack
     # The owner's voice text for a continuous explainer. Null when there is none.
@@ -224,6 +233,11 @@ def _caption_mode(project: Project) -> CaptionMode:
     return cast(CaptionMode, project.caption_mode)
 
 
+def _callout_style(project: Project) -> CalloutStyle:
+    # The database CHECK constraint keeps this to the two allowed values.
+    return cast(CalloutStyle, project.callout_style)
+
+
 def _review_points(project: Project) -> list[ReviewPointKey]:
     # Stored normalized, but read defensively: only known keys are ever returned.
     stored = project.review_points if isinstance(project.review_points, list) else []
@@ -261,6 +275,7 @@ async def _detail(session: AsyncSession, project: Project) -> ProjectDetail:
         ambience_enabled=project.ambience_enabled,
         caption_mode=_caption_mode(project),
         callouts=project.callouts,
+        callout_style=_callout_style(project),
         voice_track=_voice_track(project),
         presenter_delivery=project.presenter_delivery,
         presenter_staging=project.presenter_staging,
@@ -338,6 +353,7 @@ async def create_project(body: ProjectCreate, session: SessionDep) -> ProjectDet
             presenter_staging=body.presenter_staging,
             presenter_outfit=body.presenter_outfit,
             presenter_named_look_id=body.presenter_named_look_id,
+            callout_style=body.callout_style,
         )
     except projects_service.ProjectValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

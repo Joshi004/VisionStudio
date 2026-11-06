@@ -50,6 +50,15 @@ CAPTION_BURNED: Final = "burned"
 CAPTION_YTT: Final = "ytt"
 CAPTION_MODES: Final = (CAPTION_BURNED, CAPTION_YTT)
 CAPTION_MODE_MESSAGE: Final = "Captions must be burned into the video or a YouTube caption file."
+# How an explainer's callouts are drawn (CMO-002). `boxes`: short text boxes. `motion`: small
+# animated graphics, only for a continuous explainer with graphics and callouts on.
+CALLOUT_BOXES: Final = "boxes"
+CALLOUT_MOTION: Final = "motion"
+CALLOUT_STYLES: Final = (CALLOUT_BOXES, CALLOUT_MOTION)
+CALLOUT_STYLE_MESSAGE: Final = "Callouts must be drawn as boxes or as motion graphics."
+CALLOUT_MOTION_ONLY_MESSAGE: Final = (
+    "Motion callouts are only for a continuous explainer with graphics and callouts on."
+)
 # The presenter delivery text is sent to the speech model as the take's instruction.
 DELIVERY_MAX_CHARS: Final = speech_synthesizer.INSTRUCTION_MAX_CHARS
 # How an explainer's presenter is placed and moves on camera, sent to the shot prompts.
@@ -123,6 +132,7 @@ _FIELD_LABELS: Final[Mapping[str, str]] = {
     "ambience_enabled": "Ambience",
     "caption_mode": "Captions",
     "callouts": "Callouts",
+    "callout_style": "Callout style",
     "presenter_delivery": "Presenter delivery",
     "presenter_staging": "Presenter staging",
     "presenter_outfit": "Presenter outfit",
@@ -138,7 +148,7 @@ _NULLABLE_FIELDS: Final = frozenset(
     )
 )
 # The switches only an explainer has (EXPLAINER-007). They can be changed at any time.
-_EXPLAINER_SWITCHES: Final = frozenset(("caption_mode", "callouts"))
+_EXPLAINER_SWITCHES: Final = frozenset(("caption_mode", "callouts", "callout_style"))
 
 
 class ProjectValidationError(ValueError):
@@ -237,6 +247,16 @@ def validate_project(project: Project) -> None:
         project.kind != KIND_EXPLAINER or project.voice_track != VOICE_CONTINUOUS
     ):
         raise ProjectValidationError(GRAPHICS_ONLY_MESSAGE)
+    if project.callout_style not in CALLOUT_STYLES:
+        raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
+    # Written out here: `graphic_theme.wanted` says the same, but that module imports this one.
+    if project.callout_style == CALLOUT_MOTION and not (
+        project.kind == KIND_EXPLAINER
+        and project.voice_track == VOICE_CONTINUOUS
+        and project.graphics
+        and project.callouts
+    ):
+        raise ProjectValidationError(CALLOUT_MOTION_ONLY_MESSAGE)
 
 
 def _normalise_name(value: str) -> str:
@@ -283,6 +303,7 @@ async def create_project(
     presenter_staging: str | None = None,
     presenter_outfit: str | None = None,
     presenter_named_look_id: int | None = None,
+    callout_style: str = CALLOUT_BOXES,
 ) -> Project:
     """Creates a project with the orientation's defaults (ANALYSIS.md Section 4.4) and commits.
     The speech mode, the kind and the voice track are set here and never changed afterwards.
@@ -298,6 +319,9 @@ async def create_project(
     `presenter_named_look_id` is instead one of the presenter's saved outfits (a named look of
     the Character Lab): it cannot be sent together with `presenter_outfit`.
 
+    `callout_style` (CMO-002) is `boxes` unless sent as `motion`, which is refused unless the
+    project is a continuous explainer with graphics and callouts on.
+
     `graphics` (EXG-001) is on by default for a continuous explainer and off for every other
     project; asking for it on any other project is refused.
 
@@ -311,6 +335,8 @@ async def create_project(
         raise ProjectValidationError("Kind must be story or explainer.")
     if caption_mode not in CAPTION_MODES:
         raise ProjectValidationError(CAPTION_MODE_MESSAGE)
+    if callout_style not in CALLOUT_STYLES:
+        raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
     if voice_track is not None and voice_track not in VOICE_TRACKS:
         raise ProjectValidationError("Voice must be lines or continuous.")
     if kind == KIND_EXPLAINER:
@@ -369,6 +395,7 @@ async def create_project(
         ambience_enabled=True,
         caption_mode=caption_mode if kind == KIND_EXPLAINER else CAPTION_BURNED,
         callouts=callouts if kind == KIND_EXPLAINER else True,
+        callout_style=callout_style,
         voice_track=voice_track,
         presenter_delivery=delivery,
         presenter_staging=staging,
@@ -561,6 +588,8 @@ def _prepare_value(field: str, value: object) -> object:
         raise ProjectValidationError(CAPTION_MODE_MESSAGE)
     if field == "callouts" and not isinstance(value, bool):
         raise ProjectValidationError("Callouts must be on or off.")
+    if field == "callout_style" and value not in CALLOUT_STYLES:
+        raise ProjectValidationError(CALLOUT_STYLE_MESSAGE)
     return value
 
 

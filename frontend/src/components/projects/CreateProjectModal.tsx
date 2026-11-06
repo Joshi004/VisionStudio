@@ -19,6 +19,8 @@ import { useLibraryEnvironments } from "../../api/environmentLab";
 import { describeError } from "../../api/errors";
 import { useCreateProject } from "../../api/projects";
 import { PresenterOutfitField } from "./PresenterOutfitField";
+import { CALLOUT_STYLES, isCalloutStyle } from "./calloutStyles";
+import type { CalloutStyle } from "./calloutStyles";
 import { CAPTION_MODES, isCaptionMode } from "./captionModes";
 import type { CaptionMode } from "./captionModes";
 import { PROJECT_KINDS, STAGING_MAX_CHARS, isProjectKind } from "./projectKinds";
@@ -130,6 +132,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [setId, setSetId] = useState<string | null>(null);
   const [captionMode, setCaptionMode] = useState<CaptionMode>("burned");
   const [callouts, setCallouts] = useState(true);
+  const [calloutStyle, setCalloutStyle] = useState<CalloutStyle>("boxes");
   const [voiceTrack, setVoiceTrack] = useState<VoiceTrack>("continuous");
   const [delivery, setDelivery] = useState("");
   const [staging, setStaging] = useState("");
@@ -137,6 +140,10 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
   const [outfitId, setOutfitId] = useState<number | null>(null);
   const [graphics, setGraphics] = useState(true);
   const [name, setName] = useState("");
+
+  // Motion callouts are only for a continuous explainer with graphics and callouts on.
+  const canChooseCalloutStyle =
+    kind === "explainer" && voiceTrack === "continuous" && graphics && callouts;
 
   const canCreate =
     orientation !== null && name.trim() !== "" && (kind === "story" || presenterId !== null);
@@ -156,6 +163,7 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
         set_environment_id: explainer && setId !== null ? Number(setId) : null,
         caption_mode: explainer ? captionMode : "burned",
         callouts: explainer ? callouts : true,
+        callout_style: canChooseCalloutStyle ? calloutStyle : "boxes",
         // A story sends neither: it is always "lines" and has no delivery text.
         voice_track: explainer ? voiceTrack : undefined,
         presenter_delivery:
@@ -389,6 +397,33 @@ function CreateProjectForm({ onClose }: { onClose: () => void }) {
                 checked={callouts}
                 onChange={(event) => setCallouts(event.currentTarget.checked)}
               />
+              {canChooseCalloutStyle && (
+                <Radio.Group
+                  label="Callout style"
+                  value={calloutStyle}
+                  onChange={(value) => {
+                    if (isCalloutStyle(value)) {
+                      setCalloutStyle(value);
+                    }
+                  }}
+                >
+                  <Stack mt="xs" gap="xs">
+                    {CALLOUT_STYLES.map((option) => (
+                      <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                        <Group wrap="nowrap" align="flex-start">
+                          <Radio.Indicator />
+                          <Stack gap={2}>
+                            <Text fw={500}>{option.label}</Text>
+                            <Text size="sm" c="dimmed">
+                              {option.description}
+                            </Text>
+                          </Stack>
+                        </Group>
+                      </Radio.Card>
+                    ))}
+                  </Stack>
+                </Radio.Group>
+              )}
               <Text size="xs" c="dimmed">
                 You can change both later in the project settings.
               </Text>

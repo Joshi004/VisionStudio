@@ -18,6 +18,7 @@ import {
 import { useProjectCast } from "../../api/projectCast";
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
 import { capitalise } from "../../format";
+import { CALLOUT_STYLES, isCalloutStyle } from "./calloutStyles";
 import { CAPTION_MODES, isCaptionMode } from "./captionModes";
 import { PresenterOutfitField } from "./PresenterOutfitField";
 import { STAGING_MAX_CHARS, projectKindLabel } from "./projectKinds";
@@ -53,8 +54,23 @@ export function ProjectSettingsForm({
   const changes = changedFields(project, draft);
   const unchanged = Object.keys(changes).length === 0;
 
+  // Motion callouts are only for a continuous explainer with graphics and callouts on.
+  const canChooseCalloutStyle =
+    project.voice_track === "continuous" && project.graphics && draft.callouts;
+
   function edit<K extends keyof Draft>(field: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
+    onEdit();
+  }
+
+  function editCallouts(on: boolean) {
+    // Motion callouts need callouts on, so switching them off puts the style back to boxes in
+    // the same save.
+    setDraft((current) => ({
+      ...current,
+      callouts: on,
+      callout_style: on ? current.callout_style : "boxes",
+    }));
     onEdit();
   }
 
@@ -280,8 +296,35 @@ export function ProjectSettingsForm({
               <Switch
                 label="Callouts"
                 checked={draft.callouts}
-                onChange={(event) => edit("callouts", event.currentTarget.checked)}
+                onChange={(event) => editCallouts(event.currentTarget.checked)}
               />
+              {canChooseCalloutStyle && (
+                <Radio.Group
+                  label="Callout style"
+                  value={draft.callout_style}
+                  onChange={(value) => {
+                    if (isCalloutStyle(value)) {
+                      edit("callout_style", value);
+                    }
+                  }}
+                >
+                  <Stack mt="xs" gap="xs">
+                    {CALLOUT_STYLES.map((option) => (
+                      <Radio.Card key={option.value} value={option.value} p="md" radius="md">
+                        <Group wrap="nowrap" align="flex-start">
+                          <Radio.Indicator />
+                          <Stack gap={2}>
+                            <Text fw={500}>{option.label}</Text>
+                            <Text size="sm" c="dimmed">
+                              {option.description}
+                            </Text>
+                          </Stack>
+                        </Group>
+                      </Radio.Card>
+                    ))}
+                  </Stack>
+                </Radio.Group>
+              )}
               <Text size="xs" c="dimmed">
                 Both apply when the video is rendered, so they can be changed at any time without
                 making anything again. A change marks the videos it no longer fits as out of date.

@@ -1,4 +1,5 @@
 import type { ProjectDetail, ProjectUpdate } from "../../api/projects";
+import type { CalloutStyle } from "./calloutStyles";
 import type { CaptionMode } from "./captionModes";
 
 export type NumberDraft = number | string;
@@ -18,6 +19,8 @@ export type Draft = {
   caption_mode: CaptionMode;
   /** Whether an explainer's render draws callouts (EXPLAINER-007). */
   callouts: boolean;
+  /** How callouts are drawn: simple boxes or motion graphics (CMO-002). */
+  callout_style: CalloutStyle;
   /** The text that steers a continuous explainer's voice (FLOW-002). Empty means none. */
   presenter_delivery: string;
   /** How an explainer's presenter is placed and moves on camera. Empty means none. */
@@ -42,6 +45,7 @@ export function initialDraft(project: ProjectDetail): Draft {
     ambience_enabled: project.ambience_enabled,
     caption_mode: project.caption_mode,
     callouts: project.callouts,
+    callout_style: project.callout_style,
     presenter_delivery: project.presenter_delivery ?? "",
     presenter_staging: project.presenter_staging ?? "",
     presenter_outfit: project.presenter_outfit ?? "",
@@ -71,6 +75,9 @@ export function changedFields(project: ProjectDetail, draft: Draft): ProjectUpda
   }
   if (draft.callouts !== saved.callouts) {
     changes.callouts = draft.callouts;
+  }
+  if (draft.callout_style !== saved.callout_style) {
+    changes.callout_style = draft.callout_style;
   }
   const delivery = draft.presenter_delivery.trim();
   if (delivery !== saved.presenter_delivery.trim()) {
