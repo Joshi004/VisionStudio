@@ -169,6 +169,15 @@ STEPS: Final[tuple[Step, ...]] = (
     # is written from the Story Bible alone. Skipped as complete for any other project. Nothing
     # after it waits for it yet; the graphics will (EXG-005).
     Step("graphic_theme", "Design the graphics look", ("story_bible",)),
+    # CMO-006: the callout look and both versions of every callout of a motion project. It needs
+    # the callout plan and the graphics look. Skipped as complete for any project whose callouts
+    # are not drawn as motion graphics. The renders wait for it: a render is refused while a
+    # callout has no graphic (`story_renders.callout_gate`).
+    Step(
+        "callout_graphics",
+        "Make the callout graphics",
+        ("callout_plan", "graphic_theme"),
+    ),
     Step("shot_plans", "Plan the shots", ("speech_synthesis", "scene_staging"), kind=SCENE),
     # EXG-004: the brief of each graphic shot the cut planner chose, written from the shot's words
     # and the sentences around them. Skipped as complete for any project that is not a continuous
@@ -221,7 +230,7 @@ STEPS: Final[tuple[Step, ...]] = (
     Step(
         "scene_render",
         "Render the scenes",
-        ("shot_generation", "graphics", "callout_plan", "shot_plans"),
+        ("shot_generation", "graphics", "callout_plan", "callout_graphics", "shot_plans"),
         kind=SCENE,
         whole=("shot_plans",),
     ),
@@ -234,7 +243,11 @@ STEPS: Final[tuple[Step, ...]] = (
         "Place the music",
         ("music_generation", "shot_generation", "graphics"),
     ),
-    Step("render", "Render the video", ("shot_generation", "music_placement", "graphics")),
+    Step(
+        "render",
+        "Render the video",
+        ("shot_generation", "music_placement", "graphics", "callout_graphics"),
+    ),
 )
 
 STEP_KEYS: Final = tuple(step.key for step in STEPS)

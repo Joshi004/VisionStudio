@@ -11,8 +11,9 @@ of times.
 
 One status per step, the first rule that fits (`step_status`):
 
-1. `off`: the step is switched off for the project (the music steps with music off, and the
-   word timings of a story or of an explainer with captions and callouts both off).
+1. `off`: the step is switched off for the project (the music steps with music off, the
+   word timings of a story or of an explainer with captions and callouts both off, and the
+   callout graphics of a project whose callouts are not motion graphics).
 2. `running`: a target has work going on (a job queued or running, or its follow-on work is
    about to show up).
 3. `attention`: a target failed and nothing is going on for it.
@@ -34,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Job, Project
 from app.jobs import store
 from app.services import activity as activity_service
-from app.services import callout_plan, graphic_theme, word_timings
+from app.services import callout_look, callout_plan, graphic_theme, word_timings
 from app.services import story_pipeline as pipeline
 from app.services.story_pipeline import STEP_KEYS, STEPS, RunOptions, Target
 from app.services.story_pipeline_targets import ADAPTERS
@@ -69,6 +70,10 @@ CALLOUT_PLAN_STEP: Final = "callout_plan"
 # (EXG-002, EXG-004, EXG-005).
 GRAPHICS_STEPS: Final = ("graphic_theme", "graphic_briefs", "graphics")
 
+# The step that is switched off for every project whose callouts are not drawn as motion graphics
+# (CMO-006).
+CALLOUT_GRAPHICS_STEP: Final = "callout_graphics"
+
 # The group each step is shown in.
 GROUPS: Final[dict[str, str]] = {
     "story_bible": "story",
@@ -94,6 +99,7 @@ GROUPS: Final[dict[str, str]] = {
     "graphic_theme": "graphics",
     "graphic_briefs": "graphics",
     "graphics": "graphics",
+    "callout_graphics": "graphics",
     "music_bible": "music",
     "music_themes": "music",
     "music_plan": "music",
@@ -284,6 +290,7 @@ async def build(session: AsyncSession, project: Project) -> Board:
             or (step.key == WORD_TIMINGS_STEP and not word_timings.wanted(project))
             or (step.key == CALLOUT_PLAN_STEP and not callout_plan.wanted(project))
             or (step.key in GRAPHICS_STEPS and not graphic_theme.wanted(project))
+            or (step.key == CALLOUT_GRAPHICS_STEP and not callout_look.wanted(project))
         )
         needs_done = all(statuses[key] in ("done", "off") for key in step.needs)
         counts: StepCounts | None = (

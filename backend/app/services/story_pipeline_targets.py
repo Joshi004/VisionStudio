@@ -31,6 +31,8 @@ from app.db.models import Job, Project, ProjectMissingLibraryItem
 from app.db.types import utcnow
 from app.jobs import store
 from app.services import (
+    callout_graphics,
+    callout_look,
     callout_plan,
     character_definitions,
     character_images,
@@ -1734,6 +1736,81 @@ async def _call_graphic_theme(session: AsyncSession, project: Project, options: 
     return await graphic_theme.start_run(session, project)
 
 
+# --- The callout graphics (CMO-006) -----------------------------------------------------------
+
+# The target of the callout look. Every callout target waits for it.
+_CALLOUT_LOOK_KEY: Final = "callout_look"
+
+
+def _callout_key(callout_id: str) -> str:
+    return f"callout:{callout_id}"
+
+
+async def _evaluate_callout_graphics(
+    session: AsyncSession, project: Project, options: RunOptions
+) -> StepView:
+    # Only a continuous explainer with callouts drawn as motion graphics has callout graphics.
+    # For any other project the step has one target that is already done, so a run reports it as
+    # skipped and no call is made.
+    if not callout_look.wanted(project):
+        return StepView([Target(PROJECT_KEY, "", True)])
+    look = await callout_look.state(session, project)
+    look_done = look.latest is not None and not look.out_of_date
+    look_active = _active(look.job)
+    targets = [
+        Target(
+            _CALLOUT_LOOK_KEY,
+            "Callout look",
+            look_done,
+            active=look_active,
+            block=None if look_done or look_active else look.blocked_reason,
+            last_error=_failure(look.job),
+            stale=look.latest is not None and not look_done,
+        )
+    ]
+    graphics = await callout_graphics.state(session, project)
+    for number, entry in enumerate(graphics.entries, start=1):
+        if not entry.enabled:
+            continue
+        callout_id = str(entry.callout["id"])
+        # A callout is done when the rule gives it a version or a box, and none of its versions
+        # is still being made: the render is refused while one is (`story_renders.callout_gate`).
+        done = entry.done and entry.status != "working"
+        active = entry.status == "working"
+        # Until the look is done the callout only waits for it: that is not a problem to report.
+        waiting = not look_done
+        targets.append(
+            Target(
+                _callout_key(callout_id),
+                f"Callout {number} ({str(entry.callout['type']).replace('_', ' ')})",
+                done,
+                active=active,
+                block=None if done or active or waiting else entry.refusal,
+                last_error=None if done else entry.last_error,
+                waits_for=(_CALLOUT_LOOK_KEY,) if waiting else (),
+                ref=(callout_id,),
+                stale=entry.status == "out_of_date" and not done,
+            )
+        )
+    return StepView(targets)
+
+
+async def _start_callout_graphics(
+    session: AsyncSession,
+    project: Project,
+    targets: list[Target],
+    options: RunOptions,
+    deadline: float,
+) -> list[Started]:
+    async def make(target: Target) -> tuple[int, ...]:
+        if target.key == _CALLOUT_LOOK_KEY:
+            return await _ids_of(callout_look.start_run(session, project))
+        jobs = await callout_graphics.start_callout(session, project, target.ref[0])
+        return tuple(job.id for job in jobs)
+
+    return await _start_each(session, targets, deadline, make)
+
+
 # --- Shot plans -----------------------------------------------------------------------------
 
 
@@ -2504,6 +2581,7 @@ ADAPTERS: Final[dict[str, Adapter]] = {
     "word_timings": Adapter(_evaluate_word_timings, _start_word_timings),
     "callout_plan": Adapter(_evaluate_callout_plan, _project_start(_call_callout_plan)),
     "graphic_theme": Adapter(_evaluate_graphic_theme, _project_start(_call_graphic_theme)),
+    "callout_graphics": Adapter(_evaluate_callout_graphics, _start_callout_graphics),
     "shot_plans": Adapter(_evaluate_shot_plans, _start_shot_plans),
     "graphic_briefs": Adapter(_evaluate_graphic_briefs, _start_graphic_briefs),
     "graphics": Adapter(_evaluate_graphics, _start_graphics),
